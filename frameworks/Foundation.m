@@ -14,6 +14,7 @@ extern void  iosim_nslog(const char *message);
 extern double iosim_now(void);
 extern void *objc_msgSend(void *self, void *sel, ...);
 extern void *objc_getClass(const char *name);
+extern char *getenv(const char *name);
 
 extern void *malloc(unsigned long size);
 extern void *calloc(unsigned long n, unsigned long size);
@@ -35,6 +36,7 @@ struct cf_constant_string {
 };
 
 extern void *objc_getClass(const char *name);
+extern char *getenv(const char *name);
 
 
 static char *iosim_utf16_to_utf8(const unsigned short *s, unsigned long n)
@@ -788,6 +790,89 @@ static char *format_va(const char *fmt, va_list ap)
 @end
 
 /* --------------------------------------------------------------- NSData */
+
+
+/* --------------------------------------------------------------- bundles */
+
+@implementation NSBundle
++ (NSBundle *)mainBundle
+{
+    static NSBundle *bundle;
+    if (!bundle)
+        bundle = [[self alloc] init];
+    return bundle;
+}
+- (id)resourcePath
+{
+    const char *dir = getenv("IOSIM_BUNDLE_DIR");
+    if (!dir || !*dir)
+        dir = ".";
+    return [NSString stringWithUTF8String:dir];
+}
+- (id)bundlePath { return [self resourcePath]; }
+- (id)pathForResource:(id)name ofType:(id)type
+{
+    const char *n = iosim_string_cstr(name);
+    const char *t = iosim_string_cstr(type);
+    const char *dir = getenv("IOSIM_BUNDLE_DIR");
+    if (!dir || !*dir)
+        dir = ".";
+    char buf[1024];
+    if (t && *t)
+        snprintf(buf, sizeof(buf), "%s/%s.%s", dir, n, t);
+    else
+        snprintf(buf, sizeof(buf), "%s/%s", dir, n);
+    return [NSString stringWithUTF8String:buf];
+}
+@end
+
+/* ---------------------------------------------------------- user defaults */
+
+@implementation NSUserDefaults
++ (NSUserDefaults *)standardUserDefaults
+{
+    static NSUserDefaults *defaults;
+    if (!defaults)
+        defaults = [[self alloc] init];
+    return defaults;
+}
+- (id)init
+{
+    self = [super init];
+    if (self)
+        _store = [NSMutableDictionary dictionary];
+    return self;
+}
+- (void)setObject:(id)value forKey:(id)key
+{
+    if (!key)
+        return;
+    if (value)
+        [_store setObject:value forKey:key];
+    else
+        [_store removeObjectForKey:key];
+}
+- (id)objectForKey:(id)key { return key ? [_store objectForKey:key] : nil; }
+- (void)removeObjectForKey:(id)key { if (key) [_store removeObjectForKey:key]; }
+- (id)stringForKey:(id)key
+{
+    id value = [self objectForKey:key];
+    return value && [value isKindOfClass:[NSString class]] ? value : nil;
+}
+- (BOOL)boolForKey:(id)key
+{
+    id value = [self objectForKey:key];
+    return value && [value respondsToSelector:@selector(boolValue)]
+               ? [value boolValue] : NO;
+}
+- (long)integerForKey:(id)key
+{
+    id value = [self objectForKey:key];
+    return value && [value respondsToSelector:@selector(integerValue)]
+               ? [value integerValue] : 0;
+}
+- (void)synchronize { }
+@end
 
 @implementation NSData
 + (id)data { return [[[self alloc] init] autorelease]; }

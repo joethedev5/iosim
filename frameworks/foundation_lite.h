@@ -142,6 +142,27 @@ __attribute__((objc_root_class))
 - (void)removeAllObjects;
 @end
 
+@interface NSBundle : NSObject
++ (NSBundle *)mainBundle;
+- (id)resourcePath;
+- (id)bundlePath;
+- (id)pathForResource:(id)name ofType:(id)type;
+@end
+
+@interface NSUserDefaults : NSObject {
+@public
+    id _store;
+}
++ (NSUserDefaults *)standardUserDefaults;
+- (void)setObject:(id)value forKey:(id)key;
+- (id)objectForKey:(id)key;
+- (void)removeObjectForKey:(id)key;
+- (id)stringForKey:(id)key;
+- (BOOL)boolForKey:(id)key;
+- (long)integerForKey:(id)key;
+- (void)synchronize;
+@end
+
 @interface NSData : NSObject {
 @public
     void *_bytes;
