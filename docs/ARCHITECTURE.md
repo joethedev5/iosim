@@ -333,6 +333,14 @@ exist: `list`, `create`, `delete`, `boot`, `bootstatus`, `shutdown`, `erase`,
   reopens the stream, runs `sceneWillEnterForeground:`/`sceneDidBecomeActive:`
   and continues from its in-memory state. `shutdown` sends SIGCONT before
   SIGTERM so stopped children terminate with the process group.
+- When an app stops, SpringBoard copies the device framebuffer into
+  `var/run/switcher/<bundle>.png`; that is the app's real last frame, not a
+  generated thumbnail. A swipe up from the bottom edge of the home screen
+  (or `ui switcher`) opens the switcher: the wallpaper dims and the suspended
+  apps appear as snapshot cards with their names. Tapping a card resumes that
+  process through the same SIGCONT path; a downward swipe closes the switcher.
+  Cards for off-screen apps are not drawn; a horizontal swipe moves the focus
+  between up to three visible cards.
 
 ### 2.9 Services: libdispatch, Mach and XPC
 
@@ -532,9 +540,12 @@ Python for iteration speed.
 - The dyld shared cache is not parsed; each dylib is loaded from disk.
 - Class method dispatch covers the common path; message forwarding, associated
   objects, ARC entry points and exceptions are pending.
-- The SpringBoard grid is a single page with 16 slots. There is no paging or
-  app switcher UI, and no snapshot cache; a backgrounded app is suspended in
-  place (the process stops and the same process resumes from its icon), but
-  there is no memory-pressure termination policy. Stock system apps are
-  display icons without executables, and a directly launched app alongside a
-  running SpringBoard is not coordinated through launchd.
+- The SpringBoard grid is a single page with 16 slots; there is no paging.
+  The switcher shows at most three cards and opens from the home screen or
+  `ui switcher` (a foreground app owns the event stream, so an in-app
+  bottom-edge gesture is not intercepted); cards have no scrolling animation
+  or swipe-to-kill. A backgrounded app is suspended in place (the process
+  stops and the same process resumes from its icon), with no memory-pressure
+  termination policy. Stock system apps are display icons without
+  executables, and a directly launched app alongside a running SpringBoard is
+  not coordinated through launchd.

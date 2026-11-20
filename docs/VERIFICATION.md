@@ -478,6 +478,18 @@ message, the resume message, the foreground lifecycle and the single
 `viewDidLoad`. `shutdown` continues stopped children before SIGTERM, so no
 app process survives the device.
 
+The app switcher uses the real frames, not mock cards. At suspension
+SpringBoard copies `data/var/run/framebuffer.png` to
+`data/var/run/switcher/com.iosim.touch.png`; the switcher dims the sampled
+wallpaper and draws each suspended app as a 72%-width card (40 pt corners,
+shadow, name above) scaled from that PNG. The screenshot after a drag gesture
+shows the card carrying the app's live content, including the dots the drag
+left in its trail view. The test asserts the switcher's log line, the cached
+PNG's 1206 x 2622 dimensions, selection of the card, and a second
+`resumed from suspension` — the card really continues the stopped process.
+A bottom-edge swipe up opens the switcher from the home screen and a downward
+swipe closes it; `ui switcher` injects the same toggle for headless tests.
+
 ## Limitations
 
 The framework surface is still a subset. Auto Layout supports equality and
@@ -489,9 +501,10 @@ Text input is a single-line `UITextField` with a QWERTY keyboard; UITextView,
 multitap gestures and selection handles are not implemented. Touch input is
 single-finger: there is no multitouch, touch prediction or pressure. Cross-process Mach ports and
 XPC remain in-process, the SpringBoard grid is a single 16-slot page with no
-paging or app switcher UI, and stock system apps have no executables in this
-runtime. Backgrounded apps are suspended in place (SIGSTOP) and resumed from
-their icon, with no memory-pressure termination policy. CoreText shaping is limited to the glyphs in SFUI;
+paging, and the switcher shows at most three cards with no scrolling animation
+or kill gesture; stock system apps have no executables in this runtime.
+Backgrounded apps are suspended in place (SIGSTOP) and resumed from their icon
+or switcher card, with no memory-pressure termination policy. CoreText shaping is limited to the glyphs in SFUI;
 right-to-left and complex scripts are not shaped. `UIView.transform` applies a
 full 2D affine transform (translation, scale and rotation) through an offscreen
 composite; `CATransform3D` is not supported. Core Animation keeps one explicit

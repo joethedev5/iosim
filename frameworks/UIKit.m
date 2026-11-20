@@ -67,6 +67,11 @@ extern int  strcmp(const char *a, const char *b);
 extern unsigned long strlen(const char *s);
 extern void *memcpy(void *dst, const void *src, unsigned long n);
 extern int  snprintf(char *buf, unsigned long size, const char *fmt, ...);
+extern int  iosim_fs_mkdir(const char *path, int intermediates);
+extern int  iosim_fs_read(const char *path, unsigned char **out,
+                          unsigned long *out_len);
+extern int  iosim_fs_write(const char *path, const void *bytes,
+                           unsigned long len);
 extern int  iosim_png_load(const char *path, unsigned char **out_rgba,
                            int *out_width, int *out_height);
 extern void *_Block_copy(void *block);
@@ -6215,6 +6220,7 @@ struct shell_app {
     char exe[512];
     char bundle[128];
     char home[384];
+    char snapshot[1024];   /* last framebuffer captured when suspending */
     int stock;   /* artwork id, -1 for the generic placeholder */
     int dock;
     int pid;     /* suspended process, or 0 */
@@ -6311,6 +6317,7 @@ static void shell_add_app(const char *name, const char *exe, const char *bundle,
     a->stock = stock;
     a->dock = dock;
     a->pid = 0;
+    a->snapshot[0] = 0;
 }
 
 static void shell_load_apps(void)
@@ -6904,6 +6911,217 @@ static void shell_draw(int fbWidth, int fbHeight, double scale)
     draw_device_chrome(fbWidth, scale);
 }
 
+static int g_switcher;
+static int g_switcher_index;
+static int g_sb_down;
+static double g_sb_down_x, g_sb_down_y;
+
+static int shell_suspended_count(void)
+{
+    int count = 0;
+    for (int i = 0; i < g_shell_app_count; i++)
+        if (g_shell_apps[i].pid > 0)
+            count++;
+    return count;
+}
+
+static struct shell_app *shell_suspended_app(int ordinal, int *out_index)
+{
+    int k = 0;
+    for (int i = 0; i < g_shell_app_count; i++)
+    {
+        if (g_shell_apps[i].pid <= 0)
+            continue;
+        if (k == ordinal)
+        {
+            if (out_index)
+                *out_index = i;
+            return &g_shell_apps[i];
+        }
+        k++;
+    }
+    return 0;
+}
+
+static void shell_snapshot_dir(char *out, unsigned long cap)
+{
+    const char *fb = getenv("IOSIM_SCREENSHOT_PATH");
+    out[0] = 0;
+    if (!fb || !*fb)
+        return;
+    const char *slash = 0;
+    for (const char *p = fb; *p; p++)
+        if (*p == '/')
+            slash = p;
+    unsigned long n = slash ? (unsigned long)(slash - fb) : 0;
+    snprintf(out, cap, "%.*s/switcher", (int)n, fb);
+}
+
+/* Keep the last rendered frame of a suspended app for the app switcher. */
+static void shell_capture_snapshot(struct shell_app *a)
+{
+    char dir[1024];
+    shell_snapshot_dir(dir, sizeof(dir));
+    if (!dir[0])
+        return;
+    iosim_fs_mkdir(dir, 1);
+    const char *fb = getenv("IOSIM_SCREENSHOT_PATH");
+    unsigned char *bytes = 0;
+    unsigned long len = 0;
+    if (!fb || iosim_fs_read(fb, &bytes, &len) != 0)
+        return;
+    const char *key = a->bundle[0] ? a->bundle : a->name;
+    char name[160];
+    int k = 0;
+    for (const char *p = key; *p && k < 150; p++)
+    {
+        char c = *p;
+        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+            (c >= '0' && c <= '9') || c == '.' || c == '-' || c == '_')
+            name[k++] = c;
+        else
+            name[k++] = '_';
+    }
+    name[k] = 0;
+    char path[1200];
+    snprintf(path, sizeof(path), "%s/%s.png", dir, name);
+    if (iosim_fs_write(path, bytes, len) == 0)
+    {
+        int m = 0;
+        for (const char *p = path; *p && m < 1023; p++)
+            a->snapshot[m++] = *p;
+        a->snapshot[m] = 0;
+    }
+    free(bytes);
+}
+
+static void shell_switcher_geometry(int fbWidth, int fbHeight, double scale,
+                                    int ordinal, double *out_x,
+                                    double *out_y, double *out_w,
+                                    double *out_h)
+{
+    double W = fbWidth / scale, H = fbHeight / scale;
+    double cardW = W * 0.72;
+    double cardH = cardW * H / W;
+    double gap = 20.0;
+    double y = (H - cardH) / 2.0;
+    double cx = W / 2.0 + (ordinal - g_switcher_index) * (cardW + gap);
+    *out_x = cx - cardW / 2.0;
+    *out_y = y;
+    *out_w = cardW;
+    *out_h = cardH;
+}
+
+static void shell_draw_switcher(int fbWidth, int fbHeight, double scale,
+                                const char *path)
+{
+    shell_wallpaper_build(fbWidth, fbHeight);
+    if (g_shell_wallpaper)
+        iosim_fb_paste_xrgb(g_shell_wallpaper);
+    else
+    {
+        iosim_fb_set_opacity(1.0);
+        iosim_fb_fill_rect(0, 0, fbWidth, fbHeight, 0x0b1020);
+    }
+    iosim_fb_set_opacity(0.55);
+    iosim_fb_fill_rect(0, 0, fbWidth, fbHeight, 0x000000);
+    iosim_fb_set_opacity(1.0);
+
+    int count = shell_suspended_count();
+    if (count == 0)
+    {
+        const char *text = "No recent apps";
+        int tw = iosim_fb_font_text_width(text, IOSIM_FONT_SEMIBOLD, 17,
+                                          scale);
+        iosim_fb_font_text((fbWidth - tw) / 2,
+                           fbHeight / 2, text, IOSIM_FONT_SEMIBOLD, 17,
+                           scale, 0xd8d5e0);
+        draw_device_chrome(fbWidth, scale);
+        if (path && *path)
+            iosim_fb_present(path);
+        return;
+    }
+    if (g_switcher_index >= count)
+        g_switcher_index = count - 1;
+    if (g_switcher_index < 0)
+        g_switcher_index = 0;
+
+    int first = g_switcher_index > 0 ? g_switcher_index - 1 : 0;
+    int last = g_switcher_index + 1 < count ? g_switcher_index + 1 : count - 1;
+    for (int i = first; i <= last; i++)
+    {
+        struct shell_app *a = shell_suspended_app(i, 0);
+        if (!a)
+            continue;
+        double x, y, w, h;
+        shell_switcher_geometry(fbWidth, fbHeight, scale, i, &x, &y, &w, &h);
+        int wpx = (int)(w * scale + 0.5);
+        int hpx = (int)(h * scale + 0.5);
+        int xpx = (int)(x * scale + 0.5);
+        int ypx = (int)(y * scale + 0.5);
+        if (wpx <= 0 || hpx <= 0)
+            continue;
+
+        iosim_fb_set_opacity(0.45);
+        iosim_fb_fill_round_rect(xpx - (int)(6 * scale), ypx + (int)(8 * scale),
+                                 wpx + (int)(12 * scale), hpx,
+                                 (int)(46 * scale), 0x000000);
+        iosim_fb_set_opacity(1.0);
+
+        void *state = iosim_fb_begin_offscreen((unsigned)wpx, (unsigned)hpx);
+        if (state)
+        {
+            int drew = 0;
+            if (a->snapshot[0])
+            {
+                unsigned char *rgba = 0;
+                int sw = 0, sh = 0;
+                if (iosim_png_load(a->snapshot, &rgba, &sw, &sh) == 0 && rgba)
+                {
+                    iosim_fb_blit_rgba_scaled(0, 0, wpx, hpx, rgba, sw, sh,
+                                              sw * 4);
+                    free(rgba);
+                    drew = 1;
+                }
+            }
+            if (!drew)
+                iosim_fb_fill_rect(0, 0, wpx, hpx, 0x1c1c1e);
+            iosim_fb_mask_round_rect(0, 0, wpx, hpx, (int)(40 * scale));
+            int bw = 0, bh = 0;
+            unsigned *buf = iosim_fb_end_offscreen(state, &bw, &bh);
+            if (buf)
+            {
+                iosim_fb_blit_affine(buf, bw, bh, 1.0, 0.0, 0.0, 1.0,
+                                     xpx, ypx, 1.0);
+                iosim_fb_free_offscreen(buf);
+            }
+        }
+        int tw = iosim_fb_font_text_width(a->name, IOSIM_FONT_SEMIBOLD, 15,
+                                          scale);
+        iosim_fb_font_text((int)((x + w / 2) * scale) - tw / 2,
+                           (int)((y - 22) * scale), a->name,
+                           IOSIM_FONT_SEMIBOLD, 15, scale, 0xffffff);
+    }
+    draw_device_chrome(fbWidth, scale);
+    if (path && *path)
+        iosim_fb_present(path);
+}
+
+static int shell_switcher_hit(int xpx, int ypx, int fbWidth, int fbHeight,
+                              double scale)
+{
+    int count = shell_suspended_count();
+    for (int i = 0; i < count; i++)
+    {
+        double x, y, w, h;
+        shell_switcher_geometry(fbWidth, fbHeight, scale, i, &x, &y, &w, &h);
+        if (xpx >= x * scale && xpx < (x + w) * scale &&
+            ypx >= y * scale && ypx < (y + h) * scale)
+            return i;
+    }
+    return -1;
+}
+
 static void shell_launch(int index, int fbWidth, int fbHeight, double scale,
                          const char *path)
 {
@@ -6920,6 +7138,8 @@ static void shell_launch(int index, int fbWidth, int fbHeight, double scale,
             int state = iosim_spawn_wait(a->pid);
             if (state == 0)
                 a->pid = 0;
+            else
+                shell_capture_snapshot(a);
             shell_draw(fbWidth, fbHeight, scale);
             if (path && *path)
                 iosim_fb_present(path);
@@ -6943,6 +7163,8 @@ static void shell_launch(int index, int fbWidth, int fbHeight, double scale,
     {
         int state = iosim_spawn_wait(pid);
         a->pid = state == 1 ? pid : 0;
+        if (state == 1)
+            shell_capture_snapshot(a);
     }
     else
         printf("[SpringBoard] launch failed for %s\n", a->name);
@@ -6950,6 +7172,19 @@ static void shell_launch(int index, int fbWidth, int fbHeight, double scale,
     shell_draw(fbWidth, fbHeight, scale);
     if (path && *path)
         iosim_fb_present(path);
+}
+
+static void shell_repaint(int fbWidth, int fbHeight, double scale,
+                          const char *path, int switcher)
+{
+    if (switcher)
+        shell_draw_switcher(fbWidth, fbHeight, scale, path);
+    else
+    {
+        shell_draw(fbWidth, fbHeight, scale);
+        if (path && *path)
+            iosim_fb_present(path);
+    }
 }
 
 static int run_springboard(void)
@@ -6987,15 +7222,110 @@ static int run_springboard(void)
         if (r == 1 && type == 8)
         {
             /* The set of installed apps changed: rebuild the home screen. */
+            g_switcher = 0;
             shell_load_apps();
             shell_draw(fbWidth, fbHeight, scale);
             if (path && *path)
                 iosim_fb_present(path);
             continue;
         }
+        if (r == 1 && type == 9)
+        {
+            int count = shell_suspended_count();
+            g_switcher = !g_switcher;
+            if (g_switcher)
+            {
+                g_switcher_index = count > 0 ? count - 1 : 0;
+                printf("[SpringBoard] app switcher opened (%d suspended)\n",
+                       count);
+            }
+            else
+                printf("[SpringBoard] app switcher closed\n");
+            fflush(0);
+            shell_repaint(fbWidth, fbHeight, scale, path, g_switcher);
+            continue;
+        }
+        if (r == 1 && type == 2)
+        {
+            g_sb_down = 1;
+            g_sb_down_x = x / scale;
+            g_sb_down_y = y / scale;
+            continue;
+        }
+        if (r == 1 && type == 4)
+        {
+            double px = x / scale, py = y / scale;
+            double dx = px - g_sb_down_x, dy = py - g_sb_down_y;
+            int down = g_sb_down;
+            g_sb_down = 0;
+            if (!down)
+                continue;
+            if (!g_switcher && g_sb_down_y > fbHeight / scale - 45 &&
+                dy < -100 && dx > -140 && dx < 140)
+            {
+                int count = shell_suspended_count();
+                g_switcher = 1;
+                g_switcher_index = count > 0 ? count - 1 : 0;
+                printf("[SpringBoard] app switcher opened (%d suspended)\n",
+                       count);
+                fflush(0);
+                shell_repaint(fbWidth, fbHeight, scale, path, 1);
+            }
+            else if (g_switcher && dy > 90)
+            {
+                g_switcher = 0;
+                printf("[SpringBoard] app switcher closed\n");
+                fflush(0);
+                shell_repaint(fbWidth, fbHeight, scale, path, 0);
+            }
+            else if (g_switcher && (dx > 100 || dx < -100))
+            {
+                int count = shell_suspended_count();
+                g_switcher_index += dx < 0 ? 1 : -1;
+                if (g_switcher_index < 0)
+                    g_switcher_index = 0;
+                if (g_switcher_index >= count)
+                    g_switcher_index = count > 0 ? count - 1 : 0;
+                shell_repaint(fbWidth, fbHeight, scale, path, 1);
+            }
+            continue;
+        }
+        if (r == 1 && type == 7 && g_switcher)
+        {
+            g_switcher = 0;
+            shell_repaint(fbWidth, fbHeight, scale, path, 0);
+            continue;
+        }
         if (r != 1 || type != 1)
             continue;
         double px = x / scale, py = y / scale;
+        if (g_switcher)
+        {
+            int ordinal = shell_switcher_hit(x, y, fbWidth, fbHeight, scale);
+            if (ordinal >= 0)
+            {
+                int appIndex = -1;
+                struct shell_app *a = shell_suspended_app(ordinal, &appIndex);
+                printf("[SpringBoard] switcher selected %s\n",
+                       a ? a->name : "?");
+                fflush(0);
+                g_switcher = 0;
+                if (a)
+                    shell_launch(appIndex, fbWidth, fbHeight, scale, path);
+            }
+            else
+            {
+                int count = shell_suspended_count();
+                if (px < 201.0 && g_switcher_index > 0)
+                    g_switcher_index--;
+                else if (px >= 201.0 && g_switcher_index + 1 < count)
+                    g_switcher_index++;
+                else
+                    g_switcher = 0;
+                shell_repaint(fbWidth, fbHeight, scale, path, g_switcher);
+            }
+            continue;
+        }
         int hit = -1, slot = 0;
         for (int i = 0; i < g_shell_app_count && hit < 0; i++)
         {

@@ -349,6 +349,45 @@ else
     fails=$((fails+1))
 fi
 
+# ---------- 7c. app switcher: real snapshot, real resume ----------
+"$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
+sleep 0.6
+"$ROOT/tools/iosimctl" ui "$UDID" switcher >/dev/null
+if wait_log "app switcher opened (1 suspended)"; then
+    echo "ok   app switcher lists the suspended app"
+else
+    echo "FAIL app switcher"; fails=$((fails+1))
+fi
+SWITCHPIC="$IOSIM_HOME/Devices/$UDID/data/var/run/switcher/com.iosim.touch.png"
+if out="$(python3 - "$SWITCHPIC" <<'PY'
+import struct, sys
+data = open(sys.argv[1], "rb").read()
+assert data[:8] == b"\x89PNG\r\n\x1a\n", "not a PNG"
+w, h = struct.unpack(">II", data[16:24])
+assert (w, h) == (1206, 2622), (w, h)
+print("ok   the suspended app's last frame is cached as a switcher snapshot")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL switcher snapshot"; echo "$out"; fails=$((fails+1))
+fi
+resumed_before="$(grep -Fc "[UIKit-lite] resumed from suspension" "$SBLOG" 2>/dev/null || true)"
+"$ROOT/tools/iosimctl" ui "$UDID" tap 201 400 >/dev/null
+if wait_log "switcher selected TouchApp"; then
+    echo "ok   tapping a switcher card selects the suspended app"
+else
+    echo "FAIL switcher selection"; fails=$((fails+1))
+fi
+sleep 0.6
+resumed_after="$(grep -Fc "[UIKit-lite] resumed from suspension" "$SBLOG" 2>/dev/null || true)"
+if [ "$resumed_after" -gt "$resumed_before" ]; then
+    echo "ok   the switcher card resumes the same suspended process"
+else
+    echo "FAIL switcher resume ($resumed_before -> $resumed_after)"
+    fails=$((fails+1))
+fi
+
 # ---------- 8. display link, animation timeline and presentation values ----------
 "$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
 sleep 0.8
