@@ -466,6 +466,14 @@ void *objc_lookup_imp(void *obj, void *sel)
     return imp;
 }
 
+/* Called by clang's fast-enumeration codegen when the mutations pointer of a
+ * collection changes mid-loop. None of the Foundation-lite collections hand out
+ * a live mutations counter, so this is a no-op that keeps the loop running. */
+void objc_enumerationMutation(void *obj)
+{
+    (void)obj;
+}
+
 void *objc_alloc_init(void *class_ptr)
 {
     struct objc_class_min *cls = class_ptr;

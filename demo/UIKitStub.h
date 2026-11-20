@@ -50,11 +50,27 @@ __attribute__((objc_root_class))
 @interface NSCalendar : NSObject
 @end
 
-@interface NSSet : NSObject
+typedef struct {
+    unsigned long state;
+    id *itemsPtr;
+    unsigned long *mutationsPtr;
+    unsigned long extra[5];
+} NSFastEnumerationState;
+
+@protocol NSFastEnumeration
+- (unsigned long)countByEnumeratingWithState:(NSFastEnumerationState *)state
+                                     objects:(id *)buffer
+                                       count:(unsigned long)len;
+@end
+
+@interface NSSet : NSObject <NSFastEnumeration>
 - (unsigned long)count;
 - (id)anyObject;
 - (id)allObjects;
 - (BOOL)containsObject:(id)object;
+- (unsigned long)countByEnumeratingWithState:(NSFastEnumerationState *)state
+                                     objects:(id *)buffer
+                                       count:(unsigned long)len;
 @end
 
 @class UIView;
@@ -575,10 +591,14 @@ extern int UIApplicationMain(int argc, char **argv, id principal,
 - (UIViewController *)selectedViewController;
 @end
 
-@interface NSArray : NSObject
+@interface NSArray : NSObject <NSFastEnumeration>
 + (id)arrayWithObjects:(const id *)objects count:(unsigned long)count;
 @property(readonly) unsigned long count;
 - (id)objectAtIndex:(unsigned long)index;
+- (id)objectAtIndexedSubscript:(unsigned long)index;
+- (unsigned long)countByEnumeratingWithState:(NSFastEnumerationState *)state
+                                     objects:(id *)buffer
+                                       count:(unsigned long)len;
 @end
 
 @interface NSMutableArray : NSArray
@@ -586,6 +606,23 @@ extern int UIApplicationMain(int argc, char **argv, id principal,
 - (void)addObject:(id)object;
 - (void)removeObjectAtIndex:(unsigned long)index;
 - (void)insertObject:(id)object atIndex:(unsigned long)index;
+- (void)setObject:(id)object atIndexedSubscript:(unsigned long)index;
+@end
+
+@interface NSDictionary : NSObject <NSFastEnumeration>
+@property(readonly) unsigned long count;
+- (id)objectForKey:(id)key;
+- (id)objectForKeyedSubscript:(id)key;
+- (unsigned long)countByEnumeratingWithState:(NSFastEnumerationState *)state
+                                     objects:(id *)buffer
+                                       count:(unsigned long)len;
+@end
+
+@interface NSMutableDictionary : NSDictionary
++ (id)dictionary;
+- (void)setObject:(id)object forKey:(id)key;
+- (void)removeObjectForKey:(id)key;
+- (void)setObject:(id)object forKeyedSubscript:(id)key;
 @end
 
 @class UITableView, UITableViewCell, NSIndexPath;

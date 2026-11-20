@@ -300,6 +300,19 @@ components; and `NSJSONSerialization` is a dependency-free recursive
 serializer and parser over `NSDictionary`, `NSArray`, `NSString`, `NSNumber`
 and `NSNull`. Compact output is deterministic (dictionary insertion order on
 this runtime) and the parser rejects truncated or malformed input.
+
+`NSArray`, `NSSet` and `NSDictionary` adopt `NSFastEnumeration`: because their
+backing stores are contiguous C arrays, `countByEnumeratingWithState:` hands
+the loop `itemsPtr` straight at that storage (arrays and sets yield members,
+dictionaries yield keys). Compiler-emitted for-in loops check the mutation
+pointer each pass and call `objc_enumerationMutation` on a mismatch; the
+runtime exports that symbol as a no-op, matching the collections' lack of a
+live mutation counter. Indexed and keyed subscripting map onto the existing
+primitive accessors: `array[i]` is `objectAtIndexedSubscript:`,
+`array[i] = obj` is `setObject:atIndexedSubscript:` (replace, or append when
+`i == count`), `dict[key]` is `objectForKeyedSubscript:`, and
+`dict[key] = obj` is `setObject:forKeyedSubscript:`, where a nil value removes
+the key.
 `NSPropertyListSerialization` writes and reads XML property lists, and
 `NSUserDefaults` persists a domain to
 `$HOME/Library/Preferences/<bundle-id>.plist`.

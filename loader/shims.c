@@ -289,6 +289,7 @@ int iosim_request_lock(void)
 }
 
 void  *objc_opt_class(void *obj);
+void   objc_enumerationMutation(void *obj);
 double iosim_now(void);
 void *_Block_copy(void *block);
 void _Block_release(void *block);
@@ -724,6 +725,7 @@ static const struct iosim_shim shims[] = {
     SHIM_DIRECT(iosim_objc_is_kind_of),
     SHIM_DIRECT(iosim_objc_responds),
     SHIM_DIRECT(objc_opt_class),
+    SHIM_DIRECT(objc_enumerationMutation),
     SHIM_DIRECT(objc_setProperty_nonatomic),
     SHIM_DIRECT(objc_setProperty_nonatomic_copy),
     SHIM_DIRECT(objc_setProperty_atomic),

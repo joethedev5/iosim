@@ -542,6 +542,18 @@ lines are asserted individually, and the descriptor really is shared between
 the seek, read, truncate and write calls because each step observes the
 previous step's offset and length.
 
+### Foundation: fast enumeration and subscripting
+
+`tests/fastenum_test.m` joins an array with `for (NSString *s in array)`
+(producing `alphabetagamma`), sums four boxed numbers to 10 with a typed
+for-in, walks set members as `xyz`, and enumerates a dictionary's keys as
+`k1k2k3`. Subscripting then reads `arr[0]`/`arr[2]`, replaces through
+`arr[1] = @"BETA"`, appends by assigning at `count`, reads `d[@"k1"]`,
+updates through `d[@"k2"] = @"TWO"`, removes with `d[@"k2"] = nil` (leaving two
+keys) and confirms a missing keyed subscript returns nil. The fixture links
+`objc_enumerationMutation` through ordinary for-in codegen, so the loader's
+exported no-op is part of what the test proves.
+
 ### Foundation: persistent defaults and property lists
 
 `tests/defaults_test.m` writes a domain with `NSUserDefaults` in one process

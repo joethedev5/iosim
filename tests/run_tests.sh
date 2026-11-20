@@ -419,6 +419,37 @@ check "[fh] end 17" "$out" "seekToEndOfFile returns the file length"
 check "[fh] final hello file!" "$out" \
     "truncateFileAtOffset: and an updating handle append correctly"
 
+# ---------- 4l. Foundation fast enumeration and subscripting ----------
+"$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
+    -ffreestanding -O1 -I "$ROOT/frameworks" \
+    -c "$ROOT/tests/fastenum_test.m" -o "$T/fastenum_test.o"
+"$LD64" -arch x86_64 -platform_version $PLATFORM -e _main \
+    -o "$T/fastenum_test" "$T/fastenum_test.o" \
+    "$ROOT/runtime/System/Library/Frameworks/Foundation.framework/Foundation" \
+    -undefined dynamic_lookup
+out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/fastenum_test" 2>&1)"
+check "[fe] array alphabetagamma" "$out" \
+    "for-in over NSArray enumerates in storage order"
+check "[fe] sum 10" "$out" \
+    "fast enumeration over NSNumber objects boxes and unboxes values"
+check "[fe] set xyz" "$out" "for-in over NSSet walks members"
+check "[fe] dict k1k2k3" "$out" \
+    "for-in over NSDictionary enumerates its keys"
+check "[fe] sub alpha gamma" "$out" \
+    "indexed subscripting reads NSArray elements"
+check "[fe] replace BETA" "$out" \
+    "setObject:atIndexedSubscript: replaces an element"
+check "[fe] append delta" "$out" \
+    "setting the end subscript appends to a mutable array"
+check "[fe] dsub one three" "$out" \
+    "keyed subscripting reads NSDictionary values"
+check "[fe] dset TWO" "$out" \
+    "setObject:forKeyedSubscript: updates a dictionary value"
+check "[fe] dremove 2" "$out" \
+    "setting nil through a keyed subscript removes the key"
+check "[fe] dmiss nil" "$out" \
+    "a missing keyed subscript returns nil"
+
 # ---------- 5. UIKit-lite framework dylib ----------
 cat > "$T/uikit_app.c" <<'EOF'
 extern int printf(const char *fmt, ...);

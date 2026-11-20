@@ -42,6 +42,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | `CAAnimationGroup`: grouped opacity/corner animations, group removal clears children | ✅ |
 | CoreAnimation paths, gradients, sublayers (z-ordered), PNG images | ✅ |
 | Foundation collections, strings, selector/block notifications with userInfo, timers, NSIndexPath | ✅ |
+| Foundation fast enumeration (`for-in`) and indexed/keyed collection subscripting | ✅ |
 | NSDateFormatter parse/print round trip, NSNumberFormatter decimal/currency/percent | ✅ |
 | `NSFileManager`, `NSData` file I/O, `NSFileHandle` read/write/seek/truncate, `NSURL`, `NSJSONSerialization` | ✅ |
 | `NSPropertyListSerialization` and persistent `NSUserDefaults` domains | ✅ |

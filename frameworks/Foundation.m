@@ -841,6 +841,23 @@ static char *format_va(const char *fmt, va_list ap)
             return i;
     return (unsigned long)-1;
 }
+- (id)objectAtIndexedSubscript:(unsigned long)index
+{
+    return [self objectAtIndex:index];
+}
+- (unsigned long)countByEnumeratingWithState:(NSFastEnumerationState *)state
+                                     objects:(id *)buffer
+                                       count:(unsigned long)len
+{
+    (void)buffer;
+    (void)len;
+    if (state->state != 0)
+        return 0;
+    state->state = 1;
+    state->itemsPtr = _items;
+    state->mutationsPtr = &state->extra[0];
+    return _count;
+}
 - (id)description
 {
     NSMutableString *s = [NSMutableString string];
@@ -895,6 +912,15 @@ static char *format_va(const char *fmt, va_list ap)
     unsigned long i = [self indexOfObject:object];
     if (i != (unsigned long)-1)
         [self removeObjectAtIndex:i];
+}
+- (void)setObject:(id)object atIndexedSubscript:(unsigned long)index
+{
+    if (!object)
+        return;
+    if (index < _count)
+        _items[index] = object;
+    else if (index == _count)
+        [self addObject:object];
 }
 @end
 
@@ -952,6 +978,19 @@ static char *format_va(const char *fmt, va_list ap)
         if (objects_equal(_items[i], object))
             return _items[i];
     return nil;
+}
+- (unsigned long)countByEnumeratingWithState:(NSFastEnumerationState *)state
+                                     objects:(id *)buffer
+                                       count:(unsigned long)len
+{
+    (void)buffer;
+    (void)len;
+    if (state->state != 0)
+        return 0;
+    state->state = 1;
+    state->itemsPtr = _items;
+    state->mutationsPtr = &state->extra[0];
+    return _count;
 }
 - (id)description
 {
@@ -1046,6 +1085,23 @@ static char *format_va(const char *fmt, va_list ap)
         [a addObject:_values[i]];
     return a;
 }
+- (id)objectForKeyedSubscript:(id)key
+{
+    return [self objectForKey:key];
+}
+- (unsigned long)countByEnumeratingWithState:(NSFastEnumerationState *)state
+                                     objects:(id *)buffer
+                                       count:(unsigned long)len
+{
+    (void)buffer;
+    (void)len;
+    if (state->state != 0)
+        return 0;
+    state->state = 1;
+    state->itemsPtr = _keys;
+    state->mutationsPtr = &state->extra[0];
+    return _count;
+}
 @end
 
 @implementation NSMutableDictionary
@@ -1089,6 +1145,13 @@ static char *format_va(const char *fmt, va_list ap)
     }
 }
 - (void)removeAllObjects { _count = 0; }
+- (void)setObject:(id)object forKeyedSubscript:(id)key
+{
+    if (!object)
+        [self removeObjectForKey:key];
+    else
+        [self setObject:object forKey:key];
+}
 @end
 
 /* --------------------------------------------------------------- NSData */

@@ -8,6 +8,19 @@ typedef struct {
     unsigned long length;
 } NSRange;
 
+typedef struct {
+    unsigned long state;
+    id *itemsPtr;
+    unsigned long *mutationsPtr;
+    unsigned long extra[5];
+} NSFastEnumerationState;
+
+@protocol NSFastEnumeration
+- (unsigned long)countByEnumeratingWithState:(NSFastEnumerationState *)state
+                                     objects:(id *)buffer
+                                       count:(unsigned long)len;
+@end
+
 __attribute__((objc_root_class))
 @interface NSObject {
     Class isa;
@@ -110,7 +123,7 @@ __attribute__((objc_root_class))
 - (id)stringValue;
 @end
 
-@interface NSArray : NSObject {
+@interface NSArray : NSObject <NSFastEnumeration> {
 @public
     id *_items;
     unsigned long _count;
@@ -127,6 +140,10 @@ __attribute__((objc_root_class))
 - (id)lastObject;
 - (BOOL)containsObject:(id)object;
 - (unsigned long)indexOfObject:(id)object;
+- (id)objectAtIndexedSubscript:(unsigned long)index;
+- (unsigned long)countByEnumeratingWithState:(NSFastEnumerationState *)state
+                                     objects:(id *)buffer
+                                       count:(unsigned long)len;
 @end
 
 @interface NSMutableArray : NSArray
@@ -136,9 +153,10 @@ __attribute__((objc_root_class))
 - (void)removeObjectAtIndex:(unsigned long)index;
 - (void)removeAllObjects;
 - (void)removeObject:(id)object;
+- (void)setObject:(id)object atIndexedSubscript:(unsigned long)index;
 @end
 
-@interface NSSet : NSObject {
+@interface NSSet : NSObject <NSFastEnumeration> {
 @public
     id *_items;
     unsigned long _count;
@@ -153,6 +171,9 @@ __attribute__((objc_root_class))
 - (id)allObjects;
 - (BOOL)containsObject:(id)object;
 - (id)member:(id)object;
+- (unsigned long)countByEnumeratingWithState:(NSFastEnumerationState *)state
+                                     objects:(id *)buffer
+                                       count:(unsigned long)len;
 @end
 
 @interface NSMutableSet : NSSet
@@ -162,7 +183,7 @@ __attribute__((objc_root_class))
 - (void)removeAllObjects;
 @end
 
-@interface NSDictionary : NSObject {
+@interface NSDictionary : NSObject <NSFastEnumeration> {
 @public
     id *_keys;
     id *_values;
@@ -177,6 +198,10 @@ __attribute__((objc_root_class))
 - (id)objectForKey:(id)key;
 - (id)allKeys;
 - (id)allValues;
+- (id)objectForKeyedSubscript:(id)key;
+- (unsigned long)countByEnumeratingWithState:(NSFastEnumerationState *)state
+                                     objects:(id *)buffer
+                                       count:(unsigned long)len;
 @end
 
 @interface NSMutableDictionary : NSDictionary
@@ -184,6 +209,7 @@ __attribute__((objc_root_class))
 - (void)setObject:(id)object forKey:(id)key;
 - (void)removeObjectForKey:(id)key;
 - (void)removeAllObjects;
+- (void)setObject:(id)object forKeyedSubscript:(id)key;
 @end
 
 @interface NSBundle : NSObject
