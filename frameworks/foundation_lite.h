@@ -215,6 +215,43 @@ __attribute__((objc_root_class))
 - (void)fire;
 @end
 
+@interface NSDate : NSObject {
+@public
+    double _timeIntervalSince1970;
+}
++ (id)date;
++ (id)dateWithTimeIntervalSince1970:(double)interval;
+- (id)initWithTimeIntervalSince1970:(double)interval;
+- (double)timeIntervalSince1970;
+- (double)timeIntervalSinceNow;
+@end
+
+@interface NSDateFormatter : NSObject {
+@public
+    id _dateFormat;
+}
+- (void)setDateFormat:(id)format;
+- (id)dateFormat;
+- (id)stringFromDate:(NSDate *)date;
+@end
+
+@interface NSError : NSObject {
+@public
+    id _domain;
+    long _code;
+    id _userInfo;
+}
++ (id)errorWithDomain:(id)domain code:(long)code userInfo:(id)userInfo;
+- (id)domain;
+- (long)code;
+- (id)userInfo;
+- (id)localizedDescription;
+@end
+
+@interface NSNull : NSObject
++ (id)null;
+@end
+
 void NSLog(id format, ...);
 
 const char *iosim_string_cstr(id string);

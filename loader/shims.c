@@ -304,6 +304,13 @@ static int shim_sysctlbyname(const char *name, void *oldp, size_t *oldlenp,
     return 0;
 }
 
+double iosim_wall_time(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    return (double)ts.tv_sec + ts.tv_nsec / 1e9;
+}
+
 /* ---------- table ---------- */
 
 #define SHIM(fn) { #fn, (void *)(uintptr_t)&shim_##fn }
@@ -380,6 +387,7 @@ static const struct iosim_shim shims[] = {
     SHIM_DIRECT(_Block_object_assign),
     SHIM_DIRECT(_Block_object_dispose),
     SHIM_DIRECT(iosim_now),
+    SHIM_DIRECT(iosim_wall_time),
     SHIM_DIRECT(malloc),
     SHIM_DIRECT(calloc),
     SHIM_DIRECT(realloc),

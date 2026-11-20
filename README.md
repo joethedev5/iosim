@@ -30,6 +30,9 @@ runners**, combined with the public Darling and Apple dyld sources.
 | Scene lifecycle (`UIWindowScene`, `UISceneDelegate`) required by iOS 27 | ✅ |
 | Software framebuffer, SF font rendering, UIKit view rendering | ✅ |
 | Touch hit-testing, target/action, table selection, event FIFO run loop | ✅ |
+| Drag scrolling with rubber-band clamp, tap/pan/swipe gesture recognizers | ✅ |
+| Auto Layout: NSLayoutConstraint, anchors, guides, intrinsic sizing, priorities | ✅ (subset) |
+| Multiline UILabel wrapping, UITextField focus, caret and software keyboard | ✅ |
 | UINavigationController push/pop, UIStackView intrinsic layout, UIButton titles | ✅ |
 | UIView animations (frame, alpha), CALayer backing/opacity/corner radius | ✅ |
 | CoreAnimation paths, gradients, sublayers, PNG images | ✅ |
@@ -38,13 +41,16 @@ runners**, combined with the public Darling and Apple dyld sources.
 | Mach ports/messages, bootstrap service registry, in-process XPC | ✅ |
 | SpringBoard-like home screen, icon grid, dock, launch overlay | ✅ |
 | UIView transforms (translation/scale), layout callbacks, UIScrollView offsets | ✅ (basic) |
+| Layer clipping (`clipsToBounds`/`masksToBounds`), shadows and borders | ✅ |
 
 The test suite exercises a real Apple-toolchain-built x86_64 UIKit app, a
 Foundation app using `NSLog` with a constant `CFString`, an Objective-C app
 with its own class, and a two-image dylib app. Three additional fixtures run
 natively: a graphics app using `CAGradientLayer`, `CAShapeLayer` and
 `UIImageView`; a `UITableView` app with a data source, reusable-style cells,
-accessories and selection; and a services test that round-trips Mach messages,
+accessories and selection; an Auto Layout app using anchors, guides and a
+multiline label; a text-input app with a software keyboard; and a services
+test that round-trips Mach messages,
 registers a bootstrap service, uses libdispatch queues/semaphores/groups and
 sends an XPC dictionary between a listener and a client.
 

@@ -127,6 +127,29 @@ exe "$T/nslog_test" "$T/nslog_test.o"
 out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/nslog_test" 2>&1)"
 check "foundation lite works" "$out" "Foundation.framework substitution and constant CFString"
 
+cat > "$T/date_test.m" <<'EOF'
+#include "foundation_lite.h"
+int main(void)
+{
+    @autoreleasepool
+    {
+        NSDate *epoch = [NSDate dateWithTimeIntervalSince1970:0];
+        NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
+        [formatter setDateFormat:@"yyyy-MM-dd HH:mm:ss"];
+        NSLog(@"date=%@", [formatter stringFromDate:epoch]);
+        NSError *error = [NSError errorWithDomain:@"Test"
+                                             code:42 userInfo:nil];
+        NSLog(@"error domain=%@ code=%ld", [error domain], [error code]);
+    }
+    return 0;
+}
+EOF
+"$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc -ffreestanding -O1 -I "$ROOT/frameworks" -c "$T/date_test.m" -o "$T/date_test.o"
+"$LD64" -arch x86_64 -platform_version $PLATFORM -o "$T/date_test" "$T/date_test.o" "$ROOT/runtime/System/Library/Frameworks/Foundation.framework/Foundation" -undefined dynamic_lookup
+out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/date_test" 2>&1)"
+check "date=1970-01-01 00:00:00" "$out" "NSDate/NSDateFormatter"
+check "error domain=Test code=42" "$out" "NSError"
+
 # ---------- 5. UIKit-lite framework dylib ----------
 cat > "$T/uikit_app.c" <<'EOF'
 extern int printf(const char *fmt, ...);

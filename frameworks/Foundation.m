@@ -1021,3 +1021,183 @@ void NSLog(id format, ...)
     iosim_nslog(text ? text : "(null)");
     free(text);
 }
+
+/* ------------------------------------------------------------ dates */
+
+extern double iosim_wall_time(void);
+
+static void iosim_civil_from_days(long long z, int *year, int *month, int *day)
+{
+    z += 719468;
+    long long era = (z >= 0 ? z : z - 146096) / 146097;
+    unsigned long long doe = (unsigned long long)(z - era * 146097);
+    unsigned long long yoe =
+        (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    long long y = (long long)yoe + era * 400;
+    unsigned long long doy =
+        doe - (365 * yoe + yoe / 4 - yoe / 100);
+    unsigned long long mp = (5 * doy + 2) / 153;
+    unsigned long long d = doy - (153 * mp + 2) / 5 + 1;
+    unsigned long long m = mp < 10 ? mp + 3 : mp - 9;
+    *year = (int)(y + (m <= 2));
+    *month = (int)m;
+    *day = (int)d;
+}
+
+@implementation NSDate
++ (id)date
+{
+    return [[self alloc] initWithTimeIntervalSince1970:iosim_wall_time()];
+}
++ (id)dateWithTimeIntervalSince1970:(double)interval
+{
+    return [[self alloc] initWithTimeIntervalSince1970:interval];
+}
+- (id)initWithTimeIntervalSince1970:(double)interval
+{
+    self = [super init];
+    if (self)
+        _timeIntervalSince1970 = interval;
+    return self;
+}
+- (double)timeIntervalSince1970 { return _timeIntervalSince1970; }
+- (double)timeIntervalSinceNow
+{
+    return _timeIntervalSince1970 - iosim_wall_time();
+}
+@end
+
+@implementation NSDateFormatter
+- (void)setDateFormat:(id)format { _dateFormat = format; }
+- (id)dateFormat { return _dateFormat; }
+- (id)stringFromDate:(NSDate *)date
+{
+    if (!date)
+        return @"";
+    const char *fmt = iosim_string_cstr(_dateFormat);
+    if (!fmt)
+        fmt = "yyyy-MM-dd HH:mm:ss";
+    double seconds = date->_timeIntervalSince1970;
+    long long isecs = (long long)seconds;
+    if (seconds < 0 && seconds != (double)isecs)
+        isecs--;
+    long long days = isecs / 86400;
+    long long sod = isecs % 86400;
+    if (sod < 0)
+    {
+        sod += 86400;
+        days--;
+    }
+    int year = 1970, month = 1, day = 1;
+    iosim_civil_from_days(days, &year, &month, &day);
+    int hour = (int)(sod / 3600);
+    int minute = (int)((sod % 3600) / 60);
+    int second = (int)(sod % 60);
+    char out[192];
+    int o = 0;
+    for (int i = 0; fmt[i] && o < 180;)
+    {
+        char c = fmt[i];
+        int run = 1;
+        while (fmt[i + run] == c)
+            run++;
+        if (c == 'y')
+        {
+            if (run >= 4)
+                o += snprintf(out + o, sizeof(out) - (unsigned long)o, "%04d",
+                              year);
+            else
+                o += snprintf(out + o, sizeof(out) - (unsigned long)o, "%02d",
+                              year % 100);
+        }
+        else if (c == 'M')
+        {
+            if (run >= 2)
+                o += snprintf(out + o, sizeof(out) - (unsigned long)o, "%02d",
+                              month);
+            else
+                o += snprintf(out + o, sizeof(out) - (unsigned long)o, "%d",
+                              month);
+        }
+        else if (c == 'd')
+        {
+            if (run >= 2)
+                o += snprintf(out + o, sizeof(out) - (unsigned long)o, "%02d",
+                              day);
+            else
+                o += snprintf(out + o, sizeof(out) - (unsigned long)o, "%d",
+                              day);
+        }
+        else if (c == 'H')
+        {
+            if (run >= 2)
+                o += snprintf(out + o, sizeof(out) - (unsigned long)o, "%02d",
+                              hour);
+            else
+                o += snprintf(out + o, sizeof(out) - (unsigned long)o, "%d",
+                              hour);
+        }
+        else if (c == 'm')
+        {
+            if (run >= 2)
+                o += snprintf(out + o, sizeof(out) - (unsigned long)o, "%02d",
+                              minute);
+            else
+                o += snprintf(out + o, sizeof(out) - (unsigned long)o, "%d",
+                              minute);
+        }
+        else if (c == 's')
+        {
+            if (run >= 2)
+                o += snprintf(out + o, sizeof(out) - (unsigned long)o, "%02d",
+                              second);
+            else
+                o += snprintf(out + o, sizeof(out) - (unsigned long)o, "%d",
+                              second);
+        }
+        else
+        {
+            int n = run;
+            while (n-- > 0 && o < 180)
+                out[o++] = c;
+        }
+        i += run;
+    }
+    out[o] = 0;
+    return [NSString stringWithUTF8String:out];
+}
+@end
+
+@implementation NSError
++ (id)errorWithDomain:(id)domain code:(long)code userInfo:(id)userInfo
+{
+    NSError *error = [[self alloc] init];
+    error->_domain = domain;
+    error->_code = code;
+    error->_userInfo = userInfo;
+    return error;
+}
+- (id)domain { return _domain; }
+- (long)code { return _code; }
+- (id)userInfo { return _userInfo; }
+- (id)localizedDescription
+{
+    if (_userInfo &&
+        [(id)_userInfo respondsToSelector:@selector(objectForKey:)])
+        return [(id)_userInfo objectForKey:@"NSLocalizedDescription"];
+    return @"";
+}
+@end
+
+@implementation NSNull
++ (id)null
+{
+    static NSNull *null;
+    if (!null)
+        null = [[self alloc] init];
+    return null;
+}
+- (BOOL)isEqual:(id)other { return other == self; }
+- (unsigned long)hash { return 0; }
+- (id)description { return @"<null>"; }
+@end

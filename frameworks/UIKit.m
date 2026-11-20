@@ -100,6 +100,12 @@ typedef void *CGColorRef;
     double _animDuration;
     double _animRepeatCount;
     BOOL _animInfinite;
+    UIColor *_shadowColor;
+    double _shadowOpacity;
+    double _shadowRadius;
+    CGSize _shadowOffset;
+    double _borderWidth;
+    UIColor *_borderColor;
 }
 - (double)cornerRadius;
 - (void)setCornerRadius:(double)radius;
@@ -849,13 +855,30 @@ static void animation_mark_active(double duration, double repeat);
 {
     self = [super init];
     if (self)
+    {
         _opacity = 1.0;
+        _shadowRadius = 3.0;
+        _shadowOffset = CGSizeMake(0, -3);
+        _shadowColor = [UIColor blackColor];
+    }
     return self;
 }
 - (double)cornerRadius { return _cornerRadius; }
 - (void)setCornerRadius:(double)radius { _cornerRadius = radius; }
 - (void)setMasksToBounds:(BOOL)masks { _masksToBounds = masks; }
 - (BOOL)masksToBounds { return _masksToBounds; }
+- (void)setShadowColor:(UIColor *)color { _shadowColor = color; }
+- (UIColor *)shadowColor { return _shadowColor; }
+- (void)setShadowOpacity:(double)opacity { _shadowOpacity = opacity; }
+- (double)shadowOpacity { return _shadowOpacity; }
+- (void)setShadowRadius:(double)radius { _shadowRadius = radius; }
+- (double)shadowRadius { return _shadowRadius; }
+- (void)setShadowOffset:(CGSize)offset { _shadowOffset = offset; }
+- (CGSize)shadowOffset { return _shadowOffset; }
+- (void)setBorderWidth:(double)width { _borderWidth = width; }
+- (double)borderWidth { return _borderWidth; }
+- (void)setBorderColor:(UIColor *)color { _borderColor = color; }
+- (UIColor *)borderColor { return _borderColor; }
 - (CGRect)frame { return _frame; }
 - (void)setFrame:(CGRect)frame { _frame = frame; }
 - (void)setBackgroundColor:(UIColor *)color { _backgroundColor = color; }
@@ -3493,6 +3516,33 @@ static void render_view(UIView *view, double originX, double originY,
         clipped = 1;
     }
 
+    if (view->_layer && view->_layer->_shadowOpacity > 0.001 &&
+        w > 0 && h > 0)
+    {
+        double radius = view->_layer->_shadowRadius * scale;
+        if (radius < 1)
+            radius = 1;
+        int ox = (int)(view->_layer->_shadowOffset.width * scale);
+        int oy = (int)(view->_layer->_shadowOffset.height * scale);
+        int corner = view->_layer ? (int)(view->_layer->_cornerRadius * scale + 0.5) : 0;
+        unsigned shadowColor = view->_layer->_shadowColor
+                                   ? color_rgb(view->_layer->_shadowColor)
+                                   : 0x000000;
+        int steps = 8;
+        for (int s = steps; s >= 1; s--)
+        {
+            double t = (double)s / steps;
+            int grow = (int)(radius * t + 0.5);
+            double shade = view->_layer->_shadowOpacity * 0.16 *
+                           (1.0 - t * 0.55);
+            iosim_fb_set_opacity(alpha * shade);
+            iosim_fb_fill_round_rect(x + ox - grow, y + oy - grow,
+                                     w + 2 * grow, h + 2 * grow,
+                                     corner + grow, shadowColor);
+        }
+        iosim_fb_set_opacity(alpha);
+    }
+
     if (view->_backgroundColor && view->_backgroundColor->_a > 0.001 &&
         w > 0 && h > 0)
     {
@@ -3757,6 +3807,66 @@ static void render_view(UIView *view, double originX, double originY,
         render_view(sub, originX + frame.origin.x - scrollX,
                     originY + frame.origin.y - scrollY, scale, alpha);
     }
+    if (view->_layer && view->_layer->_borderWidth > 0.001 &&
+        view->_layer->_borderColor && w > 0 && h > 0)
+    {
+        int thickness = (int)(view->_layer->_borderWidth * scale + 0.5);
+        if (thickness < 1)
+            thickness = 1;
+        int radius = (int)(view->_layer->_cornerRadius * scale + 0.5);
+        if (radius * 2 > w)
+            radius = w / 2;
+        if (radius * 2 > h)
+            radius = h / 2;
+        unsigned border = color_rgb(view->_layer->_borderColor);
+        iosim_fb_set_opacity(alpha * view->_layer->_borderColor->_a);
+        if (radius <= 0)
+        {
+            iosim_fb_fill_rect(x, y, w, thickness, border);
+            iosim_fb_fill_rect(x, y + h - thickness, w, thickness, border);
+            iosim_fb_fill_rect(x, y, thickness, h, border);
+            iosim_fb_fill_rect(x + w - thickness, y, thickness, h, border);
+        }
+        else
+        {
+            iosim_fb_fill_rect(x + radius, y, w - 2 * radius, thickness,
+                               border);
+            iosim_fb_fill_rect(x + radius, y + h - thickness,
+                               w - 2 * radius, thickness, border);
+            iosim_fb_fill_rect(x, y + radius, thickness, h - 2 * radius,
+                               border);
+            iosim_fb_fill_rect(x + w - thickness, y + radius, thickness,
+                               h - 2 * radius, border);
+            double centers[4][2] = {
+                {x + radius, y + radius},
+                {x + w - radius, y + radius},
+                {x + w - radius, y + h - radius},
+                {x + radius, y + h - radius}
+            };
+            double starts[4] = {3.14159265358979323846,
+                                1.5 * 3.14159265358979323846,
+                                0.0,
+                                0.5 * 3.14159265358979323846};
+            for (int c = 0; c < 4; c++)
+            {
+                double lastX = 0, lastY = 0;
+                for (int i = 0; i <= 10; i++)
+                {
+                    double a = starts[c] + (i / 10.0) *
+                               (0.5 * 3.14159265358979323846);
+                    double px = centers[c][0] + radius * __builtin_cos(a);
+                    double py = centers[c][1] + radius * __builtin_sin(a);
+                    if (i > 0)
+                        iosim_fb_draw_line((int)lastX, (int)lastY, (int)px,
+                                           (int)py, thickness, border);
+                    lastX = px;
+                    lastY = py;
+                }
+            }
+        }
+        iosim_fb_set_opacity(alpha);
+    }
+
     if (clipped)
         iosim_fb_pop_clip();
     iosim_fb_set_opacity(1.0);
@@ -3934,10 +4044,14 @@ static void keyboard_row_4(int fbW, double scale, int y, int h)
                        IOSIM_FONT_REGULAR, 16, scale, 0xffffff);
     int globeX = (int)(margin * scale) + numW + (int)(gap * scale);
     iosim_fb_fill_round_rect(globeX, y, globeW, h, (int)(5 * scale), 0x4a4a4d);
-    int gw = iosim_fb_font_text_width("🌐", IOSIM_FONT_REGULAR, 18, scale);
-    iosim_fb_font_text(globeX + (globeW - gw) / 2,
-                       y + h / 2 + (int)(6 * scale), "🌐",
-                       IOSIM_FONT_REGULAR, 18, scale, 0xffffff);
+    int gcx = globeX + globeW / 2, gcy = y + h / 2;
+    int gr = (int)(9 * scale);
+    iosim_fb_fill_circle(gcx, gcy, gr, 0xffffff);
+    iosim_fb_fill_circle(gcx, gcy, gr - (int)(2 * scale), 0x4a4a4d);
+    iosim_fb_fill_rect(gcx - (int)(1 * scale), gcy - gr + (int)(2 * scale),
+                       (int)(2 * scale), gr * 2 - (int)(4 * scale), 0xffffff);
+    iosim_fb_fill_rect(gcx - gr + (int)(2 * scale), gcy - (int)(1 * scale),
+                       gr * 2 - (int)(4 * scale), (int)(2 * scale), 0xffffff);
     int spaceX = globeX + globeW + (int)(gap * scale);
     int retX = fbW - (int)(margin * scale) - retW;
     int spaceW = retX - (int)(gap * scale) - spaceX;
@@ -4600,6 +4714,7 @@ int UIApplicationMain(int argc, char **argv, id principal, id delegateName)
                 continue;
             iosim_fb_set_opacity(1.0);
             render_view(window, 0, 0, scale, 1.0);
+            draw_device_chrome(fbWidth, scale);
             draw_keyboard(fbWidth, fbHeight, scale);
             if (path && *path)
                 iosim_fb_present(path);
