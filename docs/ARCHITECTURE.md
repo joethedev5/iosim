@@ -484,12 +484,32 @@ decoded with libpng in `loader/image.c`.
   interitem and line spacing and section insets; `UICollectionView` reloads
   cells as real subviews at those frames, so the scroll view's offset and clip
   move them together, and it routes taps to the item's index path and delegate.
+  A data source may implement `numberOfSectionsInCollectionView:`; the reload
+  and tap passes walk each section with its own running cursor (top inset,
+  rows, bottom inset, then one line-space between sections), so item index
+  paths carry their section and selection is tracked per section.
   `registerClass:forCellWithReuseIdentifier:` and
   `dequeueReusableCellWithReuseIdentifier:forIndexPath:` create cells the way a
   data source expects.
 - `UIStepper` lays out two `UIControl` halves around a divider; each half
   steps the value within minimum/maximum (honouring stepValue and wraps) and
   sends `UIControlEventValueChanged`.
+- `UIPickerView` keeps a fractional row offset per component. Rendering draws
+  each wheel's titles at `center + (row - offset) * 32 pt`, fades rows toward
+  the edges, and paints a centered selection band; dragging shifts the wheel's
+  offset, and touch-up snaps it to the nearest row and reports
+  `pickerView:didSelectRow:inComponent:`. A tap selects the row under the
+  finger. Text follows the surface luminance (label color behavior), and
+  `selectRow:inComponent:animated:` and the reload methods reset offsets from
+  the data source.
+- `UIDatePicker` embeds a `UIPickerView` and acts as its data source and
+  delegate, so the wheels, band, hit-testing and snapping are the same code.
+  The component layout follows `datePickerMode` (month/day/year,
+  hour/minute/AM-PM, both, or a countdown), the day wheel's row count follows
+  the selected month and leap year, and a month or year change reloads that
+  wheel before clamping the day. Selection rebuilds the date through
+  `NSCalendar`/`NSDateComponents` and sends `UIControlEventValueChanged`;
+  setting the date refreshes every wheel from the calendar components.
 - `UISearchBar` embeds a real `UITextField` subclass, so focusing it raises
   the software keyboard and hardware keys edit the same text. EditingChanged
   reaches `searchBar:textDidChange:`; Return is intercepted before it can

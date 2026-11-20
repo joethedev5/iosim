@@ -1137,6 +1137,69 @@ enum {
 - (void)setWraps:(BOOL)wraps;
 @end
 
+#define PICKER_MAX_COMPONENTS 8
+#define PICKER_ROW_HEIGHT 32.0
+
+@interface UIPickerView : UIView {
+@public
+    id _dataSource;
+    id _delegate;
+    long _selectedRows[PICKER_MAX_COMPONENTS];
+    double _rowOffsets[PICKER_MAX_COMPONENTS];
+    long _dragComponent;
+    double _dragStartOffset;
+    CGPoint _dragStartPoint;
+    BOOL _dragging;
+}
+- (void)setDataSource:(id)dataSource;
+- (id)dataSource;
+- (void)setDelegate:(id)delegate;
+- (id)delegate;
+- (long)numberOfComponents;
+- (long)numberOfRowsInComponent:(long)component;
+- (long)selectedRowInComponent:(long)component;
+- (void)selectRow:(long)row inComponent:(long)component animated:(BOOL)animated;
+- (void)reloadAllComponents;
+- (void)reloadComponent:(long)component;
+@end
+
+enum {
+    UIDatePickerModeTime = 0,
+    UIDatePickerModeDate = 1,
+    UIDatePickerModeDateAndTime = 2,
+    UIDatePickerModeCountDownTimer = 3
+};
+
+enum {
+    UIDatePickerStyleAutomatic = 0,
+    UIDatePickerStyleWheels = 1,
+    UIDatePickerStyleCompact = 2,
+    UIDatePickerStyleInline = 3
+};
+
+@interface UIDatePicker : UIControl {
+@public
+    long _mode;
+    long _style;
+    double _dateInterval;
+    double _countdownDuration;
+    UIPickerView *_pickerView;
+    NSCalendar *_calendar;
+    BOOL _settingUp;
+}
+- (NSDate *)date;
+- (void)setDate:(NSDate *)date;
+- (void)setDate:(NSDate *)date animated:(BOOL)animated;
+- (long)datePickerMode;
+- (void)setDatePickerMode:(long)mode;
+- (long)preferredDatePickerStyle;
+- (void)setPreferredDatePickerStyle:(long)style;
+- (NSCalendar *)calendar;
+- (void)setCalendar:(NSCalendar *)calendar;
+- (double)countDownDuration;
+- (void)setCountDownDuration:(double)duration;
+@end
+
 @interface UIProgressView : UIView {
 @public
     double _progress;
@@ -1371,6 +1434,7 @@ enum {
     id _cellClasses;
     id _cells;
     long _selectedItem;
+    long _selectedSection;
 }
 - (id)initWithFrame:(CGRect)frame
  collectionViewLayout:(UICollectionViewLayout *)layout;
@@ -3439,6 +3503,571 @@ static id g_firstResponder;
 - (CGSize)intrinsicContentSize { return CGSizeMake(94, 32); }
 @end
 
+/* ------------------------------------------------------------- pickers */
+
+static unsigned color_rgb(UIColor *color);
+
+static long picker_components(UIPickerView *picker)
+{
+    if (picker->_dataSource &&
+        [picker->_dataSource respondsToSelector:
+            @selector(numberOfComponentsInPickerView:)])
+    {
+        SEL sel = @selector(numberOfComponentsInPickerView:);
+        long n = ((long (*)(id, void *, id))objc_msgSend)(
+            picker->_dataSource, (void *)sel, picker);
+        if (n < 1)
+            n = 1;
+        if (n > PICKER_MAX_COMPONENTS)
+            n = PICKER_MAX_COMPONENTS;
+        return n;
+    }
+    return 1;
+}
+
+static long picker_rows(UIPickerView *picker, long component)
+{
+    if (!picker->_dataSource ||
+        ![picker->_dataSource respondsToSelector:
+            @selector(pickerView:numberOfRowsInComponent:)])
+        return 0;
+    SEL sel = @selector(pickerView:numberOfRowsInComponent:);
+    long n = ((long (*)(id, void *, id, long))objc_msgSend)(
+        picker->_dataSource, (void *)sel, picker, component);
+    return n > 0 ? n : 0;
+}
+
+static id picker_title(UIPickerView *picker, long row, long component)
+{
+    if (!picker->_delegate ||
+        ![picker->_delegate respondsToSelector:
+            @selector(pickerView:titleForRow:forComponent:)])
+        return nil;
+    SEL sel = @selector(pickerView:titleForRow:forComponent:);
+    return ((id (*)(id, void *, id, long, long))objc_msgSend)(
+        picker->_delegate, (void *)sel, picker, row, component);
+}
+
+static void picker_report(UIPickerView *picker, long row, long component)
+{
+    if (!picker->_delegate ||
+        ![picker->_delegate respondsToSelector:
+            @selector(pickerView:didSelectRow:inComponent:)])
+        return;
+    SEL sel = @selector(pickerView:didSelectRow:inComponent:);
+    ((void (*)(id, void *, id, long, long))objc_msgSend)(
+        picker->_delegate, (void *)sel, picker, row, component);
+}
+
+/* A wheel has no fill of its own; its text follows the surface it sits on,
+ * like the real picker's use of the label color for the current style. */
+static unsigned picker_text_color(UIView *view)
+{
+    for (UIView *v = view; v; v = [v superview])
+    {
+        UIColor *color = v->_backgroundColor;
+        if (!color || color->_a <= 0.5)
+            continue;
+        unsigned rgb = color_rgb(color);
+        double luminance = (0.299 * (((rgb >> 16) & 0xff) / 255.0) +
+                            0.587 * (((rgb >> 8) & 0xff) / 255.0) +
+                            0.114 * ((rgb & 0xff) / 255.0));
+        return luminance > 0.55 ? 0x000000 : 0xffffff;
+    }
+    return 0xffffff;
+}
+
+@implementation UIPickerView
+- (id)initWithFrame:(CGRect)frame
+{
+    self = [super initWithFrame:frame];
+    if (self)
+    {
+        _dragComponent = -1;
+        _dragging = NO;
+        [self setBackgroundColor:[UIColor clearColor]];
+    }
+    return self;
+}
+- (void)setDataSource:(id)dataSource
+{
+    _dataSource = dataSource;
+    [self reloadAllComponents];
+}
+- (id)dataSource { return _dataSource; }
+- (void)setDelegate:(id)delegate { _delegate = delegate; }
+- (id)delegate { return _delegate; }
+- (long)numberOfComponents { return picker_components(self); }
+- (long)numberOfRowsInComponent:(long)component
+{
+    return picker_rows(self, component);
+}
+- (long)selectedRowInComponent:(long)component
+{
+    if (component < 0 || component >= PICKER_MAX_COMPONENTS)
+        return 0;
+    long rows = picker_rows(self, component);
+    long row = _selectedRows[component];
+    if (row < 0)
+        row = 0;
+    if (rows > 0 && row >= rows)
+        row = rows - 1;
+    return row;
+}
+- (void)selectRow:(long)row inComponent:(long)component animated:(BOOL)animated
+{
+    (void)animated;
+    long components = picker_components(self);
+    if (component < 0 || component >= components)
+        return;
+    long rows = picker_rows(self, component);
+    if (row < 0)
+        row = 0;
+    if (rows > 0 && row >= rows)
+        row = rows - 1;
+    _selectedRows[component] = row;
+    _rowOffsets[component] = row;
+}
+- (void)reloadAllComponents
+{
+    long components = picker_components(self);
+    for (long c = 0; c < components; c++)
+    {
+        long rows = picker_rows(self, c);
+        long row = _selectedRows[c];
+        if (row < 0)
+            row = 0;
+        if (rows > 0 && row >= rows)
+            row = rows - 1;
+        if (rows <= 0)
+            row = 0;
+        _selectedRows[c] = row;
+        _rowOffsets[c] = row;
+    }
+}
+- (void)reloadComponent:(long)component
+{
+    long components = picker_components(self);
+    if (component < 0 || component >= components)
+        return;
+    long rows = picker_rows(self, component);
+    long row = _selectedRows[component];
+    if (row < 0)
+        row = 0;
+    if (rows > 0 && row >= rows)
+        row = rows - 1;
+    if (rows <= 0)
+        row = 0;
+    _selectedRows[component] = row;
+    _rowOffsets[component] = row;
+}
+- (void)touchesBegan:(NSSet *)touches withEvent:(UIEvent *)event
+{
+    (void)event;
+    UITouch *touch = [touches anyObject];
+    CGPoint point = [touch locationInView:self];
+    long components = picker_components(self);
+    double componentWidth = _frame.size.width / components;
+    long component = 0;
+    if (componentWidth > 0)
+        component = (long)(point.x / componentWidth);
+    if (component < 0)
+        component = 0;
+    if (component >= components)
+        component = components - 1;
+    _dragComponent = component;
+    _dragging = YES;
+    _dragStartPoint = point;
+    _dragStartOffset = _rowOffsets[component];
+}
+- (void)touchesMoved:(NSSet *)touches withEvent:(UIEvent *)event
+{
+    (void)event;
+    if (!_dragging || _dragComponent < 0)
+        return;
+    UITouch *touch = [touches anyObject];
+    CGPoint point = [touch locationInView:self];
+    long component = _dragComponent;
+    long rows = picker_rows(self, component);
+    double low = 0;
+    double high = rows - 1;
+    if (high < low)
+        high = low;
+    double offset = _dragStartOffset -
+                    (point.y - _dragStartPoint.y) / PICKER_ROW_HEIGHT;
+    if (offset < low)
+        offset = low;
+    if (offset > high)
+        offset = high;
+    _rowOffsets[component] = offset;
+}
+- (void)touchesEnded:(NSSet *)touches withEvent:(UIEvent *)event
+{
+    (void)event;
+    if (!_dragging || _dragComponent < 0)
+        return;
+    UITouch *touch = [touches anyObject];
+    CGPoint point = [touch locationInView:self];
+    long component = _dragComponent;
+    long rows = picker_rows(self, component);
+    long row;
+    if (__builtin_fabs(point.y - _dragStartPoint.y) < 3.0)
+    {
+        /* A tap lands on the row under the finger. */
+        double center = _frame.size.height / 2.0;
+        row = (long)__builtin_floor(
+            (point.y - center) / PICKER_ROW_HEIGHT +
+            _rowOffsets[component] + 0.5);
+    }
+    else
+        row = (long)__builtin_floor(_rowOffsets[component] + 0.5);
+    if (row < 0)
+        row = 0;
+    if (rows > 0 && row >= rows)
+        row = rows - 1;
+    if (rows <= 0)
+        row = 0;
+    long previous = _selectedRows[component];
+    _selectedRows[component] = row;
+    _rowOffsets[component] = row;
+    _dragging = NO;
+    _dragComponent = -1;
+    if (row != previous)
+        picker_report(self, row, component);
+}
+- (CGSize)intrinsicContentSize { return CGSizeMake(320, 216); }
+@end
+
+/* ----------------------------------------------------------- date picker */
+
+#define DATEPICKER_FIRST_YEAR 1900
+#define DATEPICKER_YEAR_COUNT 201
+
+static long datepicker_days_in_month(long year, long month)
+{
+    static const long monthDays[12] = {
+        31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31
+    };
+    if (month < 1 || month > 12)
+        return 31;
+    if (month == 2)
+    {
+        long leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+        return 28 + leap;
+    }
+    return monthDays[month - 1];
+}
+
+static long datepicker_component_count(long mode)
+{
+    if (mode == UIDatePickerModeDate)
+        return 3;
+    if (mode == UIDatePickerModeDateAndTime)
+        return 6;
+    if (mode == UIDatePickerModeCountDownTimer)
+        return 2;
+    return 3;
+}
+
+/* The component layout is: date modes start with month/day/year; time
+ * modes use hour/minute/AM-PM (offset after the date part when combined). */
+static int datepicker_is_date_component(long mode, long component)
+{
+    return (mode == UIDatePickerModeDate ||
+            mode == UIDatePickerModeDateAndTime) && component < 3;
+}
+
+static long datepicker_rows_for(UIDatePicker *picker, long component)
+{
+    long mode = picker->_mode;
+    if (datepicker_is_date_component(mode, component))
+    {
+        if (component == 0)
+            return 12;
+        if (component == 1)
+        {
+            /* Read the wheel state directly: selectedRowInComponent: queries
+             * the data source, which is this picker and would recurse. */
+            long month = picker->_pickerView->_selectedRows[0] + 1;
+            long year = DATEPICKER_FIRST_YEAR +
+                        picker->_pickerView->_selectedRows[2];
+            return datepicker_days_in_month(year, month);
+        }
+        return DATEPICKER_YEAR_COUNT;
+    }
+    if (mode == UIDatePickerModeCountDownTimer)
+        return component == 0 ? 24 : 60;
+    long timeComponent = component - (mode == UIDatePickerModeDateAndTime ? 3 : 0);
+    if (timeComponent == 0)
+        return 12;
+    if (timeComponent == 1)
+        return 60;
+    return 2;
+}
+
+@implementation UIDatePicker
+- (id)initWithFrame:(CGRect)frame
+{
+    self = [super initWithFrame:frame];
+    if (self)
+    {
+        _mode = UIDatePickerModeDateAndTime;
+        _style = UIDatePickerStyleAutomatic;
+        _dateInterval = [[NSDate date] timeIntervalSince1970];
+        _countdownDuration = 0;
+        [self setBackgroundColor:[UIColor clearColor]];
+
+        _pickerView = [[UIPickerView alloc]
+            initWithFrame:CGRectMake(0, 0, frame.size.width,
+                                     frame.size.height)];
+        _pickerView->_dataSource = self;
+        _pickerView->_delegate = self;
+        [_pickerView reloadAllComponents];
+        [self addSubview:_pickerView];
+        [self refreshWheelsFromDate];
+    }
+    return self;
+}
+- (void)layoutSubviews
+{
+    if (_pickerView)
+        _pickerView->_frame =
+            CGRectMake(0, 0, _frame.size.width, _frame.size.height);
+}
+- (NSDate *)date
+{
+    return [NSDate dateWithTimeIntervalSince1970:_dateInterval];
+}
+- (void)setDate:(NSDate *)date
+{
+    [self setDate:date animated:NO];
+}
+- (void)setDate:(NSDate *)date animated:(BOOL)animated
+{
+    (void)animated;
+    if (!date)
+        date = [NSDate date];
+    _dateInterval = [date timeIntervalSince1970];
+    [self refreshWheelsFromDate];
+}
+- (long)datePickerMode { return _mode; }
+- (void)setDatePickerMode:(long)mode
+{
+    _mode = mode;
+    _settingUp = YES;
+    [_pickerView reloadAllComponents];
+    _settingUp = NO;
+    [self refreshWheelsFromDate];
+}
+- (long)preferredDatePickerStyle { return _style; }
+- (void)setPreferredDatePickerStyle:(long)style { _style = style; }
+- (NSCalendar *)calendar
+{
+    return _calendar ? _calendar : [NSCalendar currentCalendar];
+}
+- (void)setCalendar:(NSCalendar *)calendar { _calendar = calendar; }
+- (double)countDownDuration { return _countdownDuration; }
+- (void)setCountDownDuration:(double)duration
+{
+    _countdownDuration = duration > 0 ? duration : 0;
+    [self refreshWheelsFromDate];
+}
+- (void)refreshWheelsFromDate
+{
+    if (!_pickerView)
+        return;
+    NSCalendar *calendar = self.calendar;
+    NSDate *date = [NSDate dateWithTimeIntervalSince1970:_dateInterval];
+    NSDateComponents *comp = [calendar components:
+        NSCalendarUnitYear | NSCalendarUnitMonth | NSCalendarUnitDay |
+        NSCalendarUnitHour | NSCalendarUnitMinute | NSCalendarUnitSecond
+        fromDate:date];
+    _settingUp = YES;
+    if (_mode == UIDatePickerModeDate ||
+        _mode == UIDatePickerModeDateAndTime)
+    {
+        long year = comp->_year;
+        if (year < DATEPICKER_FIRST_YEAR)
+            year = DATEPICKER_FIRST_YEAR;
+        if (year >= DATEPICKER_FIRST_YEAR + DATEPICKER_YEAR_COUNT)
+            year = DATEPICKER_FIRST_YEAR + DATEPICKER_YEAR_COUNT - 1;
+        long month = comp->_month;
+        if (month < 1)
+            month = 1;
+        if (month > 12)
+            month = 12;
+        [_pickerView selectRow:month - 1 inComponent:0 animated:NO];
+        [_pickerView selectRow:year - DATEPICKER_FIRST_YEAR
+                    inComponent:2 animated:NO];
+        [_pickerView reloadComponent:1];
+        long day = comp->_day;
+        long rows = datepicker_days_in_month(year, month);
+        if (day > rows)
+            day = rows;
+        if (day < 1)
+            day = 1;
+        [_pickerView selectRow:day - 1 inComponent:1 animated:NO];
+    }
+    long timeBase =
+        _mode == UIDatePickerModeDateAndTime ? 3 :
+        (_mode == UIDatePickerModeTime ? 0 : -1);
+    if (timeBase >= 0)
+    {
+        long hour = comp->_hour % 12;
+        if (hour == 0)
+            hour = 12;
+        [_pickerView selectRow:hour - 1 inComponent:timeBase animated:NO];
+        [_pickerView selectRow:comp->_minute inComponent:timeBase + 1
+                     animated:NO];
+        [_pickerView selectRow:comp->_hour >= 12 ? 1 : 0
+                    inComponent:timeBase + 2 animated:NO];
+    }
+    else if (_mode == UIDatePickerModeCountDownTimer)
+    {
+        long total = (long)_countdownDuration;
+        [_pickerView selectRow:(total / 3600) % 24 inComponent:0 animated:NO];
+        [_pickerView selectRow:(total / 60) % 60 inComponent:1 animated:NO];
+    }
+    _settingUp = NO;
+}
+- (long)numberOfComponentsInPickerView:(UIPickerView *)pickerView
+{
+    (void)pickerView;
+    return datepicker_component_count(_mode);
+}
+- (long)pickerView:(UIPickerView *)pickerView
+    numberOfRowsInComponent:(long)component
+{
+    (void)pickerView;
+    return datepicker_rows_for(self, component);
+}
+- (id)pickerView:(UIPickerView *)pickerView titleForRow:(long)row
+    forComponent:(long)component
+{
+    (void)pickerView;
+    char buf[32];
+    static const char *months[12] = {
+        "January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December"
+    };
+    if (datepicker_is_date_component(_mode, component))
+    {
+        if (component == 0)
+            return row >= 0 && row < 12
+                       ? [NSString stringWithUTF8String:months[row]]
+                       : nil;
+        if (component == 1)
+        {
+            snprintf(buf, sizeof buf, "%ld", (long)(row + 1));
+            return [NSString stringWithUTF8String:buf];
+        }
+        snprintf(buf, sizeof buf, "%ld",
+                 (long)(DATEPICKER_FIRST_YEAR + row));
+        return [NSString stringWithUTF8String:buf];
+    }
+    if (_mode == UIDatePickerModeCountDownTimer)
+    {
+        if (component == 0)
+            snprintf(buf, sizeof buf, "%ld", (long)row);
+        else
+            snprintf(buf, sizeof buf, "%02ld", (long)row);
+        return [NSString stringWithUTF8String:buf];
+    }
+    long timeComponent =
+        component - (_mode == UIDatePickerModeDateAndTime ? 3 : 0);
+    if (timeComponent == 0)
+    {
+        long hour = row == 0 ? 12 : (long)row;
+        snprintf(buf, sizeof buf, "%ld", hour);
+    }
+    else if (timeComponent == 1)
+        snprintf(buf, sizeof buf, "%02ld", (long)row);
+    else
+        snprintf(buf, sizeof buf, "%s", row == 0 ? "AM" : "PM");
+    return [NSString stringWithUTF8String:buf];
+}
+- (void)pickerView:(UIPickerView *)pickerView didSelectRow:(long)row
+    inComponent:(long)component
+{
+    (void)pickerView;
+    (void)row;
+    if (_settingUp)
+        return;
+    if (datepicker_is_date_component(_mode, component) && component != 1)
+    {
+        /* Month or year changed: the day wheel's row count follows. */
+        long month = [_pickerView selectedRowInComponent:0] + 1;
+        long year = DATEPICKER_FIRST_YEAR +
+                    [_pickerView selectedRowInComponent:2];
+        long dayRow = [_pickerView selectedRowInComponent:1];
+        long rows = datepicker_days_in_month(year, month);
+        if (dayRow >= rows)
+            dayRow = rows - 1;
+        if (dayRow < 0)
+            dayRow = 0;
+        [_pickerView reloadComponent:1];
+        [_pickerView selectRow:dayRow inComponent:1 animated:NO];
+    }
+    [self updateDateFromWheels];
+    [self sendActionsForControlEvents:UIControlEventValueChanged];
+}
+- (void)updateDateFromWheels
+{
+    NSCalendar *calendar = self.calendar;
+    NSDate *current = [NSDate dateWithTimeIntervalSince1970:_dateInterval];
+    NSDateComponents *comp = [calendar components:
+        NSCalendarUnitYear | NSCalendarUnitMonth | NSCalendarUnitDay |
+        NSCalendarUnitHour | NSCalendarUnitMinute | NSCalendarUnitSecond
+        fromDate:current];
+    long year = comp->_year;
+    long month = comp->_month;
+    long day = comp->_day;
+    long hour = comp->_hour;
+    long minute = comp->_minute;
+    if (_mode == UIDatePickerModeDate ||
+        _mode == UIDatePickerModeDateAndTime)
+    {
+        month = [_pickerView selectedRowInComponent:0] + 1;
+        year = DATEPICKER_FIRST_YEAR +
+               [_pickerView selectedRowInComponent:2];
+        long rows = datepicker_days_in_month(year, month);
+        day = [_pickerView selectedRowInComponent:1] + 1;
+        if (day > rows)
+            day = rows;
+        if (day < 1)
+            day = 1;
+    }
+    if (_mode == UIDatePickerModeCountDownTimer)
+    {
+        long hours = [_pickerView selectedRowInComponent:0];
+        long minutes = [_pickerView selectedRowInComponent:1];
+        _countdownDuration = (double)(hours * 3600 + minutes * 60);
+        return;
+    }
+    long timeBase =
+        _mode == UIDatePickerModeDateAndTime ? 3 :
+        (_mode == UIDatePickerModeTime ? 0 : -1);
+    if (timeBase >= 0)
+    {
+        long hour12 = [_pickerView selectedRowInComponent:timeBase] + 1;
+        minute = [_pickerView selectedRowInComponent:timeBase + 1];
+        long pm = [_pickerView selectedRowInComponent:timeBase + 2];
+        hour = (hour12 % 12) + (pm ? 12 : 0);
+    }
+    NSDateComponents *out = [[NSDateComponents alloc] init];
+    out->_year = year;
+    out->_month = month;
+    out->_day = day;
+    out->_hour = hour;
+    out->_minute = minute;
+    out->_second = comp->_second;
+    NSDate *date = [calendar dateFromComponents:out];
+    if (date)
+        _dateInterval = [date timeIntervalSince1970];
+}
+- (CGSize)intrinsicContentSize { return CGSizeMake(320, 216); }
+@end
+
 @implementation UISegmentedControl
 - (id)initWithItems:(NSArray *)items
 {
@@ -5010,6 +5639,34 @@ static long collection_count(UICollectionView *collectionView)
     return 0;
 }
 
+static long collection_sections(UICollectionView *collectionView)
+{
+    if (collectionView->_dataSource &&
+        [collectionView->_dataSource respondsToSelector:
+            @selector(numberOfSectionsInCollectionView:)])
+    {
+        SEL sel = @selector(numberOfSectionsInCollectionView:);
+        long sections = ((long (*)(id, void *, id))objc_msgSend)(
+            collectionView->_dataSource, (void *)sel, collectionView);
+        return sections > 0 ? sections : 1;
+    }
+    return 1;
+}
+
+static long collection_items_in_section(UICollectionView *collectionView,
+                                        long section)
+{
+    if (collectionView->_dataSource &&
+        [collectionView->_dataSource respondsToSelector:
+            @selector(collectionView:numberOfItemsInSection:)])
+    {
+        SEL sel = @selector(collectionView:numberOfItemsInSection:);
+        return ((long (*)(id, void *, id, long))objc_msgSend)(
+            collectionView->_dataSource, (void *)sel, collectionView, section);
+    }
+    return 0;
+}
+
 static void collection_metrics(UICollectionView *collectionView,
                                double *itemW, double *itemH,
                                double *interitem, double *line,
@@ -5057,6 +5714,7 @@ static int collection_columns(double width, double itemW, double interitem,
         _cellClasses = [NSMutableDictionary dictionary];
         _cells = [NSMutableArray array];
         _selectedItem = -1;
+        _selectedSection = -1;
         [self setBackgroundColor:[UIColor clearColor]];
     }
     return self;
@@ -5094,82 +5752,126 @@ static int collection_columns(double width, double itemW, double interitem,
     }
     [_cells removeAllObjects];
 
-    long count = collection_count(self);
     double itemW, itemH, interitem, line, left, right, top, bottom;
     collection_metrics(self, &itemW, &itemH, &interitem, &line,
                        &left, &right, &top, &bottom);
     int columns = collection_columns(_frame.size.width, itemW, interitem,
                                      left, right);
-    for (long i = 0; i < count; i++)
+    long sections = collection_sections(self);
+    double cursor = 0;
+    for (long section = 0; section < sections; section++)
     {
-        NSIndexPath *path = [NSIndexPath indexPathForRow:i inSection:0];
-        UICollectionViewCell *cell = nil;
-        if (_dataSource &&
-            [_dataSource respondsToSelector:
-                @selector(collectionView:cellForItemAtIndexPath:)])
+        long count = collection_items_in_section(self, section);
+        cursor += top;
+        for (long i = 0; i < count; i++)
         {
-            SEL sel = @selector(collectionView:cellForItemAtIndexPath:);
-            cell = (UICollectionViewCell *)((id (*)(id, void *, id, id))
-                objc_msgSend)(_dataSource, (void *)sel, self, path);
+            NSIndexPath *path =
+                [NSIndexPath indexPathForRow:i inSection:section];
+            UICollectionViewCell *cell = nil;
+            if (_dataSource &&
+                [_dataSource respondsToSelector:
+                    @selector(collectionView:cellForItemAtIndexPath:)])
+            {
+                SEL sel = @selector(collectionView:cellForItemAtIndexPath:);
+                cell = (UICollectionViewCell *)((id (*)(id, void *, id, id))
+                    objc_msgSend)(_dataSource, (void *)sel, self, path);
+            }
+            if (cell)
+            {
+                int column = (int)(i % columns), row = (int)(i / columns);
+                double x = left + column * (itemW + interitem);
+                double y = cursor + row * (itemH + line);
+                [cell setFrame:CGRectMake(x, y, itemW, itemH)];
+                [cell setSelected:(section == _selectedSection &&
+                                  i == _selectedItem)
+                         animated:NO];
+                [self addSubview:cell];
+                [_cells addObject:cell];
+            }
+            else
+                [_cells addObject:[NSNull null]];
         }
-        if (cell)
-        {
-            int column = (int)(i % columns), row = (int)(i / columns);
-            double x = left + column * (itemW + interitem);
-            double y = top + row * (itemH + line);
-            [cell setFrame:CGRectMake(x, y, itemW, itemH)];
-            [cell setSelected:(i == _selectedItem) animated:NO];
-            [self addSubview:cell];
-            [_cells addObject:cell];
-        }
-        else
-            [_cells addObject:[NSNull null]];
+        long rows = (count + columns - 1) / columns;
+        if (rows > 0)
+            cursor += rows * itemH + (rows - 1) * line;
+        cursor += bottom;
+        if (section + 1 < sections)
+            cursor += line;
     }
-    long rows = (count + columns - 1) / columns;
-    double height = rows > 0 ? top + rows * itemH + (rows - 1) * line + bottom
-                             : 0;
-    _contentSize = CGSizeMake(_frame.size.width, height);
+    _contentSize = CGSizeMake(_frame.size.width, cursor);
+}
+static long collection_flat_index(UICollectionView *collectionView,
+                                  long section, long item)
+{
+    long flat = item;
+    for (long s = 0; s < section; s++)
+        flat += collection_items_in_section(collectionView, s);
+    return flat;
 }
 - (void)handleTapAtPoint:(CGPoint)point
 {
-    long count = collection_count(self);
     double itemW, itemH, interitem, line, left, right, top, bottom;
     collection_metrics(self, &itemW, &itemH, &interitem, &line,
                        &left, &right, &top, &bottom);
     int columns = collection_columns(_frame.size.width, itemW, interitem,
                                      left, right);
-    for (long i = 0; i < count; i++)
+    long sections = collection_sections(self);
+    double cursor = 0;
+    for (long section = 0; section < sections; section++)
     {
-        int column = (int)(i % columns), row = (int)(i / columns);
-        double x = left + column * (itemW + interitem);
-        double y = top + row * (itemH + line);
-        if (point.x < x || point.x >= x + itemW || point.y < y ||
-            point.y >= y + itemH)
-            continue;
-        long previous = _selectedItem;
-        _selectedItem = i;
-        if (previous >= 0 && previous < (long)[_cells count])
+        long count = collection_items_in_section(self, section);
+        cursor += top;
+        for (long i = 0; i < count; i++)
         {
-            id cell = [_cells objectAtIndex:(unsigned long)previous];
-            if ([cell isKindOfClass:[UICollectionViewCell class]])
-                [(UICollectionViewCell *)cell setSelected:NO animated:NO];
+            int column = (int)(i % columns), row = (int)(i / columns);
+            double x = left + column * (itemW + interitem);
+            double y = cursor + row * (itemH + line);
+            if (point.x < x || point.x >= x + itemW || point.y < y ||
+                point.y >= y + itemH)
+                continue;
+            long previousSection = _selectedSection;
+            long previousItem = _selectedItem;
+            _selectedSection = section;
+            _selectedItem = i;
+            if (previousSection >= 0)
+            {
+                long previous = collection_flat_index(self, previousSection,
+                                                      previousItem);
+                if (previous >= 0 && previous < (long)[_cells count])
+                {
+                    id cell =
+                        [_cells objectAtIndex:(unsigned long)previous];
+                    if ([cell isKindOfClass:[UICollectionViewCell class]])
+                        [(UICollectionViewCell *)cell setSelected:NO
+                                                         animated:NO];
+                }
+            }
+            long flat = collection_flat_index(self, section, i);
+            if (flat >= 0 && flat < (long)[_cells count])
+            {
+                id cell = [_cells objectAtIndex:(unsigned long)flat];
+                if ([cell isKindOfClass:[UICollectionViewCell class]])
+                    [(UICollectionViewCell *)cell setSelected:YES
+                                                     animated:NO];
+            }
+            if (_delegate &&
+                [_delegate respondsToSelector:
+                    @selector(collectionView:didSelectItemAtIndexPath:)])
+            {
+                NSIndexPath *path =
+                    [NSIndexPath indexPathForRow:i inSection:section];
+                SEL sel = @selector(collectionView:didSelectItemAtIndexPath:);
+                ((void (*)(id, void *, id, id))objc_msgSend)(
+                    _delegate, (void *)sel, self, path);
+            }
+            return;
         }
-        if (i < (long)[_cells count])
-        {
-            id cell = [_cells objectAtIndex:(unsigned long)i];
-            if ([cell isKindOfClass:[UICollectionViewCell class]])
-                [(UICollectionViewCell *)cell setSelected:YES animated:NO];
-        }
-        if (_delegate &&
-            [_delegate respondsToSelector:
-                @selector(collectionView:didSelectItemAtIndexPath:)])
-        {
-            NSIndexPath *path = [NSIndexPath indexPathForRow:i inSection:0];
-            SEL sel = @selector(collectionView:didSelectItemAtIndexPath:);
-            ((void (*)(id, void *, id, id))objc_msgSend)(
-                _delegate, (void *)sel, self, path);
-        }
-        return;
+        long rows = (count + columns - 1) / columns;
+        if (rows > 0)
+            cursor += rows * itemH + (rows - 1) * line;
+        cursor += bottom;
+        if (section + 1 < sections)
+            cursor += line;
     }
 }
 @end
@@ -7064,6 +7766,62 @@ static void render_view(UIView *view, double originX, double originY,
                                  slider->_thumbTintColor
                                      ? color_rgb(slider->_thumbTintColor)
                                      : 0xffffff);
+    }
+    else if ([view isKindOfClass:[UIPickerView class]])
+    {
+        UIPickerView *picker = (UIPickerView *)view;
+        long components = picker_components(picker);
+        unsigned textColor = picker_text_color(view);
+        int bandH = (int)(PICKER_ROW_HEIGHT * scale + 0.5);
+        int centerY = y + h / 2;
+        int clippedPicker = iosim_fb_push_clip(x, y, w, h);
+        /* Selection band: a tinted lozenge inside two hairlines. */
+        iosim_fb_set_opacity(alpha * (textColor == 0x000000 ? 0.06 : 0.10));
+        iosim_fb_fill_round_rect(x, centerY - bandH / 2, w, bandH,
+                                 (int)(6 * scale + 0.5), textColor);
+        iosim_fb_set_opacity(alpha * (textColor == 0x000000 ? 0.12 : 0.22));
+        iosim_fb_fill_rect(x, centerY - bandH / 2, w, 1, textColor);
+        iosim_fb_fill_rect(x, centerY + bandH / 2 - 1, w, 1, textColor);
+        iosim_fb_set_opacity(alpha);
+        for (long c = 0; c < components; c++)
+        {
+            long rows = picker_rows(picker, c);
+            double componentWidth = (double)w / components;
+            int cx = x + (int)((c + 0.5) * componentWidth + 0.5);
+            int ascent = 0, descent = 0, lineHeight = 0;
+            double points = 21.0;
+            iosim_fb_font_metrics(IOSIM_FONT_REGULAR, points, scale, &ascent,
+                                  &descent, &lineHeight);
+            double offset = picker->_rowOffsets[c];
+            for (long r = 0; r < rows; r++)
+            {
+                double dy = ((double)r - offset) * PICKER_ROW_HEIGHT;
+                double rowCenter = centerY + dy * scale;
+                if (rowCenter < y - PICKER_ROW_HEIGHT * scale ||
+                    rowCenter > y + h + PICKER_ROW_HEIGHT * scale)
+                    continue;
+                id title = picker_title(picker, r, c);
+                const char *text = iosim_string_cstr(title);
+                if (!text)
+                    continue;
+                double half = h > 0 ? h / 2.0 : 1.0;
+                double distance = __builtin_fabs(dy) / half;
+                if (distance > 1)
+                    distance = 1;
+                double fade = 1.0 - 0.7 * distance * distance;
+                int tw = iosim_fb_font_text_width(text, IOSIM_FONT_REGULAR,
+                                                  points, scale);
+                int baseline =
+                    (int)(rowCenter + 0.5) + ascent - lineHeight / 2;
+                iosim_fb_set_opacity(alpha * fade);
+                iosim_fb_font_text(cx - tw / 2, baseline, text,
+                                   IOSIM_FONT_REGULAR, points, scale,
+                                   textColor);
+            }
+        }
+        iosim_fb_set_opacity(alpha);
+        if (clippedPicker)
+            iosim_fb_pop_clip();
     }
     else if ([view isKindOfClass:[UIProgressView class]])
     {

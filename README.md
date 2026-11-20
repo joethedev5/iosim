@@ -62,12 +62,14 @@ runners**, combined with the public Darling and Apple dyld sources.
 | Layer clipping (`clipsToBounds`/`masksToBounds`), shadows and borders | ✅ |
 | Switch, slider, segmented, progress, page and activity controls in the iOS 26 glass design | ✅ |
 | Floating glass tab bar with per-item targets and content swapping | ✅ |
-| UICollectionView flow layout, reusable cells, selection and drag scrolling | ✅ |
+| UICollectionView flow layout, multiple sections, reusable cells, selection, drag scrolling | ✅ |
 | UITableView sections, headers, per-row heights and section-aware selection | ✅ |
 | UILongPressGestureRecognizer duration, movement tolerance and state changes | ✅ |
 | UIBarButtonItem/UINavigationItem, right bar buttons and automatic back button | ✅ |
 | UISearchBar with delegate edits, Return action, Cancel and keyboard focus | ✅ |
 | UIStepper plus/minus halves, stepping, limits and ValueChanged | ✅ |
+| UIPickerView wheels: data source components, titles, tap/drag selection with snapping | ✅ |
+| UIDatePicker date, time and combined wheels with calendar-accurate dates | ✅ |
 
 The test suite exercises a real Apple-toolchain-built x86_64 UIKit app, a
 Foundation app using `NSLog` with a constant `CFString`, a Foundation

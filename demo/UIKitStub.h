@@ -15,6 +15,7 @@ __attribute__((objc_root_class))
 
 @interface NSString : NSObject
 + (id)stringWithFormat:(id)format, ...;
++ (id)stringWithUTF8String:(const char *)string;
 - (const char *)UTF8String;
 - (unsigned long)length;
 - (id)initWithData:(id)data encoding:(unsigned long)encoding;
@@ -32,6 +33,15 @@ __attribute__((objc_root_class))
 @interface NSNumber : NSObject
 + (id)numberWithDouble:(double)value;
 - (double)doubleValue;
+@end
+
+@interface NSDate : NSObject
++ (id)date;
++ (id)dateWithTimeIntervalSince1970:(double)interval;
+- (double)timeIntervalSince1970;
+@end
+
+@interface NSCalendar : NSObject
 @end
 
 @interface NSSet : NSObject
@@ -382,6 +392,56 @@ enum { UIAlertActionStyleDefault = 0, UIAlertActionStyleCancel = 1,
     forControlEvents:(unsigned long)events;
 @end
 
+@class UIPickerView;
+
+@protocol UIPickerViewDataSource
+- (long)numberOfComponentsInPickerView:(UIPickerView *)pickerView;
+- (long)pickerView:(UIPickerView *)pickerView
+    numberOfRowsInComponent:(long)component;
+@end
+
+@protocol UIPickerViewDelegate
+@optional
+- (id)pickerView:(UIPickerView *)pickerView titleForRow:(long)row
+    forComponent:(long)component;
+- (void)pickerView:(UIPickerView *)pickerView didSelectRow:(long)row
+    inComponent:(long)component;
+@end
+
+@interface UIPickerView : UIView
+@property(nonatomic, retain) id dataSource;
+@property(nonatomic, retain) id delegate;
+- (long)numberOfComponents;
+- (long)numberOfRowsInComponent:(long)component;
+- (long)selectedRowInComponent:(long)component;
+- (void)selectRow:(long)row inComponent:(long)component animated:(BOOL)animated;
+- (void)reloadAllComponents;
+- (void)reloadComponent:(long)component;
+@end
+
+enum {
+    UIDatePickerModeTime = 0,
+    UIDatePickerModeDate = 1,
+    UIDatePickerModeDateAndTime = 2,
+    UIDatePickerModeCountDownTimer = 3
+};
+
+enum {
+    UIDatePickerStyleAutomatic = 0,
+    UIDatePickerStyleWheels = 1,
+    UIDatePickerStyleCompact = 2,
+    UIDatePickerStyleInline = 3
+};
+
+@interface UIDatePicker : UIControl
+@property long datePickerMode;
+@property long preferredDatePickerStyle;
+@property(nonatomic, retain) NSDate *date;
+@property(nonatomic, retain) NSCalendar *calendar;
+@property double countDownDuration;
+- (void)setDate:(NSDate *)date animated:(BOOL)animated;
+@end
+
 @interface UIProgressView : UIView
 - (void)setProgress:(double)progress animated:(BOOL)animated;
 @end
@@ -518,6 +578,9 @@ enum {
     numberOfItemsInSection:(long)section;
 - (UICollectionViewCell *)collectionView:(UICollectionView *)collectionView
             cellForItemAtIndexPath:(NSIndexPath *)indexPath;
+@optional
+- (long)numberOfSectionsInCollectionView:
+    (UICollectionView *)collectionView;
 @end
 
 @protocol UICollectionViewDelegate

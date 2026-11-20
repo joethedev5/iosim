@@ -155,6 +155,18 @@ taps that point, and the delegate reports `[collection] selected 5`. A
 fourth-row item, so the tap frame math, the cell subview frames and the scroll
 offset all agree.
 
+### UIKit: multi-section collection views
+
+`demo/SectionCollectionApp.m` returns two sections (4 and 3 items) from
+`numberOfSectionsInCollectionView:` with 80 pt items and 10 pt spacing. The
+suite reads the first cell of section two at (60, 270) pt as the green palette
+entry, and the band between the sections at (60, 205) pt as the background,
+proving the second section starts after the first section's rows, bottom inset
+and the inter-section line space. Tapping (240, 140) reports
+`[sectioncollection] selected 0:2`; tapping (150, 270) reports `selected 1:1`,
+so hit-testing runs over the same section geometry and index paths carry the
+section.
+
 ### UIKit layout: navigation and stack views
 
 `demo/NavApp.m` builds a `UINavigationController` around two view controllers.
@@ -173,6 +185,28 @@ and observes `value=1` and `value=2` from `ValueChanged`, then taps the
 minus half at (178, 316) and the third event confirms the value dropped
 again. The two halves are real `UIControl`s, so hit-testing and tracking are
 the same path as other controls.
+
+### UIKit: picker wheels
+
+`demo/PickerApp.m` shows a two-component `UIPickerView` (five country rows and
+three color rows) with a delegate that prints selections. The screenshot at
+(30, 248) pt reads the translucent selection band over the app background, so
+the centered band is rendered where the wheel math puts it. Tapping the second
+wheel's third row at (290, 312) pt prints `selected 1:2`; a touch-down at
+(100, 300), a move to (100, 236) — two rows up — and touch-up prints
+`selected 0:2`, proving drag offsets are per component, clamped to the row
+count and snapped on release.
+
+### UIKit: date picker
+
+`demo/DatePickerApp.m` places a date-mode `UIDatePicker` and a time-mode one,
+both set to 2024-02-29 12:34:00 UTC, with `ValueChanged` targets that print the
+resulting epoch seconds. Tapping the day wheel's 28 at (201, 128) pt prints
+`date 1709123640`, one day back. Tapping March at (83, 192) pt prints
+`date 1711629240`: the month wheel moved, the year wheel stayed on 2024 and
+the day wheel kept 28 across the month boundary. Tapping minute 35 at
+(201, 382) pt in the time wheels prints `time 1709210100`, with the hour and
+AM/PM wheels unchanged.
 
 ### UIKit: search bar text input
 

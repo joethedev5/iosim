@@ -1604,6 +1604,184 @@ fi
 "$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
 sleep 0.4
 
+# ---------- 9m. multi-section UICollectionView flow layout ----------
+"$ROOT/tools/build_app.sh" "$ROOT/demo/SectionCollectionApp.m" \
+    "$T/SectionCollectionApp" >/dev/null
+mkdir -p "$T/SectionCollectionApp.app"
+cp "$T/SectionCollectionApp" "$T/SectionCollectionApp.app/SectionCollectionApp"
+python3 - "$T/SectionCollectionApp.app/Info.plist" <<'PY'
+import plistlib, sys
+with open(sys.argv[1], "wb") as f:
+    plistlib.dump({
+        "CFBundleIdentifier": "com.iosim.sectioncollection",
+        "CFBundleExecutable": "SectionCollectionApp",
+        "CFBundleName": "SectionCollection",
+        "CFBundlePackageType": "APPL",
+        "CFBundleVersion": "1",
+        "CFBundleShortVersionString": "1.0",
+    }, f)
+PY
+"$ROOT/tools/iosimctl" install "$UDID" "$T/SectionCollectionApp.app" >/dev/null
+sleep 0.5
+# Settle on page 2 so the twenty-fifth icon's slot is visible.
+"$ROOT/tools/iosimctl" ui "$UDID" swipe 50 400 350 400 0.3 >/dev/null
+sleep 0.3
+"$ROOT/tools/iosimctl" ui "$UDID" swipe 350 400 50 400 0.3 >/dev/null
+sleep 0.4
+# Twenty-fifth installed app: grid slot 31, second page row 3 column 3.
+"$ROOT/tools/iosimctl" ui "$UDID" tap 339.8333 422.8333 >/dev/null
+if wait_log "[sectioncollection] ready"; then
+    echo "ok   SpringBoard launches the sectioned collection fixture"
+else
+    echo "FAIL sectioned collection launch"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/sectioncollection.png" >/dev/null
+if out="$(python3 - "$ROOT/tools" "$T/sectioncollection.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+
+def px(point_x, point_y):
+    return pngpixel.px(rows, bpp, point_x * 3, point_y * 3)
+
+c = px(60, 270)
+r, g, b = (c >> 16) & 255, (c >> 8) & 255, c & 255
+if not (r < 130 and g > 150 and b < 170):
+    raise SystemExit("second section cell not drawn: %06x" % c)
+c = px(60, 205)
+r, g, b = (c >> 16) & 255, (c >> 8) & 255, c & 255
+if not (r < 45 and g < 50 and b < 70):
+    raise SystemExit("sections not separated by a gap: %06x" % c)
+print("ok   the flow layout stacks section two below section one")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL sectioned collection rendering"; echo "$out"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" tap 240 140 >/dev/null
+if wait_log "[sectioncollection] selected 0:2"; then
+    echo "ok   tapping a first-section cell reports section 0 and its row"
+else
+    echo "FAIL sectioned collection first selection"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" tap 150 270 >/dev/null
+if wait_log "[sectioncollection] selected 1:1"; then
+    echo "ok   tapping a second-section cell reports that section and row"
+else
+    echo "FAIL sectioned collection second selection"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
+sleep 0.4
+
+# ---------- 9n. UIPickerView wheels, taps and drags ----------
+"$ROOT/tools/build_app.sh" "$ROOT/demo/PickerApp.m" "$T/PickerApp" >/dev/null
+mkdir -p "$T/PickerApp.app"
+cp "$T/PickerApp" "$T/PickerApp.app/PickerApp"
+python3 - "$T/PickerApp.app/Info.plist" <<'PY'
+import plistlib, sys
+with open(sys.argv[1], "wb") as f:
+    plistlib.dump({
+        "CFBundleIdentifier": "com.iosim.picker",
+        "CFBundleExecutable": "PickerApp",
+        "CFBundleName": "Picker",
+        "CFBundlePackageType": "APPL",
+        "CFBundleVersion": "1",
+        "CFBundleShortVersionString": "1.0",
+    }, f)
+PY
+"$ROOT/tools/iosimctl" install "$UDID" "$T/PickerApp.app" >/dev/null
+sleep 0.5
+# Twenty-sixth installed app: first slot of the third home page.
+"$ROOT/tools/iosimctl" ui "$UDID" swipe 350 400 50 400 0.3 >/dev/null
+sleep 0.4
+"$ROOT/tools/iosimctl" ui "$UDID" tap 62.1667 121.8333 >/dev/null
+if wait_log "[picker] ready"; then
+    echo "ok   SpringBoard launches the picker fixture"
+else
+    echo "FAIL picker fixture launch"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/picker.png" >/dev/null
+if out="$(python3 - "$ROOT/tools" "$T/picker.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+c = pngpixel.px(rows, bpp, 30 * 3, 248 * 3)
+r, g, b = (c >> 16) & 255, (c >> 8) & 255, c & 255
+if not (28 <= r <= 55 and 32 <= g <= 60 and 46 <= b <= 80):
+    raise SystemExit("picker selection band not drawn: %06x" % c)
+print("ok   the picker draws its centered selection band over two wheels")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL picker rendering"; echo "$out"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" tap 290 312 >/dev/null
+if wait_log "[picker] selected 1:2"; then
+    echo "ok   tapping a wheel row selects it in that component"
+else
+    echo "FAIL picker tap selection"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" down 100 300 >/dev/null
+"$ROOT/tools/iosimctl" ui "$UDID" move 100 236 >/dev/null
+"$ROOT/tools/iosimctl" ui "$UDID" up 100 236 >/dev/null
+if wait_log "[picker] selected 0:2"; then
+    echo "ok   dragging the first wheel two rows snaps to the new selection"
+else
+    echo "FAIL picker drag selection"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
+sleep 0.4
+
+# ---------- 9o. UIDatePicker date and time wheels ----------
+"$ROOT/tools/build_app.sh" "$ROOT/demo/DatePickerApp.m" "$T/DatePickerApp" >/dev/null
+mkdir -p "$T/DatePickerApp.app"
+cp "$T/DatePickerApp" "$T/DatePickerApp.app/DatePickerApp"
+python3 - "$T/DatePickerApp.app/Info.plist" <<'PY'
+import plistlib, sys
+with open(sys.argv[1], "wb") as f:
+    plistlib.dump({
+        "CFBundleIdentifier": "com.iosim.datepicker",
+        "CFBundleExecutable": "DatePickerApp",
+        "CFBundleName": "DatePicker",
+        "CFBundlePackageType": "APPL",
+        "CFBundleVersion": "1",
+        "CFBundleShortVersionString": "1.0",
+    }, f)
+PY
+"$ROOT/tools/iosimctl" install "$UDID" "$T/DatePickerApp.app" >/dev/null
+sleep 0.5
+# Twenty-seventh installed app: third page row 0 column 1.
+"$ROOT/tools/iosimctl" ui "$UDID" tap 154.7222 121.8333 >/dev/null
+if wait_log "[datepicker] ready"; then
+    echo "ok   SpringBoard launches the date picker fixture"
+else
+    echo "FAIL date picker fixture launch"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" tap 201 128 >/dev/null
+if wait_log "[datepicker] date 1709123640"; then
+    echo "ok   tapping the day wheel moves the date one day back"
+else
+    echo "FAIL date picker day selection"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" tap 83 192 >/dev/null
+if wait_log "[datepicker] date 1711629240"; then
+    echo "ok   selecting March updates month, day and year wheels together"
+else
+    echo "FAIL date picker month selection"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" tap 201 382 >/dev/null
+if wait_log "[datepicker] time 1709210100"; then
+    echo "ok   the time wheels edit minutes and keep the AM/PM selection"
+else
+    echo "FAIL date picker time selection"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
+sleep 0.4
+
 # ---------- 10. cross-process Mach services ----------
 # launchd owns the bootstrap namespace; two independent guest processes find
 # each other through it and exchange a Mach message over the service port.
