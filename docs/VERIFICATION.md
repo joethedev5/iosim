@@ -460,6 +460,24 @@ and the real iOS capture (Controls: 0.22/255 against the direct iosim capture,
 repainted the same measured home screen. Installing while booted sends the
 `apps` event, and the icon appears without a reboot.
 
+Backgrounding suspends rather than terminates. The app stops itself after
+`sceneDidEnterBackground:`; SpringBoard's `waitpid(WUNTRACED)` records the
+stopped PID, and tapping the same icon sends SIGCONT so the process resumes
+in place:
+
+```
+[UIKit-lite] backgrounded by the system; suspending
+[SpringBoard] resuming TouchApp (pid 157672)
+[UIKit-lite] resumed from suspension
+```
+
+The process state is `T` (stopped) while on the home screen, and its
+`viewDidLoad` ran exactly once across the suspend/resume cycle — the fixture's
+`[touch] app ready` line is not printed again. The test asserts the stop
+message, the resume message, the foreground lifecycle and the single
+`viewDidLoad`. `shutdown` continues stopped children before SIGTERM, so no
+app process survives the device.
+
 ## Limitations
 
 The framework surface is still a subset. Auto Layout supports equality and
@@ -471,8 +489,9 @@ Text input is a single-line `UITextField` with a QWERTY keyboard; UITextView,
 multitap gestures and selection handles are not implemented. Touch input is
 single-finger: there is no multitouch, touch prediction or pressure. Cross-process Mach ports and
 XPC remain in-process, the SpringBoard grid is a single 16-slot page with no
-paging or app switcher, a backgrounded app is terminated rather than suspended,
-and stock system apps have no executables in this runtime. CoreText shaping is limited to the glyphs in SFUI;
+paging or app switcher UI, and stock system apps have no executables in this
+runtime. Backgrounded apps are suspended in place (SIGSTOP) and resumed from
+their icon, with no memory-pressure termination policy. CoreText shaping is limited to the glyphs in SFUI;
 right-to-left and complex scripts are not shaped. `UIView.transform` applies a
 full 2D affine transform (translation, scale and rotation) through an offscreen
 composite; `CATransform3D` is not supported. Core Animation keeps one explicit

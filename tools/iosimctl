@@ -283,10 +283,17 @@ def notify_ui(udid, line):
     fifo = event_fifo_path(udid)
     if not fifo.exists():
         return False
-    try:
-        fd = os.open(str(fifo), os.O_WRONLY | os.O_NONBLOCK)
-    except OSError:
-        return False
+    # A suspended app releases the stream and the resumed or next foreground
+    # process opens it just after SIGCONT; retry briefly instead of failing.
+    deadline = time.time() + 1.0
+    while True:
+        try:
+            fd = os.open(str(fifo), os.O_WRONLY | os.O_NONBLOCK)
+            break
+        except OSError:
+            if time.time() >= deadline:
+                return False
+            time.sleep(0.02)
     try:
         os.write(fd, (line + "\n").encode())
     finally:

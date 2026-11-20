@@ -321,6 +321,34 @@ check "[switch] 1" "$out" "switch toggles on touch up inside"
 check "[button] pressed" "$out" \
     "button target/action fires from the touch pipeline"
 
+# ---------- 7b. backgrounded apps suspend and resume in place ----------
+"$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
+if wait_log "[UIKit-lite] backgrounded by the system; suspending"; then
+    echo "ok   home suspends the foreground app"
+else
+    echo "FAIL app suspension"; fails=$((fails+1))
+fi
+sleep 0.5
+# Tapping the same icon continues the same process (grid slot 9).
+"$ROOT/tools/iosimctl" ui "$UDID" tap 154.7222 322.5 >/dev/null
+if wait_log "resuming TouchApp"; then
+    echo "ok   SpringBoard resumes the suspended app process"
+else
+    echo "FAIL app resume"; fails=$((fails+1))
+fi
+if wait_log "[UIKit-lite] resumed from suspension"; then
+    echo "ok   the app continues from sceneWillEnterForeground"
+else
+    echo "FAIL resume lifecycle"; fails=$((fails+1))
+fi
+ready_count="$(grep -Fc "[touch] app ready" "$SBLOG" 2>/dev/null || true)"
+if [ "$ready_count" -eq 1 ]; then
+    echo "ok   no relaunch: viewDidLoad ran once across suspend/resume"
+else
+    echo "FAIL state preservation (app ready count=$ready_count)"
+    fails=$((fails+1))
+fi
+
 # ---------- 8. display link, animation timeline and presentation values ----------
 "$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
 sleep 0.8

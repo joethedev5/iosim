@@ -325,6 +325,14 @@ exist: `list`, `create`, `delete`, `boot`, `bootstatus`, `shutdown`, `erase`,
   the `home` background request. `UIApplicationMain` opens the stream before
   its first frame so events sent during scene construction are queued rather
   than lost.
+- `home` is a real suspension: the app runs `sceneWillResignActive:` and
+  `sceneDidEnterBackground:`, closes the event stream and stops itself with
+  SIGSTOP. SpringBoard's `waitpid(WUNTRACED)` sees the stop, records the PID
+  on the app's icon and repaints the home screen. Tapping that icon closes
+  SpringBoard's reader, sends SIGCONT and waits again; the same process
+  reopens the stream, runs `sceneWillEnterForeground:`/`sceneDidBecomeActive:`
+  and continues from its in-memory state. `shutdown` sends SIGCONT before
+  SIGTERM so stopped children terminate with the process group.
 
 ### 2.9 Services: libdispatch, Mach and XPC
 
@@ -524,7 +532,9 @@ Python for iteration speed.
 - The dyld shared cache is not parsed; each dylib is loaded from disk.
 - Class method dispatch covers the common path; message forwarding, associated
   objects, ARC entry points and exceptions are pending.
-- The SpringBoard grid is a single page with 16 slots. There is no paging, app
-  switcher or suspension snapshots; a backgrounded app is terminated. Stock
-  system apps are display icons without executables, and a directly launched
-  app alongside a running SpringBoard is not coordinated through launchd.
+- The SpringBoard grid is a single page with 16 slots. There is no paging or
+  app switcher UI, and no snapshot cache; a backgrounded app is suspended in
+  place (the process stops and the same process resumes from its icon), but
+  there is no memory-pressure termination policy. Stock system apps are
+  display icons without executables, and a directly launched app alongside a
+  running SpringBoard is not coordinated through launchd.

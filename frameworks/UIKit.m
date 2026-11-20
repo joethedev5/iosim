@@ -6204,6 +6204,8 @@ extern long read(int fd, void *buf, unsigned long count);
 extern int close(int fd);
 extern int iosim_spawn_app(const char *exe, const char *bundle, const char *home);
 extern int iosim_spawn_wait(int pid);
+extern void iosim_suspend_self(void);
+extern int iosim_resume_app(int pid);
 extern void iosim_event_close(void);
 
 #define SHELL_MAX_APPS 40
@@ -6215,6 +6217,7 @@ struct shell_app {
     char home[384];
     int stock;   /* artwork id, -1 for the generic placeholder */
     int dock;
+    int pid;     /* suspended process, or 0 */
 };
 
 static struct shell_app g_shell_apps[SHELL_MAX_APPS];
@@ -6307,6 +6310,7 @@ static void shell_add_app(const char *name, const char *exe, const char *bundle,
     shell_copy(a->home, (int)sizeof(a->home), home);
     a->stock = stock;
     a->dock = dock;
+    a->pid = 0;
 }
 
 static void shell_load_apps(void)
@@ -6904,6 +6908,26 @@ static void shell_launch(int index, int fbWidth, int fbHeight, double scale,
                          const char *path)
 {
     struct shell_app *a = &g_shell_apps[index];
+    if (a->pid > 0)
+    {
+        /* The app stopped itself from the home event. Hand the event
+         * stream back and continue the same process where it left off. */
+        printf("[SpringBoard] resuming %s (pid %d)\n", a->name, a->pid);
+        fflush(0);
+        iosim_event_close();
+        if (iosim_resume_app(a->pid) == 0)
+        {
+            int state = iosim_spawn_wait(a->pid);
+            if (state == 0)
+                a->pid = 0;
+            shell_draw(fbWidth, fbHeight, scale);
+            if (path && *path)
+                iosim_fb_present(path);
+            return;
+        }
+        printf("[SpringBoard] resume failed for %s\n", a->name);
+        a->pid = 0;
+    }
     if (!a->exe[0])
     {
         printf("[SpringBoard] %s is a system app with no executable in this "
@@ -6916,7 +6940,10 @@ static void shell_launch(int index, int fbWidth, int fbHeight, double scale,
     iosim_event_close();
     int pid = iosim_spawn_app(a->exe, a->bundle, a->home);
     if (pid > 0)
-        iosim_spawn_wait(pid);
+    {
+        int state = iosim_spawn_wait(pid);
+        a->pid = state == 1 ? pid : 0;
+    }
     else
         printf("[SpringBoard] launch failed for %s\n", a->name);
     fflush(0);
@@ -7397,9 +7424,9 @@ int UIApplicationMain(int argc, char **argv, id principal, id delegateName)
             }
             else if (r == 1 && type == 7)
             {
-                /* The system asked the app to background: run the scene
-                 * lifecycle and terminate, as a suspended app would be
-                 * reclaimed by the runtime. */
+                /* The system asked the app to background. Run the scene
+                 * lifecycle, release the event stream and suspend until
+                 * SpringBoard continues the process on the next launch. */
                 SEL willResign = @selector(sceneWillResignActive:);
                 SEL didEnter = @selector(sceneDidEnterBackground:);
                 if (sceneDelegate &&
@@ -7410,8 +7437,24 @@ int UIApplicationMain(int argc, char **argv, id principal, id delegateName)
                     [sceneDelegate respondsToSelector:didEnter])
                     ((void (*)(id, SEL, id))objc_msgSend)(
                         sceneDelegate, didEnter, scene);
-                printf("[UIKit-lite] backgrounded by the system\n");
-                break;
+                printf("[UIKit-lite] backgrounded by the system; suspending\n");
+                fflush(0);
+                iosim_event_close();
+                iosim_suspend_self();
+                iosim_event_open();
+                SEL willEnter = @selector(sceneWillEnterForeground:);
+                SEL didBecome = @selector(sceneDidBecomeActive:);
+                if (sceneDelegate &&
+                    [sceneDelegate respondsToSelector:willEnter])
+                    ((void (*)(id, SEL, id))objc_msgSend)(
+                        sceneDelegate, willEnter, scene);
+                if (sceneDelegate &&
+                    [sceneDelegate respondsToSelector:didBecome])
+                    ((void (*)(id, SEL, id))objc_msgSend)(
+                        sceneDelegate, didBecome, scene);
+                printf("[UIKit-lite] resumed from suspension\n");
+                fflush(0);
+                redraw = 1;
             }
             if (iosim_foundation_tick())
                 redraw = 1;

@@ -40,6 +40,8 @@ def stop_springboard():
     global springboard_pid
     if springboard_pid:
         try:
+            # Suspended apps ignore SIGTERM until continued.
+            os.killpg(springboard_pid, signal.SIGCONT)
             os.killpg(springboard_pid, signal.SIGTERM)
         except ProcessLookupError:
             pass

@@ -194,17 +194,34 @@ int iosim_spawn_app(const char *exe, const char *bundle, const char *home)
     return (int)pid;
 }
 
+/* Returns 1 when the app stopped itself (backgrounded/suspended), 0 when it
+ * exited, -1 on error. */
 int iosim_spawn_wait(int pid)
 {
     int status = 0;
     if (pid <= 0)
         return -1;
-    while (waitpid(pid, &status, 0) < 0)
+    pid_t r;
+    while ((r = waitpid(pid, &status, WUNTRACED)) < 0)
     {
         if (errno != EINTR)
             return -1;
     }
-    return status;
+    if (WIFSTOPPED(status))
+        return 1;
+    return 0;
+}
+
+void iosim_suspend_self(void)
+{
+    raise(SIGSTOP);
+}
+
+int iosim_resume_app(int pid)
+{
+    if (pid <= 0)
+        return -1;
+    return kill(pid, SIGCONT);
 }
 
 void  *objc_opt_class(void *obj);
@@ -598,6 +615,8 @@ static const struct iosim_shim shims[] = {
     SHIM_DIRECT(iosim_fs_list),
     SHIM_DIRECT(iosim_spawn_app),
     SHIM_DIRECT(iosim_spawn_wait),
+    SHIM_DIRECT(iosim_suspend_self),
+    SHIM_DIRECT(iosim_resume_app),
     SHIM_DIRECT(iosim_dispatch_drain_main),
     SHIM_DIRECT(_Block_copy),
     SHIM_DIRECT(_Block_release),
