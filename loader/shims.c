@@ -5,6 +5,7 @@
 #include "framebuffer.h"
 #include "events.h"
 #include "services.h"
+#include "image.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -352,6 +353,15 @@ static const struct iosim_shim shims[] = {
     SHIM_DIRECT(iosim_fb_fill_rect),
     SHIM_DIRECT(iosim_fb_fill_round_rect),
     SHIM_DIRECT(iosim_fb_fill_circle),
+    SHIM_DIRECT(iosim_fb_draw_line),
+    SHIM_DIRECT(iosim_fb_fill_ellipse),
+    SHIM_DIRECT(iosim_fb_fill_polygon),
+    SHIM_DIRECT(iosim_fb_fill_linear_gradient),
+    SHIM_DIRECT(iosim_fb_blit_rgba),
+    SHIM_DIRECT(iosim_fb_blit_rgba_scaled),
+    SHIM_DIRECT(iosim_fb_width),
+    SHIM_DIRECT(iosim_fb_height),
+    SHIM_DIRECT(iosim_png_load),
     SHIM_DIRECT(iosim_fb_set_opacity),
     SHIM_DIRECT(__sincos_stret),
     SHIM_DIRECT(iosim_fb_text),
@@ -361,6 +371,7 @@ static const struct iosim_shim shims[] = {
     SHIM_DIRECT(iosim_fb_font_metrics),
     SHIM_DIRECT(iosim_fb_present),
     SHIM_DIRECT(iosim_event_next),
+    SHIM_DIRECT(iosim_dispatch_drain_main),
     SHIM_DIRECT(_Block_copy),
     SHIM_DIRECT(_Block_release),
     SHIM_DIRECT(_Block_object_assign),

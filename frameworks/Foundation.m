@@ -507,6 +507,13 @@ static char *format_va(const char *fmt, va_list ap)
         [a addObject:[array objectAtIndex:i]];
     return a;
 }
++ (id)arrayWithObjects:(const id *)objects count:(unsigned long)count
+{
+    NSMutableArray *a = [NSMutableArray array];
+    for (unsigned long i = 0; i < count; i++)
+        [a addObject:objects[i]];
+    return a;
+}
 + (id)arrayWithObjects:(id)first, ...
 {
     NSMutableArray *a = [NSMutableArray array];
@@ -620,6 +627,15 @@ static char *format_va(const char *fmt, va_list ap)
 
 @implementation NSDictionary
 + (id)dictionary { return [[[self alloc] init] autorelease]; }
++ (id)dictionaryWithObjects:(const id *)objects
+                    forKeys:(const id *)keys
+                      count:(unsigned long)count
+{
+    NSMutableDictionary *d = [NSMutableDictionary dictionary];
+    for (unsigned long i = 0; i < count; i++)
+        [d setObject:objects[i] forKey:keys[i]];
+    return d;
+}
 + (id)dictionaryWithObjects:(id)firstObject forKeys:(id)firstKey, ...
 {
     NSMutableDictionary *d = [NSMutableDictionary dictionary];

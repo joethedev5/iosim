@@ -80,8 +80,7 @@ int main(void)
     printf("bootstrap: register=%d lookup=%d port=%#x same=%d\n",
            reg, lk, looked, looked == port);
 
-    xpc_connection_t listener =
-        xpc_connection_create_mach_service("com.iosim.echo", NULL, 0);
+    xpc_connection_t listener = xpc_connection_create("com.iosim.echo", NULL);
     xpc_connection_set_event_handler(listener, ^(xpc_object_t event) {
         (void)event;
         g_xpc_events++;

@@ -799,3 +799,297 @@ void iosim_fb_font_metrics(int style, double size_pt, double scale,
     if (descent) *descent = d;
     if (line_height) *line_height = h;
 }
+
+/* ---------------------------------------------------- extended drawing */
+
+static void fb_blend_pixel(int x, int y, uint32_t color, double coverage)
+{
+    if (x < 0 || y < 0 || x >= (int)fb_width || y >= (int)fb_height)
+        return;
+    coverage *= fb_opacity;
+    if (coverage <= 0)
+        return;
+    uint32_t *row = fb_pixels + (size_t)y * fb_width;
+    if (coverage >= 0.999)
+    {
+        row[x] = color;
+        return;
+    }
+    unsigned a = (unsigned)(coverage * 255.0 + 0.5);
+    uint32_t dst = row[x];
+    unsigned r = (((color >> 16) & 0xFF) * a + ((dst >> 16) & 0xFF) * (255 - a) + 127) / 255;
+    unsigned g = (((color >> 8) & 0xFF) * a + ((dst >> 8) & 0xFF) * (255 - a) + 127) / 255;
+    unsigned b = ((color & 0xFF) * a + (dst & 0xFF) * (255 - a) + 127) / 255;
+    row[x] = (r << 16) | (g << 8) | b;
+}
+
+void iosim_fb_draw_line(int x0, int y0, int x1, int y1, int thickness,
+                        uint32_t color)
+{
+    if (thickness < 1)
+        thickness = 1;
+    int dx = x1 - x0, dy = y1 - y0;
+    int steps = (dx < 0 ? -dx : dx) > (dy < 0 ? -dy : dy)
+                    ? (dx < 0 ? -dx : dx) : (dy < 0 ? -dy : dy);
+    if (steps == 0)
+    {
+        if (thickness <= 1)
+            fb_blend_pixel(x0, y0, color, 1.0);
+        else
+            iosim_fb_fill_circle(x0, y0, thickness / 2, color);
+        return;
+    }
+    double r = thickness / 2.0;
+    for (int i = 0; i <= steps; i++)
+    {
+        double t = (double)i / steps;
+        double px = x0 + dx * t, py = y0 + dy * t;
+        int cx = (int)(px + 0.5), cy = (int)(py + 0.5);
+        if (thickness <= 1)
+            fb_blend_pixel(cx, cy, color, 1.0);
+        else
+            iosim_fb_fill_circle(cx, cy, (int)(r + 0.5), color);
+    }
+}
+
+void iosim_fb_fill_ellipse(int cx, int cy, int rx, int ry, uint32_t color)
+{
+    if (rx <= 0 || ry <= 0)
+        return;
+    int x0 = cx - rx - 1, x1 = cx + rx + 2;
+    int y0 = cy - ry - 1, y1 = cy + ry + 2;
+    if (x0 < 0) x0 = 0;
+    if (y0 < 0) y0 = 0;
+    if (x1 > (int)fb_width) x1 = (int)fb_width;
+    if (y1 > (int)fb_height) y1 = (int)fb_height;
+    int fg_r = (color >> 16) & 0xFF, fg_g = (color >> 8) & 0xFF,
+        fg_b = color & 0xFF;
+    double scale = rx < ry ? rx : ry;
+    for (int y = y0; y < y1; y++)
+    {
+        double dy = (y + 0.5 - cy) / ry;
+        for (int x = x0; x < x1; x++)
+        {
+            double dx = (x + 0.5 - cx) / rx;
+            double d = (__builtin_sqrt(dx * dx + dy * dy) - 1.0) * scale;
+            double coverage = (0.5 - d) * fb_opacity;
+            if (coverage <= 0)
+                continue;
+            uint32_t *row = fb_pixels + (size_t)y * fb_width;
+            if (coverage >= 1)
+            {
+                row[x] = color;
+                continue;
+            }
+            unsigned a = (unsigned)(coverage * 255.0 + 0.5);
+            uint32_t dst = row[x];
+            unsigned r = (fg_r * a + ((dst >> 16) & 0xFF) * (255 - a) + 127) / 255;
+            unsigned g = (fg_g * a + ((dst >> 8) & 0xFF) * (255 - a) + 127) / 255;
+            unsigned b = (fg_b * a + (dst & 0xFF) * (255 - a) + 127) / 255;
+            row[x] = (r << 16) | (g << 8) | b;
+        }
+    }
+}
+
+void iosim_fb_fill_polygon(const double *xs, const double *ys, int count,
+                           uint32_t color)
+{
+    if (!fb_pixels || count < 3 || !xs || !ys)
+        return;
+    double minY = ys[0], maxY = ys[0];
+    for (int i = 1; i < count; i++)
+    {
+        if (ys[i] < minY) minY = ys[i];
+        if (ys[i] > maxY) maxY = ys[i];
+    }
+    int y0 = (int)minY - 1, y1 = (int)maxY + 2;
+    if (y0 < 0) y0 = 0;
+    if (y1 > (int)fb_height) y1 = (int)fb_height;
+    double *cov = malloc(sizeof(double) * fb_width);
+    double *cross = malloc(sizeof(double) * count);
+    if (!cov || !cross)
+    {
+        free(cov); free(cross);
+        return;
+    }
+    const int SUB = 4;
+    for (int y = y0; y < y1; y++)
+    {
+        memset(cov, 0, sizeof(double) * fb_width);
+        for (int s = 0; s < SUB; s++)
+        {
+            double sy = y + (s + 0.5) / SUB;
+            int n = 0;
+            for (int i = 0, j = count - 1; i < count; j = i++)
+            {
+                if ((ys[i] > sy) != (ys[j] > sy))
+                {
+                    double t = (sy - ys[i]) / (ys[j] - ys[i]);
+                    cross[n++] = xs[i] + t * (xs[j] - xs[i]);
+                }
+            }
+            for (int a = 1; a < n; a++)
+            {
+                double v = cross[a];
+                int b = a - 1;
+                while (b >= 0 && cross[b] > v)
+                {
+                    cross[b + 1] = cross[b];
+                    b--;
+                }
+                cross[b + 1] = v;
+            }
+            for (int a = 0; a + 1 < n; a += 2)
+            {
+                double xa = cross[a], xb = cross[a + 1];
+                if (xb <= 0 || xa >= (double)fb_width)
+                    continue;
+                if (xa < 0) xa = 0;
+                if (xb > (double)fb_width) xb = (double)fb_width;
+                int ia = (int)xa, ib = (int)(xb + 0.999);
+                for (int x = ia; x < ib && x < (int)fb_width; x++)
+                {
+                    double left = x > xa ? x : xa;
+                    double right = x + 1 < xb ? x + 1 : xb;
+                    if (right > left)
+                        cov[x] += (right - left) / SUB;
+                }
+            }
+        }
+        for (int x = 0; x < (int)fb_width; x++)
+            if (cov[x] > 0)
+                fb_blend_pixel(x, y, color, cov[x] > 1 ? 1 : cov[x]);
+    }
+    free(cov);
+    free(cross);
+}
+
+void iosim_fb_fill_linear_gradient(int x, int y, int w, int h,
+                                   uint32_t start_color, uint32_t end_color,
+                                   double sx, double sy, double ex, double ey)
+{
+    if (!fb_pixels || w <= 0 || h <= 0)
+        return;
+    double ax = x + sx * w, ay = y + sy * h;
+    double bx = x + ex * w, by = y + ey * h;
+    double dx = bx - ax, dy = by - ay;
+    double len2 = dx * dx + dy * dy;
+    if (len2 < 1e-9)
+    {
+        iosim_fb_fill_rect(x, y, w, h, start_color);
+        return;
+    }
+    int x0 = x < 0 ? 0 : x, y0 = y < 0 ? 0 : y;
+    int x1 = x + w > (int)fb_width ? (int)fb_width : x + w;
+    int y1 = y + h > (int)fb_height ? (int)fb_height : y + h;
+    int sr = (start_color >> 16) & 0xFF, sg = (start_color >> 8) & 0xFF,
+        sb = start_color & 0xFF;
+    int er = (end_color >> 16) & 0xFF, eg = (end_color >> 8) & 0xFF,
+        eb = end_color & 0xFF;
+    for (int yy = y0; yy < y1; yy++)
+    {
+        uint32_t *row = fb_pixels + (size_t)yy * fb_width;
+        for (int xx = x0; xx < x1; xx++)
+        {
+            double t = ((xx + 0.5 - ax) * dx + (yy + 0.5 - ay) * dy) / len2;
+            if (t < 0) t = 0;
+            if (t > 1) t = 1;
+            unsigned r = (unsigned)(sr + (er - sr) * t + 0.5);
+            unsigned g = (unsigned)(sg + (eg - sg) * t + 0.5);
+            unsigned b = (unsigned)(sb + (eb - sb) * t + 0.5);
+            fb_blend_pixel(xx, yy, (r << 16) | (g << 8) | b, 1.0);
+        }
+    }
+}
+
+void iosim_fb_blit_rgba(int x, int y, int w, int h, const uint8_t *rgba,
+                        int stride)
+{
+    if (!fb_pixels || !rgba || w <= 0 || h <= 0)
+        return;
+    if (stride <= 0)
+        stride = w * 4;
+    for (int yy = 0; yy < h; yy++)
+    {
+        int dy = y + yy;
+        if (dy < 0 || dy >= (int)fb_height)
+            continue;
+        const uint8_t *src = rgba + (size_t)yy * stride;
+        uint32_t *row = fb_pixels + (size_t)dy * fb_width;
+        for (int xx = 0; xx < w; xx++)
+        {
+            int dx = x + xx;
+            if (dx < 0 || dx >= (int)fb_width)
+                continue;
+            unsigned sa = src[xx * 4 + 3];
+            if (!sa)
+                continue;
+            double a = (sa / 255.0) * fb_opacity;
+            uint32_t fg = ((unsigned)src[xx * 4] << 16) |
+                          ((unsigned)src[xx * 4 + 1] << 8) |
+                          src[xx * 4 + 2];
+            uint32_t dst = row[dx];
+            unsigned ia = (unsigned)(a * 255.0 + 0.5);
+            unsigned r = (((fg >> 16) & 0xFF) * ia + ((dst >> 16) & 0xFF) * (255 - ia) + 127) / 255;
+            unsigned g = (((fg >> 8) & 0xFF) * ia + ((dst >> 8) & 0xFF) * (255 - ia) + 127) / 255;
+            unsigned b = ((fg & 0xFF) * ia + (dst & 0xFF) * (255 - ia) + 127) / 255;
+            row[dx] = (r << 16) | (g << 8) | b;
+        }
+    }
+}
+
+int iosim_fb_width(void) { return (int)fb_width; }
+int iosim_fb_height(void) { return (int)fb_height; }
+
+void iosim_fb_blit_rgba_scaled(int x, int y, int w, int h,
+                               const uint8_t *rgba, int sw, int sh,
+                               int stride)
+{
+    if (!fb_pixels || !rgba || w <= 0 || h <= 0 || sw <= 0 || sh <= 0)
+        return;
+    if (stride <= 0)
+        stride = sw * 4;
+    for (int yy = 0; yy < h; yy++)
+    {
+        int dy = y + yy;
+        if (dy < 0 || dy >= (int)fb_height)
+            continue;
+        double fy = ((yy + 0.5) * sh / h) - 0.5;
+        int y0 = (int)__builtin_floor(fy);
+        double ty = fy - y0;
+        int y0c = y0 < 0 ? 0 : (y0 >= sh ? sh - 1 : y0);
+        int y1c = y0 + 1 < 0 ? 0 : (y0 + 1 >= sh ? sh - 1 : y0 + 1);
+        uint32_t *row = fb_pixels + (size_t)dy * fb_width;
+        for (int xx = 0; xx < w; xx++)
+        {
+            int dx = x + xx;
+            if (dx < 0 || dx >= (int)fb_width)
+                continue;
+            double fx = ((xx + 0.5) * sw / w) - 0.5;
+            int x0 = (int)__builtin_floor(fx);
+            double tx = fx - x0;
+            int x0c = x0 < 0 ? 0 : (x0 >= sw ? sw - 1 : x0);
+            int x1c = x0 + 1 < 0 ? 0 : (x0 + 1 >= sw ? sw - 1 : x0 + 1);
+            const uint8_t *p00 = rgba + (size_t)y0c * stride + x0c * 4;
+            const uint8_t *p10 = rgba + (size_t)y0c * stride + x1c * 4;
+            const uint8_t *p01 = rgba + (size_t)y1c * stride + x0c * 4;
+            const uint8_t *p11 = rgba + (size_t)y1c * stride + x1c * 4;
+            double c[4];
+            for (int k = 0; k < 4; k++)
+            {
+                double top = p00[k] * (1 - tx) + p10[k] * tx;
+                double bot = p01[k] * (1 - tx) + p11[k] * tx;
+                c[k] = top * (1 - ty) + bot * ty;
+            }
+            double a = (c[3] / 255.0) * fb_opacity;
+            if (a <= 0)
+                continue;
+            uint32_t dst = row[dx];
+            unsigned ia = (unsigned)(a * 255.0 + 0.5);
+            unsigned r = ((unsigned)(c[0] + 0.5) * ia + ((dst >> 16) & 0xFF) * (255 - ia) + 127) / 255;
+            unsigned g = ((unsigned)(c[1] + 0.5) * ia + ((dst >> 8) & 0xFF) * (255 - ia) + 127) / 255;
+            unsigned b = ((unsigned)(c[2] + 0.5) * ia + (dst & 0xFF) * (255 - ia) + 127) / 255;
+            row[dx] = (r << 16) | (g << 8) | b;
+        }
+    }
+}

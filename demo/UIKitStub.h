@@ -139,3 +139,32 @@ extern int UIApplicationMain(int argc, char **argv, id principal,
                              id delegateName);
 
 #endif
+
+@interface UIBezierPath : NSObject
++ (instancetype)bezierPath;
+- (void)moveToPoint:(CGPoint)point;
+- (void)addLineToPoint:(CGPoint)point;
+@end
+
+@interface CAShapeLayer : CALayer
+@property(nonatomic, retain) UIBezierPath *path;
+@property(nonatomic, retain) UIColor *fillColor;
+@property(nonatomic, retain) UIColor *strokeColor;
+@property double lineWidth;
+@end
+
+@interface CAGradientLayer : CALayer
+@property(nonatomic, retain) id colors;
+@property CGPoint startPoint;
+@property CGPoint endPoint;
+@end
+
+@interface UIImage : NSObject
++ (UIImage *)imageNamed:(NSString *)name;
+@end
+
+@interface UIImageView : UIView
+- (instancetype)initWithImage:(UIImage *)image;
+@property(nonatomic, retain) UIImage *image;
+@property int contentMode;
+@end

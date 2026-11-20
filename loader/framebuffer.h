@@ -16,6 +16,21 @@ void iosim_fb_set_opacity(double opacity);
 void iosim_fb_text(int x, int y, int scale, uint32_t color, const char *text);
 int  iosim_fb_text_width(const char *text, int scale);
 int  iosim_fb_present(const char *path);
+void iosim_fb_draw_line(int x0, int y0, int x1, int y1, int thickness,
+                        uint32_t color);
+void iosim_fb_fill_ellipse(int cx, int cy, int rx, int ry, uint32_t color);
+void iosim_fb_fill_polygon(const double *xs, const double *ys, int count,
+                           uint32_t color);
+void iosim_fb_fill_linear_gradient(int x, int y, int w, int h,
+                                   uint32_t start_color, uint32_t end_color,
+                                   double sx, double sy, double ex, double ey);
+void iosim_fb_blit_rgba(int x, int y, int w, int h, const uint8_t *rgba,
+                        int stride);
+void iosim_fb_blit_rgba_scaled(int x, int y, int w, int h,
+                               const uint8_t *rgba, int sw, int sh,
+                               int stride);
+int  iosim_fb_width(void);
+int  iosim_fb_height(void);
 
 /* System-font text (FreeType). Sizes are in UIKit points; scale converts to
  * device pixels. style: 0 regular, 1 bold, 2 semibold. */

@@ -87,6 +87,7 @@ __attribute__((objc_root_class))
 }
 + (id)array;
 + (id)arrayWithObjects:(id)first, ...;
++ (id)arrayWithObjects:(const id *)objects count:(unsigned long)count;
 + (id)arrayWithObject:(id)object;
 + (id)arrayWithArray:(id)array;
 - (id)initWithObjects:(id)first, ...;
@@ -115,6 +116,9 @@ __attribute__((objc_root_class))
 }
 + (id)dictionary;
 + (id)dictionaryWithObjects:(id)firstObject forKeys:(id)firstKey, ...;
++ (id)dictionaryWithObjects:(const id *)objects
+                    forKeys:(const id *)keys
+                      count:(unsigned long)count;
 - (unsigned long)count;
 - (id)objectForKey:(id)key;
 - (id)allKeys;

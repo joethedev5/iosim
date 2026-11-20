@@ -21,8 +21,9 @@ add_executable(iosim-run
   loader/framebuffer.c
   loader/events.c
   loader/services.c
+  loader/image.c
   loader/start.S
 )
 target_include_directories(iosim-run PRIVATE loader)
 target_compile_options(iosim-run PRIVATE -Wall -Wextra -Wno-unused-parameter)
-target_link_libraries(iosim-run PRIVATE dl m z Freetype::Freetype)
+target_link_libraries(iosim-run PRIVATE dl m z png Freetype::Freetype)

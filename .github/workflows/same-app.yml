@@ -23,6 +23,14 @@ jobs:
               -o services_test_x86_64 2> out/build-services.err; then
             echo "services test build failed:"; cat out/build-services.err; exit 1
           fi
+          if ! xcrun clang -arch arm64 $CFLAGS -framework UIKit -framework Foundation \
+              demo/GraphicsApp.m -o GraphicsApp_arm64 2> out/build-graphics-arm64.err; then
+            echo "GraphicsApp arm64 build failed:"; cat out/build-graphics-arm64.err; exit 1
+          fi
+          if ! xcrun clang -arch x86_64 $CFLAGS -framework UIKit -framework Foundation \
+              demo/GraphicsApp.m -o GraphicsApp_x86_64 2> out/build-graphics-x86_64.err; then
+            echo "GraphicsApp x86_64 build failed:"; cat out/build-graphics-x86_64.err; exit 1
+          fi
           file HelloSim_arm64 HelloSim_x86_64 services_test_x86_64 > out/file.txt
           otool -L services_test_x86_64 > out/services-libs.txt 2>&1
           for f in HelloSim_arm64 HelloSim_x86_64; do
@@ -75,6 +83,15 @@ jobs:
           codesign --force --sign - --timestamp=none HelloSim.app 2> out/codesign.err || true
           codesign -dv HelloSim.app > out/codesign.txt 2>&1 || true
 
+          mkdir -p GraphicsApp.app
+          cp GraphicsApp_arm64 GraphicsApp.app/GraphicsApp
+          cp demo/Assets/badge.png GraphicsApp.app/badge.png
+          sed -e 's/HelloSim/GraphicsApp/g' -e 's/com\.iosim\.graphicsapp/com.iosim.graphicsapp/g' \
+            -e 's/com\.iosim\.hellosim/com.iosim.graphicsapp/g' \
+            HelloSim.app/Info.plist > GraphicsApp.app/Info.plist
+          plutil -lint GraphicsApp.app/Info.plist
+          codesign --force --sign - --timestamp=none GraphicsApp.app 2> out/codesign-graphics.err || true
+
       - name: Boot simulator, install and launch the app
         run: |
           set +e
@@ -119,6 +136,13 @@ jobs:
               --predicate 'process == "HelloSim" OR eventMessage CONTAINS "HelloSim"' \
               > out/app-log.txt 2>&1
             xcrun simctl terminate "$UDID" com.iosim.hellosim >> out/boot.txt 2>&1
+            xcrun simctl install "$UDID" GraphicsApp.app >> out/boot.txt 2>&1
+            ( xcrun simctl launch --console-pty "$UDID" com.iosim.graphicsapp \
+                > out/graphics-console.txt 2>&1 & echo $! > /tmp/gconsole.pid )
+            sleep 6
+            xcrun simctl io "$UDID" screenshot out/graphics-real.png >> out/boot.txt 2>&1
+            kill "$(cat /tmp/gconsole.pid)" 2>/dev/null || true
+            xcrun simctl terminate "$UDID" com.iosim.graphicsapp >> out/boot.txt 2>&1
             find "$HOME/Library/Logs/DiagnosticReports" -maxdepth 2 \
               -iname 'HelloSim*' -mmin -15 -print -exec cp {} out/ \; \
               > out/crash-reports.txt 2>&1 || true
@@ -155,6 +179,9 @@ jobs:
           set +e
           tar czf artifact/HelloSim.app.tgz HelloSim.app
           cp HelloSim_arm64 HelloSim_x86_64 services_test_x86_64 artifact/
+          cp GraphicsApp_arm64 GraphicsApp_x86_64 artifact/
+          tar czf artifact/GraphicsApp.app.tgz GraphicsApp.app
+          cp out/graphics-real.png artifact/ 2>/dev/null
           cp out/real-sim.png artifact/ 2>/dev/null
           cp -R out artifact/out
           tar czf same-app.tgz -C artifact .

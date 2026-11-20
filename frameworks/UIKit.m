@@ -46,6 +46,23 @@ extern int  iosim_foundation_tick(void);
 extern int  iosim_dispatch_drain_main(void);
 extern const char *iosim_string_cstr(id string);
 extern int  strcmp(const char *a, const char *b);
+extern int  snprintf(char *buf, unsigned long size, const char *fmt, ...);
+extern int  iosim_png_load(const char *path, unsigned char **out_rgba,
+                           int *out_width, int *out_height);
+extern void iosim_fb_fill_ellipse(int cx, int cy, int rx, int ry,
+                                  unsigned color);
+extern void iosim_fb_draw_line(int x0, int y0, int x1, int y1, int thickness,
+                               unsigned color);
+extern void iosim_fb_fill_polygon(const double *xs, const double *ys,
+                                  int count, unsigned color);
+extern void iosim_fb_fill_linear_gradient(int x, int y, int w, int h,
+                                          unsigned start_color,
+                                          unsigned end_color,
+                                          double sx, double sy,
+                                          double ex, double ey);
+extern void iosim_fb_blit_rgba_scaled(int x, int y, int w, int h,
+                                      const unsigned char *rgba,
+                                      int sw, int sh, int stride);
 
 @class UIView;
 @class UIWindowScene;
@@ -84,6 +101,77 @@ extern int  strcmp(const char *a, const char *b);
 - (void)removeFromSuperlayer;
 - (void)addAnimation:(id)animation forKey:(id)key;
 - (void)removeAnimationForKey:(id)key;
+@end
+
+
+@class UIBezierPath, UIImage;
+
+@interface CAShapeLayer : CALayer {
+@public
+    UIBezierPath *_path;
+    UIColor *_fillColor;
+    UIColor *_strokeColor;
+    double _lineWidth;
+}
+- (void)setPath:(UIBezierPath *)path;
+- (UIBezierPath *)path;
+- (void)setFillColor:(UIColor *)color;
+- (UIColor *)fillColor;
+- (void)setStrokeColor:(UIColor *)color;
+- (UIColor *)strokeColor;
+- (void)setLineWidth:(double)width;
+- (double)lineWidth;
+@end
+
+@interface CAGradientLayer : CALayer {
+@public
+    NSArray *_colors;
+    CGPoint _startPoint;
+    CGPoint _endPoint;
+}
+- (void)setColors:(NSArray *)colors;
+- (NSArray *)colors;
+- (void)setStartPoint:(CGPoint)point;
+- (CGPoint)startPoint;
+- (void)setEndPoint:(CGPoint)point;
+- (CGPoint)endPoint;
+@end
+
+@interface UIBezierPath : NSObject {
+@public
+    double _xs[512];
+    double _ys[512];
+    int _count;
+    int _shape;
+    CGRect _rect;
+    double _cornerRadius;
+}
++ (id)bezierPath;
++ (id)bezierPathWithRect:(CGRect)rect;
++ (id)bezierPathWithRoundedRect:(CGRect)rect cornerRadius:(double)radius;
++ (id)bezierPathWithOvalInRect:(CGRect)rect;
+- (void)moveToPoint:(CGPoint)point;
+- (void)addLineToPoint:(CGPoint)point;
+- (void)addArcWithCenter:(CGPoint)center radius:(double)radius
+               startAngle:(double)start endAngle:(double)end
+                clockwise:(BOOL)clockwise;
+- (void)closePath;
+- (void)appendPath:(UIBezierPath *)path;
+- (void)addRect:(CGRect)rect;
+- (void)addOvalInRect:(CGRect)rect;
+- (void)addRoundedRect:(CGRect)rect cornerRadius:(double)radius;
+@end
+
+@interface UIImage : NSObject {
+@public
+    unsigned char *_rgba;
+    int _width;
+    int _height;
+}
++ (id)imageNamed:(id)name;
++ (id)imageWithContentsOfFile:(id)path;
+- (int)width;
+- (int)height;
 @end
 
 @interface CAMediaTimingFunction : NSObject {
@@ -205,6 +293,18 @@ extern id kCAMediaTimingFunctionEaseInEaseOut;
 - (int)textAlignment;
 - (void)setNumberOfLines:(int)n;
 - (int)numberOfLines;
+@end
+
+@interface UIImageView : UIView {
+@public
+    UIImage *_image;
+    int _contentMode;
+}
+- (id)initWithImage:(UIImage *)image;
+- (void)setImage:(UIImage *)image;
+- (UIImage *)image;
+- (void)setContentMode:(int)mode;
+- (int)contentMode;
 @end
 
 @interface UIViewController : NSObject {
@@ -621,6 +721,173 @@ int iosim_animations_active(void)
 }
 @end
 
+
+/* ------------------------------------------------------- paths and layers */
+
+@implementation UIBezierPath
++ (id)bezierPath
+{
+    return [[self alloc] init];
+}
++ (id)bezierPathWithRect:(CGRect)rect
+{
+    UIBezierPath *p = [[self alloc] init];
+    p->_shape = 1;
+    p->_rect = rect;
+    return p;
+}
++ (id)bezierPathWithRoundedRect:(CGRect)rect cornerRadius:(double)radius
+{
+    UIBezierPath *p = [[self alloc] init];
+    p->_shape = 2;
+    p->_rect = rect;
+    p->_cornerRadius = radius;
+    return p;
+}
++ (id)bezierPathWithOvalInRect:(CGRect)rect
+{
+    UIBezierPath *p = [[self alloc] init];
+    p->_shape = 3;
+    p->_rect = rect;
+    return p;
+}
+- (void)moveToPoint:(CGPoint)point
+{
+    if (_count == 0 && _shape == 0)
+    {
+        _xs[0] = point.x;
+        _ys[0] = point.y;
+        _count = 1;
+    }
+}
+- (void)addLineToPoint:(CGPoint)point
+{
+    if (_count < 512)
+    {
+        _xs[_count] = point.x;
+        _ys[_count] = point.y;
+        _count++;
+    }
+}
+- (void)addArcWithCenter:(CGPoint)center radius:(double)radius
+               startAngle:(double)start endAngle:(double)end
+                clockwise:(BOOL)clockwise
+{
+    int steps = 64;
+    for (int i = 0; i <= steps; i++)
+    {
+        double t = (double)i / steps;
+        double a = start + (end - start) * t;
+        if (!clockwise)
+            a = start + (end - start) * t;
+        [self addLineToPoint:CGPointMake(center.x + radius * __builtin_cos(a),
+                                         center.y + radius * __builtin_sin(a))];
+    }
+}
+- (void)closePath { }
+- (void)appendPath:(UIBezierPath *)path
+{
+    if (!path)
+        return;
+    if (path->_shape == 0)
+    {
+        for (int i = 0; i < path->_count && _count < 512; i++)
+            [self addLineToPoint:CGPointMake(path->_xs[i], path->_ys[i])];
+    }
+}
+- (void)addRect:(CGRect)rect { (void)rect; }
+- (void)addOvalInRect:(CGRect)rect { (void)rect; }
+- (void)addRoundedRect:(CGRect)rect cornerRadius:(double)radius
+{ (void)rect; (void)radius; }
+@end
+
+@implementation CAShapeLayer
+- (id)init
+{
+    self = [super init];
+    if (self)
+        _lineWidth = 1.0;
+    return self;
+}
+- (void)setPath:(UIBezierPath *)path { _path = path; }
+- (UIBezierPath *)path { return _path; }
+- (void)setFillColor:(UIColor *)color { _fillColor = color; }
+- (UIColor *)fillColor { return _fillColor; }
+- (void)setStrokeColor:(UIColor *)color { _strokeColor = color; }
+- (UIColor *)strokeColor { return _strokeColor; }
+- (void)setLineWidth:(double)width { _lineWidth = width; }
+- (double)lineWidth { return _lineWidth; }
+@end
+
+@implementation CAGradientLayer
+- (id)init
+{
+    self = [super init];
+    if (self)
+    {
+        _startPoint = CGPointMake(0.5, 0.0);
+        _endPoint = CGPointMake(0.5, 1.0);
+    }
+    return self;
+}
+- (void)setColors:(NSArray *)colors { _colors = colors; }
+- (NSArray *)colors { return _colors; }
+- (void)setStartPoint:(CGPoint)point { _startPoint = point; }
+- (CGPoint)startPoint { return _startPoint; }
+- (void)setEndPoint:(CGPoint)point { _endPoint = point; }
+- (CGPoint)endPoint { return _endPoint; }
+@end
+
+/* ------------------------------------------------------------ image views */
+
+@implementation UIImage
++ (id)imageWithContentsOfFile:(id)path
+{
+    const char *p = iosim_string_cstr(path);
+    if (!p)
+        return nil;
+    unsigned char *rgba = 0;
+    int w = 0, h = 0;
+    if (iosim_png_load(p, &rgba, &w, &h) != 0)
+        return nil;
+    UIImage *image = [[self alloc] init];
+    image->_rgba = rgba;
+    image->_width = w;
+    image->_height = h;
+    return image;
+}
++ (id)imageNamed:(id)name
+{
+    const char *n = iosim_string_cstr(name);
+    const char *dir = getenv("IOSIM_BUNDLE_DIR");
+    if (!dir || !*dir)
+        dir = ".";
+    char path[1024];
+    snprintf(path, sizeof(path), "%s/%s", dir, n ? n : "");
+    id image = [self imageWithContentsOfFile:[NSString stringWithUTF8String:path]];
+    if (image)
+        return image;
+    snprintf(path, sizeof(path), "%s/%s.png", dir, n ? n : "");
+    return [self imageWithContentsOfFile:[NSString stringWithUTF8String:path]];
+}
+- (int)width { return _width; }
+- (int)height { return _height; }
+@end
+
+@implementation UIImageView
+- (id)initWithImage:(UIImage *)image
+{
+    self = [super initWithFrame:CGRectMake(0, 0, 0, 0)];
+    if (self)
+        _image = image;
+    return self;
+}
+- (void)setImage:(UIImage *)image { _image = image; }
+- (UIImage *)image { return _image; }
+- (void)setContentMode:(int)mode { _contentMode = mode; }
+- (int)contentMode { return _contentMode; }
+@end
+
 @implementation UIViewController
 - (id)init { return [super init]; }
 - (void)loadView
@@ -887,6 +1154,94 @@ static double layer_key_value(CALayer *layer, const char *key, double base)
     return from + (to - from) * ease_t(t);
 }
 
+
+static void render_shape_path(UIBezierPath *path, int x, int y, int w, int h,
+                              double scale, UIColor *fill, UIColor *stroke,
+                              double lineWidth)
+{
+    if (!path)
+        return;
+    unsigned fill_color = color_rgb(fill);
+    unsigned stroke_color = color_rgb(stroke);
+    int thickness = (int)(lineWidth * scale + 0.5);
+    if (thickness < 1)
+        thickness = 1;
+
+    if (path->_shape == 1 || path->_shape == 2)
+    {
+        int rx = x + (int)(path->_rect.origin.x * scale + 0.5);
+        int ry = y + (int)(path->_rect.origin.y * scale + 0.5);
+        int rw = (int)(path->_rect.size.width * scale + 0.5);
+        int rh = (int)(path->_rect.size.height * scale + 0.5);
+        if (fill && rw > 0 && rh > 0)
+        {
+            if (path->_shape == 2)
+                iosim_fb_fill_round_rect(rx, ry, rw, rh,
+                                         (int)(path->_cornerRadius * scale + 0.5),
+                                         fill_color);
+            else
+                iosim_fb_fill_rect(rx, ry, rw, rh, fill_color);
+        }
+        if (stroke)
+        {
+            iosim_fb_draw_line(rx, ry, rx + rw, ry, thickness, stroke_color);
+            iosim_fb_draw_line(rx + rw, ry, rx + rw, ry + rh, thickness, stroke_color);
+            iosim_fb_draw_line(rx + rw, ry + rh, rx, ry + rh, thickness, stroke_color);
+            iosim_fb_draw_line(rx, ry + rh, rx, ry, thickness, stroke_color);
+        }
+        return;
+    }
+    if (path->_shape == 3)
+    {
+        int rx = x + (int)(path->_rect.origin.x * scale + 0.5);
+        int ry = y + (int)(path->_rect.origin.y * scale + 0.5);
+        int rw = (int)(path->_rect.size.width * scale + 0.5);
+        int rh = (int)(path->_rect.size.height * scale + 0.5);
+        if (fill && rw > 0 && rh > 0)
+            iosim_fb_fill_ellipse(rx + rw / 2, ry + rh / 2, rw / 2, rh / 2,
+                                  fill_color);
+        if (stroke && rw > 0 && rh > 0)
+        {
+            double cx = rx + rw / 2.0, cy = ry + rh / 2.0;
+            double ax = rw / 2.0, ay = rh / 2.0;
+            double px = cx + ax, py = cy;
+            for (int i = 1; i <= 64; i++)
+            {
+                double t = 2 * 3.14159265358979323846 * i / 64.0;
+                double nx = cx + ax * __builtin_cos(t);
+                double ny = cy + ay * __builtin_sin(t);
+                iosim_fb_draw_line((int)px, (int)py, (int)nx, (int)ny,
+                                   thickness, stroke_color);
+                px = nx; py = ny;
+            }
+        }
+        return;
+    }
+
+    int count = path->_count;
+    if (count <= 0)
+        return;
+    if (fill && count >= 3)
+    {
+        double xs[512], ys[512];
+        for (int i = 0; i < count; i++)
+        {
+            xs[i] = x + path->_xs[i] * scale;
+            ys[i] = y + path->_ys[i] * scale;
+        }
+        iosim_fb_fill_polygon(xs, ys, count, fill_color);
+    }
+    if (stroke)
+    {
+        for (int i = 0; i + 1 < count; i++)
+            iosim_fb_draw_line((int)(x + path->_xs[i] * scale),
+                               (int)(y + path->_ys[i] * scale),
+                               (int)(x + path->_xs[i + 1] * scale),
+                               (int)(y + path->_ys[i + 1] * scale),
+                               thickness, stroke_color);
+    }
+}
+
 static void render_layer(CALayer *layer, double parentX, double parentY,
                          double scale, double parentAlpha)
 {
@@ -912,6 +1267,26 @@ static void render_layer(CALayer *layer, double parentX, double parentY,
         else
             iosim_fb_fill_rect(x, y, w, h, color);
     }
+    if ([layer isKindOfClass:[CAGradientLayer class]])
+    {
+        CAGradientLayer *g = (CAGradientLayer *)layer;
+        unsigned a = 0, b = 0;
+        if (g->_colors && g->_colors->_count > 0)
+        {
+            a = color_rgb((UIColor *)[g->_colors objectAtIndex:0]);
+            b = color_rgb((UIColor *)[g->_colors objectAtIndex:g->_colors->_count - 1]);
+            iosim_fb_fill_linear_gradient(x, y, w, h, a, b, g->_startPoint.x,
+                                          g->_startPoint.y, g->_endPoint.x,
+                                          g->_endPoint.y);
+        }
+    }
+    else if ([layer isKindOfClass:[CAShapeLayer class]])
+    {
+        CAShapeLayer *sl = (CAShapeLayer *)layer;
+        render_shape_path(sl->_path, x, y, w, h, scale, sl->_fillColor,
+                          sl->_strokeColor, sl->_lineWidth);
+    }
+
     for (int i = 0; i < layer->_sublayerCount; i++)
         render_layer((CALayer *)layer->_sublayers[i], parentX + frame.origin.x,
                      parentY + frame.origin.y, scale, alpha);
@@ -954,6 +1329,40 @@ static void render_view(UIView *view, double originX, double originY,
             render_layer((CALayer *)view->_layer->_sublayers[i],
                          originX + frame.origin.x, originY + frame.origin.y,
                          scale, alpha);
+    }
+
+    if ([view isKindOfClass:[UIImageView class]])
+    {
+        UIImageView *iv = (UIImageView *)view;
+        UIImage *image = iv->_image;
+        if (image && image->_rgba && image->_width > 0 && image->_height > 0)
+        {
+            int dw = w, dh = h, dx = 0, dy = 0;
+            if (iv->_contentMode == 1 || iv->_contentMode == 4)
+            {
+                if (iv->_contentMode == 1)
+                {
+                    double s = (double)w / image->_width;
+                    double sy = (double)h / image->_height;
+                    if (sy < s) s = sy;
+                    dw = (int)(image->_width * s + 0.5);
+                    dh = (int)(image->_height * s + 0.5);
+                }
+                else
+                {
+                    dw = image->_width / 3;
+                    dh = image->_height / 3;
+                    if (dw <= 0) dw = image->_width;
+                    if (dh <= 0) dh = image->_height;
+                }
+                dx = (w - dw) / 2;
+                dy = (h - dh) / 2;
+            }
+            if (dw > 0 && dh > 0)
+                iosim_fb_blit_rgba_scaled(x + dx, y + dy, dw, dh,
+                                          image->_rgba, image->_width,
+                                          image->_height, image->_width * 4);
+        }
     }
 
     if ([view isKindOfClass:[UILabel class]])
