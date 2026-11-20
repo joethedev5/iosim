@@ -663,6 +663,26 @@ static void kvo_install_setter(void *subclass, void *original, SEL setter,
     kvo_remember_setter(subclass, setter, key);
 }
 
+static double kvc_operator_double(id value)
+{
+    if (!value)
+        return 0;
+    if ([value isKindOfClass:[NSNumber class]])
+        return [value doubleValue];
+    if (iosim_objc_responds(value, sel_registerName("doubleValue")))
+        return ((double (*)(id, SEL))objc_msgSend)(
+            value, sel_registerName("doubleValue"));
+    return 0;
+}
+
+static void kvc_operator_unique_add(NSMutableArray *array, id value)
+{
+    if (!value)
+        return;
+    if (![array containsObject:value])
+        [array addObject:value];
+}
+
 /* ------------------------------------------------------------- NSObject */
 
 @implementation NSObject
@@ -761,13 +781,84 @@ static void kvo_install_setter(void *subclass, void *original, SEL setter,
         return nil;
     if (p[0] == '@')
     {
-        if (strcmp(p, "@count") == 0)
+        const char *dot = strchr(p, '.');
+        unsigned long n = dot ? (unsigned long)(dot - p) : strlen(p);
+        char op[64];
+        if (n >= sizeof(op))
+            return nil;
+        memcpy(op, p, n);
+        op[n] = 0;
+        if (strcmp(op, "@count") == 0)
         {
             SEL countSel = sel_registerName("count");
             if (iosim_objc_responds(self, countSel))
                 return [NSNumber numberWithLongLong:
                     ((unsigned long (*)(id, SEL))objc_msgSend)(self, countSel)];
             return [NSNumber numberWithInt:0];
+        }
+        if (!iosim_objc_responds(self, @selector(countByEnumeratingWithState:
+                                                 objects:count:)))
+            return nil;
+        const char *rest = dot ? dot + 1 : 0;
+        NSString *restKey = rest ? [NSString stringWithUTF8String:rest] : nil;
+        NSMutableArray *values = [NSMutableArray array];
+        for (id item in self)
+        {
+            id value = restKey ? [item valueForKeyPath:restKey] : item;
+            if (value)
+                [values addObject:value];
+        }
+        if (strcmp(op, "@sum") == 0 || strcmp(op, "@avg") == 0)
+        {
+            double sum = 0;
+            for (id value in values)
+                sum += kvc_operator_double(value);
+            if (strcmp(op, "@avg") == 0)
+                sum = [values count] ? sum / (double)[values count] : 0;
+            return [NSNumber numberWithDouble:sum];
+        }
+        if (strcmp(op, "@max") == 0 || strcmp(op, "@min") == 0)
+        {
+            id best = nil;
+            double bestValue = 0;
+            BOOL wantMax = strcmp(op, "@max") == 0;
+            for (id value in values)
+            {
+                double number = kvc_operator_double(value);
+                if (!best || (wantMax ? number > bestValue
+                                      : number < bestValue))
+                {
+                    best = value;
+                    bestValue = number;
+                }
+            }
+            return best;
+        }
+        if (strcmp(op, "@distinctUnionOfObjects") == 0)
+        {
+            NSMutableArray *result = [NSMutableArray array];
+            for (id value in values)
+                kvc_operator_unique_add(result, value);
+            return result;
+        }
+        if (strcmp(op, "@unionOfArrays") == 0 ||
+            strcmp(op, "@distinctUnionOfArrays") == 0)
+        {
+            BOOL distinct = op[1] == 'd';
+            NSMutableArray *result = [NSMutableArray array];
+            for (id value in values)
+            {
+                if (![value isKindOfClass:[NSArray class]])
+                    continue;
+                for (id element in (NSArray *)value)
+                {
+                    if (distinct)
+                        kvc_operator_unique_add(result, element);
+                    else
+                        [result addObject:element];
+                }
+            }
+            return result;
         }
         return nil;
     }
@@ -1803,6 +1894,13 @@ static char *format_va(const char *fmt, va_list ap)
 }
 - (id)objectForKeyedSubscript:(id)key
 {
+    return [self objectForKey:key];
+}
+- (id)valueForKey:(NSString *)key
+{
+    const char *k = [key UTF8String];
+    if (!k || k[0] == '@')
+        return [super valueForKey:key];
     return [self objectForKey:key];
 }
 - (unsigned long)countByEnumeratingWithState:(NSFastEnumerationState *)state

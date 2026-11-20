@@ -43,7 +43,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | CoreAnimation paths, gradients, layer geometry/contents, sublayers (z-ordered), PNG images | ✅ |
 | Foundation collections, strings, selector/block notifications with userInfo, timers, NSIndexPath | ✅ |
 | Foundation fast enumeration (`for-in`) and indexed/keyed collection subscripting | ✅ |
-| Key-value coding (accessor lookup, scalar boxing, key paths) and automatic KVO | ✅ |
+| Key-value coding (accessors, boxing, key paths, collection operators) and automatic KVO | ✅ |
 | NSDateFormatter parse/print round trip, NSNumberFormatter decimal/currency/percent | ✅ |
 | KDK kernel symbolication: full local+global maps, Mach trap and BSD syscall tables | ✅ |
 | `NSFileManager`, `NSData` file I/O, `NSFileHandle` read/write/seek/truncate, `NSURL`, `NSJSONSerialization` | ✅ |

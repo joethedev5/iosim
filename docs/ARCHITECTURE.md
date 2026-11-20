@@ -351,8 +351,11 @@ Key-value coding looks accessors up the way Foundation does: `get<Key>`,
 The runtime hands out each method's type encoding, so scalar getters are
 boxed (`NSNumber` for integers, floats and booleans) and `setValue:forKey:`
 unboxes `NSNumber` arguments before calling the setter; object values pass
-through directly. Key paths split on `.` and recurse, and `@count` applied to
-a collection returns an `NSNumber`.
+through directly. Key paths split on `.` and recurse. Collection operators run over
+the receiver's fast enumeration: `@count`, `@sum`, `@avg`, `@max`, `@min`,
+`@distinctUnionOfObjects`, `@unionOfArrays` and `@distinctUnionOfArrays`,
+with a trailing key path applied to every element. `NSDictionary` overrides
+`valueForKey:` to return `objectForKey:` for ordinary keys.
 
 Automatic key-value observing uses the same isa-swizzling design as objc4.
 The loader runtime now creates classes at run time

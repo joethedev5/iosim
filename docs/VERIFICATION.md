@@ -619,6 +619,17 @@ Counts are exactly `2` and `2`; after `removeObserver:` the next
 `setName:@"erin"` produces no notification while the getter returns `erin`.
 The suite asserts all ten lines.
 
+### Foundation: KVC collection operators
+
+`tests/kvc_operators_test.m` runs the operators over an array of boxed
+numbers: count 4, sum 10, average 2.5, max 4 and min 1. An array of
+dictionaries with `price` and `category` yields sum 40, average 13.3, max 25
+and min 5 for `@sum.price` and friends; `@distinctUnionOfObjects.category`
+returns two values in first-seen order (`a`, `b`). Two arrays [1,2] and
+[2,3] flatten to four elements with `@unionOfArrays` and three with
+`@distinctUnionOfArrays`. Finally `valueForKey:@"price"` on a dictionary
+returns 10, proving the NSDictionary override maps to `objectForKey:`.
+
 ### libdispatch: timer and data sources
 
 `tests/dispatch_source_test.m` creates a main-queue timer with a 10 ms start

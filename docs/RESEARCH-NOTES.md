@@ -162,6 +162,14 @@ Measured with `zig-x86_64-linux-0.17.1` from ziglang.org:
   frame after background and before gradient/shape/sublayers.
 - Fixture `tests/calayer_geometry_test.m` (section 26).
 
+## 2026-11-20: KVC collection operators
+
+- `@count`, `@sum`, `@avg`, `@max`, `@min`, `@distinctUnionOfObjects`,
+  `@unionOfArrays` and `@distinctUnionOfArrays` run over fast enumeration and
+  apply a trailing key path per element.
+- `NSDictionary valueForKey:` now maps ordinary keys to `objectForKey:`.
+- Fixture `tests/kvc_operators_test.m` (section 27).
+
 ## Open directions
 
 - `metal-cpp` + macOS SDK Metal headers make it possible to implement a

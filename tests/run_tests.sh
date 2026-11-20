@@ -2958,6 +2958,26 @@ check "[layer] anchor 100 100 pos 100 100" "$out" \
 check "[layer] bounds 100 100 120 60 pos 100 100" "$out" \
     "setBounds changes size around the anchor"
 
+# ---------- 27. KVC collection operators ----------
+"$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
+    -ffreestanding -O1 -I "$ROOT/frameworks" \
+    -c "$ROOT/tests/kvc_operators_test.m" -o "$T/kvc_operators_test.o"
+"$LD64" -arch x86_64 -platform_version $PLATFORM -e _main \
+    -o "$T/kvc_operators_test" "$T/kvc_operators_test.o" \
+    "$ROOT/runtime/System/Library/Frameworks/Foundation.framework/Foundation" \
+    -undefined dynamic_lookup
+out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/kvc_operators_test" 2>&1)"
+check "[kvcop] numbers 4 10 2.5 4 1" "$out" \
+    "@count/@sum/@avg/@max/@min over boxed numbers"
+check "[kvcop] prices 40 13.3 25 5" "$out" \
+    "collection operators apply the trailing key path to each object"
+check "[kvcop] categories 2 a b" "$out" \
+    "@distinctUnionOfObjects.category keeps first-seen order"
+check "[kvcop] union 4 distinct 3" "$out" \
+    "@unionOfArrays flattens while @distinctUnionOfArrays removes duplicates"
+check "[kvcop] dict 10" "$out" \
+    "NSDictionary valueForKey: maps to objectForKey:"
+
 if [ "$fails" -ne 0 ]; then
     echo "$fails test(s) failed" >&2
     exit 1
