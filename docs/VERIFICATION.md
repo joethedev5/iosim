@@ -404,6 +404,17 @@ The transport is one `SOCK_SEQPACKET` datagram per message over a Linux
 abstract-namespace socket derived from the device UDID, so no filesystem
 rendezvous is needed and the name never collides with another device.
 
+XPC rides on the same namespace. `tests/xpc_cross_test.c` is built with
+`-fblocks`; its service creates a mach-service listener
+(`XPC_CONNECTION_MACH_SERVICE_LISTENER`), installs an event handler and
+resumes, which registers `com.iosim.cross.xpc` and starts a receiver thread.
+The client process resumes a plain connection, sends a dictionary with a
+string, an int64, a bool and a 4-byte data value, and the service's handler
+receives a rebuilt object and prints
+`xpc service: received kind=ping seq=7 flag=1 blob=4`. The encoder emits a
+tagged tree; the decoder bounds depth, dictionary counts, key and value
+lengths before allocating, because the bytes cross a process boundary.
+
 ### System UI: SpringBoard, measured and real
 
 `IOSIM_SHELL=1` switches `UIApplicationMain` to the home screen, and
@@ -529,9 +540,9 @@ and guides, but not the full Cassowary solver or every UIKit layout API.
 without comments, streaming or fragments unless enabled.
 Text input is a single-line `UITextField` with a QWERTY keyboard; UITextView,
 multitap gestures and selection handles are not implemented. Touch input is
-single-finger: there is no multitouch, touch prediction or pressure. Mach messages and the bootstrap namespace
-are shared across guest processes, but XPC objects themselves are still
-delivered in-process; SpringBoard pages in groups of 16 without a sliding
+single-finger: there is no multitouch, touch prediction or pressure. Mach
+messages, the bootstrap namespace and serialized XPC dictionaries are shared
+across guest processes. SpringBoard pages in groups of 16 without a sliding
 page animation, and the switcher shows at most three cards with no scrolling
 animation or kill gesture; stock system apps have no executables in this
 runtime.
@@ -541,6 +552,6 @@ right-to-left and complex scripts are not shaped. `UIView.transform` applies a
 full 2D affine transform (translation, scale and rotation) through an offscreen
 composite; `CATransform3D` is not supported. Core Animation keeps one explicit
 animation slot per layer, so a layer can animate one property at a time, and
-`CADisplayLink` ignores preferred frame-rate ranges. XPC objects are an
-in-process transport on top of the now cross-process Mach substrate. Metal
-and video remain unimplemented.
+`CADisplayLink` ignores preferred frame-rate ranges. XPC carries dictionaries
+and value objects between processes but not connections, file descriptors or
+reply ports. Metal and video remain unimplemented.

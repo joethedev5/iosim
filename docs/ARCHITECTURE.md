@@ -385,10 +385,16 @@ transport and the bootstrap namespace are shared across the device.
   returns a send port backed by that connection; `mach_msg` on it writes one
   datagram, which is the send right. Unknown names return 1102.
 - **XPC** dictionaries, strings, integers, bools, data and arrays are backed by
-  a small object type. Connections are registered by service name; a send
-  invokes a peer's event handler. This models the message flow in-process;
-  carrying XPC objects between processes is the next step on top of the Mach
-  transport above.
+  a small object type. A connection created with
+  `xpc_connection_create_mach_service(name, queue,
+  XPC_CONNECTION_MACH_SERVICE_LISTENER)` and resumed registers its name as a
+  Mach service and starts a receiver thread; a client connection sends a
+  dictionary that is serialized as a tagged tree into one Mach datagram. The
+  receiver validates the frame, rebuilds the object graph (bounded depth,
+  counts and lengths, since the bytes come from another process) and invokes
+  the listener's event handler with the new object. Within one process a send
+  still calls the peer connection's handler directly, preserving the original
+  in-process flow. Handlers are heap-copied so stack blocks stay valid.
 
 `tools/iosim-launchd` is the per-device boot anchor, state owner and bootstrap
 namespace server.

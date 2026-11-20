@@ -666,6 +666,39 @@ else
     echo "note: launchd log not captured at the expected path"
 fi
 
+# ---------- 11. cross-process XPC ----------
+# An XPC listener registers its Mach service; a client in another process
+# sends a dictionary, which arrives as a rebuilt XPC object.
+"$CC" -target "$TARGET" -ffreestanding -fPIC -O1 -fblocks \
+    -c "$ROOT/tests/xpc_cross_test.c" -o "$T/xpc_cross.o"
+exe "$T/xpc_cross" "$T/xpc_cross.o"
+XLOG="$T/xpc-service.log"
+rm -f "$XLOG"
+"$ROOT/tools/iosimctl" spawn "$UDID" "$T/xpc_cross" service > "$XLOG" 2>&1 &
+xpc_job=$!
+i=0
+while [ "$i" -lt 50 ]; do
+    grep -Fq -- "xpc service: ready" "$XLOG" 2>/dev/null && break
+    sleep 0.1
+    i=$((i+1))
+done
+if grep -Fq -- "xpc service: ready" "$XLOG" 2>/dev/null; then
+    echo "ok   an XPC listener registers its Mach service"
+else
+    echo "FAIL XPC listener"; cat "$XLOG"; fails=$((fails+1))
+fi
+out="$("$ROOT/tools/iosimctl" spawn "$UDID" "$T/xpc_cross" client 2>&1 | tail -1)"
+check "xpc client: sent" "$out" "an XPC client sends a dictionary by name"
+i=0
+while [ "$i" -lt 50 ]; do
+    grep -Fq -- "xpc service: received" "$XLOG" 2>/dev/null && break
+    sleep 0.1
+    i=$((i+1))
+done
+check "xpc service: received kind=ping seq=7 flag=1 blob=4" "$(cat "$XLOG")" \
+    "the dictionary arrives as a rebuilt XPC object in the other process"
+wait "$xpc_job" 2>/dev/null || true
+
 "$ROOT/tools/iosimctl" shutdown "$UDID" >/dev/null
 
 if [ "$fails" -ne 0 ]; then

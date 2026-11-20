@@ -41,6 +41,16 @@ static void call_block(void *block)
         ((void (*)(void *))b->invoke)(block);
 }
 
+/* XPC and dispatch handlers take one argument (the event/message object). */
+static void call_block_arg(void *block, void *arg)
+{
+    if (!block)
+        return;
+    struct block_layout *b = block;
+    if (b->invoke)
+        ((void (*)(void *, void *))b->invoke)(block, arg);
+}
+
 static double now_seconds(void)
 {
     struct timespec ts;
@@ -913,9 +923,219 @@ const void *xpc_data_get_bytes_ptr(void *obj) { struct xpc_object *o = obj; retu
 size_t xpc_data_get_length(void *obj) { struct xpc_object *o = obj; return o ? o->data_len : 0; }
 const char *xpc_copy_description(void *obj) { (void)obj; return "xpc-object"; }
 
+/* Serialized XPC messages: one tagged object tree per Mach datagram. The
+ * frame travels on the bootstrap service's socket; the receiving process
+ * rebuilds the object graph and hands it to the listener's event handler. */
+#define XPC_FRAME_MAGIC 0x58504331u /* "XPC1" */
+#define XPC_PAYLOAD_MAX 60000
+#define XPC_DEPTH_MAX 16
+
+typedef struct {
+    mach_msg_header_t header;
+    uint32_t magic;
+    uint32_t length;
+    int32_t sender;
+    unsigned char payload[XPC_PAYLOAD_MAX];
+} xpc_frame;
+
+#define XPC_FRAME_HEADER offsetof(xpc_frame, payload)
+
+static int xpc_encode_into(struct xpc_object *o, unsigned char *buf, size_t cap,
+                           size_t *pos, int depth)
+{
+    if (depth > XPC_DEPTH_MAX || *pos + 1 > cap)
+        return -1;
+    if (!o)
+    {
+        buf[(*pos)++] = 0; /* null */
+        return 0;
+    }
+    buf[(*pos)++] = (unsigned char)o->type;
+    switch (o->type)
+    {
+    case XPC_DICT:
+    {
+        uint32_t n = (uint32_t)o->count;
+        if (*pos + 4 > cap)
+            return -1;
+        memcpy(buf + *pos, &n, 4);
+        *pos += 4;
+        for (int i = 0; i < o->count; i++)
+        {
+            const char *key = o->keys[i] ? o->keys[i] : "";
+            uint32_t kl = (uint32_t)strlen(key);
+            if (*pos + 4 + kl > cap)
+                return -1;
+            memcpy(buf + *pos, &kl, 4);
+            *pos += 4;
+            memcpy(buf + *pos, key, kl);
+            *pos += kl;
+            if (xpc_encode_into(o->items[i], buf, cap, pos, depth + 1) != 0)
+                return -1;
+        }
+        return 0;
+    }
+    case XPC_ARRAY:
+    {
+        uint32_t n = (uint32_t)o->count;
+        if (*pos + 4 > cap)
+            return -1;
+        memcpy(buf + *pos, &n, 4);
+        *pos += 4;
+        for (int i = 0; i < o->count; i++)
+            if (xpc_encode_into(o->items[i], buf, cap, pos, depth + 1) != 0)
+                return -1;
+        return 0;
+    }
+    case XPC_STRING:
+    {
+        const char *str = o->str ? o->str : "";
+        uint32_t l = (uint32_t)strlen(str);
+        if (*pos + 4 + l > cap)
+            return -1;
+        memcpy(buf + *pos, &l, 4);
+        *pos += 4;
+        memcpy(buf + *pos, str, l);
+        *pos += l;
+        return 0;
+    }
+    case XPC_INT:
+        if (*pos + 8 > cap)
+            return -1;
+        memcpy(buf + *pos, &o->i64, 8);
+        *pos += 8;
+        return 0;
+    case XPC_BOOL:
+        if (*pos + 1 > cap)
+            return -1;
+        buf[(*pos)++] = o->i64 ? 1 : 0;
+        return 0;
+    case XPC_DATA:
+    {
+        uint32_t l = (uint32_t)o->data_len;
+        if (*pos + 4 + l > cap)
+            return -1;
+        memcpy(buf + *pos, &l, 4);
+        *pos += 4;
+        if (l)
+            memcpy(buf + *pos, o->data, l);
+        *pos += l;
+        return 0;
+    }
+    default:
+        return -1;
+    }
+}
+
+static int xpc_take(const unsigned char *buf, size_t len, size_t *pos,
+                    void *out, size_t n)
+{
+    if (*pos + n > len)
+        return -1;
+    memcpy(out, buf + *pos, n);
+    *pos += n;
+    return 0;
+}
+
+static struct xpc_object *xpc_decode(const unsigned char *buf, size_t len,
+                                     size_t *pos, int depth)
+{
+    if (depth > XPC_DEPTH_MAX || *pos >= len)
+        return NULL;
+    unsigned char type = buf[(*pos)++];
+    if (type == 0)
+        return xpc_new(XPC_STRING);
+    if (type != XPC_DICT && type != XPC_ARRAY && type != XPC_STRING &&
+        type != XPC_INT && type != XPC_BOOL && type != XPC_DATA)
+        return NULL;
+    struct xpc_object *o = xpc_new(type);
+    switch (type)
+    {
+    case XPC_DICT:
+    {
+        uint32_t n = 0;
+        if (xpc_take(buf, len, pos, &n, 4) != 0 || n > 64)
+            return NULL;
+        for (uint32_t i = 0; i < n; i++)
+        {
+            uint32_t kl = 0;
+            if (xpc_take(buf, len, pos, &kl, 4) != 0 || kl > 4096 ||
+                *pos + kl > len)
+                return NULL;
+            char *key = malloc(kl + 1);
+            if (!key)
+                return NULL;
+            memcpy(key, buf + *pos, kl);
+            key[kl] = 0;
+            *pos += kl;
+            struct xpc_object *value = xpc_decode(buf, len, pos, depth + 1);
+            if (!value)
+                return NULL;
+            o->keys[o->count] = key;
+            o->items[o->count] = value;
+            o->count++;
+        }
+        return o;
+    }
+    case XPC_ARRAY:
+    {
+        uint32_t n = 0;
+        if (xpc_take(buf, len, pos, &n, 4) != 0 || n > 64)
+            return NULL;
+        for (uint32_t i = 0; i < n; i++)
+        {
+            struct xpc_object *value = xpc_decode(buf, len, pos, depth + 1);
+            if (!value)
+                return NULL;
+            o->items[o->count++] = value;
+        }
+        return o;
+    }
+    case XPC_STRING:
+    {
+        uint32_t l = 0;
+        if (xpc_take(buf, len, pos, &l, 4) != 0 || *pos + l > len)
+            return NULL;
+        o->str = malloc(l + 1);
+        if (!o->str)
+            return NULL;
+        memcpy(o->str, buf + *pos, l);
+        o->str[l] = 0;
+        *pos += l;
+        return o;
+    }
+    case XPC_INT:
+        if (xpc_take(buf, len, pos, &o->i64, 8) != 0)
+            return NULL;
+        return o;
+    case XPC_BOOL:
+        if (*pos + 1 > len)
+            return NULL;
+        o->i64 = buf[(*pos)++] != 0;
+        return o;
+    default: /* XPC_DATA */
+    {
+        uint32_t l = 0;
+        if (xpc_take(buf, len, pos, &l, 4) != 0 || *pos + l > len)
+            return NULL;
+        o->data = malloc(l ? l : 1);
+        if (!o->data)
+            return NULL;
+        memcpy(o->data, buf + *pos, l);
+        o->data_len = l;
+        *pos += l;
+        return o;
+    }
+    }
+}
+
 struct xpc_connection {
     char *name;
     void *handler;
+    unsigned long flags;
+    uint32_t port;
+    int started;
+    int listener;
 };
 static struct xpc_connection *connections[64];
 static int connection_count;
@@ -929,9 +1149,12 @@ static struct xpc_connection *find_connection(const char *name)
 }
 void *xpc_connection_create_mach_service(const char *name, void *queue, unsigned long flags)
 {
-    (void)queue; (void)flags;
+    (void)queue;
     struct xpc_connection *c = calloc(1, sizeof(*c));
     c->name = strdup(name ? name : "");
+    c->flags = flags;
+    /* XPC_CONNECTION_MACH_SERVICE_LISTENER = 1 */
+    c->listener = (flags & 1) != 0;
     if (connection_count < 64)
         connections[connection_count++] = c;
     return c;
@@ -947,12 +1170,111 @@ void *xpc_connection_create(const char *name, void *queue)
 }
 void xpc_connection_set_event_handler(void *conn, void *handler)
 {
-    ((struct xpc_connection *)conn)->handler = handler;
+    struct xpc_connection *c = conn;
+    if (!c)
+        return;
+    /* Handlers may be stack blocks; the connection owns a heap copy. */
+    if (c->handler)
+        _Block_release(c->handler);
+    c->handler = handler ? _Block_copy(handler) : NULL;
 }
 void xpc_connection_set_target_queue(void *conn, void *queue) { (void)conn; (void)queue; }
-void xpc_connection_resume(void *conn) { (void)conn; }
+
+/* The listener thread receives serialized messages from its bootstrap port
+ * and delivers rebuilt XPC objects to the connection's event handler. */
+static void *xpc_receiver(void *arg)
+{
+    struct xpc_connection *c = arg;
+    xpc_frame *frame = calloc(1, sizeof(*frame));
+    if (!frame)
+        return NULL;
+    for (;;)
+    {
+        frame->header.msgh_size = sizeof(*frame);
+        frame->header.msgh_local_port = c->port;
+        int kr =
+            mach_msg(&frame->header, MACH_RCV_MSG | MACH_RCV_TIMEOUT, 0,
+                     sizeof(*frame), c->port, 1000, 0);
+        if (kr != 0)
+            continue;
+        if (frame->magic != XPC_FRAME_MAGIC || frame->length > XPC_PAYLOAD_MAX)
+            continue;
+        size_t pos = 0;
+        struct xpc_object *event =
+            xpc_decode(frame->payload, frame->length, &pos, 0);
+        if (!event)
+            continue;
+        if (c->handler)
+            call_block_arg(c->handler, event);
+    }
+    return NULL;
+}
+
+void xpc_connection_resume(void *conn)
+{
+    struct xpc_connection *c = conn;
+    if (!c || c->started)
+        return;
+    c->started = 1;
+    if (!c->listener)
+        return;
+    uint32_t port = port_new(-1);
+    if (bootstrap_register(bootstrap_port_value, c->name, port) != 0)
+        return;
+    c->port = port;
+    pthread_t thread;
+    if (pthread_create(&thread, NULL, xpc_receiver, c) != 0)
+        return;
+    pthread_detach(thread);
+}
 void xpc_connection_suspend(void *conn) { (void)conn; }
 void xpc_connection_cancel(void *conn) { (void)conn; }
+
+/* Serialize and send one message to the bootstrap service another process
+ * registered for this connection name. */
+static int xpc_send_remote(struct xpc_connection *c, void *message)
+{
+    if (!message)
+        return -1;
+    if (c->port == 0)
+    {
+        uint32_t port = 0;
+        if (bootstrap_look_up(bootstrap_port_value, c->name, &port) != 0)
+            return -1;
+        c->port = port;
+    }
+    unsigned char *payload = malloc(XPC_PAYLOAD_MAX);
+    if (!payload)
+        return -1;
+    size_t plen = 0;
+    if (xpc_encode_into(message, payload, XPC_PAYLOAD_MAX, &plen, 0) != 0 ||
+        plen == 0)
+    {
+        free(payload);
+        return -1;
+    }
+    size_t total = XPC_FRAME_HEADER + plen;
+    xpc_frame *frame = calloc(1, total);
+    if (!frame)
+    {
+        free(payload);
+        return -1;
+    }
+    frame->header.msgh_bits = 0;
+    frame->header.msgh_size = (uint32_t)total;
+    frame->header.msgh_remote_port = c->port;
+    frame->header.msgh_id = 0x78706331;
+    frame->magic = XPC_FRAME_MAGIC;
+    frame->length = (uint32_t)plen;
+    frame->sender = (int32_t)getpid();
+    memcpy(frame->payload, payload, plen);
+    int kr =
+        mach_msg(&frame->header, MACH_SEND_MSG, (uint32_t)total, 0, 0, 0, 0);
+    free(frame);
+    free(payload);
+    return kr == 0 ? 0 : -1;
+}
+
 void xpc_connection_send_message(void *conn, void *message)
 {
     struct xpc_connection *c = conn;
@@ -963,15 +1285,18 @@ void xpc_connection_send_message(void *conn, void *message)
         if (peer && peer != c && peer->handler &&
             strcmp(peer->name, c->name) == 0)
         {
-            call_block(peer->handler);
-            break;
+            call_block_arg(peer->handler, message);
+            return;
         }
     }
-    (void)message;
+    xpc_send_remote(c, message);
 }
 void xpc_connection_send_message_with_reply(void *conn, void *message, void *queue, void *handler)
 {
-    (void)conn; (void)message; (void)queue; (void)handler;
+    (void)queue;
+    xpc_connection_send_message(conn, message);
+    if (handler)
+        call_block(handler);
 }
 void xpc_connection_send_barrier(void *conn, void *block) { (void)conn; call_block(block); }
 int xpc_connection_get_pid(void *conn) { (void)conn; return getpid(); }
