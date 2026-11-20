@@ -271,9 +271,9 @@ sizeWithAttributes:/drawAtPoint: renders through the CGContext text bridge,
 and drawInRect:/boundingRectWithSize: word-wrap paragraphs. Device RGB/gray
 color spaces, CGColorCreate, CGPath bounding boxes, containment and copies
 are covered. UITextView maps taps to byte indices, selects words on a second
-tap, extends the selection while dragging, clamps programmatic selectedRange
-and replaces/removes selected ranges; the renderer paints the selection
-highlight and draggable end handles. CGContextClip rasterizes path
+tap or a half-second press, extends the selection while dragging, clamps
+programmatic selectedRange and replaces/removes selected ranges; the renderer
+paints the selection highlight and draggable end handles. CGContextClip rasterizes path
 masks and intersects active masks; framebuffer fills, strokes, glyphs and
 image blits honor them. Quadratic/cubic CGPath, CGContext and UIBezierPath
 curves flatten adaptively from the second-derivative bound (1 to 128
@@ -358,7 +358,13 @@ management.
   mode; touchesMoved samples the index at the knob's line (the knob sits
   below the text, where a raw lookup would clamp to the text end) and moves
   the corresponding endpoint. Fixture `tests/textview_handle_drag_test.m`.
-- Remaining text-selection gaps: long-press selection and the edit menu.
+- Long press: touchesBegan arms a pending press with its index and time; the
+  UI loop calls `iosim_text_press_tick`, which selects the word once 0.5 s
+  have passed. A move past 10 points or a touch end cancels it. The fixture
+  runs through a real event FIFO and checks the selection plus captured
+  handles.
+- Remaining text-selection gaps: the edit menu (UIMenuController) and
+  multi-line drag affordances beyond the single active touch.
 
 ## 2026-11-20: CALayer.transform (2D CATransform3D)
 

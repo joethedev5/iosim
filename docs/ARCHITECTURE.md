@@ -903,8 +903,11 @@ emoji and mic artwork.
 
 `UITextView` shares the first-responder role. Touching an editable text view
 focuses it and maps the touch to a byte index in the wrapped text; a second
-tap within 350 ms selects the word under the finger. A drag continues from
-the initial index (or from the selected word's start after a double tap):
+tap within 350 ms selects the word under the finger. A touch held for half a
+second without moving 10 points promotes to the same word selection through a
+per-frame UI-loop tick, so no timer thread is involved. A drag continues from
+the initial index (or from the selected word's start after a double tap or
+long press):
 `touchesMoved:` recomputes the index under the finger and selects the span
 between it and the anchor, collapsing back to a caret when the finger
 returns to the anchor, and `touchesEnded:` closes the drag.

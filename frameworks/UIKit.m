@@ -799,6 +799,10 @@ typedef enum {
     unsigned long _dragAnchor;
     BOOL _dragging;
     int _dragHandle;
+    CGPoint _pressPoint;
+    double _pressStartTime;
+    unsigned long _pressIndex;
+    BOOL _pressPending;
 }
 - (id)text;
 - (void)setText:(id)text;
@@ -816,6 +820,10 @@ typedef enum {
 - (BOOL)resignFirstResponder;
 - (BOOL)isFirstResponder;
 @end
+
+/* The text view holding a touch that may become a long-press selection;
+ * the UI loop promotes it once the press duration elapses. */
+static UITextView *g_pendingPressEditor;
 
 @interface UIImageView : UIView {
 @public
@@ -3869,6 +3877,11 @@ static void text_index_point_in_view(UITextView *editor,
     }
     _dragHandle = 0;
     double now = iosim_now();
+    _pressPoint = point;
+    _pressStartTime = now;
+    _pressIndex = index;
+    _pressPending = YES;
+    g_pendingPressEditor = self;
     if (now - _lastTapTime < 0.35)
     {
         NSRange word = text_word_range(text, index);
@@ -3903,6 +3916,17 @@ static void text_index_point_in_view(UITextView *editor,
     (void)event;
     UITouch *touch = [touches anyObject];
     CGPoint point = touch ? [touch locationInView:self] : CGPointMake(0, 0);
+    if (_pressPending)
+    {
+        double dx = point.x - _pressPoint.x;
+        double dy = point.y - _pressPoint.y;
+        if (dx * dx + dy * dy > 100.0)
+        {
+            _pressPending = NO;
+            if (g_pendingPressEditor == self)
+                g_pendingPressEditor = 0;
+        }
+    }
     unsigned long index;
     if (_dragHandle == 1 || _dragHandle == 2)
     {
@@ -3946,6 +3970,9 @@ static void text_index_point_in_view(UITextView *editor,
     (void)event;
     _dragging = NO;
     _dragHandle = 0;
+    _pressPending = NO;
+    if (g_pendingPressEditor == self)
+        g_pendingPressEditor = 0;
 }
 - (void)insertText:(id)text
 {
@@ -4010,6 +4037,37 @@ static void text_index_point_in_view(UITextView *editor,
     _needsLayout = YES;
 }
 @end
+
+/* Once a held touch passes the long-press duration, select the word under
+ * the original index. Called from the UI loop; returns 1 when the selection
+ * changed so the caller redraws. */
+static int iosim_text_press_tick(void)
+{
+    UITextView *editor = g_pendingPressEditor;
+    if (!editor || !editor->_pressPending)
+        return 0;
+    if (iosim_now() - editor->_pressStartTime < 0.5)
+        return 0;
+    editor->_pressPending = NO;
+    g_pendingPressEditor = 0;
+    const char *text = editor->_text ? iosim_string_cstr(editor->_text) : "";
+    if (!text)
+        text = "";
+    NSRange word = text_word_range(text, editor->_pressIndex);
+    if (word.length > 0)
+    {
+        [editor setSelectedRange:word];
+        editor->_dragAnchor = word.location;
+        editor->_dragging = YES;
+        editor->_dragHandle = 0;
+    }
+    else
+    {
+        [editor setSelectedRange:NSMakeRange(editor->_pressIndex, 0)];
+    }
+    editor->_needsLayout = YES;
+    return 1;
+}
 
 @implementation UITextField
 - (id)initWithFrame:(CGRect)frame
@@ -14588,6 +14646,8 @@ int UIApplicationMain(int argc, char **argv, id principal, id delegateName)
                 redraw = 1;
             }
             if ([window tickGestureRecognizers])
+                redraw = 1;
+            if (iosim_text_press_tick())
                 redraw = 1;
             if (iosim_foundation_tick())
                 redraw = 1;

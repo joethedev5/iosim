@@ -323,6 +323,11 @@ the end knob from the font metrics, drags it 20 points right (the selection
 grows past five characters but stays inside `hello world`), then grabs the
 new start knob and pulls it right; the selection start moves to 3 with a
 3-character span. This covers knob hit testing and per-endpoint dragging.
+`tests/textview_long_press_test.m` starts with a synthetic touch inside
+`world` and runs the real event-loop path through a FIFO: a `dispatch_after`
+block at 900 ms observes `{6,5}`, captures the frame and exits. The PNG holds
+12976 highlight pixels and 1908 blue handle/caret pixels, proving the
+per-frame long-press tick selected the word and marked it with handles.
 
 ### Text input: multiline UITextView and hardware keys
 

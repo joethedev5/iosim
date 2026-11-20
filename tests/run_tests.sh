@@ -3668,6 +3668,45 @@ check "[handle] end 1 1" "$out" \
 check "[handle] start 1" "$out" \
     "dragging the start handle moves the selection start"
 
+rm -f "$T/textview_press.fifo"
+mkfifo "$T/textview_press.fifo"
+"$ROOT/tools/build_app.sh" "$ROOT/tests/textview_long_press_test.m" \
+    "$T/textview_long_press_test" >/dev/null
+out="$(IOSIM_EVENT_FIFO="$T/textview_press.fifo" \
+    IOSIM_TEST_PNG="$T/textview_press.png" \
+    DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" \
+    "$T/textview_long_press_test" 2>&1)"
+check "[press] long 1 range 6 5" "$out" \
+    "holding a touch selects the word under the finger after 0.5s"
+check "[press] png written" "$out" \
+    "the long-press fixture captures the selected frame"
+if out="$(python3 - "$ROOT/tools" "$T/textview_press.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+highlight = handles = 0
+for y in range(100 * 3, 260 * 3):
+    for x in range(24 * 3, 344 * 3):
+        c = pngpixel.px(rows, bpp, x, y)
+        r, g, b = ((c >> 16) & 255), ((c >> 8) & 255), (c & 255)
+        if abs(r - 0x33) < 25 and abs(g - 0x50) < 25 and abs(b - 0x7a) < 25:
+            highlight += 1
+        if abs(r - 0x42) < 25 and abs(g - 0x6b) < 25 and abs(b - 0xf2) < 25:
+            handles += 1
+if highlight < 500:
+    raise SystemExit("long-press selection highlight missing: %d" % highlight)
+if handles < 400:
+    raise SystemExit("long-press handles missing: %d" % handles)
+print("ok   long press paints %d highlight and %d handle pixels:" %
+      (highlight, handles))
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL UITextView long press"; echo "$out"; fails=$((fails+1))
+fi
+
 if [ "$fails" -ne 0 ]; then
     echo "$fails test(s) failed" >&2
     exit 1
