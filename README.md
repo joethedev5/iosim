@@ -51,6 +51,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | Real app suspension: home stops the process, the icon resumes it in place | ✅ |
 | App switcher: bottom-edge gestures, cached frames, resume, swipe-up kill | ✅ |
 | Multi-page home screen: 16-slot pages, page dots, horizontal swipe paging | ✅ |
+| Spotlight search: pill opens a keyboard-driven search over installed apps | ✅ |
 | UIView 2D affine transforms (translate/scale/rotate), layout callbacks, UIScrollView offsets | ✅ (basic) |
 | Layer clipping (`clipsToBounds`/`masksToBounds`), shadows and borders | ✅ |
 | Switch, slider, segmented, progress, page and activity controls in the iOS 26 glass design | ✅ |

@@ -590,6 +590,20 @@ Tapping the icon then reports a fresh launch and the fixture's `[touch] app
 ready` appears again, confirming the kill really discarded the old process
 state instead of resuming it.
 
+Spotlight is driven by the same event stream. The test taps the search pill
+at (201, 718.5) pt, types `t`, `a`, `b` with `ui key`, and watches the count
+narrow from 5 to 2 to 1 (`[SpringBoard] search results N`). The screenshot
+taken then shows the Q key pixel `#444448` (the software keyboard) and the
+first result row at (201, 270) pt painted `#1a1e2a`. Tapping the row logs
+`search selected Tab` and `resuming Tab (pid ...)`: search found the real
+installed app and resumed its suspended process. The query is matched
+case-insensitively against every installed app, so the earlier two-character
+query also matched the stock Contacts app, which is correct Spotlight
+behavior. The resume only succeeds because the suite installs TextViewApp
+after Tab was suspended and the manifest reload keeps Tab's pid; without that
+the search result would start a second process instead of continuing the
+stopped one.
+
 The home grid pages in groups of 16 once seven stock apps and nine
 installed apps are present. The test installs ten extra page fixtures (21 grid apps in
 all), then swipes left: SpringBoard reports `home page 2 of 2`, draws the

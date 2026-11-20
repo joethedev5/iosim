@@ -395,11 +395,23 @@ fi
 # ---------- 7c. app switcher: real snapshot, real resume ----------
 "$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
 sleep 0.6
+swc_before="$(grep -Fc "[SpringBoard] app switcher opened" "$SBLOG" 2>/dev/null || true)"
 "$ROOT/tools/iosimctl" ui "$UDID" switcher >/dev/null
-if wait_log "app switcher opened (1 suspended)"; then
+swc_now="$swc_before"
+i=0
+while [ "$i" -lt 50 ]; do
+    swc_now="$(grep -Fc "[SpringBoard] app switcher opened" "$SBLOG" 2>/dev/null || true)"
+    [ "$swc_now" -gt "$swc_before" ] && break
+    sleep 0.1
+    i=$((i+1))
+done
+# Previous apps stay suspended, so the card count is not a fixed number; the
+# switcher must open and report the apps it is holding suspended.
+if [ "$swc_now" -gt "$swc_before" ] &&
+    grep -Eq 'app switcher opened \([1-9][0-9]* suspended\)' "$SBLOG"; then
     echo "ok   app switcher lists the suspended app"
 else
-    echo "FAIL app switcher"; fails=$((fails+1))
+    echo "FAIL app switcher ($swc_before -> $swc_now)"; fails=$((fails+1))
 fi
 SWITCHPIC="$IOSIM_HOME/Devices/$UDID/data/var/run/switcher/com.iosim.touch.png"
 if out="$(python3 - "$SWITCHPIC" <<'PY'
@@ -446,8 +458,9 @@ while [ "$i" -lt 50 ]; do
     sleep 0.1
     i=$((i+1))
 done
+opened_last="$(grep -F "[SpringBoard] app switcher opened" "$SBLOG" 2>/dev/null | tail -1)"
 if [ "$opened_now" -gt "$opened_before" ] &&
-    grep -Fq -- "app switcher opened (1 suspended)" "$SBLOG"; then
+    printf '%s\n' "$opened_last" | grep -Eq '\([1-9][0-9]* suspended\)'; then
     echo "ok   an in-app bottom-edge swipe suspends and opens the switcher"
 else
     echo "FAIL in-app switcher gesture ($opened_before -> $opened_now)"
@@ -496,6 +509,10 @@ if [ -n "$closed_pid" ] && ! kill -0 "$closed_pid" 2>/dev/null; then
 else
     echo "FAIL switcher termination (pid=$closed_pid)"; fails=$((fails+1))
 fi
+# The switcher stays open on the remaining suspended app's card after the
+# kill, so return home before tapping the home-screen icon.
+"$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
+sleep 0.5
 launch_before="$(grep -Fc "[SpringBoard] launching TouchApp" "$SBLOG" 2>/dev/null || true)"
 "$ROOT/tools/iosimctl" ui "$UDID" tap 154.7222 322.5 >/dev/null
 launch_now="$launch_before"
@@ -911,6 +928,56 @@ if wait_log "[textview] lines=2 text=ab|d"; then
     echo "ok   backspace deletes and typing continues"
 else
     echo "FAIL text view backspace"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
+sleep 0.4
+
+# ---------- 9e. Spotlight search over installed apps ----------
+"$ROOT/tools/iosimctl" ui "$UDID" tap 201 718.5 >/dev/null
+if wait_log "[SpringBoard] search opened"; then
+    echo "ok   tapping the search pill opens Spotlight"
+else
+    echo "FAIL search open"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" key t >/dev/null
+"$ROOT/tools/iosimctl" ui "$UDID" key a >/dev/null
+"$ROOT/tools/iosimctl" ui "$UDID" key b >/dev/null
+if wait_log "[SpringBoard] search results 1"; then
+    echo "ok   typing narrows the results to the matching app"
+else
+    echo "FAIL search filtering"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/search.png" >/dev/null
+if out="$(python3 - "$ROOT/tools" "$T/search.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+key = pngpixel.px(rows, bpp, 23 * 3, 620 * 3)
+r, g, b = (key >> 16) & 255, (key >> 8) & 255, key & 255
+if not (50 <= r <= 100 and abs(r - g) < 12 and abs(g - b) < 12):
+    raise SystemExit("search keyboard not visible: %06x" % key)
+row = pngpixel.px(rows, bpp, 201 * 3, 270 * 3)
+r, g, b = (row >> 16) & 255, (row >> 8) & 255, row & 255
+if not (r < 60 and b > 30):
+    raise SystemExit("search result row not drawn: %06x" % row)
+print("ok   Spotlight draws the result row and the software keyboard")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL search rendering"; echo "$out"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" tap 200 270 >/dev/null
+if wait_log "[SpringBoard] search selected Tab"; then
+    echo "ok   tapping a search result selects that app"
+else
+    echo "FAIL search selection"; fails=$((fails+1))
+fi
+if wait_log "resuming Tab (pid"; then
+    echo "ok   the search result resumes the suspended app"
+else
+    echo "FAIL search resume"; fails=$((fails+1))
 fi
 "$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
 sleep 0.4

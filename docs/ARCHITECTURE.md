@@ -571,12 +571,25 @@ writes the same shared framebuffer. `home` (type 7) makes the app run
 `sceneWillResignActive:`/`sceneDidEnterBackground:`, release the stream and
 SIGSTOP itself; the same process resumes from its icon or switcher card.
 `apps` (type 8) reloads the manifest and redraws when an install changes the
-app set.
+app set. A reload carries every suspended app's pid and cached frame over to
+its new manifest entry (matched by bundle identifier), so installing an app
+does not forget the apps already stopped; a name that disappeared from the
+manifest has its process continued and terminated instead of leaking.
 
 Stock system apps (Fitness, Watch, Reminders, Files, Preview, Utilities,
 Contacts, Safari, Messages) are drawn from measured vector artwork. Their
 Apple executables are not part of this runtime, so tapping one reports that no
 executable is installed rather than faking a launch.
+
+The search pill opens a Spotlight-style overlay over the dimmed wallpaper: a
+34 pt title, a glass search field with a caret, matching app rows (icon and
+name, up to four visible) and the same software keyboard apps use. The field
+shares the runtime's first-responder path through a hidden `UITextField`, so
+on-screen keyboard taps and `ui key` records edit the same query; matching is
+case-insensitive substring search over the installed app names, including
+stock apps. Tapping a row launches or resumes that app, and `home` closes the
+overlay. Each keystroke logs the result count, which is what the tests assert
+alongside the drawn row and keyboard pixels.
 
 ## 3. Why this design
 

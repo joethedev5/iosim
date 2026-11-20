@@ -65,6 +65,7 @@ extern int  iosim_dispatch_drain_main(void);
 extern const char *iosim_string_cstr(id string);
 extern int  strcmp(const char *a, const char *b);
 extern unsigned long strlen(const char *s);
+extern char *strstr(const char *haystack, const char *needle);
 extern void *malloc(unsigned long size);
 extern void  free(void *ptr);
 extern void *memcpy(void *dst, const void *src, unsigned long n);
@@ -6866,6 +6867,28 @@ static void shell_load_apps(void)
         "HelloSim", "GraphicsApp", "ListApp", "AutoLayout",
         "TextInput", "Alert", "NumberPad", "Controls"
     };
+    /* Installing an app rewrites the manifest; suspended apps must keep
+     * their pid and cached frame so their icons still resume in place. */
+    struct saved_app {
+        char bundle[128];
+        char name[128];
+        int pid;
+        char snapshot[1024];
+    };
+    static struct saved_app saved[SHELL_MAX_APPS];
+    int saved_count = 0;
+    for (int i = 0; i < g_shell_app_count; i++)
+    {
+        if (g_shell_apps[i].pid <= 0)
+            continue;
+        struct saved_app *keep = &saved[saved_count++];
+        shell_copy(keep->bundle, (int)sizeof(keep->bundle),
+                   g_shell_apps[i].bundle);
+        shell_copy(keep->name, (int)sizeof(keep->name), g_shell_apps[i].name);
+        keep->pid = g_shell_apps[i].pid;
+        shell_copy(keep->snapshot, (int)sizeof(keep->snapshot),
+                   g_shell_apps[i].snapshot);
+    }
     g_shell_app_count = 0;
     shell_add_app("Fitness", "", "", "", 0, 0);
     shell_add_app("Watch", "", "", "", 1, 0);
@@ -6938,6 +6961,33 @@ static void shell_load_apps(void)
 
     shell_add_app("Safari", "", "", "", 7, 1);
     shell_add_app("Messages", "", "", "", 8, 1);
+
+    for (int i = 0; i < g_shell_app_count; i++)
+    {
+        for (int j = 0; j < saved_count; j++)
+        {
+            if (saved[j].pid <= 0)
+                continue;
+            int match;
+            if (g_shell_apps[i].bundle[0] && saved[j].bundle[0])
+                match = strcmp(g_shell_apps[i].bundle, saved[j].bundle) == 0;
+            else
+                match = strcmp(g_shell_apps[i].name, saved[j].name) == 0;
+            if (!match)
+                continue;
+            g_shell_apps[i].pid = saved[j].pid;
+            shell_copy(g_shell_apps[i].snapshot,
+                       (int)sizeof(g_shell_apps[i].snapshot),
+                       saved[j].snapshot);
+            saved[j].pid = 0;
+            break;
+        }
+    }
+    /* A name that vanished from the manifest no longer has a home screen
+     * slot; stop its process instead of leaving it suspended forever. */
+    for (int j = 0; j < saved_count; j++)
+        if (saved[j].pid > 0)
+            iosim_terminate_app(saved[j].pid);
 }
 
 static void shell_label(const char *name, int cx, int baseline, double scale)
@@ -7476,6 +7526,9 @@ static int g_switcher_index;
 static volatile int g_switcher_requested;
 static int g_sb_down;
 static double g_sb_down_x, g_sb_down_y;
+static int g_search;
+static char g_search_query[64];
+static UITextField *g_search_field;
 
 static void shell_repaint(int fbWidth, int fbHeight, double scale,
                           const char *path, int switcher);
@@ -7676,6 +7729,168 @@ static void shell_draw_switcher(int fbWidth, int fbHeight, double scale,
         iosim_fb_present(path);
 }
 
+/* Spotlight-style search over the installed apps. The search field shares
+ * the runtime's text-input role through a hidden UITextField, so both the
+ * on-screen keyboard and hardware key records edit the same query. */
+static void shell_lower_copy(char *out, const char *in, unsigned long cap)
+{
+    unsigned long i = 0;
+    for (; in && *in && i + 1 < cap; in++)
+        out[i++] = (*in >= 'A' && *in <= 'Z')
+                       ? (char)(*in - 'A' + 'a')
+                       : *in;
+    out[i] = 0;
+}
+
+static int shell_search_matches(const char *name)
+{
+    char lowered[128], wanted[64];
+    shell_lower_copy(lowered, name, sizeof(lowered));
+    shell_lower_copy(wanted, g_search_query, sizeof(wanted));
+    if (!wanted[0])
+        return 0;
+    return strstr(lowered, wanted) != 0;
+}
+
+static int shell_search_result_apps(int *out, int cap)
+{
+    int n = 0;
+    for (int i = 0; i < g_shell_app_count && n < cap; i++)
+    {
+        if (!shell_search_matches(g_shell_apps[i].name))
+            continue;
+        if (out)
+            out[n] = i;
+        n++;
+    }
+    return n;
+}
+
+static void shell_refresh_search_query(void)
+{
+    if (!g_search_field)
+        return;
+    const char *text = iosim_string_cstr(g_search_field->_text);
+    snprintf(g_search_query, sizeof(g_search_query), "%s",
+             text ? text : "");
+}
+
+static void shell_draw_search(int fbWidth, int fbHeight, double scale,
+                              const char *path)
+{
+    shell_wallpaper_build(fbWidth, fbHeight);
+    if (g_shell_wallpaper)
+        iosim_fb_paste_xrgb(g_shell_wallpaper);
+    else
+    {
+        iosim_fb_set_opacity(1.0);
+        iosim_fb_fill_rect(0, 0, fbWidth, fbHeight, 0x0b1020);
+    }
+    iosim_fb_set_opacity(0.55);
+    iosim_fb_fill_rect(0, 0, fbWidth, fbHeight, 0x000000);
+    iosim_fb_set_opacity(1.0);
+
+    double W = fbWidth / scale;
+    iosim_fb_font_text((int)(24 * scale), (int)(100 * scale), "Search",
+                       IOSIM_FONT_SEMIBOLD, 34, scale, 0xffffff);
+
+    int fx = (int)(24 * scale + 0.5);
+    int fy = (int)(160 * scale + 0.5);
+    int fw = (int)((W - 48) * scale + 0.5);
+    int fh = (int)(52 * scale + 0.5);
+    iosim_fb_fill_round_rect(fx, fy, fw, fh, (int)(14 * scale + 0.5),
+                             0x1b1f2b);
+    const char *shown = g_search_query[0] ? g_search_query : "Search apps";
+    unsigned fg = g_search_query[0] ? 0xffffff : 0x7c8291;
+    iosim_fb_font_text(fx + (int)(16 * scale),
+                       fy + fh / 2 + (int)(6 * scale), shown,
+                       IOSIM_FONT_REGULAR, 17, scale, fg);
+    int caretX = fx + (int)(16 * scale) +
+                 iosim_fb_font_text_width(shown, IOSIM_FONT_REGULAR, 17,
+                                          scale);
+    iosim_fb_fill_rect(caretX + (int)(2 * scale), fy + (int)(14 * scale),
+                       (int)(2 * scale), (int)(24 * scale), 0x426bf2);
+
+    int apps[16];
+    int total = shell_search_result_apps(apps, 16);
+    int rows = total > 4 ? 4 : total;
+    for (int i = 0; i < rows; i++)
+    {
+        struct shell_app *a = &g_shell_apps[apps[i]];
+        int rowY = (int)((240 + i * 64) * scale + 0.5);
+        iosim_fb_fill_round_rect((int)(24 * scale), rowY,
+                                 (int)((W - 48) * scale),
+                                 (int)(56 * scale), (int)(14 * scale),
+                                 0x1a1e2a);
+        int icon = (int)(40 * scale + 0.5);
+        int iconX = (int)(32 * scale + 0.5);
+        shell_stock_icon(a->stock, iconX, rowY + (int)(8 * scale), icon,
+                         scale);
+        iosim_fb_font_text(iconX + icon + (int)(16 * scale),
+                           rowY + (int)(36 * scale), a->name,
+                           IOSIM_FONT_REGULAR, 17, scale, 0xffffff);
+    }
+    if (g_search_query[0] && total == 0)
+    {
+        const char *none = "No Results";
+        int tw = iosim_fb_font_text_width(none, IOSIM_FONT_SEMIBOLD, 17,
+                                          scale);
+        iosim_fb_font_text((fbWidth - tw) / 2, (int)(260 * scale), none,
+                           IOSIM_FONT_SEMIBOLD, 17, scale, 0xd8d5e0);
+    }
+    draw_keyboard(fbWidth, fbHeight, scale);
+    draw_device_chrome(fbWidth, scale);
+    if (path && *path)
+        iosim_fb_present(path);
+}
+
+static int shell_search_hit(double px, double py, int fbWidth, double scale)
+{
+    double W = fbWidth / scale;
+    if (px < 24.0 || px > W - 24.0)
+        return -1;
+    if (py < 240.0 || py >= 240.0 + 4 * 64.0)
+        return -1;
+    int row = (int)((py - 240.0) / 64.0);
+    int apps[16];
+    int total = shell_search_result_apps(apps, 16);
+    if (row >= 4 || row >= total)
+        return -1;
+    return apps[row];
+}
+
+static void shell_open_search(int fbWidth, int fbHeight, double scale,
+                              const char *path)
+{
+    if (!g_search_field)
+    {
+        g_search_field = [[UITextField alloc]
+            initWithFrame:CGRectMake(24, 160, 354, 52)];
+        g_search_field.textColor = [UIColor whiteColor];
+        g_search_field.font = [UIFont systemFontOfSize:17];
+    }
+    g_search_field.text = @"";
+    g_search_query[0] = 0;
+    g_search = 1;
+    [g_search_field becomeFirstResponder];
+    printf("[SpringBoard] search opened\n");
+    fflush(0);
+    shell_draw_search(fbWidth, fbHeight, scale, path);
+}
+
+static void shell_close_search(int fbWidth, int fbHeight, double scale,
+                               const char *path)
+{
+    g_search = 0;
+    if (g_search_field)
+        [g_search_field resignFirstResponder];
+    printf("[SpringBoard] search closed\n");
+    fflush(0);
+    shell_draw(fbWidth, fbHeight, scale);
+    if (path && *path)
+        iosim_fb_present(path);
+}
+
 static int shell_switcher_hit(int xpx, int ypx, int fbWidth, int fbHeight,
                               double scale)
 {
@@ -7847,6 +8062,11 @@ static int run_springboard(void)
                 g_home_page = shell_page_count() - 1;
             if (g_home_page < 0)
                 g_home_page = 0;
+            if (g_search)
+            {
+                shell_draw_search(fbWidth, fbHeight, scale, path);
+                continue;
+            }
             shell_draw(fbWidth, fbHeight, scale);
             if (path && *path)
                 iosim_fb_present(path);
@@ -7854,6 +8074,12 @@ static int run_springboard(void)
         }
         if (r == 1 && type == 9)
         {
+            if (g_search)
+            {
+                g_search = 0;
+                if (g_search_field)
+                    [g_search_field resignFirstResponder];
+            }
             int count = shell_suspended_count();
             g_switcher = !g_switcher;
             if (g_switcher)
@@ -7883,6 +8109,12 @@ static int run_springboard(void)
             g_sb_down = 0;
             if (!down)
                 continue;
+            if (g_search)
+            {
+                if (g_sb_down_y > fbHeight / scale - 45 && dy < -100)
+                    shell_close_search(fbWidth, fbHeight, scale, path);
+                continue;
+            }
             if (!g_switcher && g_sb_down_y > fbHeight / scale - 45 &&
                 dy < -100 && dx > -140 && dx < 140)
             {
@@ -7943,11 +8175,37 @@ static int run_springboard(void)
             }
             continue;
         }
-        if (r == 1 && type == 7 && g_switcher)
+        if (r == 1 && (type == 5 || type == 6) && g_search)
         {
-            g_switcher = 0;
-            shell_repaint(fbWidth, fbHeight, scale, path, 0);
+            if (type == 5)
+            {
+                char buf[2] = {(char)x, 0};
+                [g_search_field
+                    insertText:[NSString stringWithUTF8String:buf]];
+            }
+            else
+                [g_search_field deleteBackward];
+            shell_refresh_search_query();
+            int apps[16];
+            int total = shell_search_result_apps(apps, 16);
+            printf("[SpringBoard] search results %d\n", total);
+            fflush(0);
+            shell_draw_search(fbWidth, fbHeight, scale, path);
             continue;
+        }
+        if (r == 1 && type == 7)
+        {
+            if (g_search)
+            {
+                shell_close_search(fbWidth, fbHeight, scale, path);
+                continue;
+            }
+            if (g_switcher)
+            {
+                g_switcher = 0;
+                shell_repaint(fbWidth, fbHeight, scale, path, 0);
+                continue;
+            }
         }
         if (r != 1 || type != 1)
             continue;
@@ -7979,6 +8237,36 @@ static int run_springboard(void)
             }
             continue;
         }
+        if (g_search)
+        {
+            int appIndex = shell_search_hit(px, py, fbWidth, scale);
+            if (appIndex >= 0)
+            {
+                g_search = 0;
+                [g_search_field resignFirstResponder];
+                printf("[SpringBoard] search selected %s\n",
+                       g_shell_apps[appIndex].name);
+                fflush(0);
+                shell_launch(appIndex, fbWidth, fbHeight, scale, path);
+                continue;
+            }
+            if (keyboard_handle_tap(x, y, fbWidth, fbHeight, scale))
+            {
+                shell_refresh_search_query();
+                int apps[16];
+                int total = shell_search_result_apps(apps, 16);
+                printf("[SpringBoard] search results %d\n", total);
+                fflush(0);
+                shell_draw_search(fbWidth, fbHeight, scale, path);
+                continue;
+            }
+            if (py < 550.0)
+            {
+                shell_close_search(fbWidth, fbHeight, scale, path);
+                continue;
+            }
+            continue;
+        }
         int hit = -1, slot = 0;
         for (int i = 0; i < g_shell_app_count && hit < 0; i++)
         {
@@ -7996,6 +8284,12 @@ static int run_springboard(void)
                     hit = i;
             }
             slot++;
+        }
+        if (hit < 0 && px >= 158.0 && px <= 244.0 && py >= 698.0 &&
+            py <= 739.0)
+        {
+            shell_open_search(fbWidth, fbHeight, scale, path);
+            continue;
         }
         if (hit < 0 && px >= 201.0 - 80 && px < 201.0 + 80 &&
             py >= 806.0 - 44 && py < 806.0 + 44)
