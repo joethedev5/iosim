@@ -74,6 +74,9 @@ void dispatch_retain(void *queue) { (void)queue; }
 
 static void mainq_push(void *block, double when)
 {
+    if (getenv("IOSIM_DEBUG_DISPATCH"))
+        fprintf(stderr, "[dispatch] enqueue %p when %.3f now %.3f\n", block,
+                when, now_seconds());
     pthread_mutex_lock(&mainq_lock);
     int next = (mainq_tail + 1) % MAINQ_CAP;
     if (next != mainq_head)
@@ -169,6 +172,9 @@ int iosim_dispatch_drain_main(void)
         pthread_mutex_unlock(&mainq_lock);
         if (!block)
             break;
+        if (getenv("IOSIM_DEBUG_DISPATCH"))
+            fprintf(stderr, "[dispatch] run %p at %.3f\n", block,
+                    now_seconds());
         call_block(block);
         _Block_release(block);
         ran++;
@@ -553,9 +559,6 @@ void *xpc_connection_create_mach_service(const char *name, void *queue, unsigned
 void *xpc_connection_create(const char *name, void *queue)
 {
     (void)queue;
-    struct xpc_connection *existing = find_connection(name);
-    if (existing)
-        return existing;
     struct xpc_connection *c = calloc(1, sizeof(*c));
     c->name = strdup(name ? name : "");
     if (connection_count < 64)
@@ -574,9 +577,16 @@ void xpc_connection_send_message(void *conn, void *message)
 {
     struct xpc_connection *c = conn;
     if (!c) return;
-    struct xpc_connection *peer = find_connection(c->name);
-    if (peer && peer->handler)
-        call_block(peer->handler);
+    for (int i = 0; i < connection_count; i++)
+    {
+        struct xpc_connection *peer = connections[i];
+        if (peer && peer != c && peer->handler &&
+            strcmp(peer->name, c->name) == 0)
+        {
+            call_block(peer->handler);
+            break;
+        }
+    }
     (void)message;
 }
 void xpc_connection_send_message_with_reply(void *conn, void *message, void *queue, void *handler)

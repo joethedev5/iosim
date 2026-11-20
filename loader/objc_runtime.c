@@ -401,7 +401,8 @@ void *objc_lookup_imp(void *obj, void *sel)
 {
     if (!obj || !sel)
     {
-        fprintf(stderr, "objc: nil receiver or selector\n");
+        fprintf(stderr, "objc: nil receiver or selector (obj=%p sel=%s)\n",
+                obj, sel ? (const char *)sel : "(null)");
         _exit(1);
     }
     const char *name = (const char *)sel;

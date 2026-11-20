@@ -1248,8 +1248,8 @@ int iosim_animations_active(void)
 - (void)reloadData { _needsReload = NO; }
 - (id)dequeueReusableCellWithIdentifier:(id)identifier
 {
-    return [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault
-                                   reuseIdentifier:identifier];
+    (void)identifier;
+    return nil;
 }
 - (void)handleTapAtPoint:(CGPoint)point
 {
@@ -1297,18 +1297,27 @@ id UIApplicationDidFinishLaunchingNotification = @"UIApplicationDidFinishLaunchi
     UIView *hit = [self hitTest:point];
     if (hit && [hit isKindOfClass:[UIControl class]])
         [(UIControl *)hit sendActionsForControlEvents:UIControlEventTouchUpInside];
-    UIView *walker = hit;
-    CGPoint local = point;
-    while (walker)
+    UIView *tableHit = hit;
+    while (tableHit && ![tableHit isKindOfClass:[UITableView class]])
+        tableHit = [tableHit superview];
+    if (tableHit)
     {
-        if ([walker isKindOfClass:[UITableView class]])
+        double ox = 0, oy = 0;
+        UIView *anc = tableHit;
+        while (anc)
         {
-            [(UITableView *)walker handleTapAtPoint:local];
-            break;
+            ox += anc->_frame.origin.x;
+            oy += anc->_frame.origin.y;
+            if ([anc isKindOfClass:[UIScrollView class]])
+            {
+                UIScrollView *sc = (UIScrollView *)anc;
+                ox -= sc->_contentOffset.x;
+                oy -= sc->_contentOffset.y;
+            }
+            anc = [anc superview];
         }
-        local.x -= walker->_frame.origin.x;
-        local.y -= walker->_frame.origin.y;
-        walker = [walker superview];
+        [(UITableView *)tableHit
+            handleTapAtPoint:CGPointMake(point.x - ox, point.y - oy)];
     }
 }
 - (void)makeKeyAndVisible { g_keyWindow = self; }
@@ -1566,9 +1575,11 @@ static void render_layer(CALayer *layer, double parentX, double parentY,
     int w = (int)(frame.size.width * scale + 0.5);
     int h = (int)(frame.size.height * scale + 0.5);
     iosim_fb_set_opacity(alpha);
-    if (layer->_backgroundColor && w > 0 && h > 0)
+    if (layer->_backgroundColor && layer->_backgroundColor->_a > 0.001 &&
+        w > 0 && h > 0)
     {
         unsigned color = color_rgb(layer->_backgroundColor);
+        iosim_fb_set_opacity(alpha * layer->_backgroundColor->_a);
         double radius = layer_key_value(layer, "cornerRadius",
                                         layer->_cornerRadius);
         if (radius > 0)
@@ -1576,6 +1587,7 @@ static void render_layer(CALayer *layer, double parentX, double parentY,
                                      color);
         else
             iosim_fb_fill_rect(x, y, w, h, color);
+        iosim_fb_set_opacity(alpha);
     }
     if ([layer isKindOfClass:[CAGradientLayer class]])
     {
@@ -1585,9 +1597,17 @@ static void render_layer(CALayer *layer, double parentX, double parentY,
         {
             a = color_rgb((UIColor *)[g->_colors objectAtIndex:0]);
             b = color_rgb((UIColor *)[g->_colors objectAtIndex:g->_colors->_count - 1]);
-            iosim_fb_fill_linear_gradient(x, y, w, h, a, b, g->_startPoint.x,
-                                          g->_startPoint.y, g->_endPoint.x,
-                                          g->_endPoint.y);
+            if (layer->_cornerRadius > 0)
+                iosim_fb_fill_linear_gradient_round_rect(
+                    x, y, w, h, (int)(layer->_cornerRadius * scale + 0.5), a,
+                    b, g->_startPoint.x, g->_startPoint.y, g->_endPoint.x,
+                    g->_endPoint.y);
+            else
+                iosim_fb_fill_linear_gradient(x, y, w, h, a, b,
+                                              g->_startPoint.x,
+                                              g->_startPoint.y,
+                                              g->_endPoint.x,
+                                              g->_endPoint.y);
         }
     }
     else if ([layer isKindOfClass:[CAShapeLayer class]])
@@ -1645,15 +1665,18 @@ static void render_view(UIView *view, double originX, double originY,
         y = (int)(cy - h / 2.0 + 0.5);
     }
 
-    if (view->_backgroundColor && w > 0 && h > 0)
+    if (view->_backgroundColor && view->_backgroundColor->_a > 0.001 &&
+        w > 0 && h > 0)
     {
         unsigned color = color_rgb(view->_backgroundColor);
+        iosim_fb_set_opacity(alpha * view->_backgroundColor->_a);
         double radius = view->_layer ? view->_layer->_cornerRadius : 0;
         if (radius > 0)
             iosim_fb_fill_round_rect(x, y, w, h, (int)(radius * scale + 0.5),
                                      color);
         else
             iosim_fb_fill_rect(x, y, w, h, color);
+        iosim_fb_set_opacity(alpha);
     }
 
     if (view->_layer)
@@ -1781,6 +1804,8 @@ static void render_view(UIView *view, double originX, double originY,
     {
         UILabel *label = (UILabel *)view;
         const char *text = string_cstr(label->_text);
+        if (text && getenv("IOSIM_DEBUG_TEXT"))
+            printf("[text] %s at %d,%d %dx%d\n", text, x, y, w, h);
         if (text)
         {
             double points = label->_font ? label->_font->_size : 17.0;

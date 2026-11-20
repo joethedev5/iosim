@@ -36,6 +36,52 @@ struct cf_constant_string {
 
 extern void *objc_getClass(const char *name);
 
+
+static char *iosim_utf16_to_utf8(const unsigned short *s, unsigned long n)
+{
+    if (!s)
+        return (char *)"";
+    char *out = malloc(n * 4 + 1);
+    if (!out)
+        return (char *)"";
+    char *p = out;
+    for (unsigned long i = 0; i < n; i++)
+    {
+        unsigned int c = s[i];
+        if (c >= 0xD800 && c <= 0xDBFF && i + 1 < n)
+        {
+            unsigned int lo = s[i + 1];
+            if (lo >= 0xDC00 && lo <= 0xDFFF)
+            {
+                c = 0x10000 + ((c - 0xD800) << 10) + (lo - 0xDC00);
+                i++;
+            }
+        }
+        if (c < 0x80)
+            *p++ = (char)c;
+        else if (c < 0x800)
+        {
+            *p++ = (char)(0xC0 | (c >> 6));
+            *p++ = (char)(0x80 | (c & 0x3F));
+        }
+        else if (c < 0x10000)
+        {
+            *p++ = (char)(0xE0 | (c >> 12));
+            *p++ = (char)(0x80 | ((c >> 6) & 0x3F));
+            *p++ = (char)(0x80 | (c & 0x3F));
+        }
+        else
+        {
+            *p++ = (char)(0xF0 | (c >> 18));
+            *p++ = (char)(0x80 | ((c >> 12) & 0x3F));
+            *p++ = (char)(0x80 | ((c >> 6) & 0x3F));
+            *p++ = (char)(0x80 | (c & 0x3F));
+        }
+    }
+    *p = 0;
+    return out;
+}
+
 const char *iosim_string_cstr(id string)
 {
     if (!string)
@@ -43,6 +89,9 @@ const char *iosim_string_cstr(id string)
     struct cf_constant_string *cs = (struct cf_constant_string *)string;
     if (cs->flags == 0x7c8 && cs->cstr)
         return cs->cstr;
+    if (cs->flags == 0x7d0 && cs->cstr)
+        return iosim_utf16_to_utf8((const unsigned short *)cs->cstr,
+                                   cs->length);
     if (((Class)iosim_objc_class_of(string)) &&
         iosim_objc_is_kind_of(string, objc_getClass("NSString")))
     {
@@ -59,6 +108,9 @@ static const char *obj_cstr(id obj)
     struct cf_constant_string *cs = (struct cf_constant_string *)obj;
     if (cs->flags == 0x7c8 && cs->cstr)
         return cs->cstr;
+    if (cs->flags == 0x7d0 && cs->cstr)
+        return iosim_utf16_to_utf8((const unsigned short *)cs->cstr,
+                                   cs->length);
     if (iosim_objc_is_kind_of(obj, objc_getClass("NSString")))
         return ((NSString *)obj)->_cstr ? ((NSString *)obj)->_cstr : "";
     id desc = [obj description];
