@@ -7,6 +7,7 @@
 extern void *malloc(unsigned long size);
 extern void *calloc(unsigned long n, unsigned long size);
 extern void free(void *ptr);
+extern void *memcpy(void *dst, const void *src, unsigned long n);
 
 extern void iosim_fb_fill_rect(int x, int y, int w, int h, unsigned color);
 extern void iosim_fb_fill_ellipse(int cx, int cy, int rx, int ry,
@@ -18,6 +19,17 @@ extern void iosim_fb_fill_polygon(const double *xs, const double *ys,
 extern void iosim_fb_set_opacity(double opacity);
 extern int iosim_fb_push_clip(int x, int y, int w, int h);
 extern void iosim_fb_pop_clip(void);
+extern int iosim_fb_font_text_width(const char *text, int style,
+                                    double size_pt, double scale);
+extern void iosim_fb_font_text(int x, int baseline_y, const char *text,
+                               int style, double size_pt, double scale,
+                               unsigned color);
+extern void iosim_fb_font_metrics(int style, double size_pt, double scale,
+                                  int *ascent, int *descent, int *line_height);
+
+#define IOSIM_FONT_REGULAR 0
+#define IOSIM_FONT_BOLD 1
+#define IOSIM_FONT_SEMIBOLD 2
 extern void iosim_fb_blit_rgba_scaled(int x, int y, int w, int h,
                                       const unsigned char *rgba,
                                       int source_w, int source_h,
@@ -40,6 +52,14 @@ struct CGColor {
 };
 
 #define CG_COLOR_MAGIC 0x4347434fu
+#define CG_IMAGE_MAGIC 0x4347494du
+
+struct CGImage {
+    int refs;
+    unsigned magic;
+    int w, h;
+    unsigned char *rgba;
+};
 
 #define CG_MAX_PATH_POINTS 1024
 #define CG_MAX_PATHS 128
@@ -691,6 +711,36 @@ void CGContextScaleCTM(CGContextRef context, double sx, double sy)
     context->state.sy *= sy;
 }
 
+void iosim_cg_draw_text(CGContextRef context, const char *text, double x,
+                        double baseline, double size_pt, int bold,
+                        unsigned color)
+{
+    if (!context)
+        context = g_current_context;
+    if (!context || !text)
+        return;
+    double px, py;
+    cg_transform(context, x, baseline, &px, &py);
+    iosim_fb_set_opacity(context->base_alpha * context->state.alpha);
+    iosim_fb_font_text((int)(px + 0.5), (int)(py + 0.5), text,
+                       bold ? IOSIM_FONT_SEMIBOLD : IOSIM_FONT_REGULAR,
+                       size_pt, context->scale, color);
+    iosim_fb_set_opacity(1.0);
+}
+
+double iosim_cg_text_width(CGContextRef context, const char *text,
+                           double size_pt, int bold)
+{
+    if (!context)
+        context = g_current_context;
+    if (!context || !text)
+        return 0;
+    int pixels = iosim_fb_font_text_width(
+        text, bold ? IOSIM_FONT_SEMIBOLD : IOSIM_FONT_REGULAR, size_pt,
+        context->scale);
+    return context->scale > 0 ? pixels / context->scale : pixels;
+}
+
 CGColorRef CGColorCreateGenericRGB(double r, double g, double b, double a)
 {
     struct CGColor *color = calloc(1, sizeof(*color));
@@ -754,6 +804,88 @@ int CGColorEqualToColor(CGColorRef a, CGColorRef b)
         return 0;
     return ca->r == cb->r && ca->g == cb->g && ca->b == cb->b &&
            ca->a == cb->a;
+}
+
+/* ----------------------------------------------------------------- images */
+
+CGImageRef CGImageCreateWithRGBA(const unsigned char *rgba, int w, int h)
+{
+    if (!rgba || w <= 0 || h <= 0)
+        return 0;
+    struct CGImage *image = calloc(1, sizeof(*image));
+    if (!image)
+        return 0;
+    image->rgba = malloc((unsigned long)w * h * 4);
+    if (!image->rgba)
+    {
+        free(image);
+        return 0;
+    }
+    memcpy(image->rgba, rgba, (unsigned long)w * h * 4);
+    image->refs = 1;
+    image->magic = CG_IMAGE_MAGIC;
+    image->w = w;
+    image->h = h;
+    return (CGImageRef)image;
+}
+
+CGImageRef CGImageRetain(CGImageRef imageRef)
+{
+    struct CGImage *image = (struct CGImage *)imageRef;
+    if (image)
+        image->refs++;
+    return imageRef;
+}
+
+void CGImageRelease(CGImageRef imageRef)
+{
+    struct CGImage *image = (struct CGImage *)imageRef;
+    if (!image)
+        return;
+    if (--image->refs > 0)
+        return;
+    image->magic = 0;
+    free(image->rgba);
+    free(image);
+}
+
+int CGImageGetWidth(CGImageRef imageRef)
+{
+    struct CGImage *image = (struct CGImage *)imageRef;
+    return image ? image->w : 0;
+}
+
+int CGImageGetHeight(CGImageRef imageRef)
+{
+    struct CGImage *image = (struct CGImage *)imageRef;
+    return image ? image->h : 0;
+}
+
+const unsigned char *iosim_cgimage_data(CGImageRef imageRef, int *out_w,
+                                        int *out_h)
+{
+    struct CGImage *image = (struct CGImage *)imageRef;
+    if (!image)
+        return 0;
+    if (out_w) *out_w = image->w;
+    if (out_h) *out_h = image->h;
+    return image->rgba;
+}
+
+int iosim_cgimage_is_valid(const void *imageRef)
+{
+    struct CGImage *image = (struct CGImage *)imageRef;
+    if (!image || image->magic != CG_IMAGE_MAGIC || image->refs <= 0)
+        return 0;
+    return 1;
+}
+
+void CGContextDrawImage(CGContextRef context, CGRect rect, CGImageRef imageRef)
+{
+    struct CGImage *image = (struct CGImage *)imageRef;
+    if (!image)
+        return;
+    iosim_cg_draw_image(context, image->rgba, image->w, image->h, rect);
 }
 
 /* ------------------------------------------------------------------ paths */

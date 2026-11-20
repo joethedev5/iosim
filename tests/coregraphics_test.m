@@ -66,6 +66,20 @@ int main(void)
     CGContextFillRect(context, CGRectMake(180, 220, 40, 40));
     CGColorRelease(color);
 
+    unsigned char cg_pixels[2 * 2 * 4];
+    for (int i = 0; i < 4; i++)
+    {
+        cg_pixels[i * 4 + 0] = 255;
+        cg_pixels[i * 4 + 1] = 255;
+        cg_pixels[i * 4 + 2] = 0;
+        cg_pixels[i * 4 + 3] = 255;
+    }
+    CGImageRef cg_image = CGImageCreateWithRGBA(cg_pixels, 2, 2);
+    printf("[cg] cgimage %d %d valid %d\n", CGImageGetWidth(cg_image),
+           CGImageGetHeight(cg_image), iosim_cgimage_is_valid(cg_image));
+    CGContextDrawImage(context, CGRectMake(180, 150, 40, 40), cg_image);
+    CGImageRelease(cg_image);
+
     CGContextSaveGState(context);
     CGContextClipToRect(context, CGRectMake(240, 10, 50, 40));
     CGContextSetRGBFillColor(context, 0, 1, 0, 1);
@@ -86,6 +100,7 @@ int main(void)
     printf("[cg] cgpath elements %d\n", g_element_count);
     printf("[cg] released %d\n", iosim_cgpath_is_valid(path));
     printf("[cg] uicolor %06x\n", pixel(pixels, 200, 240));
+    printf("[cg] cgimage draw %06x\n", pixel(pixels, 190, 160));
     printf("[cg] clip %06x\n", pixel(pixels, 260, 30));
     printf("[cg] clip outside %06x\n", pixel(pixels, 50, 50));
     printf("[cg] clip restored %06x\n", pixel(pixels, 250, 240));

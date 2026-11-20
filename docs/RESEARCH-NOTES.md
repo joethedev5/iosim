@@ -257,7 +257,14 @@ UIBezierPath. `UIColor CGColor` returns a refcounted color whose component
 layout matches UIColor, and UIGraphics push/pop restores nested contexts
 (including the context a nested image context had replaced). `CGContextClipToRect`
 clips drawing through the framebuffer clip stack and save/restore manages the
-clip depth. Still missing: color spaces, non-rect path clipping and text.
+clip depth. Refcounted CGImage objects own RGBA pixels, CGContextDrawImage
+blits one with scaling, UIImage exposes CGImage and converts back through
+imageWithCGImage:, and CALayer contents accepts CGImage or UIImage on both
+sublayers and view backing layers. CASpringAnimation evaluates mass/stiffness/
+damping/initialVelocity and reports settlingDuration. ObjC categories are
+resolved from `__objc_catlist` by category symbol name, and NSString
+sizeWithAttributes:/drawAtPoint: renders through the CGContext text bridge.
+Still missing: color spaces, non-rect path clipping and multi-line text.
 
 ## Open directions
 

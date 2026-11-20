@@ -3150,12 +3150,45 @@ check "[cg] cgcolor alpha 1.00 equal 1 red 0.5 valid 1" "$out" \
     "UIColor CGColor round-trips components through CoreGraphics"
 check "[cg] uicolor 8000ff" "$out" \
     "CGContextSetFillColorWithColor fills with a UIColor-derived color"
+check "[cg] cgimage 2 2 valid 1" "$out" \
+    "CGImageCreateWithRGBA reports its dimensions"
+check "[cg] cgimage draw ffff00" "$out" \
+    "CGContextDrawImage scales a CGImage into a rectangle"
 check "[cg] clip 00ff00" "$out" \
     "CGContextClipToRect limits fills to the clip rectangle"
 check "[cg] clip outside ff0000" "$out" \
     "pixels outside the clip rectangle keep their earlier color"
 check "[cg] clip restored 0000ff" "$out" \
     "restoring the graphics state removes the clip"
+
+"$ROOT/tools/build_app.sh" "$ROOT/tests/cgimage_layer_test.m" \
+    "$T/cgimage_layer_test" >/dev/null
+out="$(IOSIM_TEST_PNG="$T/cgimage_layer.png" DYLD_ROOT_PATH="$ROOT/runtime" \
+    "$RUN" "$T/cgimage_layer_test" 2>&1)"
+check "[cg] layer png written" "$out" \
+    "a CALayer with CGImage contents renders and captures a frame"
+if out="$(python3 - "$ROOT/tools" "$T/cgimage_layer.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+
+def px(x, y):
+    return pngpixel.px(rows, bpp, x * 3, y * 3)
+
+r, g, b = (lambda c: ((c >> 16) & 255, (c >> 8) & 255, c & 255))(px(60, 150))
+if not (g > 220 and b > 220 and r < 60):
+    raise SystemExit("CGImage layer contents not visible: %02x%02x%02x" % (r, g, b))
+r, g, b = (lambda c: ((c >> 16) & 255, (c >> 8) & 255, c & 255))(px(20, 20))
+if not (r < 40 and g < 40 and b < 60):
+    raise SystemExit("background outside layer changed: %02x%02x%02x" % (r, g, b))
+print("ok   CALayer CGImage contents appear at the layer frame:")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL CALayer CGImage contents"; echo "$out"; fails=$((fails+1))
+fi
 
 "$ROOT/tools/build_app.sh" "$ROOT/tests/draw_rect_test.m" \
     "$T/draw_rect_test" >/dev/null
@@ -3202,6 +3235,8 @@ check "[uig] size 20 20 red 255 0 0 255" "$out" \
     "UIGraphicsBeginImageContextWithOptions renders at the requested scale"
 check "[uig] drawn 255 0 0 255" "$out" \
     "UIImage drawInRect: composites into another image context"
+check "[uig] cgimage 20 20 255 0 0 255" "$out" \
+    "UIImage CGImage and imageWithCGImage: round-trip pixels"
 check "[uig] restored 1" "$out" \
     "ending a nested image context restores the previous context"
 check "[uig] pushed 1" "$out" \
@@ -3210,6 +3245,46 @@ check "[uig] pushed image 255 0 0 255" "$out" \
     "drawing through a pushed context extracts that context's image"
 check "[uig] popped 1" "$out" \
     "UIGraphicsPopContext restores the replaced context"
+
+# ---------- 36. CASpringAnimation ----------
+"$ROOT/tools/build_app.sh" "$ROOT/tests/spring_animation_test.m" \
+    "$T/spring_animation_test" >/dev/null
+out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/spring_animation_test" 2>&1)"
+check "[spring] settling 0.53" "$out" \
+    "CASpringAnimation derives a settling duration from its spring constants"
+check "[spring] early 1 late 1" "$out" \
+    "a spring animates the layer through intermediate values and settles"
+
+# ---------- 37. NSString drawing ----------
+"$ROOT/tools/build_app.sh" "$ROOT/tests/text_drawing_test.m" \
+    "$T/text_drawing_test" >/dev/null
+out="$(IOSIM_TEST_PNG="$T/text_drawing.png" DYLD_ROOT_PATH="$ROOT/runtime" \
+    "$RUN" "$T/text_drawing_test" 2>&1)"
+check "[text] size 1 1" "$out" \
+    "NSString sizeWithAttributes: measures a bold system-font string"
+check "[text] wrote png" "$out" \
+    "NSString drawAtPoint: renders through the drawRect: context"
+if out="$(python3 - "$ROOT/tools" "$T/text_drawing.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+count = 0
+for y in range(200 * 3, 240 * 3):
+    for x in range(40 * 3, 300 * 3):
+        c = pngpixel.px(rows, bpp, x, y)
+        r, g, b = ((c >> 16) & 255), ((c >> 8) & 255), (c & 255)
+        if r > 100 and g > 100 and b > 100:
+            count += 1
+if count < 100:
+    raise SystemExit("text pixels not visible: %d" % count)
+print("ok   NSString drawAtPoint: paints %d light text pixels:" % count)
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL NSString drawing"; echo "$out"; fails=$((fails+1))
+fi
 
 if [ "$fails" -ne 0 ]; then
     echo "$fails test(s) failed" >&2

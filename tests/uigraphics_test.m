@@ -33,6 +33,13 @@ int main(void)
     printf("\n");
     UIGraphicsEndImageContext();
 
+    CGImageRef red_cg = [red CGImage];
+    UIImage *from_cg = [UIImage imageWithCGImage:red_cg];
+    printf("[uig] cgimage %d %d ", from_cg->_width, from_cg->_height);
+    pixel(from_cg, 10, 10);
+    printf("\n");
+    CGImageRelease(red_cg);
+
     UIGraphicsBeginImageContextWithOptions(CGSizeMake(10, 10), NO, 1.0);
     CGContextRef outer = UIGraphicsGetCurrentContext();
     UIGraphicsBeginImageContextWithOptions(CGSizeMake(5, 5), NO, 1.0);

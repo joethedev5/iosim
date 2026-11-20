@@ -174,6 +174,14 @@ typedef enum {
 - (void)setKeyTimes:(id)keyTimes;
 @end
 
+@interface CASpringAnimation : CAAnimation
+- (void)setMass:(double)mass;
+- (void)setStiffness:(double)stiffness;
+- (void)setDamping:(double)damping;
+- (void)setInitialVelocity:(double)velocity;
+- (double)settlingDuration;
+@end
+
 @interface CAAnimationGroup : CAAnimation
 - (void)setAnimations:(NSArray *)animations;
 - (NSArray *)animations;
@@ -653,8 +661,10 @@ extern int UIApplicationMain(int argc, char **argv, id principal,
     int _height;
 }
 + (UIImage *)imageNamed:(NSString *)name;
++ (UIImage *)imageWithCGImage:(CGImageRef)image;
 - (int)width;
 - (int)height;
+- (CGImageRef)CGImage;
 @end
 
 @interface UITabBarItem : NSObject
@@ -688,6 +698,7 @@ extern int UIApplicationMain(int argc, char **argv, id principal,
 @end
 
 @interface NSDictionary : NSObject <NSFastEnumeration>
++ (id)dictionaryWithObjectsAndKeys:(id)firstObject, ...;
 @property(readonly) unsigned long count;
 - (id)objectForKey:(id)key;
 - (id)objectForKeyedSubscript:(id)key;
@@ -834,6 +845,16 @@ void UIGraphicsEndImageContext(void);
 @interface UIImage (Drawing)
 - (void)drawInRect:(CGRect)rect;
 - (void)drawAtPoint:(CGPoint)point;
+@end
+
+extern id NSFontAttributeName;
+extern id NSForegroundColorAttributeName;
+extern id NSBackgroundColorAttributeName;
+
+@interface NSString (UIKitDrawing)
+- (CGSize)sizeWithAttributes:(NSDictionary *)attributes;
+- (void)drawAtPoint:(CGPoint)point withAttributes:(NSDictionary *)attributes;
+- (void)drawInRect:(CGRect)rect withAttributes:(NSDictionary *)attributes;
 @end
 
 @interface UIImageView : UIView

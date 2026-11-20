@@ -2819,6 +2819,23 @@ static int pred_parse_or(pred_parser *parser)
     va_end(ap);
     return d;
 }
++ (id)dictionaryWithObjectsAndKeys:(id)firstObject, ...
+{
+    NSMutableDictionary *d = [NSMutableDictionary dictionary];
+    va_list ap;
+    va_start(ap, firstObject);
+    id obj = firstObject;
+    while (obj)
+    {
+        id key = va_arg(ap, id);
+        if (!key)
+            break;
+        [d setObject:obj forKey:key];
+        obj = va_arg(ap, id);
+    }
+    va_end(ap);
+    return d;
+}
 - (unsigned long)count { return _count; }
 - (id)objectForKey:(id)key
 {

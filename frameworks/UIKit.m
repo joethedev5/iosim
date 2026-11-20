@@ -138,6 +138,11 @@ struct layer_anim {
     double duration;
     double repeatCount;
     double seq;
+    int spring;
+    double mass;
+    double stiffness;
+    double damping;
+    double initialVelocity;
 };
 
 @interface CALayer : NSObject {
@@ -258,11 +263,14 @@ struct layer_anim {
     unsigned char *_rgba;
     int _width;
     int _height;
+    CGImageRef _cgImage;
 }
 + (id)imageNamed:(id)name;
 + (id)imageWithContentsOfFile:(id)path;
++ (id)imageWithCGImage:(CGImageRef)image;
 - (int)width;
 - (int)height;
+- (CGImageRef)CGImage;
 @end
 
 @interface CAMediaTimingFunction : NSObject {
@@ -305,6 +313,21 @@ extern id kCAMediaTimingFunctionEaseInEaseOut;
 }
 - (void)setValues:(id)values;
 - (void)setKeyTimes:(id)keyTimes;
+@end
+
+@interface CASpringAnimation : CAAnimation {
+@public
+    double _mass;
+    double _stiffness;
+    double _damping;
+    double _initialVelocity;
+    double _settlingDuration;
+}
+- (void)setMass:(double)mass;
+- (void)setStiffness:(double)stiffness;
+- (void)setDamping:(double)damping;
+- (void)setInitialVelocity:(double)velocity;
+- (double)settlingDuration;
 @end
 
 /* A group expands into one layer-animation slot per child when it is added,
@@ -1832,6 +1855,7 @@ static double layer_key_value(CALayer *layer, const char *key, double base);
         return;
     }
     BOOL keyframe = [anim isKindOfClass:[CAKeyframeAnimation class]];
+    BOOL spring = [anim isKindOfClass:[CASpringAnimation class]];
     int slot = -1;
     if (key)
     {
@@ -1860,6 +1884,15 @@ static double layer_key_value(CALayer *layer, const char *key, double base);
     entry->toValue = keyframe ? nil : anim->_toValue;
     entry->values = keyframe ? ((CAKeyframeAnimation *)anim)->_values : nil;
     entry->keyTimes = keyframe ? ((CAKeyframeAnimation *)anim)->_keyTimes : nil;
+    if (spring)
+    {
+        CASpringAnimation *sa = (CASpringAnimation *)anim;
+        entry->spring = 1;
+        entry->mass = sa->_mass > 0 ? sa->_mass : 1.0;
+        entry->stiffness = sa->_stiffness > 0 ? sa->_stiffness : 100.0;
+        entry->damping = sa->_damping > 0 ? sa->_damping : 10.0;
+        entry->initialVelocity = sa->_initialVelocity;
+    }
     entry->timingFunction = anim->_timingFunction;
     entry->key = key;
     entry->duration = anim->_duration;
@@ -1964,6 +1997,26 @@ id kCAMediaTimingFunctionEaseInEaseOut = @"easeInEaseOut";
 @implementation CAKeyframeAnimation
 - (void)setValues:(id)values { _values = values; }
 - (void)setKeyTimes:(id)keyTimes { _keyTimes = keyTimes; }
+@end
+
+@implementation CASpringAnimation
+- (void)setMass:(double)mass { _mass = mass; }
+- (void)setStiffness:(double)stiffness { _stiffness = stiffness; }
+- (void)setDamping:(double)damping { _damping = damping; }
+- (void)setInitialVelocity:(double)velocity { _initialVelocity = velocity; }
+- (double)settlingDuration
+{
+    double m = _mass > 0 ? _mass : 1.0;
+    double k = _stiffness > 0 ? _stiffness : 100.0;
+    double c = _damping > 0 ? _damping : 10.0;
+    double w0 = __builtin_sqrt(k / m);
+    double zeta = c / (2.0 * __builtin_sqrt(k * m));
+    if (w0 <= 0)
+        return 0.25;
+    if (zeta <= 0)
+        return 4.0;
+    return 4.0 / (zeta * w0);
+}
 @end
 
 @implementation CAAnimationGroup
@@ -2106,6 +2159,83 @@ int iosim_display_link_tick(void)
 - (CGColorRef)CGColor
 {
     return CGColorCreateGenericRGB(_r, _g, _b, _a);
+}
+@end
+
+id NSFontAttributeName = @"NSFontAttributeName";
+id NSForegroundColorAttributeName = @"NSForegroundColorAttributeName";
+id NSBackgroundColorAttributeName = @"NSBackgroundColorAttributeName";
+
+static unsigned text_color_rgb(UIColor *color)
+{
+    if (!color)
+        return 0x000000;
+    int r = (int)(color->_r * 255.0 + 0.5);
+    int g = (int)(color->_g * 255.0 + 0.5);
+    int b = (int)(color->_b * 255.0 + 0.5);
+    if (r < 0) r = 0; if (r > 255) r = 255;
+    if (g < 0) g = 0; if (g > 255) g = 255;
+    if (b < 0) b = 0; if (b > 255) b = 255;
+    return ((unsigned)r << 16) | ((unsigned)g << 8) | (unsigned)b;
+}
+
+static UIFont *drawing_font(NSDictionary *attributes)
+{
+    id font = attributes ? [attributes objectForKey:NSFontAttributeName] : nil;
+    if (font && [font isKindOfClass:[UIFont class]])
+        return (UIFont *)font;
+    return [UIFont systemFontOfSize:17];
+}
+
+@interface NSString (UIKitDrawing)
+- (CGSize)sizeWithAttributes:(NSDictionary *)attributes;
+- (void)drawAtPoint:(CGPoint)point withAttributes:(NSDictionary *)attributes;
+- (void)drawInRect:(CGRect)rect withAttributes:(NSDictionary *)attributes;
+@end
+
+@implementation NSString (UIKitDrawing)
+- (CGSize)sizeWithAttributes:(NSDictionary *)attributes
+{
+    const char *text = iosim_string_cstr(self);
+    if (!text)
+        return CGSizeMake(0, 0);
+    UIFont *font = drawing_font(attributes);
+    double scale = [[UIScreen mainScreen] scale];
+    if (scale <= 0)
+        scale = 1.0;
+    int width = iosim_fb_font_text_width(
+        text, font->_bold ? IOSIM_FONT_SEMIBOLD : IOSIM_FONT_REGULAR,
+        font->_size, scale);
+    int ascent = 0, descent = 0, lineHeight = 0;
+    iosim_fb_font_metrics(font->_bold ? IOSIM_FONT_SEMIBOLD
+                                      : IOSIM_FONT_REGULAR,
+                          font->_size, scale, &ascent, &descent, &lineHeight);
+    return CGSizeMake(width / scale, lineHeight / scale);
+}
+- (void)drawAtPoint:(CGPoint)point withAttributes:(NSDictionary *)attributes
+{
+    const char *text = iosim_string_cstr(self);
+    if (!text)
+        return;
+    UIFont *font = drawing_font(attributes);
+    UIColor *color = attributes
+        ? (UIColor *)[attributes objectForKey:NSForegroundColorAttributeName]
+        : nil;
+    double scale = [[UIScreen mainScreen] scale];
+    if (scale <= 0)
+        scale = 1.0;
+    int ascent = 0, descent = 0, lineHeight = 0;
+    iosim_fb_font_metrics(font->_bold ? IOSIM_FONT_SEMIBOLD
+                                      : IOSIM_FONT_REGULAR,
+                          font->_size, scale, &ascent, &descent, &lineHeight);
+    iosim_cg_draw_text(iosim_cg_current(), text, point.x,
+                       point.y + ascent / scale, font->_size,
+                       font->_bold, text_color_rgb(color));
+}
+- (void)drawInRect:(CGRect)rect withAttributes:(NSDictionary *)attributes
+{
+    [self drawAtPoint:CGPointMake(rect.origin.x, rect.origin.y)
+       withAttributes:attributes];
 }
 @end
 
@@ -4932,6 +5062,21 @@ static void cg_to_bezier_applier(void *info, const CGPathElement *element)
     image->_height = h;
     return image;
 }
++ (id)imageWithCGImage:(CGImageRef)cgImage
+{
+    int w = 0, h = 0;
+    const unsigned char *rgba = iosim_cgimage_data(cgImage, &w, &h);
+    if (!rgba || w <= 0 || h <= 0)
+        return nil;
+    UIImage *image = [[self alloc] init];
+    image->_rgba = malloc((unsigned long)w * h * 4);
+    if (!image->_rgba)
+        return nil;
+    memcpy(image->_rgba, rgba, (unsigned long)w * h * 4);
+    image->_width = w;
+    image->_height = h;
+    return image;
+}
 + (id)imageNamed:(id)name
 {
     const char *n = iosim_string_cstr(name);
@@ -4948,6 +5093,14 @@ static void cg_to_bezier_applier(void *info, const CGPathElement *element)
 }
 - (int)width { return _width; }
 - (int)height { return _height; }
+- (CGImageRef)CGImage
+{
+    if (_cgImage && !iosim_cgimage_is_valid(_cgImage))
+        _cgImage = 0;
+    if (!_cgImage)
+        _cgImage = CGImageCreateWithRGBA(_rgba, _width, _height);
+    return _cgImage;
+}
 - (void)drawInRect:(CGRect)rect
 {
     iosim_cg_draw_image(0, _rgba, _width, _height, rect);
@@ -7926,6 +8079,30 @@ static double layer_key_value(CALayer *layer, const char *key, double base)
         return layer_keyframe_value(anim->values, anim->keyTimes, t);
     double from = number_value(anim->fromValue, base);
     double to = number_value(anim->toValue, base);
+    if (anim->spring)
+    {
+        double m = anim->mass > 0 ? anim->mass : 1.0;
+        double k = anim->stiffness > 0 ? anim->stiffness : 100.0;
+        double c = anim->damping > 0 ? anim->damping : 10.0;
+        double w0 = __builtin_sqrt(k / m);
+        double zeta = c / (2.0 * __builtin_sqrt(k * m));
+        double dt = t * anim->duration;
+        double x;
+        if (zeta < 1.0)
+        {
+            double wd = w0 * __builtin_sqrt(1.0 - zeta * zeta);
+            double decay = __builtin_exp(-zeta * w0 * dt);
+            x = 1.0 - decay *
+                (__builtin_cos(wd * dt) +
+                 ((zeta * w0 - anim->initialVelocity) / wd) *
+                     __builtin_sin(wd * dt));
+        }
+        else
+        {
+            x = 1.0 - __builtin_exp(-w0 * dt) * (1.0 + w0 * dt);
+        }
+        return from + (to - from) * x;
+    }
     double e;
     if (anim->timingFunction)
         e = ((double (*)(id, SEL, double))objc_msgSend)(
@@ -8423,6 +8600,37 @@ static void render_shape_path(UIBezierPath *path, int x, int y, int w, int h,
     }
 }
 
+static void render_layer_contents(CALayer *layer, int x, int y, int w,
+                                  int h, double alpha)
+{
+    if (!layer || !layer->_contents || w <= 0 || h <= 0)
+        return;
+    if (iosim_cgimage_is_valid(layer->_contents))
+    {
+        int image_w = 0, image_h = 0;
+        const unsigned char *rgba =
+            iosim_cgimage_data((CGImageRef)layer->_contents, &image_w,
+                               &image_h);
+        if (rgba && image_w > 0 && image_h > 0)
+        {
+            iosim_fb_blit_rgba_scaled(x, y, w, h, rgba, image_w, image_h,
+                                      image_w * 4);
+            iosim_fb_set_opacity(alpha);
+        }
+    }
+    else if ([layer->_contents isKindOfClass:[UIImage class]])
+    {
+        UIImage *image = (UIImage *)layer->_contents;
+        if (image->_rgba && image->_width > 0 && image->_height > 0)
+        {
+            iosim_fb_blit_rgba_scaled(x, y, w, h, image->_rgba,
+                                      image->_width, image->_height,
+                                      image->_width * 4);
+            iosim_fb_set_opacity(alpha);
+        }
+    }
+}
+
 static void render_layer(CALayer *layer, double parentX, double parentY,
                          double scale, double parentAlpha)
 {
@@ -8451,14 +8659,7 @@ static void render_layer(CALayer *layer, double parentX, double parentY,
             iosim_fb_fill_rect(x, y, w, h, color);
         iosim_fb_set_opacity(alpha);
     }
-    if (layer->_contents && [layer->_contents isKindOfClass:[UIImage class]] &&
-        w > 0 && h > 0)
-    {
-        UIImage *image = (UIImage *)layer->_contents;
-        iosim_fb_blit_rgba_scaled(x, y, w, h, image->_rgba, image->_width,
-                                  image->_height, image->_width * 4);
-        iosim_fb_set_opacity(alpha);
-    }
+    render_layer_contents(layer, x, y, w, h, alpha);
     if ([layer isKindOfClass:[CAGradientLayer class]])
     {
         CAGradientLayer *g = (CAGradientLayer *)layer;
@@ -8699,6 +8900,9 @@ static void render_view(UIView *view, double originX, double originY,
             iosim_fb_fill_rect(x, y, w, h, color);
         iosim_fb_set_opacity(alpha);
     }
+
+    if (view->_layer)
+        render_layer_contents(view->_layer, x, y, w, h, alpha);
 
     if (w > 0 && h > 0)
     {

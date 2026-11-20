@@ -353,6 +353,7 @@ enum {
 + (id)dictionary;
 + (id)dictionaryWithObject:(id)object forKey:(id)key;
 + (id)dictionaryWithObjects:(id)firstObject forKeys:(id)firstKey, ...;
++ (id)dictionaryWithObjectsAndKeys:(id)firstObject, ...;
 + (id)dictionaryWithObjects:(const id *)objects
                     forKeys:(const id *)keys
                       count:(unsigned long)count;

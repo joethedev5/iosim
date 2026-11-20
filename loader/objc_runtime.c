@@ -80,6 +80,24 @@ static struct class_entry g_classes[MAX_CLASSES];
 static int g_nclasses;
 static int g_registered_images;
 
+/* Categories are resolved by name at lookup time instead of rewriting the
+ * class's read-only method lists. */
+#define MAX_CATEGORIES 512
+struct category_entry {
+    const char *class_name;
+    const void *instance_methods;
+    const void *class_methods;
+};
+static struct category_entry g_categories[MAX_CATEGORIES];
+static int g_ncategories;
+
+struct category_min {
+    const char *name;
+    void *cls;
+    const void *instance_methods;
+    const void *class_methods;
+};
+
 /* Classes created at runtime (KVO notifying subclasses, NSKVONotifying_Foo
  * and friends). The class and metaclass are allocated here; method lists are
  * fixed-size and grow until the class is registered. */
@@ -140,12 +158,73 @@ static void register_class(struct objc_class_min *cls, const char *name)
     g_nclasses++;
 }
 
+static const char *category_class_name(struct iosim_image *img,
+                                       void *category_addr, char *buffer,
+                                       size_t buffer_size)
+{
+    if (!img || !img->symtab || !img->file)
+        return NULL;
+    const struct symtab_command *symtab = img->symtab;
+    const struct nlist_64 *symbols =
+        (const void *)(img->file + symtab->symoff);
+    const char *strings = (const char *)(img->file + symtab->stroff);
+    for (uint32_t i = 0; i < symtab->nsyms; i++)
+    {
+        uint64_t value = symbols[i].n_value;
+        if (value != (uint64_t)(uintptr_t)category_addr &&
+            value + img->slide != (uint64_t)(uintptr_t)category_addr)
+            continue;
+        if (symbols[i].n_strx >= symtab->strsize)
+            continue;
+        const char *name = strings + symbols[i].n_strx;
+        const char *marker = strstr(name, "CATEGORY_");
+        if (!marker)
+            continue;
+        marker += strlen("CATEGORY_");
+        const char *end = strstr(marker, "_$_");
+        if (!end || end == marker)
+            continue;
+        size_t length = (size_t)(end - marker);
+        if (length >= buffer_size)
+            length = buffer_size - 1;
+        memcpy(buffer, marker, length);
+        buffer[length] = 0;
+        return buffer;
+    }
+    return NULL;
+}
+
 void iosim_objc_register_image(struct iosim_image *img)
 {
     g_registered_images++;
     for (int s = 0; s < img->nsects; s++)
     {
         struct iosim_section *sec = &img->sects[s];
+        if (strcmp(sec->sectname, "__objc_catlist") == 0 ||
+            strcmp(sec->sectname, "__objc_catlist2") == 0)
+        {
+            void **list = (void **)(uintptr_t)(sec->addr + img->slide);
+            size_t count = sec->size / sizeof(void *);
+            for (size_t i = 0; i < count; i++)
+            {
+                struct category_min *category = list[i];
+                if (!category || !category->name)
+                    continue;
+                if (g_ncategories >= MAX_CATEGORIES)
+                    break;
+                char class_name[160];
+                const char *resolved = category_class_name(
+                    img, category, class_name, sizeof(class_name));
+                g_categories[g_ncategories].class_name =
+                    resolved ? strdup(resolved) : category->name;
+                g_categories[g_ncategories].instance_methods =
+                    category->instance_methods;
+                g_categories[g_ncategories].class_methods =
+                    category->class_methods;
+                g_ncategories++;
+            }
+            continue;
+        }
         if (strcmp(sec->sectname, "__objc_classlist") != 0)
             continue;
 
@@ -274,12 +353,33 @@ static struct class_ro_min *metaclass_ro(struct objc_class_min *cls)
     return class_ro(meta);
 }
 
+static void *lookup_category_method(const char *class_name, const char *sel,
+                                    int class_methods)
+{
+    if (!class_name)
+        return NULL;
+    for (int i = 0; i < g_ncategories; i++)
+    {
+        if (strcmp(g_categories[i].class_name, class_name) != 0)
+            continue;
+        const void *list = class_methods ? g_categories[i].class_methods
+                                         : g_categories[i].instance_methods;
+        void *imp = lookup_in_methods(list, sel);
+        if (imp)
+            return imp;
+    }
+    return NULL;
+}
+
 static void *lookup_instance_method(struct objc_class_min *cls, const char *sel)
 {
     for (int depth = 0; cls && depth < 64; depth++)
     {
         struct class_ro_min *ro = class_ro(cls);
         void *imp = lookup_in_methods(ro ? ro->baseMethods : NULL, sel);
+        if (imp)
+            return imp;
+        imp = lookup_category_method(ro_name(ro), sel, 0);
         if (imp)
             return imp;
         cls = (struct objc_class_min *)cls->superclass;
@@ -293,6 +393,9 @@ static void *lookup_class_method(struct objc_class_min *cls, const char *sel)
     {
         struct class_ro_min *ro = metaclass_ro(cls);
         void *imp = lookup_in_methods(ro ? ro->baseMethods : NULL, sel);
+        if (imp)
+            return imp;
+        imp = lookup_category_method(ro_name(ro), sel, 1);
         if (imp)
             return imp;
         cls = (struct objc_class_min *)cls->superclass;

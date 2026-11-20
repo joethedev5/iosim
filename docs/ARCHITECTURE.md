@@ -256,6 +256,12 @@ ivar_t { offset_ptr, name, type, alignment, size }
 
 - `__objc_classlist` entries are read after fixups; class names come from
   `class_ro_t::name`.
+- `__objc_catlist` entries are resolved by their category symbol name
+  (`__OBJC_$_CATEGORY_Class_$_Category`), because the category's class
+  reference is not a plain relocated pointer in the modern metadata. Category
+  instance and class method lists are searched by class name after the class's
+  own methods and before walking to the superclass, so categories behave like
+  objc4 additions without rewriting read-only method lists.
 - Method dispatch compares the selector name string: Darwin `SEL` values are
   pointers to their name.
 - Ivar offsets are *realized at load time* exactly like objc4's `moveIvars`:
@@ -418,8 +424,12 @@ same component layout, and `UIGraphicsPushContext`/`UIGraphicsPopContext`
 redirect and restore the current drawing context, including nested image
 contexts. `CGContextClipToRect` intersects the framebuffer clip stack with a
 transformed rectangle, `CGContextClip` clips to the current path's bounding
-box, and save/restore tracks the clip depth. Color spaces, non-rect path
-clipping and text remain future work.
+box, and save/restore tracks the clip depth. Refcounted `CGImage` objects own
+RGBA pixels; `CGContextDrawImage` scales one into a rectangle, `UIImage
+CGImage` exposes a cached image and `imageWithCGImage:` copies one back.
+`CALayer.contents` accepts a `CGImage` or `UIImage` and the renderer blits it
+for both standalone sublayers and a view's backing layer. Color spaces,
+non-rect path clipping and text remain future work.
 
 UIScrollView tracks recent pointer velocity while dragging instead of
 averaging the whole gesture. A release above 50 pt/s records the deceleration
@@ -777,8 +787,11 @@ decoded with libpng in `loader/image.c`.
   `CAAnimationGroup` expands into one slot per child when added, inheriting
   the group's duration, timing function and repeat count where a child leaves
   them unset; children are keyed `key:index`, so removing the group's key
-  clears every expanded child at once. A 2D affine transform is applied around
-  the view center through an offscreen composite.
+  clears every expanded child at once. `CASpringAnimation` evaluates a damped
+  spring (`mass`, `stiffness`, `damping`, `initialVelocity`) and reports a
+  settling duration derived from the damping ratio and natural frequency. A 2D
+  affine transform is applied around the view center through an offscreen
+  composite.
 
 ### 2.11 Auto Layout, gestures and text input
 

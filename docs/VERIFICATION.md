@@ -480,6 +480,24 @@ corner radius is really rendered. `removeAnimationForKey:@"group"` then logs
 `#ff3b30` at both points: the group's `key:index` children were all cleared,
 not just the first slot.
 
+### Core Animation: CASpringAnimation
+
+`tests/spring_animation_test.m` animates a layer's opacity from 0 to 1 with
+mass 1, stiffness 200 and damping 15 over 0.4 s. The derived settling duration
+is 0.53 s; after 120 ms the presentation layer reports an opacity strictly
+between 0.05 and 1.20, and after another 380 ms it has settled between 0.90
+and 1.10. This exercises the spring branch instead of timing-function
+interpolation.
+
+### UIKit: NSString drawing
+
+`tests/text_drawing_test.m` measures `iosim` in a 32 pt bold system font
+(both width and height exceed 10 pt), draws it white at `(40,200)` inside a
+real `drawRect:` and writes a PNG. The suite scans the text's point range at
+device scale and requires at least 100 light pixels; the fixture produces
+9123, so `sizeWithAttributes:` and `drawAtPoint:withAttributes:` reach the
+font rasterizer through the CGContext text bridge.
+
 ### Graphics: UIVisualEffectView backdrop blur
 
 `demo/BlurApp.m` draws sixteen 25.125 pt black/white stripes and puts a dark
@@ -631,9 +649,14 @@ reports alpha 1.00, equality with itself and red component 0.5 through its
 full-surface green fill to a `240,10 50x40` rectangle leaves an outside red
 pixel unchanged, shows green inside the clip, and a blue fill after
 `CGContextRestoreGState` paints outside the old clip, proving clip removal.
+A 2x2 yellow `CGImage` reports its dimensions and draws scaled into a 40x40
+rectangle whose center samples `ffff00`. `UIImage CGImage` and
+`imageWithCGImage:` round-trip the 20x20 red image without changing its
+center pixel. `tests/cgimage_layer_test.m` runs a scene whose view layer has
+a cyan `CGImage` as contents; the captured PNG is cyan inside the layer frame
+and keeps the dark background outside it.
 `tests/draw_rect_test.m` runs a real `UIApplicationMain` scene with a custom
-`DrawView`; its `drawRect:`
-paints four shapes, writes a PNG and exits. The suite samples the PNG at
+`DrawView`; its `drawRect:`paints four shapes, writes a PNG and exits. The suite samples the PNG at
 `(60,180)` red, `(250,190)` green, `(20,300)` blue stroke and `(90,455)`
 yellow path, proving the renderer-to-CGContext bridge and device scale.
 
