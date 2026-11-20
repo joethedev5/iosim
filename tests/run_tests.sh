@@ -3186,6 +3186,8 @@ check "[cg] pathbox 10 10 20 20 inside=1 outside=0" "$out" \
     "CGPathGetBoundingBox and CGPathContainsPoint locate a rect path"
 check "[cg] pathcopy inside=1" "$out" \
     "CGPathCreateCopy duplicates path geometry"
+check "[cg] clip path inside 00ff00 outside ff0000" "$out" \
+    "CGContextClip rasterizes a non-rectangular clip mask"
 
 "$ROOT/tools/build_app.sh" "$ROOT/tests/cgimage_layer_test.m" \
     "$T/cgimage_layer_test" >/dev/null

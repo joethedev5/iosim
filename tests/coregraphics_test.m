@@ -87,6 +87,17 @@ int main(void)
     CGContextRestoreGState(context);
     CGContextSetRGBFillColor(context, 0, 0, 1, 1);
     CGContextFillRect(context, CGRectMake(240, 220, 40, 40));
+
+    CGContextSaveGState(context);
+    CGContextBeginPath(context);
+    CGContextMoveToPoint(context, 30, 250);
+    CGContextAddLineToPoint(context, 90, 250);
+    CGContextAddLineToPoint(context, 60, 290);
+    CGContextClosePath(context);
+    CGContextClip(context);
+    CGContextSetRGBFillColor(context, 0, 1, 0, 1);
+    CGContextFillRect(context, CGRectMake(0, 0, 300, 300));
+    CGContextRestoreGState(context);
     iosim_cg_end_view(context);
 
     CGColorSpaceRef rgb_space = CGColorSpaceCreateDeviceRGB();
@@ -133,5 +144,7 @@ int main(void)
     printf("[cg] clip %06x\n", pixel(pixels, 260, 30));
     printf("[cg] clip outside %06x\n", pixel(pixels, 50, 50));
     printf("[cg] clip restored %06x\n", pixel(pixels, 250, 240));
+    printf("[cg] clip path inside %06x outside %06x\n",
+           pixel(pixels, 60, 270), pixel(pixels, 50, 50));
     return 0;
 }

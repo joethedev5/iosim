@@ -19,6 +19,9 @@ extern void iosim_fb_fill_polygon(const double *xs, const double *ys,
 extern void iosim_fb_set_opacity(double opacity);
 extern int iosim_fb_push_clip(int x, int y, int w, int h);
 extern void iosim_fb_pop_clip(void);
+extern int iosim_fb_push_clip_polygon(const double *xs, const double *ys,
+                                      int count);
+extern void iosim_fb_pop_clip_mask(void);
 extern int iosim_fb_font_text_width(const char *text, int style,
                                     double size_pt, double scale);
 extern void iosim_fb_font_text(int x, int baseline_y, const char *text,
@@ -91,6 +94,7 @@ struct cg_state {
     struct CGColor stroke;
     double line_width;
     int clips;
+    int masks;
 };
 
 struct CGContext {
@@ -101,6 +105,7 @@ struct CGContext {
     struct cg_state stack[CG_MAX_STATES];
     int depth;
     int clips;
+    int masks;
     double xs[CG_MAX_POINTS];
     double ys[CG_MAX_POINTS];
     int count;
@@ -294,6 +299,16 @@ void iosim_cg_end_image(CGContextRef context)
 {
     if (!context)
         return;
+    while (context->masks > 0)
+    {
+        iosim_fb_pop_clip_mask();
+        context->masks--;
+    }
+    while (context->clips > 0)
+    {
+        iosim_fb_pop_clip();
+        context->clips--;
+    }
     if (context->offscreen)
     {
         int width = 0, height = 0;
@@ -333,6 +348,11 @@ void iosim_cg_end_view(CGContextRef context)
 {
     if (!context)
         return;
+    while (context->masks > 0)
+    {
+        iosim_fb_pop_clip_mask();
+        context->masks--;
+    }
     while (context->clips > 0)
     {
         iosim_fb_pop_clip();
@@ -604,17 +624,15 @@ void CGContextClip(CGContextRef context)
         context = g_current_context;
     if (!context || context->count < 3)
         return;
-    double minx = context->xs[0], maxx = minx;
-    double miny = context->ys[0], maxy = miny;
-    for (int i = 1; i < context->count; i++)
+    double xs[CG_MAX_POINTS], ys[CG_MAX_POINTS];
+    for (int i = 0; i < context->count; i++)
+        cg_transform(context, context->xs[i], context->ys[i], &xs[i],
+                     &ys[i]);
+    if (iosim_fb_push_clip_polygon(xs, ys, context->count))
     {
-        if (context->xs[i] < minx) minx = context->xs[i];
-        if (context->xs[i] > maxx) maxx = context->xs[i];
-        if (context->ys[i] < miny) miny = context->ys[i];
-        if (context->ys[i] > maxy) maxy = context->ys[i];
+        context->masks++;
+        context->state.masks = context->masks;
     }
-    CGContextClipToRect(context, CGRectMake(minx, miny, maxx - minx,
-                                           maxy - miny));
 }
 
 void CGContextResetClip(CGContextRef context)
@@ -623,12 +641,18 @@ void CGContextResetClip(CGContextRef context)
         context = g_current_context;
     if (!context)
         return;
+    while (context->masks > 0)
+    {
+        iosim_fb_pop_clip_mask();
+        context->masks--;
+    }
     while (context->clips > 0)
     {
         iosim_fb_pop_clip();
         context->clips--;
     }
     context->state.clips = 0;
+    context->state.masks = 0;
 }
 
 void CGContextFillPath(CGContextRef context)
@@ -682,6 +706,7 @@ void CGContextSaveGState(CGContextRef context)
     if (!context || context->depth >= CG_MAX_STATES)
         return;
     context->state.clips = context->clips;
+    context->state.masks = context->masks;
     context->stack[context->depth++] = context->state;
 }
 
@@ -692,6 +717,12 @@ void CGContextRestoreGState(CGContextRef context)
     if (!context || context->depth <= 0)
         return;
     context->state = context->stack[--context->depth];
+    while (context->masks > context->state.masks)
+    {
+        iosim_fb_pop_clip_mask();
+        context->masks--;
+    }
+    context->masks = context->state.masks;
     while (context->clips > context->state.clips)
     {
         iosim_fb_pop_clip();

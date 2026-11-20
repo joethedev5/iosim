@@ -272,8 +272,10 @@ and drawInRect:/boundingRectWithSize: word-wrap paragraphs. Device RGB/gray
 color spaces, CGColorCreate, CGPath bounding boxes, containment and copies
 are covered. UITextView maps taps to byte indices, selects words on a second
 tap, clamps programmatic selectedRange and replaces/removes selected ranges;
-the renderer paints the selection highlight. Still missing: non-rect path
-clipping and color management.
+the renderer paints the selection highlight. CGContextClip rasterizes path
+masks and intersects active masks; framebuffer fills, strokes, glyphs and
+image blits honor them. Still missing: color management and curve
+flattening.
 
 ## Open directions
 
