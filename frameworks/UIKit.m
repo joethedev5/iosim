@@ -4690,12 +4690,18 @@ static int keyboard_is_number_pad(void)
     return type == 4 || type == 5 || type == 8;
 }
 
-static void kb_key(int x, int y, int w, int h, double scale, unsigned color)
+static void kb_key_ring(int x, int y, int w, int h, double scale,
+                        unsigned color, unsigned ring)
 {
     int r = (int)(4.5 * scale);
-    iosim_fb_fill_round_rect(x, y, w, h, r, 0x2e2e33);
+    iosim_fb_fill_round_rect(x, y, w, h, r, ring);
     iosim_fb_fill_rect(x + 1, y + r, w - 2, h - 2 * r, color);
     iosim_fb_fill_round_rect(x + 1, y, w - 2, h, r - 1, color);
+}
+
+static void kb_key(int x, int y, int w, int h, double scale, unsigned color)
+{
+    kb_key_ring(x, y, w, h, scale, color, 0x2e2e33);
 }
 
 static void kb_label(const char *text, int cx, int cy, double size,
@@ -4707,6 +4713,35 @@ static void kb_label(const char *text, int cx, int cy, double size,
     iosim_fb_font_metrics(IOSIM_FONT_REGULAR, size, scale, &asc, &desc, &lh);
     iosim_fb_font_text(cx - tw / 2, cy - lh / 2 + asc, text,
                        IOSIM_FONT_REGULAR, size, scale, color);
+}
+
+static void kb_label_spaced(const char *text, int cx, int cy, double size,
+                            double spacing, double scale, unsigned color)
+{
+    int n = 0;
+    int widths[16];
+    const char *p = text;
+    while (*p && n < 16)
+    {
+        char ch[2] = { *p, 0 };
+        widths[n++] = iosim_fb_font_text_width(ch, IOSIM_FONT_REGULAR, size,
+                                               scale);
+        p++;
+    }
+    int total = 0;
+    for (int i = 0; i < n; i++)
+        total += widths[i];
+    total += (int)((n > 1 ? n - 1 : 0) * spacing * scale);
+    int asc = 0, desc = 0, lh = 0;
+    iosim_fb_font_metrics(IOSIM_FONT_REGULAR, size, scale, &asc, &desc, &lh);
+    int x = cx - total / 2;
+    int y = cy - (int)(1.2 * scale + 0.5) - lh / 2 + asc;
+    for (int i = 0; i < n; i++)
+    {
+        char ch[2] = { text[i], 0 };
+        iosim_fb_font_text(x, y, ch, IOSIM_FONT_REGULAR, size, scale, color);
+        x += widths[i] + (int)(spacing * scale + 0.5);
+    }
 }
 
 static void kb_shift(int x, int y, int w, int h, double scale)
@@ -5024,35 +5059,79 @@ static void draw_qwerty(int fbW, int fbH, double scale)
     kb_mic((int)(359.2 * scale + 0.5), (int)(833.2 * scale + 0.5), scale);
 }
 
+static void kb_delete_icon(int cx, int cy, double scale)
+{
+    /* Large bare backspace used by the number pad. */
+    int t = (int)(2.0 * scale + 0.5);
+    if (t < 1) t = 1;
+    int lx = cx - (int)(11.0 * scale + 0.5);
+    int px = cx - (int)(2.8 * scale + 0.5);
+    int rx = cx + (int)(11.7 * scale + 0.5);
+    int ty = cy - (int)(9.0 * scale + 0.5);
+    int by = cy + (int)(9.0 * scale + 0.5);
+    iosim_fb_draw_line(lx, cy, px, ty, t, 0xffffff);
+    iosim_fb_draw_line(px, ty, rx, ty, t, 0xffffff);
+    iosim_fb_draw_line(rx, ty, rx, by, t, 0xffffff);
+    iosim_fb_draw_line(rx, by, px, by, t, 0xffffff);
+    iosim_fb_draw_line(px, by, lx, cy, t, 0xffffff);
+    int e = (int)(3.5 * scale + 0.5);
+    int q = (int)(4.5 * scale + 0.5);
+    int ox = cx + (int)(2.2 * scale + 0.5);
+    int xt = (int)(1.7 * scale + 0.5);
+    if (xt < 1) xt = 1;
+    iosim_fb_draw_line(ox - e, cy - q, ox + e, cy + q, xt, 0xffffff);
+    iosim_fb_draw_line(ox - e, cy + q, ox + e, cy - q, xt, 0xffffff);
+}
+
 static void draw_number_pad(int fbW, int fbH, double scale)
 {
     double W = fbW / scale, H = fbH / scale;
-    const char *hEnv = getenv("IOSIM_KEYBOARD_HEIGHT");
-    double kbH = hEnv ? atof(hEnv) : 326.0;
-    double top = H - kbH;
-    int topPx = (int)(top * scale + 0.5);
-    kb_panel(fbW, fbH, scale, topPx, 0x202025);
-    double margin = 6, gap = 6;
-    double kw = (W - 2 * margin - 2 * gap) / 3.0;
-    double kh = 55;
-    double y0 = top + 18;
-    static const char *labels[12] = {
-        "1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "⌫"
+    double panelTop = H - 302.0;
+    int panelTopPx = (int)(panelTop * scale + 0.5);
+    kb_panel(fbW, fbH, scale, panelTopPx, 0x202025);
+    kb_panel_highlight(fbW, scale, panelTopPx);
+    double m = 4.67, kw = 126.17, gap = 6.33;
+    double rowTop = panelTop + 24.0, kh = 48.0, vgap = 6.0;
+    static const char *digits[10] = {
+        "1", "2", "3", "4", "5", "6", "7", "8", "9", "0"
+    };
+    static const char *letters[10] = {
+        "", "ABC", "DEF", "GHI", "JKL", "MNO", "PQRS", "TUV", "WXYZ", ""
     };
     for (int i = 0; i < 12; i++)
     {
         int row = i / 3, col = i % 3;
-        int x = (int)((margin + col * (kw + gap)) * scale + 0.5);
-        int y = (int)((y0 + row * (kh + gap)) * scale + 0.5);
+        double kx = m + col * (kw + gap);
+        double ky = rowTop + row * (kh + vgap);
+        int x = (int)(kx * scale + 0.5);
+        int y = (int)(ky * scale + 0.5);
         int w = (int)(kw * scale + 0.5);
         int h = (int)(kh * scale + 0.5);
-        kb_key(x, y, w, h, scale, 0x444448);
-        if (labels[i][0])
-            kb_label(labels[i], x + w / 2, y + h / 2, 28, scale, 0xffffff);
+        int isBottom = row == 3;
+        int key = i;
+        if (isBottom && col == 1)
+            key = 9;
+        if (isBottom && col == 0)
+            continue;
+        if (isBottom && col == 2)
+        {
+            kb_delete_icon(x + w / 2, y + h / 2, scale);
+            continue;
+        }
+        kb_key_ring(x, y, w, h, scale, 0x444448, 0x3c3c40);
+        if (isBottom)
+        {
+            kb_label(digits[key], x + w / 2, y + (int)(20.2 * scale + 0.5),
+                     22, scale, 0xffffff);
+            continue;
+        }
+        kb_label(digits[key], x + w / 2, y + (int)(20.2 * scale + 0.5),
+                 22, scale, 0xffffff);
+        if (letters[key][0])
+            kb_label_spaced(letters[key], x + w / 2,
+                            y + (int)(39.7 * scale + 0.5), 10, 1.4, scale,
+                            0xffffff);
     }
-    int hw = (int)(134 * scale);
-    iosim_fb_fill_round_rect((fbW - hw) / 2, fbH - (int)(13 * scale), hw,
-                             (int)(5 * scale), (int)(2.5 * scale), 0xffffff);
 }
 
 static int draw_keyboard(int fbW, int fbH, double scale)
@@ -5077,27 +5156,31 @@ static int keyboard_handle_tap(int px, int py, int fbW, int fbH,
     double W = fbW / scale, H = fbH / scale;
     if (keyboard_is_number_pad())
     {
-        double kbH = 326.0;
+        double kbH = 302.0;
         double top = H - kbH;
         if (y < top)
             return 0;
-        double margin = 6, gap = 6, kh = 55;
-        double kw = (W - 2 * margin - 2 * gap) / 3.0;
-        double y0 = top + 18;
-        int col = (int)((x - margin) / (kw + gap));
-        int row = (int)((y - y0) / (kh + gap));
+        double m = 4.67, kw = 126.17, gap = 6.33;
+        double rowTop = top + 24.0, kh = 48.0, vgap = 6.0;
+        int col = (int)((x - m) / (kw + gap));
+        int row = (int)((y - rowTop) / (kh + vgap));
         if (col < 0 || col > 2 || row < 0 || row > 3)
             return 1;
-        int index = row * 3 + col;
-        if (index == 11)
-            [g_firstResponder deleteBackward];
-        else if (index != 9)
+        if (row < 3)
         {
             char buf[2];
-            buf[0] = "123456789 0"[index];
+            buf[0] = "123456789"[row * 3 + col];
             buf[1] = 0;
             [g_firstResponder
                 insertText:[NSString stringWithUTF8String:buf]];
+        }
+        else if (col == 1)
+        {
+            [g_firstResponder insertText:[NSString stringWithUTF8String:"0"]];
+        }
+        else if (col == 2)
+        {
+            [g_firstResponder deleteBackward];
         }
         return 1;
     }

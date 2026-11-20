@@ -203,6 +203,22 @@ status bar is redrawn above it exactly as on the reference.
 Tapping Delete through the event FIFO runs the handler and dismisses the
 alert; the post-action capture shows the updated "Deleted" label.
 
+### Numeric keypad
+
+`demo/NumberPadApp.m` is the text-input fixture with the number-pad trait
+(`keyboardType = UIKeyboardTypeNumberPad`). The real iOS 26 phone pad draws
+digit keys with letter sublabels (ABC … WXYZ), a filled `0` key, a bare
+delete icon and no home indicator. iosim reproduces that measured layout:
+a 302 pt panel with the same glass edge, 126.2 × 48 pt keys on a 132.5 pt
+horizontal and 54 pt vertical pitch, 22 pt digits, letterspaced 10 pt
+sublabels, and a 24 pt bare delete glyph.
+
+| Metric | Value |
+|---|---|
+| Keyboard panel mean error | **1.22 / 255** |
+| Pixels over 24 in the panel | **1.42 %** |
+| Full frame (capture includes the Dynamic Island) | **1.66 / 255**, 2.24 % |
+
 ### Services: dispatch, Mach, bootstrap and XPC
 
 `tests/services_test.m` is an Apple-clang x86_64 executable with no UI. It
