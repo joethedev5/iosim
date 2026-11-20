@@ -41,7 +41,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | `CADisplayLink`, presentation layers, multiple concurrent layer animations | ✅ |
 | `CAAnimationGroup`: grouped opacity/corner animations, group removal clears children | ✅ |
 | CoreAnimation paths, gradients, layer geometry/contents, sublayers (z-ordered), PNG images | ✅ |
-| CoreGraphics `CGContext` fills, strokes, ellipses, paths, state stack, UIView `drawRect:` and `UIGraphics` image contexts | ✅ (subset) |
+| CoreGraphics `CGContext` fills, strokes, ellipses, paths, mutable `CGPath`, `CGColor`, clipping, push/pop contexts, state stack, UIView `drawRect:` and `UIGraphics` image contexts | ✅ (subset) |
 | Foundation collections, sorting, NSPredicate filtering, NSRegularExpression, NSScanner, notifications, timers | ✅ |
 | Foundation fast enumeration (`for-in`) and indexed/keyed collection subscripting | ✅ |
 | `NSURLSession` data tasks with headers, bodies, status and response headers over a host HTTP client | ✅ |

@@ -826,6 +826,8 @@ void UIGraphicsBeginImageContextWithOptions(CGSize size, BOOL opaque,
                                             double scale);
 void UIGraphicsBeginImageContext(CGSize size);
 CGContextRef UIGraphicsGetCurrentContext(void);
+void UIGraphicsPushContext(CGContextRef context);
+void UIGraphicsPopContext(void);
 UIImage *UIGraphicsGetImageFromCurrentImageContext(void);
 void UIGraphicsEndImageContext(void);
 

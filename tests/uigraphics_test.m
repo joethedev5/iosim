@@ -32,5 +32,28 @@ int main(void)
     pixel(drawn, 5, 5);
     printf("\n");
     UIGraphicsEndImageContext();
+
+    UIGraphicsBeginImageContextWithOptions(CGSizeMake(10, 10), NO, 1.0);
+    CGContextRef outer = UIGraphicsGetCurrentContext();
+    UIGraphicsBeginImageContextWithOptions(CGSizeMake(5, 5), NO, 1.0);
+    CGContextRef inner = UIGraphicsGetCurrentContext();
+    UIGraphicsEndImageContext();
+    printf("[uig] restored %d\n", UIGraphicsGetCurrentContext() == outer);
+
+    UIGraphicsBeginImageContextWithOptions(CGSizeMake(5, 5), NO, 1.0);
+    inner = UIGraphicsGetCurrentContext();
+    UIGraphicsPushContext(outer);
+    printf("[uig] pushed %d\n", UIGraphicsGetCurrentContext() == outer);
+    CGContextSetRGBFillColor(UIGraphicsGetCurrentContext(), 1, 0, 0, 1);
+    CGContextFillRect(UIGraphicsGetCurrentContext(),
+                      CGRectMake(0, 0, 10, 10));
+    UIImage *pushed = UIGraphicsGetImageFromCurrentImageContext();
+    printf("[uig] pushed image ");
+    pixel(pushed, 5, 5);
+    printf("\n");
+    UIGraphicsPopContext();
+    printf("[uig] popped %d\n", UIGraphicsGetCurrentContext() == inner);
+    UIGraphicsEndImageContext();
+    UIGraphicsEndImageContext();
     return 0;
 }

@@ -407,8 +407,19 @@ background and before its sublayers; plain `UIView` implements a no-op and
 custom subclasses can paint immediately. `UIGraphicsBeginImageContextWithOptions`
 redirects the same CGContext into a loader offscreen framebuffer; the result
 is copied out as RGBA for `UIGraphicsGetImageFromCurrentImageContext`, and
-`UIImage drawInRect:` blits into whichever context is current. Full CGPath
-objects, color spaces and paths beyond a point list remain future work.
+`UIImage drawInRect:` blits into whichever context is current. Mutable
+`CGPath` objects record move/line/close elements, `CGPathAddRect`,
+`CGPathAddEllipseInRect` and `CGPathAddPath` append geometry, `CGPathApply`
+walks them, and `CGContextAddPath` flattens a path into the context point
+list. `UIBezierPath CGPath` builds a real path, and `CAShapeLayer` accepts
+either a `UIBezierPath` or a `CGPath` and converts the latter for the
+renderer. `UIColor CGColor` returns a refcounted CoreGraphics color with the
+same component layout, and `UIGraphicsPushContext`/`UIGraphicsPopContext`
+redirect and restore the current drawing context, including nested image
+contexts. `CGContextClipToRect` intersects the framebuffer clip stack with a
+transformed rectangle, `CGContextClip` clips to the current path's bounding
+box, and save/restore tracks the clip depth. Color spaces, non-rect path
+clipping and text remain future work.
 
 UIScrollView tracks recent pointer velocity while dragging instead of
 averaging the whole gesture. A release above 50 pt/s records the deceleration

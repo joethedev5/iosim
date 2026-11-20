@@ -16,20 +16,43 @@ extern void iosim_fb_draw_line(int x0, int y0, int x1, int y1, int thickness,
 extern void iosim_fb_fill_polygon(const double *xs, const double *ys,
                                   int count, unsigned color);
 extern void iosim_fb_set_opacity(double opacity);
+extern int iosim_fb_push_clip(int x, int y, int w, int h);
+extern void iosim_fb_pop_clip(void);
 extern void iosim_fb_blit_rgba_scaled(int x, int y, int w, int h,
                                       const unsigned char *rgba,
                                       int source_w, int source_h,
                                       int source_stride);
 extern void *iosim_fb_begin_offscreen(unsigned width, unsigned height);
 extern unsigned *iosim_fb_end_offscreen(void *state, int *out_w, int *out_h);
+extern unsigned *iosim_fb_offscreen_pixels(void *state, int *out_w,
+                                           int *out_h);
+extern void *iosim_fb_activate_offscreen(void *state);
+extern void iosim_fb_restore_target(void *state);
 extern void iosim_fb_free_offscreen(unsigned *buf);
 
 #define CG_MAX_POINTS 512
 #define CG_MAX_STATES 8
 
 struct CGColor {
+    int refs;
+    unsigned magic;
     double r, g, b, a;
 };
+
+#define CG_COLOR_MAGIC 0x4347434fu
+
+#define CG_MAX_PATH_POINTS 1024
+#define CG_MAX_PATHS 128
+
+struct CGPath {
+    int refs;
+    int count;
+    unsigned char ops[CG_MAX_PATH_POINTS];
+    double xs[CG_MAX_PATH_POINTS];
+    double ys[CG_MAX_PATH_POINTS];
+};
+
+static struct CGPath *g_paths[CG_MAX_PATHS];
 
 struct cg_state {
     double tx, ty;
@@ -38,6 +61,7 @@ struct cg_state {
     struct CGColor fill;
     struct CGColor stroke;
     double line_width;
+    int clips;
 };
 
 struct CGContext {
@@ -47,6 +71,7 @@ struct CGContext {
     struct cg_state state;
     struct cg_state stack[CG_MAX_STATES];
     int depth;
+    int clips;
     double xs[CG_MAX_POINTS];
     double ys[CG_MAX_POINTS];
     int count;
@@ -54,6 +79,7 @@ struct CGContext {
     int image;
     void *offscreen;
     unsigned char *rgba;
+    CGContextRef previous;
 };
 
 static CGContextRef g_current_context;
@@ -120,6 +146,7 @@ CGContextRef iosim_cg_begin_view(int x, int y, int w, int h, double scale,
     context->state.stroke.b = 0;
     context->state.stroke.a = 1;
     context->state.line_width = 1.0;
+    context->previous = g_current_context;
     g_current_context = context;
     return context;
 }
@@ -127,6 +154,43 @@ CGContextRef iosim_cg_begin_view(int x, int y, int w, int h, double scale,
 CGContextRef iosim_cg_current(void)
 {
     return g_current_context;
+}
+
+CGContextRef iosim_cg_swap_current(CGContextRef context)
+{
+    CGContextRef previous = g_current_context;
+    g_current_context = context;
+    return previous;
+}
+
+struct cg_push_token {
+    CGContextRef previous;
+    void *fb_target;
+};
+
+void *iosim_cg_push_context(CGContextRef context)
+{
+    if (!context)
+        return 0;
+    struct cg_push_token *token = calloc(1, sizeof(*token));
+    if (!token)
+        return 0;
+    token->previous = g_current_context;
+    if (g_current_context != context && context->image && context->offscreen)
+        token->fb_target = iosim_fb_activate_offscreen(context->offscreen);
+    g_current_context = context;
+    return token;
+}
+
+void iosim_cg_pop_context(void *tokenPtr)
+{
+    struct cg_push_token *token = tokenPtr;
+    if (!token)
+        return;
+    g_current_context = token->previous;
+    if (token->fb_target)
+        iosim_fb_restore_target(token->fb_target);
+    free(token);
 }
 
 CGContextRef iosim_cg_begin_image(int w, int h, double scale)
@@ -154,6 +218,7 @@ CGContextRef iosim_cg_begin_image(int w, int h, double scale)
     context->state.fill.a = 1;
     context->state.stroke.a = 1;
     context->state.line_width = 1.0;
+    context->previous = g_current_context;
     g_current_context = context;
     return context;
 }
@@ -168,19 +233,13 @@ int iosim_cg_image_data(CGContextRef context, unsigned char **out_rgba,
         int width = 0, height = 0;
         unsigned *pixels = 0;
         if (context->offscreen)
-        {
-            pixels = iosim_fb_end_offscreen(context->offscreen, &width,
-                                            &height);
-            context->offscreen = 0;
-        }
+            pixels = iosim_fb_offscreen_pixels(context->offscreen, &width,
+                                               &height);
         if (!pixels || width <= 0 || height <= 0)
             return -1;
         unsigned char *rgba = malloc((unsigned long)width * height * 4);
         if (!rgba)
-        {
-            iosim_fb_free_offscreen(pixels);
             return -1;
-        }
         for (int y = 0; y < height; y++)
             for (int x = 0; x < width; x++)
             {
@@ -191,7 +250,6 @@ int iosim_cg_image_data(CGContextRef context, unsigned char **out_rgba,
                 dst[2] = (unsigned char)(color & 255);
                 dst[3] = 255;
             }
-        iosim_fb_free_offscreen(pixels);
         context->rgba = rgba;
     }
     if (out_rgba)
@@ -218,7 +276,7 @@ void iosim_cg_end_image(CGContextRef context)
     }
     free(context->rgba);
     if (g_current_context == context)
-        g_current_context = 0;
+        g_current_context = context->previous;
     iosim_fb_set_opacity(1.0);
     free(context);
 }
@@ -246,8 +304,13 @@ void iosim_cg_end_view(CGContextRef context)
 {
     if (!context)
         return;
+    while (context->clips > 0)
+    {
+        iosim_fb_pop_clip();
+        context->clips--;
+    }
     if (g_current_context == context)
-        g_current_context = 0;
+        g_current_context = context->previous;
     iosim_fb_set_opacity(1.0);
     free(context);
 }
@@ -477,6 +540,68 @@ void CGContextClosePath(CGContextRef context)
         context->closed = 1;
 }
 
+void CGContextClipToRect(CGContextRef context, CGRect rect)
+{
+    if (!context)
+        context = g_current_context;
+    if (!context)
+        return;
+    double x0, y0, x1, y1;
+    cg_transform(context, rect.origin.x, rect.origin.y, &x0, &y0);
+    cg_transform(context, rect.origin.x + rect.size.width,
+                 rect.origin.y + rect.size.height, &x1, &y1);
+    int w = (int)(x1 - x0 + 0.5);
+    int h = (int)(y1 - y0 + 0.5);
+    if (w < 0)
+    {
+        x0 -= w;
+        w = -w;
+    }
+    if (h < 0)
+    {
+        y0 -= h;
+        h = -h;
+    }
+    if (iosim_fb_push_clip((int)x0, (int)y0, w, h))
+    {
+        context->clips++;
+        context->state.clips = context->clips;
+    }
+}
+
+void CGContextClip(CGContextRef context)
+{
+    if (!context)
+        context = g_current_context;
+    if (!context || context->count < 3)
+        return;
+    double minx = context->xs[0], maxx = minx;
+    double miny = context->ys[0], maxy = miny;
+    for (int i = 1; i < context->count; i++)
+    {
+        if (context->xs[i] < minx) minx = context->xs[i];
+        if (context->xs[i] > maxx) maxx = context->xs[i];
+        if (context->ys[i] < miny) miny = context->ys[i];
+        if (context->ys[i] > maxy) maxy = context->ys[i];
+    }
+    CGContextClipToRect(context, CGRectMake(minx, miny, maxx - minx,
+                                           maxy - miny));
+}
+
+void CGContextResetClip(CGContextRef context)
+{
+    if (!context)
+        context = g_current_context;
+    if (!context)
+        return;
+    while (context->clips > 0)
+    {
+        iosim_fb_pop_clip();
+        context->clips--;
+    }
+    context->state.clips = 0;
+}
+
 void CGContextFillPath(CGContextRef context)
 {
     if (!context)
@@ -527,6 +652,7 @@ void CGContextSaveGState(CGContextRef context)
         context = g_current_context;
     if (!context || context->depth >= CG_MAX_STATES)
         return;
+    context->state.clips = context->clips;
     context->stack[context->depth++] = context->state;
 }
 
@@ -537,6 +663,12 @@ void CGContextRestoreGState(CGContextRef context)
     if (!context || context->depth <= 0)
         return;
     context->state = context->stack[--context->depth];
+    while (context->clips > context->state.clips)
+    {
+        iosim_fb_pop_clip();
+        context->clips--;
+    }
+    context->clips = context->state.clips;
 }
 
 void CGContextTranslateCTM(CGContextRef context, double tx, double ty)
@@ -564,6 +696,8 @@ CGColorRef CGColorCreateGenericRGB(double r, double g, double b, double a)
     struct CGColor *color = calloc(1, sizeof(*color));
     if (!color)
         return 0;
+    color->refs = 1;
+    color->magic = CG_COLOR_MAGIC;
     color->r = r;
     color->g = g;
     color->b = b;
@@ -571,7 +705,251 @@ CGColorRef CGColorCreateGenericRGB(double r, double g, double b, double a)
     return (CGColorRef)color;
 }
 
-void CGColorRelease(CGColorRef color)
+CGColorRef CGColorRetain(CGColorRef colorRef)
 {
+    struct CGColor *color = (struct CGColor *)colorRef;
+    if (color)
+        color->refs++;
+    return colorRef;
+}
+
+void CGColorRelease(CGColorRef colorRef)
+{
+    struct CGColor *color = (struct CGColor *)colorRef;
+    if (!color)
+        return;
+    if (--color->refs > 0)
+        return;
+    color->magic = 0;
     free(color);
+}
+
+int iosim_cgcolor_is_valid(const void *colorRef)
+{
+    struct CGColor *color = (struct CGColor *)colorRef;
+    if (!color || color->magic != CG_COLOR_MAGIC || color->refs <= 0)
+        return 0;
+    return 1;
+}
+
+const double *CGColorGetComponents(CGColorRef colorRef)
+{
+    struct CGColor *color = (struct CGColor *)colorRef;
+    return color ? &color->r : 0;
+}
+
+double CGColorGetAlpha(CGColorRef colorRef)
+{
+    struct CGColor *color = (struct CGColor *)colorRef;
+    return color ? color->a : 0;
+}
+
+int CGColorEqualToColor(CGColorRef a, CGColorRef b)
+{
+    struct CGColor *ca = (struct CGColor *)a;
+    struct CGColor *cb = (struct CGColor *)b;
+    if (ca == cb)
+        return 1;
+    if (!ca || !cb)
+        return 0;
+    return ca->r == cb->r && ca->g == cb->g && ca->b == cb->b &&
+           ca->a == cb->a;
+}
+
+/* ------------------------------------------------------------------ paths */
+
+static struct CGPath *cg_path_alloc(void)
+{
+    struct CGPath *path = calloc(1, sizeof(*path));
+    if (!path)
+        return 0;
+    path->refs = 1;
+    for (int i = 0; i < CG_MAX_PATHS; i++)
+    {
+        if (!g_paths[i])
+        {
+            g_paths[i] = path;
+            return path;
+        }
+    }
+    free(path);
+    return 0;
+}
+
+CGPathRef CGPathCreateMutable(void)
+{
+    return (CGPathRef)cg_path_alloc();
+}
+
+CGPathRef CGPathRetain(CGPathRef pathRef)
+{
+    struct CGPath *path = (struct CGPath *)pathRef;
+    if (path)
+        path->refs++;
+    return pathRef;
+}
+
+void CGPathRelease(CGPathRef pathRef)
+{
+    struct CGPath *path = (struct CGPath *)pathRef;
+    if (!path)
+        return;
+    if (--path->refs > 0)
+        return;
+    for (int i = 0; i < CG_MAX_PATHS; i++)
+    {
+        if (g_paths[i] == path)
+        {
+            g_paths[i] = 0;
+            free(path);
+            return;
+        }
+    }
+}
+
+int iosim_cgpath_is_valid(const void *pathRef)
+{
+    if (!pathRef)
+        return 0;
+    for (int i = 0; i < CG_MAX_PATHS; i++)
+    {
+        if (g_paths[i] == pathRef && g_paths[i]->refs > 0)
+            return 1;
+    }
+    return 0;
+}
+
+static void cg_path_append(struct CGPath *path, unsigned char op, double x,
+                           double y)
+{
+    if (!path || path->count >= CG_MAX_PATH_POINTS)
+        return;
+    path->ops[path->count] = op;
+    path->xs[path->count] = x;
+    path->ys[path->count] = y;
+    path->count++;
+}
+
+void CGPathMoveToPoint(CGPathRef pathRef, const void *transform, double x,
+                       double y)
+{
+    (void)transform;
+    cg_path_append((struct CGPath *)pathRef, 0, x, y);
+}
+
+void CGPathAddLineToPoint(CGPathRef pathRef, const void *transform, double x,
+                          double y)
+{
+    (void)transform;
+    cg_path_append((struct CGPath *)pathRef, 1, x, y);
+}
+
+void CGPathAddRect(CGPathRef pathRef, const void *transform, CGRect rect)
+{
+    (void)transform;
+    CGPathMoveToPoint(pathRef, 0, rect.origin.x, rect.origin.y);
+    CGPathAddLineToPoint(pathRef, 0, rect.origin.x + rect.size.width,
+                         rect.origin.y);
+    CGPathAddLineToPoint(pathRef, 0,
+                         rect.origin.x + rect.size.width,
+                         rect.origin.y + rect.size.height);
+    CGPathAddLineToPoint(pathRef, 0, rect.origin.x,
+                         rect.origin.y + rect.size.height);
+    CGPathCloseSubpath(pathRef);
+}
+
+void CGPathAddEllipseInRect(CGPathRef pathRef, const void *transform,
+                            CGRect rect)
+{
+    (void)transform;
+    double cx = rect.origin.x + rect.size.width / 2;
+    double cy = rect.origin.y + rect.size.height / 2;
+    double rx = rect.size.width / 2;
+    double ry = rect.size.height / 2;
+    CGPathMoveToPoint(pathRef, 0, cx + rx, cy);
+    for (int i = 1; i <= 64; i++)
+    {
+        double angle = 2.0 * 3.14159265358979323846 * i / 64.0;
+        CGPathAddLineToPoint(pathRef, 0, cx + rx * __builtin_cos(angle),
+                             cy + ry * __builtin_sin(angle));
+    }
+    CGPathCloseSubpath(pathRef);
+}
+
+void CGPathCloseSubpath(CGPathRef pathRef)
+{
+    cg_path_append((struct CGPath *)pathRef, 2, 0, 0);
+}
+
+void CGPathAddPath(CGPathRef pathRef, const void *transform, CGPathRef otherRef)
+{
+    (void)transform;
+    struct CGPath *path = (struct CGPath *)pathRef;
+    struct CGPath *other = (struct CGPath *)otherRef;
+    if (!path || !other)
+        return;
+    for (int i = 0; i < other->count; i++)
+        cg_path_append(path, other->ops[i], other->xs[i], other->ys[i]);
+}
+
+void CGPathApply(CGPathRef pathRef, void *info, CGPathApplierFunction function)
+{
+    struct CGPath *path = (struct CGPath *)pathRef;
+    if (!path || !function)
+        return;
+    for (int i = 0; i < path->count; i++)
+    {
+        CGPoint points[3];
+        points[0].x = path->xs[i];
+        points[0].y = path->ys[i];
+        points[1].x = 0;
+        points[1].y = 0;
+        points[2].x = 0;
+        points[2].y = 0;
+        CGPathElement element;
+        element.points = points;
+        switch (path->ops[i])
+        {
+        case 0:
+            element.type = kCGPathElementMoveToPoint;
+            break;
+        case 2:
+            element.type = kCGPathElementCloseSubpath;
+            element.points = 0;
+            break;
+        default:
+            element.type = kCGPathElementAddLineToPoint;
+            break;
+        }
+        function(info, &element);
+    }
+}
+
+void CGContextAddPath(CGContextRef context, CGPathRef pathRef)
+{
+    struct CGPath *path = (struct CGPath *)pathRef;
+    if (!context)
+        context = g_current_context;
+    if (!context || !path)
+        return;
+    if (context->count == 0)
+        context->closed = 0;
+    for (int i = 0; i < path->count; i++)
+    {
+        switch (path->ops[i])
+        {
+        case 0:
+            if (context->count == 0)
+                CGContextMoveToPoint(context, path->xs[i], path->ys[i]);
+            else
+                CGContextAddLineToPoint(context, path->xs[i], path->ys[i]);
+            break;
+        case 2:
+            CGContextClosePath(context);
+            break;
+        default:
+            CGContextAddLineToPoint(context, path->xs[i], path->ys[i]);
+            break;
+        }
+    }
 }

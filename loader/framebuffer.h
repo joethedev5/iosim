@@ -69,6 +69,9 @@ void iosim_fb_font_metrics(int style, double size_pt, double scale,
  * ARGB while an offscreen target is active. */
 void *iosim_fb_begin_offscreen(unsigned width, unsigned height);
 uint32_t *iosim_fb_end_offscreen(void *state, int *out_w, int *out_h);
+uint32_t *iosim_fb_offscreen_pixels(void *state, int *out_w, int *out_h);
+void *iosim_fb_activate_offscreen(void *state);
+void iosim_fb_restore_target(void *state);
 void iosim_fb_free_offscreen(uint32_t *buf);
 void iosim_fb_paste_xrgb(const uint32_t *src);
 void iosim_fb_capture(int x, int y, int w, int h, uint32_t *out);

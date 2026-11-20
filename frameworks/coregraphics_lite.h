@@ -7,12 +7,31 @@ typedef struct CGContext *CGContextRef;
 typedef void *CGColorRef;
 typedef const void *CGPathRef;
 
+typedef enum CGPathElementType {
+    kCGPathElementMoveToPoint,
+    kCGPathElementAddLineToPoint,
+    kCGPathElementAddQuadCurveToPoint,
+    kCGPathElementAddCurveToPoint,
+    kCGPathElementCloseSubpath
+} CGPathElementType;
+
+typedef struct CGPathElement {
+    CGPathElementType type;
+    CGPoint *points;
+} CGPathElement;
+
+typedef void (*CGPathApplierFunction)(void *info,
+                                      const CGPathElement *element);
+
 /* Direct framebuffer context used by the UIView drawRect: bridge. The
  * context's origin is in device pixels; drawing coordinates are points. */
 CGContextRef iosim_cg_begin_view(int x, int y, int w, int h, double scale,
                                  double alpha);
 void iosim_cg_end_view(CGContextRef context);
 CGContextRef iosim_cg_current(void);
+CGContextRef iosim_cg_swap_current(CGContextRef context);
+void *iosim_cg_push_context(CGContextRef context);
+void iosim_cg_pop_context(void *token);
 CGContextRef iosim_cg_begin_image(int w, int h, double scale);
 int iosim_cg_image_data(CGContextRef context, unsigned char **out_rgba,
                         int *out_w, int *out_h);
@@ -38,7 +57,11 @@ void CGContextMoveToPoint(CGContextRef context, double x, double y);
 void CGContextAddLineToPoint(CGContextRef context, double x, double y);
 void CGContextAddRect(CGContextRef context, CGRect rect);
 void CGContextAddEllipseInRect(CGContextRef context, CGRect rect);
+void CGContextAddPath(CGContextRef context, CGPathRef path);
 void CGContextClosePath(CGContextRef context);
+void CGContextClip(CGContextRef context);
+void CGContextClipToRect(CGContextRef context, CGRect rect);
+void CGContextResetClip(CGContextRef context);
 void CGContextFillPath(CGContextRef context);
 void CGContextStrokePath(CGContextRef context);
 void CGContextSaveGState(CGContextRef context);
@@ -47,6 +70,25 @@ void CGContextTranslateCTM(CGContextRef context, double tx, double ty);
 void CGContextScaleCTM(CGContextRef context, double sx, double sy);
 
 CGColorRef CGColorCreateGenericRGB(double r, double g, double b, double a);
+CGColorRef CGColorRetain(CGColorRef color);
 void CGColorRelease(CGColorRef color);
+const double *CGColorGetComponents(CGColorRef color);
+double CGColorGetAlpha(CGColorRef color);
+int CGColorEqualToColor(CGColorRef a, CGColorRef b);
+int iosim_cgcolor_is_valid(const void *color);
+
+CGPathRef CGPathCreateMutable(void);
+CGPathRef CGPathRetain(CGPathRef path);
+void CGPathRelease(CGPathRef path);
+void CGPathMoveToPoint(CGPathRef path, const void *transform, double x,
+                       double y);
+void CGPathAddLineToPoint(CGPathRef path, const void *transform, double x,
+                          double y);
+void CGPathAddRect(CGPathRef path, const void *transform, CGRect rect);
+void CGPathAddEllipseInRect(CGPathRef path, const void *transform, CGRect rect);
+void CGPathCloseSubpath(CGPathRef path);
+void CGPathAddPath(CGPathRef path, const void *transform, CGPathRef other);
+void CGPathApply(CGPathRef path, void *info, CGPathApplierFunction function);
+int iosim_cgpath_is_valid(const void *path);
 
 #endif

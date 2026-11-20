@@ -111,6 +111,9 @@ struct fb_saved_state {
     int clip_depth;
     int clip[FB_MAX_CLIP][4];
     double opacity;
+    int alpha;
+    uint32_t *owned_pixels;
+    unsigned owned_width, owned_height;
 };
 
 static struct fb_saved_state *fb_saved[FB_STATE_STACK];
@@ -132,12 +135,16 @@ void *iosim_fb_begin_offscreen(unsigned width, unsigned height)
         for (int k = 0; k < 4; k++)
             st->clip[i][k] = fb_clip_rects[i][k];
     st->opacity = fb_opacity;
+    st->alpha = fb_alpha;
     uint32_t *buf = calloc((size_t)width * height, sizeof(uint32_t));
     if (!buf)
     {
         free(st);
         return NULL;
     }
+    st->owned_pixels = buf;
+    st->owned_width = width;
+    st->owned_height = height;
     fb_saved[fb_saved_depth++] = st;
     fb_pixels = buf;
     fb_width = width;
@@ -153,7 +160,7 @@ uint32_t *iosim_fb_end_offscreen(void *state, int *out_w, int *out_h)
     if (!state || fb_saved_depth <= 0)
         return NULL;
     struct fb_saved_state *st = fb_saved[--fb_saved_depth];
-    uint32_t *buf = fb_pixels;
+    uint32_t *buf = st->owned_pixels;
     if (out_w) *out_w = (int)fb_width;
     if (out_h) *out_h = (int)fb_height;
     fb_pixels = st->pixels;
@@ -164,9 +171,70 @@ uint32_t *iosim_fb_end_offscreen(void *state, int *out_w, int *out_h)
         for (int k = 0; k < 4; k++)
             fb_clip_rects[i][k] = st->clip[i][k];
     fb_opacity = st->opacity;
-    fb_alpha = fb_saved_depth > 0 ? 1 : 0;
+    fb_alpha = st->alpha;
     free(st);
     return buf;
+}
+
+uint32_t *iosim_fb_offscreen_pixels(void *state, int *out_w, int *out_h)
+{
+    struct fb_saved_state *st = state;
+    if (!st)
+        return NULL;
+    if (out_w) *out_w = (int)st->owned_width;
+    if (out_h) *out_h = (int)st->owned_height;
+    return st->owned_pixels;
+}
+
+static struct fb_saved_state *fb_snapshot_target(void)
+{
+    struct fb_saved_state *st = calloc(1, sizeof *st);
+    if (!st)
+        return NULL;
+    st->pixels = fb_pixels;
+    st->width = fb_width;
+    st->height = fb_height;
+    st->clip_depth = fb_clip_depth;
+    for (int i = 0; i < FB_MAX_CLIP; i++)
+        for (int k = 0; k < 4; k++)
+            st->clip[i][k] = fb_clip_rects[i][k];
+    st->opacity = fb_opacity;
+    st->alpha = fb_alpha;
+    return st;
+}
+
+void *iosim_fb_activate_offscreen(void *state)
+{
+    struct fb_saved_state *st = state;
+    if (!st || !st->owned_pixels)
+        return NULL;
+    struct fb_saved_state *saved = fb_snapshot_target();
+    if (!saved)
+        return NULL;
+    fb_pixels = st->owned_pixels;
+    fb_width = st->owned_width;
+    fb_height = st->owned_height;
+    fb_clip_reset();
+    fb_opacity = 1.0;
+    fb_alpha = 1;
+    return saved;
+}
+
+void iosim_fb_restore_target(void *state)
+{
+    struct fb_saved_state *st = state;
+    if (!st)
+        return;
+    fb_pixels = st->pixels;
+    fb_width = st->width;
+    fb_height = st->height;
+    fb_clip_depth = st->clip_depth;
+    for (int i = 0; i < FB_MAX_CLIP; i++)
+        for (int k = 0; k < 4; k++)
+            fb_clip_rects[i][k] = st->clip[i][k];
+    fb_opacity = st->opacity;
+    fb_alpha = st->alpha;
+    free(st);
 }
 
 void iosim_fb_free_offscreen(uint32_t *buf)

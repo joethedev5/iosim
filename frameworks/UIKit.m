@@ -198,6 +198,9 @@ struct layer_anim {
     id _fillColor;
     id _strokeColor;
     double _lineWidth;
+    CGPathRef _cgPath;
+    CGColorRef _cgFillColor;
+    CGColorRef _cgStrokeColor;
 }
 - (void)setPath:(id)path;
 - (id)path;
@@ -231,6 +234,7 @@ struct layer_anim {
     int _shape;
     CGRect _rect;
     double _cornerRadius;
+    int _closed;
 }
 + (id)bezierPath;
 + (id)bezierPathWithRect:(CGRect)rect;
@@ -2099,7 +2103,10 @@ int iosim_display_link_tick(void)
 {
     return [self colorWithRed:0.0 green:0.5686 blue:1.0 alpha:1];
 }
-- (CGColorRef)CGColor { return (CGColorRef)self; }
+- (CGColorRef)CGColor
+{
+    return CGColorCreateGenericRGB(_r, _g, _b, _a);
+}
 @end
 
 /* ----------------------------------------------------------------- fonts */
@@ -4679,7 +4686,7 @@ static long datepicker_rows_for(UIDatePicker *picker, long component)
                                          center.y + radius * __builtin_sin(a))];
     }
 }
-- (void)closePath { }
+- (void)closePath { _closed = 1; }
 - (void)appendPath:(UIBezierPath *)path
 {
     if (!path)
@@ -4690,12 +4697,141 @@ static long datepicker_rows_for(UIDatePicker *picker, long component)
             [self addLineToPoint:CGPointMake(path->_xs[i], path->_ys[i])];
     }
 }
-- (void)addRect:(CGRect)rect { (void)rect; }
-- (void)addOvalInRect:(CGRect)rect { (void)rect; }
+- (void)addRect:(CGRect)rect
+{
+    [self moveToPoint:CGPointMake(rect.origin.x, rect.origin.y)];
+    [self addLineToPoint:CGPointMake(rect.origin.x + rect.size.width,
+                                     rect.origin.y)];
+    [self addLineToPoint:CGPointMake(rect.origin.x + rect.size.width,
+                                     rect.origin.y + rect.size.height)];
+    [self addLineToPoint:CGPointMake(rect.origin.x,
+                                     rect.origin.y + rect.size.height)];
+    [self closePath];
+}
+- (void)addOvalInRect:(CGRect)rect
+{
+    double cx = rect.origin.x + rect.size.width / 2;
+    double cy = rect.origin.y + rect.size.height / 2;
+    double rx = rect.size.width / 2;
+    double ry = rect.size.height / 2;
+    [self moveToPoint:CGPointMake(cx + rx, cy)];
+    for (int i = 1; i <= 64; i++)
+    {
+        double a = 2 * 3.14159265358979323846 * i / 64.0;
+        [self addLineToPoint:CGPointMake(cx + rx * __builtin_cos(a),
+                                         cy + ry * __builtin_sin(a))];
+    }
+    [self closePath];
+}
 - (void)addRoundedRect:(CGRect)rect cornerRadius:(double)radius
-{ (void)rect; (void)radius; }
-- (CGPathRef)CGPath { return (CGPathRef)self; }
+{
+    (void)radius;
+    [self addRect:rect];
+}
+- (CGPathRef)CGPath
+{
+    CGPathRef path = CGPathCreateMutable();
+    if (!path)
+        return 0;
+    if (_shape == 1)
+    {
+        CGPathAddRect(path, 0, _rect);
+    }
+    else if (_shape == 2)
+    {
+        double r = _cornerRadius;
+        if (r <= 0)
+        {
+            CGPathAddRect(path, 0, _rect);
+        }
+        else
+        {
+            double x0 = _rect.origin.x, y0 = _rect.origin.y;
+            double x1 = x0 + _rect.size.width;
+            double y1 = y0 + _rect.size.height;
+            CGPathMoveToPoint(path, 0, x0 + r, y0);
+            CGPathAddLineToPoint(path, 0, x1 - r, y0);
+            for (int i = 1; i <= 8; i++)
+            {
+                double a = -1.5707963267948966 + 1.5707963267948966 * i / 8;
+                CGPathAddLineToPoint(path, 0, x1 - r + r * __builtin_cos(a),
+                                     y0 + r + r * __builtin_sin(a));
+            }
+            CGPathAddLineToPoint(path, 0, x1, y1 - r);
+            for (int i = 1; i <= 8; i++)
+            {
+                double a = 1.5707963267948966 * i / 8;
+                CGPathAddLineToPoint(path, 0, x1 - r + r * __builtin_cos(a),
+                                     y1 - r + r * __builtin_sin(a));
+            }
+            CGPathAddLineToPoint(path, 0, x0 + r, y1);
+            for (int i = 1; i <= 8; i++)
+            {
+                double a = 1.5707963267948966 + 1.5707963267948966 * i / 8;
+                CGPathAddLineToPoint(path, 0, x0 + r + r * __builtin_cos(a),
+                                     y1 - r + r * __builtin_sin(a));
+            }
+            CGPathAddLineToPoint(path, 0, x0, y0 + r);
+            for (int i = 1; i <= 8; i++)
+            {
+                double a = 3.14159265358979323846 + 1.5707963267948966 * i / 8;
+                CGPathAddLineToPoint(path, 0, x0 + r + r * __builtin_cos(a),
+                                     y0 + r + r * __builtin_sin(a));
+            }
+            CGPathCloseSubpath(path);
+        }
+    }
+    else if (_shape == 3)
+    {
+        CGPathAddEllipseInRect(path, 0, _rect);
+    }
+    else if (_count > 0)
+    {
+        CGPathMoveToPoint(path, 0, _xs[0], _ys[0]);
+        for (int i = 1; i < _count; i++)
+            CGPathAddLineToPoint(path, 0, _xs[i], _ys[i]);
+        if (_closed)
+            CGPathCloseSubpath(path);
+    }
+    return path;
+}
 @end
+
+struct cg_to_bezier_context {
+    UIBezierPath *path;
+};
+
+static UIColor *ui_color_from_cgcolor(CGColorRef color)
+{
+    const double *components = CGColorGetComponents(color);
+    if (!components)
+        return nil;
+    return [UIColor colorWithRed:components[0] green:components[1]
+                            blue:components[2] alpha:CGColorGetAlpha(color)];
+}
+
+static void cg_to_bezier_applier(void *info, const CGPathElement *element)
+{
+    struct cg_to_bezier_context *context = info;
+    if (!context || !context->path || !element)
+        return;
+    switch (element->type)
+    {
+    case kCGPathElementMoveToPoint:
+        [context->path moveToPoint:element->points[0]];
+        break;
+    case kCGPathElementAddLineToPoint:
+        [context->path addLineToPoint:element->points[0]];
+        break;
+    case kCGPathElementCloseSubpath:
+        [context->path closePath];
+        break;
+    default:
+        if (element->points)
+            [context->path addLineToPoint:element->points[0]];
+        break;
+    }
+}
 
 @implementation CAShapeLayer
 - (id)init
@@ -4705,12 +4841,56 @@ static long datepicker_rows_for(UIDatePicker *picker, long component)
         _lineWidth = 1.0;
     return self;
 }
-- (void)setPath:(id)path { _path = path; }
+- (void)setPath:(id)path
+{
+    if (iosim_cgpath_is_valid(path))
+    {
+        UIBezierPath *converted = [UIBezierPath bezierPath];
+        struct cg_to_bezier_context context;
+        context.path = converted;
+        CGPathApply((CGPathRef)path, &context, cg_to_bezier_applier);
+        _path = converted;
+        CGPathRelease(_cgPath);
+        _cgPath = CGPathRetain((CGPathRef)path);
+    }
+    else
+    {
+        CGPathRelease(_cgPath);
+        _cgPath = 0;
+        _path = path;
+    }
+}
 - (id)path { return _path; }
-- (void)setFillColor:(id)color { _fillColor = color; }
-- (id)fillColor { return _fillColor; }
-- (void)setStrokeColor:(id)color { _strokeColor = color; }
-- (id)strokeColor { return _strokeColor; }
+- (void)setFillColor:(id)color
+{
+    CGColorRelease(_cgFillColor);
+    _cgFillColor = 0;
+    if (iosim_cgcolor_is_valid(color))
+    {
+        _cgFillColor = CGColorRetain((CGColorRef)color);
+        _fillColor = ui_color_from_cgcolor((CGColorRef)color);
+    }
+    else
+    {
+        _fillColor = color;
+    }
+}
+- (id)fillColor { return _cgFillColor ? (id)_cgFillColor : _fillColor; }
+- (void)setStrokeColor:(id)color
+{
+    CGColorRelease(_cgStrokeColor);
+    _cgStrokeColor = 0;
+    if (iosim_cgcolor_is_valid(color))
+    {
+        _cgStrokeColor = CGColorRetain((CGColorRef)color);
+        _strokeColor = ui_color_from_cgcolor((CGColorRef)color);
+    }
+    else
+    {
+        _strokeColor = color;
+    }
+}
+- (id)strokeColor { return _cgStrokeColor ? (id)_cgStrokeColor : _strokeColor; }
 - (void)setLineWidth:(double)width { _lineWidth = width; }
 - (double)lineWidth { return _lineWidth; }
 @end
@@ -4781,6 +4961,8 @@ static long datepicker_rows_for(UIDatePicker *picker, long component)
 #define MAX_IMAGE_CONTEXTS 8
 static CGContextRef g_image_contexts[MAX_IMAGE_CONTEXTS];
 static int g_image_context_count;
+static void *g_graphics_stack[MAX_IMAGE_CONTEXTS];
+static int g_graphics_stack_depth;
 
 void UIGraphicsBeginImageContextWithOptions(CGSize size, BOOL opaque,
                                             double scale)
@@ -4805,16 +4987,35 @@ void UIGraphicsBeginImageContext(CGSize size)
 
 CGContextRef UIGraphicsGetCurrentContext(void)
 {
+    CGContextRef context = iosim_cg_current();
+    if (context)
+        return context;
     if (g_image_context_count > 0)
         return g_image_contexts[g_image_context_count - 1];
-    return iosim_cg_current();
+    return 0;
+}
+
+void UIGraphicsPushContext(CGContextRef context)
+{
+    if (!context || g_graphics_stack_depth >= MAX_IMAGE_CONTEXTS)
+        return;
+    void *token = iosim_cg_push_context(context);
+    if (token)
+        g_graphics_stack[g_graphics_stack_depth++] = token;
+}
+
+void UIGraphicsPopContext(void)
+{
+    if (g_graphics_stack_depth <= 0)
+        return;
+    iosim_cg_pop_context(g_graphics_stack[--g_graphics_stack_depth]);
 }
 
 UIImage *UIGraphicsGetImageFromCurrentImageContext(void)
 {
-    if (g_image_context_count <= 0)
+    CGContextRef context = UIGraphicsGetCurrentContext();
+    if (!context)
         return nil;
-    CGContextRef context = g_image_contexts[g_image_context_count - 1];
     unsigned char *rgba = 0;
     int w = 0, h = 0;
     if (iosim_cg_image_data(context, &rgba, &w, &h) != 0 || !rgba)

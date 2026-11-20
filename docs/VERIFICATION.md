@@ -622,9 +622,17 @@ The suite asserts all ten lines.
 ### UIKit: CoreGraphics drawRect:
 
 `tests/coregraphics_test.m` draws a red rect, green ellipse, blue stroked
-rect, yellow filled triangle and a translated blue rect into a captured
-framebuffer and checks the sampled pixels. `tests/draw_rect_test.m` runs a
-real `UIApplicationMain` scene with a custom `DrawView`; its `drawRect:`
+rect, yellow filled triangle, a translated blue rect and a magenta CGPath
+rectangle into a captured framebuffer and checks the sampled pixels.
+`CGPathApply` visits five elements for the rectangle (move, three lines,
+close) and `CGPathRelease` invalidates it. A `UIColor` at half red, full blue
+reports alpha 1.00, equality with itself and red component 0.5 through its
+`CGColor`; `CGContextSetFillColorWithColor` fills an `0x8000ff` pixel. Clipping a
+full-surface green fill to a `240,10 50x40` rectangle leaves an outside red
+pixel unchanged, shows green inside the clip, and a blue fill after
+`CGContextRestoreGState` paints outside the old clip, proving clip removal.
+`tests/draw_rect_test.m` runs a real `UIApplicationMain` scene with a custom
+`DrawView`; its `drawRect:`
 paints four shapes, writes a PNG and exits. The suite samples the PNG at
 `(60,180)` red, `(250,190)` green, `(20,300)` blue stroke and `(90,455)`
 yellow path, proving the renderer-to-CGContext bridge and device scale.
@@ -635,7 +643,10 @@ yellow path, proving the renderer-to-CGContext bridge and device scale.
 red, and extracts a 20x20 `UIImage` whose center pixel is 255,0,0,255. It then
 begins a scale-1 blue context, draws the red image with `drawInRect:` and
 extracts it again, sampling red at the center to prove context compositing and
-image extraction.
+image extraction. A nested image context restores its parent on end; pushing
+the outer context reports it current, fills it red, extracts red from that
+context while the inner context still exists, and popping returns to the
+inner context.
 
 ### Foundation: NSRegularExpression
 

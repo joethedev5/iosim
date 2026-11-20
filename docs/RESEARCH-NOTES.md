@@ -250,8 +250,14 @@ direct-framebuffer CGContext and UIKit calls `drawRect:` between background
 and sublayers. Fixtures cover fills/strokes/ellipses/paths and a full app
 frame. UIGraphics image contexts now render into the loader's offscreen
 framebuffer and produce RGBA-backed UIImage objects; `UIImage drawInRect:`
-draws into the current context. Still missing: CGPath objects, color spaces,
-non-rect clipping paths and text.
+draws into the current context. Mutable CGPath objects record elements,
+`CGPathApply` walks them, `CGContextAddPath` flattens them, `UIBezierPath
+CGPath` returns a real path, and `CAShapeLayer` accepts CGPath or
+UIBezierPath. `UIColor CGColor` returns a refcounted color whose component
+layout matches UIColor, and UIGraphics push/pop restores nested contexts
+(including the context a nested image context had replaced). `CGContextClipToRect`
+clips drawing through the framebuffer clip stack and save/restore manages the
+clip depth. Still missing: color spaces, non-rect path clipping and text.
 
 ## Open directions
 

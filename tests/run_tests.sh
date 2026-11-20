@@ -3127,6 +3127,36 @@ check "[regex] replace=a<1>b<22>" "$out" \
     "template replacement expands \$1 capture references"
 
 # ---------- 34. CoreGraphics and the UIView drawRect: bridge ----------
+"$ROOT/tools/build_app.sh" "$ROOT/tests/coregraphics_test.m" \
+    "$T/coregraphics_test" >/dev/null
+out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/coregraphics_test" 2>&1)"
+check "[cg] rect ff0000" "$out" \
+    "CGContextFillRect paints a rectangle"
+check "[cg] ellipse 00ff00" "$out" \
+    "CGContextFillEllipseInRect paints an ellipse"
+check "[cg] stroke 0000f4" "$out" \
+    "CGContextStrokeRect strokes with the stroke color"
+check "[cg] path ffff00" "$out" \
+    "a move/line path fills as a polygon"
+check "[cg] translate 0000ff" "$out" \
+    "graphics-state translation moves subsequent drawing"
+check "[cg] cgpath ff00ff" "$out" \
+    "CGContextAddPath fills a CGPath rectangle"
+check "[cg] cgpath elements 5" "$out" \
+    "CGPathApply visits a move, three lines and a close"
+check "[cg] released 0" "$out" \
+    "CGPathRelease invalidates the path"
+check "[cg] cgcolor alpha 1.00 equal 1 red 0.5 valid 1" "$out" \
+    "UIColor CGColor round-trips components through CoreGraphics"
+check "[cg] uicolor 8000ff" "$out" \
+    "CGContextSetFillColorWithColor fills with a UIColor-derived color"
+check "[cg] clip 00ff00" "$out" \
+    "CGContextClipToRect limits fills to the clip rectangle"
+check "[cg] clip outside ff0000" "$out" \
+    "pixels outside the clip rectangle keep their earlier color"
+check "[cg] clip restored 0000ff" "$out" \
+    "restoring the graphics state removes the clip"
+
 "$ROOT/tools/build_app.sh" "$ROOT/tests/draw_rect_test.m" \
     "$T/draw_rect_test" >/dev/null
 out="$(IOSIM_TEST_PNG="$T/draw_rect.png" DYLD_ROOT_PATH="$ROOT/runtime" \
@@ -3172,6 +3202,14 @@ check "[uig] size 20 20 red 255 0 0 255" "$out" \
     "UIGraphicsBeginImageContextWithOptions renders at the requested scale"
 check "[uig] drawn 255 0 0 255" "$out" \
     "UIImage drawInRect: composites into another image context"
+check "[uig] restored 1" "$out" \
+    "ending a nested image context restores the previous context"
+check "[uig] pushed 1" "$out" \
+    "UIGraphicsPushContext makes a requested context current"
+check "[uig] pushed image 255 0 0 255" "$out" \
+    "drawing through a pushed context extracts that context's image"
+check "[uig] popped 1" "$out" \
+    "UIGraphicsPopContext restores the replaced context"
 
 if [ "$fails" -ne 0 ]; then
     echo "$fails test(s) failed" >&2
