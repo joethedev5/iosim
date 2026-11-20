@@ -607,7 +607,11 @@ enum {
 
 enum {
     UIControlEventTouchUpInside = 1 << 6,
-    UIControlEventEditingChanged = 1 << 17
+    UIControlEventValueChanged = 1 << 12,
+    UIControlEventEditingDidBegin = 1 << 16,
+    UIControlEventEditingChanged = 1 << 17,
+    UIControlEventEditingDidEnd = 1 << 18,
+    UIControlEventEditingDidEndOnExit = 1 << 19
 };
 
 enum {
@@ -1989,7 +1993,7 @@ static UITextField *g_firstResponder;
     if (t < 0) t = 0;
     if (t > 1) t = 1;
     [self setValue:_minimumValue + span * t animated:NO];
-    [self sendActionsForControlEvents:1 << 12];
+    [self sendActionsForControlEvents:UIControlEventValueChanged];
 }
 - (CGSize)intrinsicContentSize
 {
@@ -4208,6 +4212,8 @@ static int keyboard_visible(void)
     return g_firstResponder != 0;
 }
 
+static int keyboard_is_number_pad(void);
+
 static void keyboard_row_1(int fbW, double scale, int y, int h, int special)
 {
     (void)special;
@@ -4321,6 +4327,32 @@ static int keyboard_handle_tap(int px, int py, int fbW, int fbH,
     double x = px / scale, y = py / scale;
     double W = fbW / scale, H = fbH / scale;
     const char *hEnv = getenv("IOSIM_KEYBOARD_HEIGHT");
+    if (keyboard_is_number_pad())
+    {
+        double kbH = hEnv ? atof(hEnv) : 291.0;
+        double top = H - kbH;
+        if (y < top)
+            return 0;
+        double margin = 6, gap = 6, kh = 55;
+        double kw = (W - 2 * margin - 2 * gap) / 3.0;
+        double y0 = top + 18;
+        int col = (int)((x - margin) / (kw + gap));
+        int row = (int)((y - y0) / (kh + gap));
+        if (col < 0 || col > 2 || row < 0 || row > 3)
+            return 1;
+        int index = row * 3 + col;
+        if (index == 11)
+            [g_firstResponder deleteBackward];
+        else if (index != 9)
+        {
+            char buf[2];
+            buf[0] = "123456789 0"[index];
+            buf[1] = 0;
+            [g_firstResponder
+                insertText:[NSString stringWithUTF8String:buf]];
+        }
+        return 1;
+    }
     double kbH = hEnv ? atof(hEnv) : 291.0;
     double top = H - kbH;
     if (y < top)
@@ -4381,8 +4413,8 @@ static int keyboard_handle_tap(int px, int py, int fbW, int fbH,
             return 1;
         if (x > W - margin - 84)
         {
-            [(UITextField *)g_firstResponder
-                sendActionsForControlEvents:1 << 18];
+            [g_firstResponder
+                sendActionsForControlEvents:UIControlEventEditingDidEndOnExit];
             return 1;
         }
         [g_firstResponder insertText:[NSString stringWithUTF8String:" "]];
@@ -4391,8 +4423,62 @@ static int keyboard_handle_tap(int px, int py, int fbW, int fbH,
     return 1;
 }
 
+static int keyboard_is_number_pad(void)
+{
+    if (!g_firstResponder)
+        return 0;
+    int type = g_firstResponder->_keyboardType;
+    return type == 4 || type == 5 || type == 8;
+}
+
+static void draw_number_pad(int fbW, int fbH, double scale)
+{
+    double W = fbW / scale, H = fbH / scale;
+    const char *hEnv = getenv("IOSIM_KEYBOARD_HEIGHT");
+    double kbH = hEnv ? atof(hEnv) : 291.0;
+    double top = H - kbH;
+    iosim_fb_fill_rect(0, (int)(top * scale), fbW,
+                       fbH - (int)(top * scale), 0x1c1c1e);
+    double margin = 6, gap = 6;
+    double kw = (W - 2 * margin - 2 * gap) / 3.0;
+    double kh = 55;
+    double y0 = top + 18;
+    static const char *labels[12] = {
+        "1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "⌫"
+    };
+    for (int i = 0; i < 12; i++)
+    {
+        int row = i / 3, col = i % 3;
+        int x = (int)((margin + col * (kw + gap)) * scale + 0.5);
+        int y = (int)((y0 + row * (kh + gap)) * scale + 0.5);
+        int w = (int)(kw * scale + 0.5);
+        int h = (int)(kh * scale + 0.5);
+        iosim_fb_fill_round_rect(x, y, w, h, (int)(5 * scale),
+                                 i == 11 ? 0x4a4a4d : 0x6b6b6d);
+        if (labels[i][0])
+        {
+            int lw = iosim_fb_font_text_width(labels[i],
+                                              IOSIM_FONT_REGULAR, 28, scale);
+            int asc = 0, desc = 0, lh = 0;
+            iosim_fb_font_metrics(IOSIM_FONT_REGULAR, 28, scale, &asc, &desc,
+                                  &lh);
+            iosim_fb_font_text(x + (w - lw) / 2, y + (h - lh) / 2 + asc,
+                               labels[i], IOSIM_FONT_REGULAR, 28, scale,
+                               0xffffff);
+        }
+    }
+    int hw = (int)(134 * scale);
+    iosim_fb_fill_round_rect((fbW - hw) / 2, fbH - (int)(13 * scale), hw,
+                             (int)(5 * scale), (int)(2.5 * scale), 0xffffff);
+}
+
 static void draw_keyboard(int fbW, int fbH, double scale)
 {
+    if (keyboard_is_number_pad())
+    {
+        draw_number_pad(fbW, fbH, scale);
+        return;
+    }
     if (!keyboard_visible() || scale <= 0)
         return;
     double widthPt = fbW / scale, heightPt = fbH / scale;

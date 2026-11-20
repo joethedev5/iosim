@@ -130,6 +130,7 @@ __attribute__((objc_root_class))
 @property(nonatomic, retain) id placeholder;
 @property(nonatomic, retain) UIColor *textColor;
 @property(nonatomic, retain) UIFont *font;
+@property int keyboardType;
 - (BOOL)becomeFirstResponder;
 - (BOOL)resignFirstResponder;
 @end
