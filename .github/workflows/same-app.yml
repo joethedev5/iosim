@@ -32,7 +32,7 @@ jobs:
             2> out/build-autolayout.err
           xcrun clang -arch x86_64 $CFLAGS tests/services_test.m \
             -o services_test_x86_64 2> out/build-services.err
-          file HelloSim_x86_64 GraphicsApp_x86_64 ListApp_x86_64 services_test_x86_64
+          file HelloSim_x86_64 GraphicsApp_x86_64 ListApp_x86_64 NavApp_x86_64 AutoLayoutApp_x86_64 services_test_x86_64
       - uses: actions/upload-artifact@v4
         with:
           name: build-binaries

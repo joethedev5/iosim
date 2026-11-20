@@ -19,7 +19,7 @@
         [UIColor colorWithRed:0.043 green:0.055 blue:0.102 alpha:1.0];
     UILayoutGuide *safe = self.view.safeAreaLayoutGuide;
 
-    UILabel *eyebrow = [[UILabel alloc] initWithFrame:CGRectZero];
+    UILabel *eyebrow = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, 0, 0)];
     eyebrow.text = @"AUTO LAYOUT";
     eyebrow.font = [UIFont systemFontOfSize:12];
     eyebrow.textColor = [UIColor colorWithRed:0.36 green:0.78 blue:1.0
@@ -27,14 +27,14 @@
     eyebrow.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:eyebrow];
 
-    UILabel *title = [[UILabel alloc] initWithFrame:CGRectZero];
+    UILabel *title = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, 0, 0)];
     title.text = @"Constraints, solved.";
     title.font = [UIFont boldSystemFontOfSize:30];
     title.textColor = [UIColor whiteColor];
     title.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:title];
 
-    UILabel *body = [[UILabel alloc] initWithFrame:CGRectZero];
+    UILabel *body = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, 0, 0)];
     body.numberOfLines = 0;
     body.text = @"Anchors pin every view: leading, trailing, top and bottom. "
                 @"The engine solves the system, then wraps this paragraph "
@@ -45,27 +45,27 @@
     body.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:body];
 
-    UIView *card = [[UIView alloc] initWithFrame:CGRectZero];
+    UIView *card = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 0, 0)];
     card.backgroundColor = [UIColor colorWithRed:0.076 green:0.106 blue:0.184
                                             alpha:1.0];
     card.layer.cornerRadius = 18;
     card.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:card];
 
-    UIView *badge = [[UIView alloc] initWithFrame:CGRectZero];
+    UIView *badge = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 0, 0)];
     badge.backgroundColor = [UIColor systemBlueColor];
     badge.layer.cornerRadius = 14;
     badge.translatesAutoresizingMaskIntoConstraints = NO;
     [card addSubview:badge];
 
-    UILabel *cardTitle = [[UILabel alloc] initWithFrame:CGRectZero];
+    UILabel *cardTitle = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, 0, 0)];
     cardTitle.text = @"Auto Layout";
     cardTitle.font = [UIFont boldSystemFontOfSize:18];
     cardTitle.textColor = [UIColor whiteColor];
     cardTitle.translatesAutoresizingMaskIntoConstraints = NO;
     [card addSubview:cardTitle];
 
-    UILabel *cardSub = [[UILabel alloc] initWithFrame:CGRectZero];
+    UILabel *cardSub = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, 0, 0)];
     cardSub.text = @"NSLayoutConstraint \xc2\xb7 NSLayoutAnchor";
     cardSub.font = [UIFont systemFontOfSize:13];
     cardSub.textColor = [UIColor colorWithRed:0.55 green:0.61 blue:0.71
@@ -73,13 +73,13 @@
     cardSub.translatesAutoresizingMaskIntoConstraints = NO;
     [card addSubview:cardSub];
 
-    UIView *divider = [[UIView alloc] initWithFrame:CGRectZero];
+    UIView *divider = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 0, 0)];
     divider.backgroundColor = [UIColor colorWithRed:0.16 green:0.20 blue:0.29
                                                alpha:1.0];
     divider.translatesAutoresizingMaskIntoConstraints = NO;
     [card addSubview:divider];
 
-    UILabel *foot = [[UILabel alloc] initWithFrame:CGRectZero];
+    UILabel *foot = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, 0, 0)];
     foot.text = @"Solved in 240 relaxation passes";
     foot.font = [UIFont systemFontOfSize:12];
     foot.textColor = [UIColor colorWithRed:0.45 green:0.51 blue:0.61
@@ -87,7 +87,7 @@
     foot.translatesAutoresizingMaskIntoConstraints = NO;
     [card addSubview:foot];
 
-    UILabel *priority = [[UILabel alloc] initWithFrame:CGRectZero];
+    UILabel *priority = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, 0, 0)];
     priority.text = @"1000";
     priority.font = [UIFont boldSystemFontOfSize:12];
     priority.textAlignment = 1;
@@ -107,7 +107,7 @@
     run.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:run];
 
-    UILabel *caption = [[UILabel alloc] initWithFrame:CGRectZero];
+    UILabel *caption = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, 0, 0)];
     caption.text = @"safeAreaLayoutGuide \xc2\xb7 priority 750";
     caption.font = [UIFont systemFontOfSize:12];
     caption.textAlignment = 1;
