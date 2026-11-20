@@ -5688,15 +5688,15 @@ static void draw_alert(UIAlertController *alert, int fbW, int fbH,
                 continue;
             unsigned color = action->_style == UIAlertActionStyleDestructive
                                  ? 0xff6b6f : 0xffffff;
-            int tw = iosim_fb_font_text_width(title, IOSIM_FONT_REGULAR, 17,
+            int tw = iosim_fb_font_text_width(title, IOSIM_FONT_SEMIBOLD, 17,
                                               scale);
             int asc = 0, desc = 0, lh = 0;
-            iosim_fb_font_metrics(IOSIM_FONT_REGULAR, 17, scale, &asc, &desc,
+            iosim_fb_font_metrics(IOSIM_FONT_SEMIBOLD, 17, scale, &asc, &desc,
                                   &lh);
             iosim_fb_font_text(bx + (bw - tw) / 2,
                                by + bh / 2 - lh / 2 + asc +
                                    (int)(0.7 * scale + 0.5),
-                               title, IOSIM_FONT_REGULAR, 17, scale, color);
+                               title, IOSIM_FONT_SEMIBOLD, 17, scale, color);
         }
     }
     else
@@ -5714,15 +5714,15 @@ static void draw_alert(UIAlertController *alert, int fbW, int fbH,
                 unsigned color =
                     action->_style == UIAlertActionStyleDestructive
                         ? 0xff6b6f : 0xffffff;
-                int tw = iosim_fb_font_text_width(title, IOSIM_FONT_REGULAR,
+                int tw = iosim_fb_font_text_width(title, IOSIM_FONT_SEMIBOLD,
                                                   17, scale);
                 int asc = 0, desc = 0, lh = 0;
-                iosim_fb_font_metrics(IOSIM_FONT_REGULAR, 17, scale, &asc,
+                iosim_fb_font_metrics(IOSIM_FONT_SEMIBOLD, 17, scale, &asc,
                                       &desc, &lh);
                 iosim_fb_font_text(bx + (bw - tw) / 2,
                                    rowY + bh / 2 - lh / 2 + asc +
                                        (int)(0.7 * scale + 0.5),
-                                   title, IOSIM_FONT_REGULAR, 17, scale,
+                                   title, IOSIM_FONT_SEMIBOLD, 17, scale,
                                    color);
             }
             rowY += bh + (int)(8 * scale);
