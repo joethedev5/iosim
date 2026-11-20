@@ -39,6 +39,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | UINavigationController push/pop, UITabBarController, UIStackView, UIButton titles | ✅ |
 | UIView animations (frame, alpha), delay/curve/repeat options, completion blocks | ✅ |
 | `CADisplayLink`, presentation layers, multiple concurrent layer animations | ✅ |
+| `CAAnimationGroup`: grouped opacity/corner animations, group removal clears children | ✅ |
 | CoreAnimation paths, gradients, sublayers (z-ordered), PNG images | ✅ |
 | Foundation collections, strings, selector/block notifications with userInfo, timers, NSIndexPath | ✅ |
 | NSDateFormatter parse/print round trip, NSNumberFormatter decimal/currency/percent | ✅ |

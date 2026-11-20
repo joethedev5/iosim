@@ -64,6 +64,7 @@ extern int  iosim_foundation_tick(void);
 extern int  iosim_dispatch_drain_main(void);
 extern const char *iosim_string_cstr(id string);
 extern int  strcmp(const char *a, const char *b);
+extern int  strncmp(const char *a, const char *b, unsigned long n);
 extern unsigned long strlen(const char *s);
 extern char *strstr(const char *haystack, const char *needle);
 extern void *malloc(unsigned long size);
@@ -289,6 +290,16 @@ extern id kCAMediaTimingFunctionEaseInEaseOut;
 }
 - (void)setValues:(id)values;
 - (void)setKeyTimes:(id)keyTimes;
+@end
+
+/* A group expands into one layer-animation slot per child when it is added,
+ * sharing the group's duration/timing when a child leaves them unset. */
+@interface CAAnimationGroup : CAAnimation {
+@public
+    NSArray *_animations;
+}
+- (void)setAnimations:(NSArray *)animations;
+- (NSArray *)animations;
 @end
 
 @interface CADisplayLink : NSObject {
@@ -1648,6 +1659,28 @@ static double layer_key_value(CALayer *layer, const char *key, double base);
 - (void)addAnimation:(id)animation forKey:(id)key
 {
     CAAnimation *anim = (CAAnimation *)animation;
+    if ([anim isKindOfClass:[CAAnimationGroup class]])
+    {
+        CAAnimationGroup *group = (CAAnimationGroup *)anim;
+        NSArray *children = group->_animations;
+        unsigned long n = children ? [children count] : 0;
+        for (unsigned long i = 0; i < n; i++)
+        {
+            CAAnimation *child = (CAAnimation *)[children objectAtIndex:i];
+            if (!child)
+                continue;
+            if (child->_duration <= 0.0)
+                child->_duration = group->_duration;
+            if (!child->_timingFunction)
+                child->_timingFunction = group->_timingFunction;
+            if (child->_repeatCount == 0.0)
+                child->_repeatCount = group->_repeatCount;
+            id childKey =
+                key ? [NSString stringWithFormat:@"%@:%lu", key, i] : nil;
+            [self addAnimation:child forKey:childKey];
+        }
+        return;
+    }
     BOOL keyframe = [anim isKindOfClass:[CAKeyframeAnimation class]];
     int slot = -1;
     if (key)
@@ -1699,7 +1732,14 @@ static double layer_key_value(CALayer *layer, const char *key, double base);
         if (!entry->used || !entry->key)
             continue;
         const char *held = iosim_string_cstr(entry->key);
-        if (!held || strcmp(held, wanted) != 0)
+        if (!held)
+            continue;
+        /* Group children are keyed `key:index`, so removing a group clears
+         * every expanded child as well. */
+        unsigned long wlen = strlen(wanted);
+        int match = strcmp(held, wanted) == 0 ||
+                    (strncmp(held, wanted, wlen) == 0 && held[wlen] == ':');
+        if (!match)
             continue;
         if (entry->infinite)
             animation_unmark_infinite();
@@ -1774,6 +1814,11 @@ id kCAMediaTimingFunctionEaseInEaseOut = @"easeInEaseOut";
 @implementation CAKeyframeAnimation
 - (void)setValues:(id)values { _values = values; }
 - (void)setKeyTimes:(id)keyTimes { _keyTimes = keyTimes; }
+@end
+
+@implementation CAAnimationGroup
+- (void)setAnimations:(NSArray *)animations { _animations = animations; }
+- (NSArray *)animations { return _animations; }
 @end
 
 /* Display links are driven by the UIApplicationMain run loop, which wakes

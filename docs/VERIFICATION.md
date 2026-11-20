@@ -464,6 +464,22 @@ because the link ticks, the box moves because the animation timeline is
 interpolated in the renderer, and the layer pulse is a keyframe animation
 composited into the view's alpha.
 
+### Core Animation: CAAnimationGroup
+
+`demo/AnimationGroupApp.m` adds a single `CAAnimationGroup` holding an opacity
+animation (1.0 → 0.2) and a corner-radius animation (0 → 30 pt), both over two
+seconds. A timer samples `layer.presentationLayer` halfway through and prints
+`[group] mid opacity=0.59 radius=15.30`; the suite accepts 0.45–0.75 and
+11–19 pt to allow for timer scheduling jitter. The end sample is exact:
+`[group] end opacity=0.20 radius=30.00`, so both children advanced together
+and held their end values. The screenshot taken then reads the layer centre at
+(201, 300) pt as `#3c1923` — 0.2 alpha red over the dark backdrop — and a
+point 4 pt inside the top-left corner as the backdrop itself, so the 30 pt
+corner radius is really rendered. `removeAnimationForKey:@"group"` then logs
+`[group] removed opacity=1.00 radius=0.00`, and the next screenshot reads pure
+`#ff3b30` at both points: the group's `key:index` children were all cleared,
+not just the first slot.
+
 ### Foundation: files, URLs and JSON
 
 `tests/foundation_io_test.m` is a Foundation-only executable. It creates

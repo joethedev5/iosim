@@ -597,9 +597,12 @@ decoded with libpng in `loader/image.c`.
   is already present replaces that animation, adding without a key appends,
   and the most recently added animation for a property wins when it is
   sampled. `layer.presentationLayer` returns the values at the current
-  instant, so an app can sample several animations in flight on one layer. A
-  2D affine transform is applied around the view center through an offscreen
-  composite.
+  instant, so an app can sample several animations in flight on one layer.
+  `CAAnimationGroup` expands into one slot per child when added, inheriting
+  the group's duration, timing function and repeat count where a child leaves
+  them unset; children are keyed `key:index`, so removing the group's key
+  clears every expanded child at once. A 2D affine transform is applied around
+  the view center through an offscreen composite.
 
 ### 2.11 Auto Layout, gestures and text input
 

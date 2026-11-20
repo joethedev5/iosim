@@ -117,11 +117,14 @@ typedef enum {
 @property CGRect frame;
 @property double cornerRadius;
 @property double opacity;
+@property(nonatomic, retain) id backgroundColor;
 - (void)addSublayer:(CALayer *)layer;
 - (void)addAnimation:(id)animation forKey:(id)key;
 - (void)removeAnimationForKey:(id)key;
 - (CALayer *)presentationLayer;
 @end
+
+@class NSArray;
 
 @interface CAAnimation : NSObject
 + (id)animationWithKeyPath:(id)path;
@@ -138,6 +141,11 @@ typedef enum {
 @interface CAKeyframeAnimation : CAAnimation
 - (void)setValues:(id)values;
 - (void)setKeyTimes:(id)keyTimes;
+@end
+
+@interface CAAnimationGroup : CAAnimation
+- (void)setAnimations:(NSArray *)animations;
+- (NSArray *)animations;
 @end
 
 @interface CADisplayLink : NSObject

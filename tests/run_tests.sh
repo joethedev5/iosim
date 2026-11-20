@@ -2552,6 +2552,115 @@ else
     fails=$((fails+1))
 fi
 
+# ---------- 18. CAAnimationGroup ----------
+# One group carries an opacity and a corner-radius animation; the presentation
+# layer shows both interpolating together, both hold the end values and
+# removeAnimationForKey: clears every expanded child.
+"$ROOT/tools/build_app.sh" "$ROOT/demo/AnimationGroupApp.m" \
+    "$T/AnimationGroupApp" >/dev/null
+mkdir -p "$T/AnimationGroupApp.app"
+cp "$T/AnimationGroupApp" "$T/AnimationGroupApp.app/AnimationGroupApp"
+python3 - "$T/AnimationGroupApp.app/Info.plist" <<'PY'
+import plistlib, sys
+with open(sys.argv[1], "wb") as f:
+    plistlib.dump({
+        "CFBundleIdentifier": "com.iosim.animgroup",
+        "CFBundleExecutable": "AnimationGroupApp",
+        "CFBundleName": "AnimGroup",
+        "CFBundlePackageType": "APPL",
+        "CFBundleVersion": "1",
+        "CFBundleShortVersionString": "1.0",
+    }, f)
+PY
+"$ROOT/tools/iosimctl" install "$UDID" "$T/AnimationGroupApp.app" >/dev/null
+sleep 0.5
+# Thirty-first installed app: third page row 1 column 0.
+"$ROOT/tools/iosimctl" ui "$UDID" tap 62.1667 222.1667 >/dev/null
+if wait_log "[group] started"; then
+    echo "ok   SpringBoard launches the animation group fixture"
+else
+    echo "FAIL animation group launch"; fails=$((fails+1))
+fi
+if wait_log "[group] mid"; then
+    line="$(grep -F -- '[group] mid' "$SBLOG" | tail -1)"
+    if out="$(python3 - "$line" <<'PY'
+import re, sys
+m = re.search(r"opacity=([0-9.]+) radius=([0-9.]+)", sys.argv[1])
+if not m:
+    raise SystemExit("unparsable midpoint: %s" % sys.argv[1])
+op, rad = float(m.group(1)), float(m.group(2))
+if not (0.45 <= op <= 0.75):
+    raise SystemExit("midpoint opacity out of range: %.2f" % op)
+if not (11.0 <= rad <= 19.0):
+    raise SystemExit("midpoint radius out of range: %.2f" % rad)
+print("ok   the group animates opacity and corner radius together")
+PY
+)"; then
+        echo "$out"
+    else
+        echo "FAIL animation group midpoint"; echo "$out"; fails=$((fails+1))
+    fi
+else
+    echo "FAIL animation group midpoint log"; fails=$((fails+1))
+fi
+if wait_log "[group] end" &&
+    grep -Fq -- "[group] end opacity=0.20 radius=30.00" "$SBLOG"; then
+    echo "ok   both group children hold their end values"
+else
+    echo "FAIL animation group end"; fails=$((fails+1))
+fi
+sleep 0.2
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/group-end.png" >/dev/null
+if out="$(python3 - "$ROOT/tools" "$T/group-end.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+center = pngpixel.px(rows, bpp, 201 * 3, 300 * 3)
+corner = pngpixel.px(rows, bpp, 105 * 3, 205 * 3)
+r, g, b = (center >> 16) & 255, (center >> 8) & 255, center & 255
+if not (40 <= r <= 90 and 10 <= g <= 45 and 15 <= b <= 60):
+    raise SystemExit("layer end alpha not blended: %06x" % center)
+cr, cg, cb = (corner >> 16) & 255, (corner >> 8) & 255, corner & 255
+if not (cr < 30 and cg < 35 and cb < 60):
+    raise SystemExit("corner still square: %06x" % corner)
+print("ok   the rendered layer is dimmed and rounded")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL animation group rendering"; echo "$out"; fails=$((fails+1))
+fi
+if wait_log "[group] removed" &&
+    grep -Fq -- "[group] removed opacity=1.00 radius=0.00" "$SBLOG"; then
+    echo "ok   removeAnimationForKey: clears every group child"
+else
+    echo "FAIL animation group removal"; fails=$((fails+1))
+fi
+sleep 0.3
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/group-removed.png" >/dev/null
+if out="$(python3 - "$ROOT/tools" "$T/group-removed.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+center = pngpixel.px(rows, bpp, 201 * 3, 300 * 3)
+corner = pngpixel.px(rows, bpp, 105 * 3, 205 * 3)
+for name, c in (("center", center), ("corner", corner)):
+    r, g, b = (c >> 16) & 255, (c >> 8) & 255, c & 255
+    if not (r > 220 and g < 90 and b < 80):
+        raise SystemExit("%s not full red after removal: %06x" %
+                         (name, c))
+print("ok   the layer returns to its model color and square corners")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL animation group revert"; echo "$out"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
+sleep 0.4
+
 "$ROOT/tools/iosimctl" shutdown "$UDID" >/dev/null
 
 if [ "$fails" -ne 0 ]; then
