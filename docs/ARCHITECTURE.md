@@ -463,7 +463,12 @@ absent, and fills through the same multi-stop path CoreGraphics uses. A
 gradient whose stops fade to transparent therefore works as a soft mask over
 the layer tree, not just as a visible fill. Rounded
 gradient layers render into an offscreen pass, mask their corners, and
-composite back, so corner radii and layer alpha stay antialiased. Path
+composite back, so corner radii and layer alpha stay antialiased. A layer
+`transform` (CATransform3D) uses the 2D submatrix m11/m12/m21/m22 plus the
+m41/m42 translation: the layer is rendered into an offscreen pass and
+composited with `blit_affine` around its center, so rotation, scale and
+translation match the view-transform path. Perspective terms and 3D rotation
+out of plane are not rendered. Path
 clipping is supported through
 even-odd masks; color management remains future work.
 

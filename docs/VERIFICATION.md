@@ -712,6 +712,13 @@ both location modes, `CGColorRef` entries and the offscreen rounded path. A
 fourth layer is masked by a gradient fading from opaque black to transparent:
 the PNG is red at `(45,550)`, a `0x840810` half blend at `(150,550)` and
 background at `(255,550)`, proving gradient alpha drives the layer mask.
+`tests/calayer_transform_test.m` builds a 45-degree rotation, a 2x horizontal
+scale, an identity layer and a `(40,20)` translation. The capture is red at
+the rotated center and at `(120,80)` above the old top edge, background at
+the old square corner `(70,110)`, blue across `(30,330)` to `(200,330)` but
+not at `(5,330)`, green at the identity layer and yellow at the translated
+position `(110,630)` with background at its old position, proving the
+offscreen layer transform path.
 `tests/draw_rect_test.m` runs a real `UIApplicationMain` scene with a custom
 `DrawView`; its `drawRect:`paints four shapes, writes a PNG and exits. The suite samples the PNG at
 `(60,180)` red, `(250,190)` green, `(20,300)` blue stroke and `(90,455)`

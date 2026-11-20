@@ -183,6 +183,7 @@ struct layer_anim {
     CGPoint _anchorPoint;
     id _contents;
     id _mask;
+    CATransform3D _transform;
 }
 - (double)cornerRadius;
 - (void)setCornerRadius:(double)radius;
@@ -198,6 +199,8 @@ struct layer_anim {
 - (id)contents;
 - (void)setMask:(CALayer *)mask;
 - (CALayer *)mask;
+- (void)setTransform:(CATransform3D)transform;
+- (CATransform3D)transform;
 - (void)setBackgroundColor:(UIColor *)color;
 - (UIColor *)backgroundColor;
 - (void)setOpacity:(double)opacity;
@@ -1796,6 +1799,7 @@ static double layer_key_value(CALayer *layer, const char *key, double base);
         _shadowOffset = CGSizeMake(0, -3);
         _shadowColor = [UIColor blackColor];
         _anchorPoint = CGPointMake(0.5, 0.5);
+        _transform = CATransform3DIdentityValue();
     }
     return self;
 }
@@ -1805,6 +1809,8 @@ static double layer_key_value(CALayer *layer, const char *key, double base);
 - (BOOL)masksToBounds { return _masksToBounds; }
 - (void)setMask:(CALayer *)mask { _mask = mask; }
 - (CALayer *)mask { return (CALayer *)_mask; }
+- (void)setTransform:(CATransform3D)transform { _transform = transform; }
+- (CATransform3D)transform { return _transform; }
 - (void)setShadowColor:(UIColor *)color { _shadowColor = color; }
 - (UIColor *)shadowColor { return _shadowColor; }
 - (void)setShadowOpacity:(double)opacity { _shadowOpacity = opacity; }
@@ -9116,6 +9122,9 @@ static void render_layer_contents(CALayer *layer, int x, int y, int w,
 
 static void render_layer(CALayer *layer, double parentX, double parentY,
                          double scale, double parentAlpha);
+static int g_render_offscreen;
+static UIView *g_no_transform_view;
+static CALayer *g_no_transform_layer;
 static int g_mask_render_depth;
 
 /* Render a layer's mask into an offscreen pass and push its alpha channel
@@ -9170,6 +9179,37 @@ static void render_layer(CALayer *layer, double parentX, double parentY,
     int y = (int)((parentY + frame.origin.y) * scale + 0.5);
     int w = (int)(frame.size.width * scale + 0.5);
     int h = (int)(frame.size.height * scale + 0.5);
+    CATransform3D tf = layer->_transform;
+    int transformed = layer != g_no_transform_layer &&
+        (tf.m11 != 1.0 || tf.m12 != 0.0 || tf.m21 != 0.0 ||
+         tf.m22 != 1.0 || tf.m41 != 0.0 || tf.m42 != 0.0);
+    if (transformed && w > 0 && h > 0)
+    {
+        void *state = iosim_fb_begin_offscreen((unsigned)w, (unsigned)h);
+        if (state)
+        {
+            CALayer *saved = g_no_transform_layer;
+            g_no_transform_layer = layer;
+            g_render_offscreen++;
+            render_layer(layer, -frame.origin.x, -frame.origin.y, scale, 1.0);
+            g_render_offscreen--;
+            g_no_transform_layer = saved;
+            int bw = 0, bh = 0;
+            unsigned *buf = iosim_fb_end_offscreen(state, &bw, &bh);
+            if (buf)
+            {
+                double cx = w / 2.0, cy = h / 2.0;
+                double ftx = x + cx - (tf.m11 * cx + tf.m21 * cy) +
+                             tf.m41 * scale;
+                double fty = y + cy - (tf.m12 * cx + tf.m22 * cy) +
+                             tf.m42 * scale;
+                iosim_fb_blit_affine(buf, bw, bh, tf.m11, tf.m12, tf.m21,
+                                     tf.m22, ftx, fty, alpha);
+                iosim_fb_free_offscreen(buf);
+            }
+            return;
+        }
+    }
     iosim_fb_set_opacity(alpha);
     int masked = push_layer_mask(layer, x, y, w, h, scale);
     if (layer->_backgroundColor && layer->_backgroundColor->_a > 0.001 &&
@@ -9258,9 +9298,6 @@ static void render_layer(CALayer *layer, double parentX, double parentY,
         iosim_fb_pop_clip_mask();
     iosim_fb_set_opacity(1.0);
 }
-
-static int g_render_offscreen;
-static UIView *g_no_transform_view;
 
 /* Separable box blur over an XRGB rectangle. Two passes approximate the
  * Gaussian backdrop blur UIVisualEffectView applies behind its content. */

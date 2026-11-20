@@ -357,6 +357,22 @@ management.
 - Remaining text-selection gaps: handle dragging, long-press selection and
   the edit menu.
 
+## 2026-11-20: CALayer.transform (2D CATransform3D)
+
+- `objc_lite.h` now defines CATransform3D with identity/make/translate/
+  scale/rotate(axis)/concat/is-identity helpers using the row-vector layout,
+  so the first two columns match CGAffineTransform's a/b/c/d.
+- `CALayer.transform` defaults to identity. A non-identity 2D matrix makes
+  the renderer draw the layer into a w×h offscreen pass and composite it with
+  `blit_affine`, using m11/m12/m21/m22 and m41/m42 around the layer center.
+  A `g_no_transform_layer` guard prevents recursion. Masks keep working
+  because the recursive pass applies their coverage inside the offscreen.
+- Perspective (m34 etc.), out-of-plane 3D rotation and transform animation
+  interpolation are not rendered yet.
+- Fixture `tests/calayer_transform_test.m`: 45-degree rotation cuts the old
+  corner and extends past the top edge, 2x scale widens both sides, identity
+  is unchanged and translation moves the layer without leaving a copy.
+
 ## Open directions
 
 - `metal-cpp` + macOS SDK Metal headers make it possible to implement a

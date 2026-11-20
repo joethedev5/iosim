@@ -3335,6 +3335,63 @@ else
     echo "FAIL CAGradientLayer stops"; echo "$out"; fails=$((fails+1))
 fi
 
+"$ROOT/tools/build_app.sh" "$ROOT/tests/calayer_transform_test.m" \
+    "$T/calayer_transform_test" >/dev/null
+out="$(IOSIM_TEST_PNG="$T/calayer_transform.png" \
+    DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" \
+    "$T/calayer_transform_test" 2>&1)"
+check "[tf] identity 1 rot 1 translate 1 concat 1" "$out" \
+    "CATransform3D constructors build the expected 2D matrices"
+check "[tf] png written" "$out" \
+    "the transformed layer fixture captures a frame"
+if out="$(python3 - "$ROOT/tools" "$T/calayer_transform.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+
+def rgb(x, y):
+    c = pngpixel.px(rows, bpp, x * 3, y * 3)
+    return ((c >> 16) & 255, (c >> 8) & 255, c & 255)
+
+r, g, b = rgb(120, 160)
+if not (r > 200 and g < 60 and b < 60):
+    raise SystemExit("rotated layer center is not red: %02x%02x%02x" % (r, g, b))
+r, g, b = rgb(70, 110)
+if not (r < 40 and g < 40 and b < 60):
+    raise SystemExit("rotated layer kept its square corner: %02x%02x%02x" % (r, g, b))
+r, g, b = rgb(120, 80)
+if not (r > 200 and g < 60 and b < 60):
+    raise SystemExit("rotated layer does not extend past the old top edge: %02x%02x%02x" % (r, g, b))
+r, g, b = rgb(30, 330)
+if not (b > 200 and r < 60):
+    raise SystemExit("scaled layer does not widen left: %02x%02x%02x" % (r, g, b))
+r, g, b = rgb(200, 330)
+if not (b > 200 and r < 60):
+    raise SystemExit("scaled layer does not widen right: %02x%02x%02x" % (r, g, b))
+r, g, b = rgb(5, 330)
+if not (b < 60 and r < 40):
+    raise SystemExit("scaled layer overflows its 2x extent: %02x%02x%02x" % (r, g, b))
+r, g, b = rgb(110, 510)
+if not (g > 200 and r < 60 and b < 60):
+    raise SystemExit("identity layer is not green: %02x%02x%02x" % (r, g, b))
+r, g, b = rgb(250, 510)
+if not (g < 60 and r < 40):
+    raise SystemExit("identity layer changed size: %02x%02x%02x" % (r, g, b))
+r, g, b = rgb(110, 630)
+if not (r > 200 and g > 200 and b < 60):
+    raise SystemExit("translated layer is not at its new position: %02x%02x%02x" % (r, g, b))
+r, g, b = rgb(70, 630)
+if not (r < 40 and g < 40 and b < 60):
+    raise SystemExit("translated layer left a copy at its old position: %02x%02x%02x" % (r, g, b))
+print("ok   CALayer transforms rotate, scale and translate offscreen")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL CALayer transform"; echo "$out"; fails=$((fails+1))
+fi
+
 "$ROOT/tools/build_app.sh" "$ROOT/tests/draw_rect_test.m" \
     "$T/draw_rect_test" >/dev/null
 out="$(IOSIM_TEST_PNG="$T/draw_rect.png" DYLD_ROOT_PATH="$ROOT/runtime" \

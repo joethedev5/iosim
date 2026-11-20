@@ -166,6 +166,7 @@ typedef enum {
 @property double opacity;
 @property(nonatomic, retain) id backgroundColor;
 @property(nonatomic, retain) CALayer *mask;
+@property CATransform3D transform;
 - (void)addSublayer:(CALayer *)layer;
 - (void)addAnimation:(id)animation forKey:(id)key;
 - (void)removeAnimationForKey:(id)key;
