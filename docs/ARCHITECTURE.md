@@ -442,7 +442,16 @@ constructors. Quadratic and cubic curve entry points sample 24/32 segments
 into the line list, and UIBezierPath exposes the same two curve methods.
 `CGGradient` keeps color components and locations; `CGContextDrawLinearGradient`
 projects each pixel onto the axis and interpolates the surrounding stops
-before blending through the clip and mask. Path clipping is supported through
+before blending through the clip and mask. `CALayer.mask` renders the mask
+layer into an offscreen pass, copies its alpha channel into an 8-bit
+coverage mask positioned at the masked layer's origin, and pushes it onto the
+framebuffer mask stack for the duration of the layer (or view) render, so
+sublayers, contents, gradients, shapes and blended pixels all pick up the
+mask. Coverage masks multiply with any active polygon or alpha mask, giving
+nested masks and partial-alpha masks their expected cumulative effect.
+Masks on standalone layers and on view backing layers are applied; a mask on
+a view that is also rendered through the rotation offscreen path is not
+folded into the rotated composite. Path clipping is supported through
 even-odd masks; color management and adaptive curve subdivision remain future
 work.
 

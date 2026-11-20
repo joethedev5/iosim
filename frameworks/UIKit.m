@@ -60,6 +60,9 @@ extern int  iosim_event_open(void);
 extern void iosim_fb_set_opacity(double opacity);
 extern int iosim_fb_push_clip(int x, int y, int w, int h);
 extern void iosim_fb_pop_clip(void);
+extern int iosim_fb_push_clip_alpha(const unsigned char *alpha, int w,
+                                    int h, int x, int y);
+extern void iosim_fb_pop_clip_mask(void);
 extern double iosim_now(void);
 extern int  iosim_foundation_tick(void);
 extern int  iosim_dispatch_drain_main(void);
@@ -167,6 +170,7 @@ struct layer_anim {
     double _zPosition;
     CGPoint _anchorPoint;
     id _contents;
+    id _mask;
 }
 - (double)cornerRadius;
 - (void)setCornerRadius:(double)radius;
@@ -180,6 +184,8 @@ struct layer_anim {
 - (void)setAnchorPoint:(CGPoint)anchorPoint;
 - (void)setContents:(id)contents;
 - (id)contents;
+- (void)setMask:(CALayer *)mask;
+- (CALayer *)mask;
 - (void)setBackgroundColor:(UIColor *)color;
 - (UIColor *)backgroundColor;
 - (void)setOpacity:(double)opacity;
@@ -1780,6 +1786,8 @@ static double layer_key_value(CALayer *layer, const char *key, double base);
 - (void)setCornerRadius:(double)radius { _cornerRadius = radius; }
 - (void)setMasksToBounds:(BOOL)masks { _masksToBounds = masks; }
 - (BOOL)masksToBounds { return _masksToBounds; }
+- (void)setMask:(CALayer *)mask { _mask = mask; }
+- (CALayer *)mask { return (CALayer *)_mask; }
 - (void)setShadowColor:(UIColor *)color { _shadowColor = color; }
 - (UIColor *)shadowColor { return _shadowColor; }
 - (void)setShadowOpacity:(double)opacity { _shadowOpacity = opacity; }
@@ -8987,6 +8995,49 @@ static void render_layer_contents(CALayer *layer, int x, int y, int w,
 }
 
 static void render_layer(CALayer *layer, double parentX, double parentY,
+                         double scale, double parentAlpha);
+static int g_mask_render_depth;
+
+/* Render a layer's mask into an offscreen pass and push its alpha channel
+ * as a coverage mask positioned at the layer's screen origin. Coordinates
+ * inside the mask layer are relative to the masked layer's top-left,
+ * matching CALayer's mask frame semantics. */
+static int push_layer_mask(CALayer *layer, int x, int y, int w, int h,
+                           double scale)
+{
+    if (!layer || !layer->_mask || w <= 0 || h <= 0)
+        return 0;
+    if (g_mask_render_depth >= 4)
+        return 0;
+    void *state = iosim_fb_begin_offscreen((unsigned)w, (unsigned)h);
+    if (!state)
+        return 0;
+    g_mask_render_depth++;
+    render_layer((CALayer *)layer->_mask, 0, 0, scale, 1.0);
+    g_mask_render_depth--;
+    int bw = 0, bh = 0;
+    unsigned *buf = iosim_fb_end_offscreen(state, &bw, &bh);
+    if (!buf || bw <= 0 || bh <= 0)
+    {
+        if (buf)
+            iosim_fb_free_offscreen(buf);
+        return 0;
+    }
+    unsigned char *alpha = malloc((unsigned long)bw * (unsigned long)bh);
+    if (!alpha)
+    {
+        iosim_fb_free_offscreen(buf);
+        return 0;
+    }
+    for (int i = 0; i < bw * bh; i++)
+        alpha[i] = (unsigned char)(buf[i] >> 24);
+    int pushed = iosim_fb_push_clip_alpha(alpha, bw, bh, x, y);
+    free(alpha);
+    iosim_fb_free_offscreen(buf);
+    return pushed;
+}
+
+static void render_layer(CALayer *layer, double parentX, double parentY,
                          double scale, double parentAlpha)
 {
     if (!layer || layer->_hidden)
@@ -9000,6 +9051,7 @@ static void render_layer(CALayer *layer, double parentX, double parentY,
     int w = (int)(frame.size.width * scale + 0.5);
     int h = (int)(frame.size.height * scale + 0.5);
     iosim_fb_set_opacity(alpha);
+    int masked = push_layer_mask(layer, x, y, w, h, scale);
     if (layer->_backgroundColor && layer->_backgroundColor->_a > 0.001 &&
         w > 0 && h > 0)
     {
@@ -9047,6 +9099,8 @@ static void render_layer(CALayer *layer, double parentX, double parentY,
     for (int i = 0; i < layer->_sublayerCount; i++)
         render_layer((CALayer *)layer->_sublayers[i], parentX + frame.origin.x,
                      parentY + frame.origin.y, scale, alpha);
+    if (masked)
+        iosim_fb_pop_clip_mask();
     iosim_fb_set_opacity(1.0);
 }
 
@@ -9202,6 +9256,10 @@ static void render_view(UIView *view, double originX, double originY,
         x = (int)(cx - w / 2.0 + 0.5);
         y = (int)(cy - h / 2.0 + 0.5);
     }
+
+    int masked = 0;
+    if (view->_layer)
+        masked = push_layer_mask(view->_layer, x, y, w, h, scale);
 
     int clipped = 0;
     if ((view->_clipsToBounds || (view->_layer && view->_layer->_masksToBounds) ||
@@ -10241,6 +10299,8 @@ static void render_view(UIView *view, double originX, double originY,
 
     if (clipped)
         iosim_fb_pop_clip();
+    if (masked)
+        iosim_fb_pop_clip_mask();
     iosim_fb_set_opacity(1.0);
 }
 

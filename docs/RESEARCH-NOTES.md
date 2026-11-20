@@ -280,6 +280,22 @@ stores multiple stops and CGContextDrawLinearGradient interpolates them
 per-pixel through clip and mask. Still missing: color management and adaptive
 curve subdivision.
 
+## 2026-11-20: CALayer masks
+
+- The framebuffer clip masks are now 8-bit coverage, not just 0/255:
+  `iosim_fb_push_clip_alpha` builds a full-target mask from an alpha buffer
+  at an offset and multiplies it into any active mask. Every fill, stroke,
+  glyph, gradient and RGBA/affine blit scales its coverage by the mask value,
+  so partial alpha and nested masks both accumulate.
+- `CALayer.mask` renders the mask layer into a w×h offscreen pass (alpha
+  channel only), pushes that coverage at the masked layer's screen origin,
+  renders the layer and its sublayers normally, and pops. Mask-layer
+  coordinates are relative to the masked layer's top-left. `render_view`
+  applies the same pass around the whole view, so `view.layer.mask` covers
+  backgrounds, contents, `drawRect:` output and subviews.
+- Fixture `tests/calayer_mask_test.m`: rect mask, oval shape mask on a view
+  backing layer, and a 50 percent alpha mask that blends red to `0x85070f`.
+
 ## Open directions
 
 - `metal-cpp` + macOS SDK Metal headers make it possible to implement a

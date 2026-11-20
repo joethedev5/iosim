@@ -25,6 +25,9 @@ void iosim_fb_set_opacity(double opacity);
 int iosim_fb_push_clip(int x, int y, int w, int h);
 void iosim_fb_pop_clip(void);
 int iosim_fb_push_clip_polygon(const double *xs, const double *ys, int count);
+/* Push an 8-bit coverage mask positioned at (x, y). Values below 255 make
+ * subsequent drawing partially transparent (used for CALayer masks). */
+int iosim_fb_push_clip_alpha(const uint8_t *alpha, int w, int h, int x, int y);
 void iosim_fb_pop_clip_mask(void);
 void iosim_fb_text(int x, int y, int scale, uint32_t color, const char *text);
 int  iosim_fb_text_width(const char *text, int scale);

@@ -156,6 +156,7 @@ typedef enum {
 @property double cornerRadius;
 @property double opacity;
 @property(nonatomic, retain) id backgroundColor;
+@property(nonatomic, retain) CALayer *mask;
 - (void)addSublayer:(CALayer *)layer;
 - (void)addAnimation:(id)animation forKey:(id)key;
 - (void)removeAnimationForKey:(id)key;
@@ -644,8 +645,10 @@ extern int UIApplicationMain(int argc, char **argv, id principal,
 
 @interface UIBezierPath : NSObject
 + (instancetype)bezierPath;
++ (instancetype)bezierPathWithOvalInRect:(CGRect)rect;
 - (void)moveToPoint:(CGPoint)point;
 - (void)addLineToPoint:(CGPoint)point;
+- (void)addOvalInRect:(CGRect)rect;
 - (void)addQuadCurveToPoint:(CGPoint)point controlPoint:(CGPoint)control;
 - (void)addCurveToPoint:(CGPoint)point controlPoint1:(CGPoint)control1
            controlPoint2:(CGPoint)control2;

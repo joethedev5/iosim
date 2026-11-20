@@ -54,13 +54,15 @@ struct fb_mask_state {
 static struct fb_mask_state fb_mask_stack[FB_MAX_CLIP_MASKS];
 static int fb_mask_depth;
 
-static int fb_mask_allows(int x, int y)
+/* Active clip masks are 8-bit coverage values: 0 transparent, 255 opaque.
+ * Polygon masks only produce 0/255; layer masks carry antialiased coverage. */
+static int fb_mask_coverage(int x, int y)
 {
     if (!fb_clip_mask)
-        return 1;
+        return 255;
     if (x < 0 || y < 0 || x >= fb_clip_mask_w || y >= fb_clip_mask_h)
         return 0;
-    return fb_clip_mask[(size_t)y * fb_clip_mask_w + x] != 0;
+    return fb_clip_mask[(size_t)y * fb_clip_mask_w + x];
 }
 
 int iosim_fb_push_clip_polygon(const double *xs, const double *ys, int count)
@@ -137,6 +139,46 @@ void iosim_fb_pop_clip_mask(void)
     fb_clip_mask = state->mask;
     fb_clip_mask_w = state->width;
     fb_clip_mask_h = state->height;
+}
+
+int iosim_fb_push_clip_alpha(const uint8_t *alpha, int w, int h, int x, int y)
+{
+    if (!fb_pixels || !alpha || w <= 0 || h <= 0 ||
+        fb_mask_depth >= FB_MAX_CLIP_MASKS)
+        return 0;
+    int width = (int)fb_width, height = (int)fb_height;
+    if (width <= 0 || height <= 0)
+        return 0;
+    uint8_t *mask = calloc((size_t)width * height, 1);
+    if (!mask)
+        return 0;
+    int x0 = x < 0 ? 0 : x, y0 = y < 0 ? 0 : y;
+    int x1 = x + w > width ? width : x + w;
+    int y1 = y + h > height ? height : y + h;
+    int same = fb_clip_mask && fb_clip_mask_w == width &&
+               fb_clip_mask_h == height;
+    for (int yy = y0; yy < y1; yy++)
+    {
+        uint8_t *row = mask + (size_t)yy * width;
+        const uint8_t *src = alpha + (size_t)(yy - y) * w;
+        for (int xx = x0; xx < x1; xx++)
+        {
+            unsigned a = src[xx - x];
+            if (!a)
+                continue;
+            if (same)
+                a = (a * fb_clip_mask[(size_t)yy * width + xx] + 127) / 255;
+            row[xx] = (uint8_t)a;
+        }
+    }
+    struct fb_mask_state *state = &fb_mask_stack[fb_mask_depth++];
+    state->mask = fb_clip_mask;
+    state->width = fb_clip_mask_w;
+    state->height = fb_clip_mask_h;
+    fb_clip_mask = mask;
+    fb_clip_mask_w = width;
+    fb_clip_mask_h = height;
+    return 1;
 }
 
 static void fb_reset_clip_masks(void)
@@ -709,6 +751,9 @@ void iosim_fb_blit_affine(const uint32_t *src, int sw, int sh,
         {
             if (x < fb_clip_x0() || x >= fb_clip_x1())
                 continue;
+            int mcov = fb_mask_coverage(x, y);
+            if (!mcov)
+                continue;
             double X = x + 0.5;
             double u = ia * X + ic * Y + itx - 0.5;
             double v = ib * X + id * Y + ity - 0.5;
@@ -745,7 +790,9 @@ void iosim_fb_blit_affine(const uint32_t *src, int sw, int sh,
             double sb = ((p00 & 0xFF) * a00 * w00 + (p10 & 0xFF) * a10 * w10 +
                          (p01 & 0xFF) * a01 * w01 +
                          (p11 & 0xFF) * a11 * w11) / sa;
-            double f = (sa / 255.0) * opacity;
+            double f = (sa / 255.0) * opacity * (mcov / 255.0);
+            if (f <= 0.0005)
+                continue;
             uint32_t dst = row[x];
             unsigned dr = (dst >> 16) & 0xFF, dg = (dst >> 8) & 0xFF,
                      db = dst & 0xFF;
@@ -806,6 +853,8 @@ void iosim_fb_fill_rect(int x, int y, int w, int h, uint32_t color)
     int y1 = y + h > fb_clip_y1() ? fb_clip_y1() : y + h;
     if (x0 >= x1 || y0 >= y1)
         return;
+    unsigned fr = (color >> 16) & 0xFF, fg = (color >> 8) & 0xFF,
+             fb = color & 0xFF;
     if (fb_opacity >= 0.999)
     {
         for (int yy = y0; yy < y1; yy++)
@@ -813,22 +862,31 @@ void iosim_fb_fill_rect(int x, int y, int w, int h, uint32_t color)
             uint32_t *row = fb_pixels + (size_t)yy * fb_width;
             for (int xx = x0; xx < x1; xx++)
             {
-                if (!fb_mask_allows(xx, yy))
+                int cov = fb_mask_coverage(xx, yy);
+                if (!cov)
                     continue;
-                row[xx] = fb_full(color);
+                if (cov == 255)
+                {
+                    row[xx] = fb_full(color);
+                    continue;
+                }
+                uint32_t dst = row[xx];
+                unsigned r = (fr * cov + ((dst >> 16) & 0xFF) * (255 - cov) + 127) / 255;
+                unsigned g = (fg * cov + ((dst >> 8) & 0xFF) * (255 - cov) + 127) / 255;
+                unsigned b = (fb * cov + (dst & 0xFF) * (255 - cov) + 127) / 255;
+                row[xx] = fb_pack(dst, r, g, b, cov);
             }
         }
         return;
     }
-    unsigned fa = (unsigned)(fb_opacity * 255.0 + 0.5);
-    unsigned fr = (color >> 16) & 0xFF, fg = (color >> 8) & 0xFF,
-             fb = color & 0xFF;
+    unsigned base = (unsigned)(fb_opacity * 255.0 + 0.5);
     for (int yy = y0; yy < y1; yy++)
     {
         uint32_t *row = fb_pixels + (size_t)yy * fb_width;
         for (int xx = x0; xx < x1; xx++)
         {
-            if (!fb_mask_allows(xx, yy))
+            unsigned fa = (base * (unsigned)fb_mask_coverage(xx, yy) + 127) / 255;
+            if (!fa)
                 continue;
             uint32_t dst = row[xx];
             unsigned r = (fr * fa + ((dst >> 16) & 0xFF) * (255 - fa) + 127) / 255;
@@ -871,8 +929,10 @@ void iosim_fb_fill_round_rect(int x, int y, int w, int h, int radius,
         double py = yy + 0.5 - cy;
         for (int xx = x0; xx < x1; xx++)
         {
-            if (!fb_mask_allows(xx, yy))
+            int mcov = fb_mask_coverage(xx, yy);
+            if (!mcov)
                 continue;
+            double mask = mcov / 255.0;
             double px = xx + 0.5 - cx;
             double qx = __builtin_fabs(px) - ex;
             double qy = __builtin_fabs(py) - ey;
@@ -880,11 +940,12 @@ void iosim_fb_fill_round_rect(int x, int y, int w, int h, int radius,
             double outside = __builtin_sqrt(ax * ax + ay * ay);
             double inside = qx > qy ? qx : qy;
             double d = outside + (inside < 0 ? inside : 0) - radius;
-            double coverage = (0.5 - d) * fb_opacity;
+            double top = fb_opacity * mask;
+            double coverage = (0.5 - d) * top;
             if (coverage <= 0)
                 continue;
-            if (coverage > fb_opacity)
-                coverage = fb_opacity;
+            if (coverage > top)
+                coverage = top;
             if (coverage >= 1)
             {
                 row[xx] = fb_full(color);
@@ -1111,15 +1172,18 @@ void iosim_fb_fill_circle(int cx, int cy, int radius, uint32_t color)
         double dy = y + 0.5 - cy;
         for (int x = x0; x < x1; x++)
         {
-            if (!fb_mask_allows(x, y))
+            int mcov = fb_mask_coverage(x, y);
+            if (!mcov)
                 continue;
+            double mask = mcov / 255.0;
             double dx = x + 0.5 - cx;
             double d = __builtin_sqrt(dx * dx + dy * dy) - radius;
-            double coverage = (0.5 - d) * fb_opacity;
+            double top = fb_opacity * mask;
+            double coverage = (0.5 - d) * top;
             if (coverage <= 0)
                 continue;
-            if (coverage > fb_opacity)
-                coverage = fb_opacity;
+            if (coverage > top)
+                coverage = top;
             if (coverage >= 1)
             {
                 row[x] = fb_full(color);
@@ -1754,9 +1818,11 @@ void iosim_fb_font_text(int x, int baseline_y, const char *text, int style,
                 if (xx < fb_clip_x0() || xx >= fb_clip_x1() ||
                     yy < fb_clip_y0() || yy >= fb_clip_y1())
                     continue;
-                if (!fb_mask_allows(xx, yy))
+                int mcov = fb_mask_coverage(xx, yy);
+                if (!mcov)
                     continue;
-                unsigned a = (unsigned)(src[col] * fb_opacity + 0.5);
+                unsigned a = (unsigned)(src[col] * fb_opacity *
+                                        (mcov / 255.0) + 0.5);
                 if (!a)
                     continue;
                 uint32_t d = dst[xx];
@@ -1803,9 +1869,10 @@ static void fb_blend_pixel(int x, int y, uint32_t color, double coverage)
     if (x < fb_clip_x0() || x >= fb_clip_x1() ||
         y < fb_clip_y0() || y >= fb_clip_y1())
         return;
-    if (!fb_mask_allows(x, y))
+    int mcov = fb_mask_coverage(x, y);
+    if (!mcov)
         return;
-    coverage *= fb_opacity;
+    coverage *= fb_opacity * (mcov / 255.0);
     if (coverage <= 0)
         return;
     uint32_t *row = fb_pixels + (size_t)y * fb_width;
@@ -1913,15 +1980,18 @@ void iosim_fb_fill_ellipse(int cx, int cy, int rx, int ry, uint32_t color)
         double dy = (y + 0.5 - cy) / ry;
         for (int x = x0; x < x1; x++)
         {
-            if (!fb_mask_allows(x, y))
+            int mcov = fb_mask_coverage(x, y);
+            if (!mcov)
                 continue;
+            double mask = mcov / 255.0;
             double dx = (x + 0.5 - cx) / rx;
             double d = (__builtin_sqrt(dx * dx + dy * dy) - 1.0) * scale;
-            double coverage = (0.5 - d) * fb_opacity;
+            double top = fb_opacity * mask;
+            double coverage = (0.5 - d) * top;
             if (coverage <= 0)
                 continue;
-            if (coverage > fb_opacity)
-                coverage = fb_opacity;
+            if (coverage > top)
+                coverage = top;
             uint32_t *row = fb_pixels + (size_t)y * fb_width;
             if (coverage >= 1)
             {
@@ -2120,12 +2190,13 @@ void iosim_fb_blit_rgba(int x, int y, int w, int h, const uint8_t *rgba,
             if (dx < fb_clip_x0() || dx >= fb_clip_x1() ||
                 dy < fb_clip_y0() || dy >= fb_clip_y1())
                 continue;
-            if (!fb_mask_allows(dx, dy))
+            int mcov = fb_mask_coverage(dx, dy);
+            if (!mcov)
                 continue;
             unsigned sa = src[xx * 4 + 3];
             if (!sa)
                 continue;
-            double a = (sa / 255.0) * fb_opacity;
+            double a = (sa / 255.0) * fb_opacity * (mcov / 255.0);
             uint32_t fg = ((unsigned)src[xx * 4] << 16) |
                           ((unsigned)src[xx * 4 + 1] << 8) |
                           src[xx * 4 + 2];
@@ -2169,7 +2240,8 @@ void iosim_fb_blit_rgba_scaled(int x, int y, int w, int h,
             if (dx < fb_clip_x0() || dx >= fb_clip_x1() ||
                 dy < fb_clip_y0() || dy >= fb_clip_y1())
                 continue;
-            if (!fb_mask_allows(dx, dy))
+            int mcov = fb_mask_coverage(dx, dy);
+            if (!mcov)
                 continue;
             double fx = ((xx + 0.5) * sw / w) - 0.5;
             int x0 = (int)__builtin_floor(fx);
@@ -2187,7 +2259,7 @@ void iosim_fb_blit_rgba_scaled(int x, int y, int w, int h,
                 double bot = p01[k] * (1 - tx) + p11[k] * tx;
                 c[k] = top * (1 - ty) + bot * ty;
             }
-            double a = (c[3] / 255.0) * fb_opacity;
+            double a = (c[3] / 255.0) * fb_opacity * (mcov / 255.0);
             if (a <= 0)
                 continue;
             uint32_t dst = row[dx];

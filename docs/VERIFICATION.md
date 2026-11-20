@@ -681,6 +681,13 @@ rectangle whose center samples `ffff00`. `UIImage CGImage` and
 center pixel. `tests/cgimage_layer_test.m` runs a scene whose view layer has
 a cyan `CGImage` as contents; the captured PNG is cyan inside the layer frame
 and keeps the dark background outside it.
+`tests/calayer_mask_test.m` masks a red standalone layer with a left-half
+rectangle, a blue view backing layer with an oval `CAShapeLayer`, and another
+red layer with a 50 percent white mask. The captured PNG is red at `(90,170)`
+and background at `(190,170)` across the rectangle mask, blue at `(140,350)`
+and background at `(48,306)` across the oval, and `0x85070f` (a half blend of
+red over the `0x0a0f1f` background) at `(140,530)` for the partial-alpha
+mask, proving mask geometry, subtree clipping and coverage multiplication.
 `tests/draw_rect_test.m` runs a real `UIApplicationMain` scene with a custom
 `DrawView`; its `drawRect:`paints four shapes, writes a PNG and exits. The suite samples the PNG at
 `(60,180)` red, `(250,190)` green, `(20,300)` blue stroke and `(90,455)`

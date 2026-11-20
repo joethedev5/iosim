@@ -3224,6 +3224,50 @@ else
     echo "FAIL CALayer CGImage contents"; echo "$out"; fails=$((fails+1))
 fi
 
+"$ROOT/tools/build_app.sh" "$ROOT/tests/calayer_mask_test.m" \
+    "$T/calayer_mask_test" >/dev/null
+out="$(IOSIM_TEST_PNG="$T/calayer_mask.png" DYLD_ROOT_PATH="$ROOT/runtime" \
+    "$RUN" "$T/calayer_mask_test" 2>&1)"
+check "[mask] masks 1 1 1" "$out" \
+    "CALayer mask retains the mask layer on layers and view backing layers"
+check "[mask] png written" "$out" \
+    "the masked layer fixture captures a frame"
+if out="$(python3 - "$ROOT/tools" "$T/calayer_mask.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+
+def px(x, y):
+    return pngpixel.px(rows, bpp, x * 3, y * 3)
+
+def rgb(x, y):
+    c = px(x, y)
+    return ((c >> 16) & 255, (c >> 8) & 255, c & 255)
+
+r, g, b = rgb(90, 170)
+if not (r > 200 and g < 60 and b < 60):
+    raise SystemExit("masked-in half of the strip is not red: %02x%02x%02x" % (r, g, b))
+r, g, b = rgb(190, 170)
+if not (r < 40 and g < 40 and b < 60):
+    raise SystemExit("masked-out half of the strip changed: %02x%02x%02x" % (r, g, b))
+r, g, b = rgb(140, 350)
+if not (b > 200 and r < 60 and g < 80):
+    raise SystemExit("oval mask kept the view center: %02x%02x%02x" % (r, g, b))
+r, g, b = rgb(48, 306)
+if not (r < 40 and g < 40 and b < 60):
+    raise SystemExit("oval mask left the view corner visible: %02x%02x%02x" % (r, g, b))
+r, g, b = rgb(140, 530)
+if not (100 < r < 180 and g < 50 and b < 60):
+    raise SystemExit("half-alpha mask did not blend: %02x%02x%02x" % (r, g, b))
+print("ok   CALayer masks clip layer trees and carry partial alpha")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL CALayer mask"; echo "$out"; fails=$((fails+1))
+fi
+
 "$ROOT/tools/build_app.sh" "$ROOT/tests/draw_rect_test.m" \
     "$T/draw_rect_test" >/dev/null
 out="$(IOSIM_TEST_PNG="$T/draw_rect.png" DYLD_ROOT_PATH="$ROOT/runtime" \
