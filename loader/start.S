@@ -50,6 +50,10 @@ objc_msgSend:
     subq $8, %rsp
     callq objc_lookup_imp
     addq $8, %rsp
+    /* Messaging nil is a no-op that returns zero, exactly as on Darwin.
+     * The C lookup reports that case with a null IMP. */
+    testq %rax, %rax
+    jz 1f
     popq %r9
     popq %r8
     popq %rcx
@@ -66,6 +70,12 @@ objc_msgSend:
     movdqu 0x70(%rsp), %xmm7
     addq $0x80, %rsp
     jmpq *%rax
+1:  /* nil receiver: discard the saved argument area and return zero */
+    addq $0xB0, %rsp
+    pxor %xmm0, %xmm0
+    pxor %xmm1, %xmm1
+    xorl %eax, %eax
+    ret
     .size objc_msgSend, .-objc_msgSend
 
     .text
@@ -94,6 +104,8 @@ objc_msgSendSuper2:
     subq $8, %rsp
     callq objc_lookup_super_imp
     addq $8, %rsp
+    testq %rax, %rax
+    jz 1f
     popq %r9
     popq %r8
     popq %rcx
@@ -111,6 +123,11 @@ objc_msgSendSuper2:
     movdqu 0x70(%rsp), %xmm7
     addq $0x80, %rsp
     jmpq *%rax
+1:  addq $0xB0, %rsp
+    pxor %xmm0, %xmm0
+    pxor %xmm1, %xmm1
+    xorl %eax, %eax
+    ret
     .size objc_msgSendSuper2, .-objc_msgSendSuper2
 
     .text
@@ -142,6 +159,8 @@ objc_msgSend_stret:
     movq %rdx, %rsi
     callq objc_lookup_imp
     addq $8, %rsp
+    testq %rax, %rax
+    jz 1f
     popq %r9
     popq %r8
     popq %rcx
@@ -158,4 +177,7 @@ objc_msgSend_stret:
     movdqu 0x70(%rsp), %xmm7
     addq $0x80, %rsp
     jmpq *%rax
+1:  addq $0xB0, %rsp
+    xorl %eax, %eax
+    ret
     .size objc_msgSend_stret, .-objc_msgSend_stret

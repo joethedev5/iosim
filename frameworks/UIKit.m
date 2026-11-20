@@ -6211,6 +6211,8 @@ extern int iosim_spawn_app(const char *exe, const char *bundle, const char *home
 extern int iosim_spawn_wait(int pid);
 extern void iosim_suspend_self(void);
 extern int iosim_resume_app(int pid);
+extern void iosim_on_switcher_request(void (*handler)(void));
+extern int iosim_request_switcher(void);
 extern void iosim_event_close(void);
 
 #define SHELL_MAX_APPS 40
@@ -6949,8 +6951,17 @@ static void shell_draw(int fbWidth, int fbHeight, double scale)
 
 static int g_switcher;
 static int g_switcher_index;
+static volatile int g_switcher_requested;
 static int g_sb_down;
 static double g_sb_down_x, g_sb_down_y;
+
+static void shell_repaint(int fbWidth, int fbHeight, double scale,
+                          const char *path, int switcher);
+
+static void shell_switcher_requested(void)
+{
+    g_switcher_requested = 1;
+}
 
 static int shell_suspended_count(void)
 {
@@ -7158,6 +7169,23 @@ static int shell_switcher_hit(int xpx, int ypx, int fbWidth, int fbHeight,
     return -1;
 }
 
+static void shell_after_app_stop(int fbWidth, int fbHeight, double scale,
+                                 const char *path)
+{
+    if (g_switcher_requested)
+    {
+        int count = shell_suspended_count();
+        g_switcher_requested = 0;
+        g_switcher = 1;
+        g_switcher_index = count > 0 ? count - 1 : 0;
+        printf("[SpringBoard] app switcher opened (%d suspended)\n", count);
+        fflush(0);
+        shell_repaint(fbWidth, fbHeight, scale, path, 1);
+    }
+    else
+        shell_repaint(fbWidth, fbHeight, scale, path, 0);
+}
+
 static void shell_launch(int index, int fbWidth, int fbHeight, double scale,
                          const char *path)
 {
@@ -7173,12 +7201,16 @@ static void shell_launch(int index, int fbWidth, int fbHeight, double scale,
         {
             int state = iosim_spawn_wait(a->pid);
             if (state == 0)
+            {
                 a->pid = 0;
+                g_switcher_requested = 0;
+                shell_repaint(fbWidth, fbHeight, scale, path, 0);
+            }
             else
+            {
                 shell_capture_snapshot(a);
-            shell_draw(fbWidth, fbHeight, scale);
-            if (path && *path)
-                iosim_fb_present(path);
+                shell_after_app_stop(fbWidth, fbHeight, scale, path);
+            }
             return;
         }
         printf("[SpringBoard] resume failed for %s\n", a->name);
@@ -7195,19 +7227,25 @@ static void shell_launch(int index, int fbWidth, int fbHeight, double scale,
     fflush(0);
     iosim_event_close();
     int pid = iosim_spawn_app(a->exe, a->bundle, a->home);
+    int stopped = 0;
     if (pid > 0)
     {
         int state = iosim_spawn_wait(pid);
         a->pid = state == 1 ? pid : 0;
-        if (state == 1)
+        stopped = state == 1;
+        if (stopped)
             shell_capture_snapshot(a);
     }
     else
         printf("[SpringBoard] launch failed for %s\n", a->name);
     fflush(0);
-    shell_draw(fbWidth, fbHeight, scale);
-    if (path && *path)
-        iosim_fb_present(path);
+    if (stopped)
+        shell_after_app_stop(fbWidth, fbHeight, scale, path);
+    else
+    {
+        g_switcher_requested = 0;
+        shell_repaint(fbWidth, fbHeight, scale, path, 0);
+    }
 }
 
 static void shell_repaint(int fbWidth, int fbHeight, double scale,
@@ -7238,6 +7276,7 @@ static int run_springboard(void)
     if (iosim_fb_begin((unsigned)fbWidth, (unsigned)fbHeight) != 0)
         return 1;
 
+    iosim_on_switcher_request(shell_switcher_requested);
     shell_load_apps();
     shell_draw(fbWidth, fbHeight, scale);
     const char *path = getenv("IOSIM_SCREENSHOT_PATH");
@@ -7657,6 +7696,35 @@ static int alert_handle_tap(UIViewController *root, int px, int py, int fbW,
     return 1;
 }
 
+/* Runs the background lifecycle, releases the event stream and suspends the
+ * process until SpringBoard continues it. request_switcher asks the system UI
+ * to open the app switcher as it takes over. */
+static void app_enter_background(id sceneDelegate, id scene,
+                                 int requestSwitcher)
+{
+    SEL willResign = @selector(sceneWillResignActive:);
+    SEL didEnter = @selector(sceneDidEnterBackground:);
+    if (sceneDelegate && [sceneDelegate respondsToSelector:willResign])
+        ((void (*)(id, SEL, id))objc_msgSend)(sceneDelegate, willResign, scene);
+    if (sceneDelegate && [sceneDelegate respondsToSelector:didEnter])
+        ((void (*)(id, SEL, id))objc_msgSend)(sceneDelegate, didEnter, scene);
+    printf("[UIKit-lite] backgrounded by the system; suspending\n");
+    fflush(0);
+    if (requestSwitcher)
+        iosim_request_switcher();
+    iosim_event_close();
+    iosim_suspend_self();
+    iosim_event_open();
+    SEL willEnter = @selector(sceneWillEnterForeground:);
+    SEL didBecome = @selector(sceneDidBecomeActive:);
+    if (sceneDelegate && [sceneDelegate respondsToSelector:willEnter])
+        ((void (*)(id, SEL, id))objc_msgSend)(sceneDelegate, willEnter, scene);
+    if (sceneDelegate && [sceneDelegate respondsToSelector:didBecome])
+        ((void (*)(id, SEL, id))objc_msgSend)(sceneDelegate, didBecome, scene);
+    printf("[UIKit-lite] resumed from suspension\n");
+    fflush(0);
+}
+
 int UIApplicationMain(int argc, char **argv, id principal, id delegateName)
 {
     (void)principal;
@@ -7768,6 +7836,10 @@ int UIApplicationMain(int argc, char **argv, id principal, id delegateName)
     {
         int type = 0, x = 0, y = 0;
         int r;
+        double touchDownX = 0, touchDownY = 0;
+        int haveTouchDown = 0;
+        int requestSwitcher = 0;
+        double screenHeightPt = fbHeight / scale;
         while ((r = iosim_event_next(&type, &x, &y)) != 0)
         {
             int redraw = 0;
@@ -7800,6 +7872,9 @@ int UIApplicationMain(int argc, char **argv, id principal, id delegateName)
             }
             else if (r == 1 && type == 2)
             {
+                touchDownX = x / scale;
+                touchDownY = y / scale;
+                haveTouchDown = 1;
                 [window dispatchTouchDownX:x y:y];
                 redraw = 1;
             }
@@ -7810,41 +7885,29 @@ int UIApplicationMain(int argc, char **argv, id principal, id delegateName)
             }
             else if (r == 1 && type == 4)
             {
+                double upX = x / scale, upY = y / scale;
                 [window dispatchTouchUpX:x y:y];
+                if (haveTouchDown &&
+                    touchDownY > screenHeightPt - 45.0 &&
+                    upY - touchDownY < -100.0 &&
+                    upX - touchDownX > -140.0 &&
+                    upX - touchDownX < 140.0)
+                    requestSwitcher = 1;
+                haveTouchDown = 0;
                 redraw = 1;
             }
             else if (r == 1 && type == 7)
             {
-                /* The system asked the app to background. Run the scene
-                 * lifecycle, release the event stream and suspend until
-                 * SpringBoard continues the process on the next launch. */
-                SEL willResign = @selector(sceneWillResignActive:);
-                SEL didEnter = @selector(sceneDidEnterBackground:);
-                if (sceneDelegate &&
-                    [sceneDelegate respondsToSelector:willResign])
-                    ((void (*)(id, SEL, id))objc_msgSend)(
-                        sceneDelegate, willResign, scene);
-                if (sceneDelegate &&
-                    [sceneDelegate respondsToSelector:didEnter])
-                    ((void (*)(id, SEL, id))objc_msgSend)(
-                        sceneDelegate, didEnter, scene);
-                printf("[UIKit-lite] backgrounded by the system; suspending\n");
-                fflush(0);
-                iosim_event_close();
-                iosim_suspend_self();
-                iosim_event_open();
-                SEL willEnter = @selector(sceneWillEnterForeground:);
-                SEL didBecome = @selector(sceneDidBecomeActive:);
-                if (sceneDelegate &&
-                    [sceneDelegate respondsToSelector:willEnter])
-                    ((void (*)(id, SEL, id))objc_msgSend)(
-                        sceneDelegate, willEnter, scene);
-                if (sceneDelegate &&
-                    [sceneDelegate respondsToSelector:didBecome])
-                    ((void (*)(id, SEL, id))objc_msgSend)(
-                        sceneDelegate, didBecome, scene);
-                printf("[UIKit-lite] resumed from suspension\n");
-                fflush(0);
+                /* The system asked the app to background. */
+                haveTouchDown = 0;
+                requestSwitcher = 0;
+                app_enter_background(sceneDelegate, scene, 0);
+                redraw = 1;
+            }
+            if (requestSwitcher)
+            {
+                requestSwitcher = 0;
+                app_enter_background(sceneDelegate, scene, 1);
                 redraw = 1;
             }
             if (iosim_foundation_tick())

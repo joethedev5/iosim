@@ -489,6 +489,14 @@ PNG's 1206 x 2622 dimensions, selection of the card, and a second
 `resumed from suspension` — the card really continues the stopped process.
 A bottom-edge swipe up opens the switcher from the home screen and a downward
 swipe closes it; `ui switcher` injects the same toggle for headless tests.
+The same gesture works inside a foreground app. The test resumes TouchApp from
+a card, then swipes up from the bottom edge of the app itself: the app logs
+`backgrounded by the system; suspending`, signals SpringBoard, and stops with
+SIGSTOP; SpringBoard reports `app switcher opened (1 suspended)` without any
+`ui switcher` command, and tapping the card resumes the same process. This
+exercises the runtime's nil-receiver semantics as well: the touch lands on a
+view with no touch overrides, the responder chain forwards `touchesBegan:`
+to `nil`, and the trampoline returns zero instead of aborting the process.
 
 The home grid pages in groups of 16 once seven stock apps and nine
 installed apps are present. The test installs ten extra page fixtures (21 grid apps in

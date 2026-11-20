@@ -21,6 +21,7 @@
 #include <sys/wait.h>
 #include <sys/stat.h>
 #include <dirent.h>
+#include <signal.h>
 
 /* ---------- guest file-system helpers ----------
  * Flag-free wrappers so guest dylibs never pass Darwin open(2) flags to the
@@ -222,6 +223,28 @@ int iosim_resume_app(int pid)
     if (pid <= 0)
         return -1;
     return kill(pid, SIGCONT);
+}
+
+/* An app asks its SpringBoard parent to open the switcher when it suspends.
+ * The handler only sets a flag; the guest supplies a plain C function. */
+static void (*switcher_request_handler)(void);
+
+static void switcher_signal_trampoline(int sig)
+{
+    (void)sig;
+    if (switcher_request_handler)
+        switcher_request_handler();
+}
+
+void iosim_on_switcher_request(void (*handler)(void))
+{
+    switcher_request_handler = handler;
+    signal(SIGUSR1, switcher_signal_trampoline);
+}
+
+int iosim_request_switcher(void)
+{
+    return kill(getppid(), SIGUSR1);
 }
 
 void  *objc_opt_class(void *obj);
@@ -617,6 +640,8 @@ static const struct iosim_shim shims[] = {
     SHIM_DIRECT(iosim_spawn_wait),
     SHIM_DIRECT(iosim_suspend_self),
     SHIM_DIRECT(iosim_resume_app),
+    SHIM_DIRECT(iosim_on_switcher_request),
+    SHIM_DIRECT(iosim_request_switcher),
     SHIM_DIRECT(iosim_dispatch_drain_main),
     SHIM_DIRECT(_Block_copy),
     SHIM_DIRECT(_Block_release),

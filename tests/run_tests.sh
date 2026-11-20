@@ -393,6 +393,45 @@ else
     fails=$((fails+1))
 fi
 
+# ---------- 7d. in-app bottom-edge swipe hands the switcher to SpringBoard ----------
+# While an app is foreground, a swipe up from the bottom edge must background
+# the app (SIGSTOP) and ask SpringBoard to show the switcher, with no separate
+# `ui switcher` command involved.
+sleep 0.4
+opened_before="$(grep -Fc "[SpringBoard] app switcher opened" "$SBLOG" 2>/dev/null || true)"
+"$ROOT/tools/iosimctl" ui "$UDID" swipe 201 860 201 400 0.25 >/dev/null
+opened_now="$opened_before"
+i=0
+while [ "$i" -lt 50 ]; do
+    opened_now="$(grep -Fc "[SpringBoard] app switcher opened" "$SBLOG" 2>/dev/null || true)"
+    [ "$opened_now" -gt "$opened_before" ] && break
+    sleep 0.1
+    i=$((i+1))
+done
+if [ "$opened_now" -gt "$opened_before" ] &&
+    grep -Fq -- "app switcher opened (1 suspended)" "$SBLOG"; then
+    echo "ok   an in-app bottom-edge swipe suspends and opens the switcher"
+else
+    echo "FAIL in-app switcher gesture ($opened_before -> $opened_now)"
+    fails=$((fails+1))
+fi
+resume_before="$(grep -Fc "[SpringBoard] resuming TouchApp" "$SBLOG" 2>/dev/null || true)"
+"$ROOT/tools/iosimctl" ui "$UDID" tap 201 400 >/dev/null
+i=0
+while [ "$i" -lt 50 ]; do
+    resume_now="$(grep -Fc "[SpringBoard] resuming TouchApp" "$SBLOG" 2>/dev/null || true)"
+    [ "$resume_now" -gt "$resume_before" ] && break
+    sleep 0.1
+    i=$((i+1))
+done
+if [ "$resume_now" -gt "$resume_before" ]; then
+    echo "ok   the card opened by the in-app gesture resumes the app"
+else
+    echo "FAIL in-app switcher resume ($resume_before -> $resume_now)"
+    fails=$((fails+1))
+fi
+sleep 0.4
+
 # ---------- 8. display link, animation timeline and presentation values ----------
 "$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
 sleep 0.8

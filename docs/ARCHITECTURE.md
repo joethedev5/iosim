@@ -234,7 +234,10 @@ ivar_t { offset_ptr, name, type, alignment, size }
 - `objc_msgSend` is an assembly trampoline that preserves all integer and SSE
   argument registers, asks the C runtime for the IMP, restores the arguments,
   and tail-jumps — preserving the caller's return address and Darwin's
-  message-send ABI.
+  message-send ABI. Messaging `nil` is a no-op returning zero, exactly as in
+  objc4: the lookup reports a null IMP and the trampoline returns with
+  zeroed `rax`, `xmm0` and `xmm1` instead of jumping. Responder-chain
+  forwarding and optional-delegate calls therefore terminate cleanly.
 - `objc_alloc_init`, `objc_autoreleasePoolPush/Pop`, `objc_retain/release`,
   `objc_getClass`, `class_getName`, `object_getClassName`, `sel_registerName`
   and `sel_getName` are implemented.
@@ -343,6 +346,16 @@ exist: `list`, `create`, `delete`, `boot`, `bootstatus`, `shutdown`, `erase`,
   process through the same SIGCONT path; a downward swipe closes the switcher.
   Cards for off-screen apps are not drawn; a horizontal swipe moves the focus
   between up to three visible cards.
+- An app can ask for the switcher itself. A bottom-edge swipe inside the app
+  (touch down within 45 pt of the bottom edge, release at least 100 pt higher
+  and within 140 pt horizontally) runs the same background lifecycle as
+  `home`, but first calls `iosim_request_switcher()`, which signals the
+  SpringBoard parent with `SIGUSR1`. SpringBoard's handler sets a pending
+  request; when its `waitpid(WUNTRACED)` reports the stopped child it opens
+  the switcher on that app's cached frame instead of repainting the home
+  screen. The app still stops itself and the same SIGCONT path resumes it,
+  so a gesture-initiated switcher card behaves identically to a home-screen
+  one.
 
 ### 2.9 Services: libdispatch, Mach and XPC
 
@@ -549,11 +562,10 @@ Python for iteration speed.
   objects, ARC entry points and exceptions are pending.
 - The SpringBoard grid pages in 16-slot pages; page changes are discrete (no
   sliding animation), and there are no folders, widgets or Today view. The
-  switcher shows at most three cards and opens from the home screen or
-  `ui switcher` (a foreground app owns the event stream, so an in-app
-  bottom-edge gesture is not intercepted); cards have no scrolling animation
-  or swipe-to-kill. A backgrounded app is suspended in place (the process
-  stops and the same process resumes from its icon), with no memory-pressure
-  termination policy. Stock system apps are display icons without
-  executables, and a directly launched app alongside a running SpringBoard is
-  not coordinated through launchd.
+  switcher shows at most three cards and opens from the home screen, an
+  in-app bottom-edge swipe, or `ui switcher`; cards have no scrolling
+  animation or swipe-to-kill. A backgrounded app is suspended in place (the
+  process stops and the same process resumes from its icon), with no
+  memory-pressure termination policy. Stock system apps are display icons
+  without executables, and a directly launched app alongside a running
+  SpringBoard is not coordinated through launchd.

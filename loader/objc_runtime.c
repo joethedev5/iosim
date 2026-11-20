@@ -291,6 +291,9 @@ void *objc_lookup_super_imp(void *super_ptr, void *sel)
         fprintf(stderr, "objc: invalid objc_super or selector\n");
         _exit(1);
     }
+    /* [super message] to a nil receiver returns zero without a lookup. */
+    if (!sup->receiver)
+        return NULL;
     /* msgSendSuper2 passes the class that defined the method; lookup starts
      * at its superclass. */
     struct objc_class_min *cls = (struct objc_class_min *)sup->super_class;
@@ -421,12 +424,15 @@ int iosim_objc_responds(void *obj, void *sel)
 
 void *objc_lookup_imp(void *obj, void *sel)
 {
-    if (!obj || !sel)
+    if (!sel)
     {
-        fprintf(stderr, "objc: nil receiver or selector (obj=%p sel=%s)\n",
-                obj, sel ? (const char *)sel : "(null)");
+        fprintf(stderr, "objc: nil selector\n");
         _exit(1);
     }
+    /* Objective-C messaging nil is a no-op returning zero. The trampolines
+     * treat a null IMP as that case and return without calling anything. */
+    if (!obj)
+        return NULL;
     const char *name = (const char *)sel;
 
     struct class_entry *ce = find_class_entry(obj);
