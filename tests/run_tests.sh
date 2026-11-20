@@ -1392,6 +1392,52 @@ fi
 "$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
 sleep 0.4
 
+# ---------- 9j. navigation bar items and the automatic back button ----------
+"$ROOT/tools/build_app.sh" "$ROOT/demo/NavBarApp.m" "$T/NavBarApp" >/dev/null
+mkdir -p "$T/NavBarApp.app"
+cp "$T/NavBarApp" "$T/NavBarApp.app/NavBarApp"
+python3 - "$T/NavBarApp.app/Info.plist" <<'PY'
+import plistlib, sys
+with open(sys.argv[1], "wb") as f:
+    plistlib.dump({
+        "CFBundleIdentifier": "com.iosim.navbar",
+        "CFBundleExecutable": "NavBarApp",
+        "CFBundleName": "NavBar",
+        "CFBundlePackageType": "APPL",
+        "CFBundleVersion": "1",
+        "CFBundleShortVersionString": "1.0",
+    }, f)
+PY
+"$ROOT/tools/iosimctl" install "$UDID" "$T/NavBarApp.app" >/dev/null
+sleep 0.5
+# Twenty-second installed app: grid slot 28, second page row 3 column 0.
+"$ROOT/tools/iosimctl" ui "$UDID" tap 62.1667 422.8333 >/dev/null
+if wait_log "[nav] ready root"; then
+    echo "ok   SpringBoard launches the navigation bar fixture"
+else
+    echo "FAIL nav bar fixture launch"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" tap 341 70 >/dev/null
+if wait_log "[nav] add"; then
+    echo "ok   the right bar button item sends its target action"
+else
+    echo "FAIL bar button action"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" tap 200 326 >/dev/null
+if wait_log "[nav] detail appeared"; then
+    echo "ok   pushing installs the detail controller under the bar"
+else
+    echo "FAIL nav push"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" tap 68 70 >/dev/null
+if wait_log "[nav] root appeared"; then
+    echo "ok   the automatic back button pops to the previous controller"
+else
+    echo "FAIL nav back button"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
+sleep 0.4
+
 # ---------- 10. cross-process Mach services ----------
 # launchd owns the bootstrap namespace; two independent guest processes find
 # each other through it and exchange a Mach message over the service port.

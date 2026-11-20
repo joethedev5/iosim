@@ -264,11 +264,14 @@ enum {
 @property int numberOfLines;
 @end
 
+@class UINavigationItem;
+
 @interface UIViewController : NSObject
 - (id)init;
 @property(nonatomic, retain) UIView *view;
 @property(nonatomic, retain) id title;
 @property(readonly) id navigationController;
+@property(readonly) UINavigationItem *navigationItem;
 @property(nonatomic, retain) id tabBarItem;
 - (void)loadView;
 - (void)viewDidLoad;
@@ -575,6 +578,42 @@ enum {
 @property double spacing;
 @property long distribution;
 @property long alignment;
+@end
+
+enum {
+    UIBarButtonItemStylePlain = 0,
+    UIBarButtonItemStyleBordered = 1,
+    UIBarButtonItemStyleDone = 2
+};
+
+enum {
+    UIBarButtonSystemItemDone = 0,
+    UIBarButtonSystemItemCancel = 1,
+    UIBarButtonSystemItemEdit = 2,
+    UIBarButtonSystemItemSave = 3,
+    UIBarButtonSystemItemAdd = 4,
+    UIBarButtonSystemItemFlexibleSpace = 5,
+    UIBarButtonSystemItemFixedSpace = 6,
+    UIBarButtonSystemItemCompose = 7,
+    UIBarButtonSystemItemReply = 8,
+    UIBarButtonSystemItemSearch = 9,
+    UIBarButtonSystemItemClose = 10
+};
+
+@interface UIBarButtonItem : NSObject
+- (id)initWithTitle:(id)title style:(long)style target:(id)target
+             action:(SEL)action;
+- (id)initWithBarButtonSystemItem:(long)item target:(id)target
+                           action:(SEL)action;
+@property(nonatomic, retain) id title;
+@end
+
+@interface UINavigationItem : NSObject
+- (id)initWithTitle:(id)title;
+@property(nonatomic, retain) id title;
+@property(nonatomic, retain) UIBarButtonItem *leftBarButtonItem;
+@property(nonatomic, retain) UIBarButtonItem *rightBarButtonItem;
+@property BOOL hidesBackButton;
 @end
 
 @interface UINavigationController : UIViewController

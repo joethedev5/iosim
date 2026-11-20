@@ -734,6 +734,7 @@ typedef enum {
     id _navigationController;
     id _presentedController;
     id _tabBarItem;
+    id _navigationItem;
 }
 - (id)init;
 - (id)title;
@@ -741,6 +742,7 @@ typedef enum {
 - (id)navigationController;
 - (id)tabBarItem;
 - (void)setTabBarItem:(id)item;
+- (id)navigationItem;
 - (UIView *)view;
 - (void)setView:(UIView *)view;
 - (void)loadView;
@@ -822,6 +824,71 @@ enum {
 - (long)alignment;
 @end
 
+enum {
+    UIBarButtonItemStylePlain = 0,
+    UIBarButtonItemStyleBordered = 1,
+    UIBarButtonItemStyleDone = 2
+};
+
+enum {
+    UIBarButtonSystemItemDone = 0,
+    UIBarButtonSystemItemCancel = 1,
+    UIBarButtonSystemItemEdit = 2,
+    UIBarButtonSystemItemSave = 3,
+    UIBarButtonSystemItemAdd = 4,
+    UIBarButtonSystemItemFlexibleSpace = 5,
+    UIBarButtonSystemItemFixedSpace = 6,
+    UIBarButtonSystemItemCompose = 7,
+    UIBarButtonSystemItemReply = 8,
+    UIBarButtonSystemItemSearch = 9,
+    UIBarButtonSystemItemClose = 10
+};
+
+@interface UIBarButtonItem : NSObject {
+@public
+    id _title;
+    long _style;
+    long _systemItem;
+    id _target;
+    SEL _action;
+    BOOL _enabled;
+}
+- (id)initWithTitle:(id)title style:(long)style target:(id)target
+             action:(SEL)action;
+- (id)initWithBarButtonSystemItem:(long)item target:(id)target
+                           action:(SEL)action;
+- (id)title;
+- (void)setTitle:(id)title;
+- (long)style;
+- (void)setStyle:(long)style;
+- (long)systemItem;
+- (id)target;
+- (SEL)action;
+- (void)setEnabled:(BOOL)enabled;
+- (BOOL)isEnabled;
+@end
+
+@interface UINavigationItem : NSObject {
+@public
+    id _title;
+    id _leftBarButtonItem;
+    id _rightBarButtonItem;
+    id _backBarButtonItem;
+    BOOL _hidesBackButton;
+}
+- (id)initWithTitle:(id)title;
+- (id)title;
+- (void)setTitle:(id)title;
+- (id)leftBarButtonItem;
+- (void)setLeftBarButtonItem:(id)item;
+- (id)rightBarButtonItem;
+- (void)setRightBarButtonItem:(id)item;
+- (id)backBarButtonItem;
+- (void)setBackBarButtonItem:(id)item;
+- (BOOL)hidesBackButton;
+- (void)setHidesBackButton:(BOOL)hidden;
+@end
+
 @interface UINavigationController : UIViewController {
 @public
     id _stack[32];
@@ -830,6 +897,8 @@ enum {
     UILabel *_navTitleLabel;
     BOOL _navBarHidden;
     UIView *_contentView;
+    id _leftButton;
+    id _rightButton;
 }
 - (id)initWithRootViewController:(UIViewController *)root;
 - (UIViewController *)topViewController;
@@ -3422,6 +3491,12 @@ static id g_firstResponder;
     return _tabBarItem;
 }
 - (void)setTabBarItem:(id)item { _tabBarItem = item; }
+- (id)navigationItem
+{
+    if (!_navigationItem)
+        _navigationItem = [[UINavigationItem alloc] initWithTitle:_title];
+    return _navigationItem;
+}
 - (void)loadView
 {
     _view = [[UIView alloc] initWithFrame:[[UIScreen mainScreen] bounds]];
@@ -3650,6 +3725,94 @@ static id g_firstResponder;
 
 /* ----------------------------------------------------- navigation stack */
 
+static id bar_system_title(long item)
+{
+    switch (item)
+    {
+    case UIBarButtonSystemItemDone: return @"Done";
+    case UIBarButtonSystemItemCancel: return @"Cancel";
+    case UIBarButtonSystemItemEdit: return @"Edit";
+    case UIBarButtonSystemItemSave: return @"Save";
+    case UIBarButtonSystemItemAdd: return @"+";
+    case UIBarButtonSystemItemCompose: return @"Compose";
+    case UIBarButtonSystemItemReply: return @"Reply";
+    case UIBarButtonSystemItemSearch: return @"Search";
+    case UIBarButtonSystemItemClose: return @"Close";
+    }
+    return @"";
+}
+
+@implementation UIBarButtonItem
+- (id)initWithTitle:(id)title style:(long)style target:(id)target
+             action:(SEL)action
+{
+    self = [super init];
+    if (self)
+    {
+        _title = title;
+        _style = style;
+        _target = target;
+        _action = action;
+        _enabled = YES;
+    }
+    return self;
+}
+- (id)initWithBarButtonSystemItem:(long)item target:(id)target
+                           action:(SEL)action
+{
+    return [self initWithTitle:bar_system_title(item) style:UIBarButtonItemStylePlain
+                        target:target action:action];
+}
+- (id)title { return _title; }
+- (void)setTitle:(id)title { _title = title; }
+- (long)style { return _style; }
+- (void)setStyle:(long)style { _style = style; }
+- (long)systemItem { return _systemItem; }
+- (id)target { return _target; }
+- (SEL)action { return _action; }
+- (void)setEnabled:(BOOL)enabled { _enabled = enabled; }
+- (BOOL)isEnabled { return _enabled; }
+@end
+
+@implementation UINavigationItem
+- (id)init { return [super init]; }
+- (id)initWithTitle:(id)title
+{
+    self = [super init];
+    if (self)
+        _title = title;
+    return self;
+}
+- (id)title { return _title; }
+- (void)setTitle:(id)title { _title = title; }
+- (id)leftBarButtonItem { return _leftBarButtonItem; }
+- (void)setLeftBarButtonItem:(id)item { _leftBarButtonItem = item; }
+- (id)rightBarButtonItem { return _rightBarButtonItem; }
+- (void)setRightBarButtonItem:(id)item { _rightBarButtonItem = item; }
+- (id)backBarButtonItem { return _backBarButtonItem; }
+- (void)setBackBarButtonItem:(id)item { _backBarButtonItem = item; }
+- (BOOL)hidesBackButton { return _hidesBackButton; }
+- (void)setHidesBackButton:(BOOL)hidden { _hidesBackButton = hidden; }
+@end
+
+static UIControl *nav_bar_control(UIBarButtonItem *item, CGRect frame,
+                                  int alignRight)
+{
+    UIControl *control = [[UIControl alloc] initWithFrame:frame];
+    UILabel *label = [[UILabel alloc]
+        initWithFrame:CGRectMake(0, 0, frame.size.width, frame.size.height)];
+    label->_text = item ? item->_title : @"";
+    label->_font = [UIFont systemFontOfSize:17];
+    label->_textColor = [UIColor colorWithRed:0.04 green:0.52 blue:1.0
+                                          alpha:1.0];
+    label->_textAlignment = alignRight ? 2 : 0;
+    [control addSubview:label];
+    if (item)
+        [control addTarget:item->_target action:item->_action
+         forControlEvents:UIControlEventTouchUpInside];
+    return control;
+}
+
 @implementation UINavigationController
 - (id)initWithRootViewController:(UIViewController *)root
 {
@@ -3715,8 +3878,57 @@ static id g_firstResponder;
                                  bounds.size.height - navHeight);
     [_view addSubview:content];
     _contentView = content;
-    _navTitleLabel->_text = top->_title;
+
+    UINavigationItem *item = (UINavigationItem *)[top navigationItem];
+    id title = (item && item->_title) ? item->_title : top->_title;
+    _navTitleLabel->_text = title;
+
+    if (_leftButton)
+        [(UIView *)_leftButton removeFromSuperview];
+    if (_rightButton)
+        [(UIView *)_rightButton removeFromSuperview];
+    _leftButton = nil;
+    _rightButton = nil;
+
+    double width = bounds.size.width;
+    UIBarButtonItem *leftItem =
+        item ? (UIBarButtonItem *)item->_leftBarButtonItem : nil;
+    if (_stackCount > 1 && (!item || !item->_hidesBackButton))
+    {
+        UIViewController *previous = _stack[_stackCount - 2];
+        id previousTitle = previous->_title;
+        UINavigationItem *previousItem =
+            (UINavigationItem *)[previous navigationItem];
+        if (previousItem && previousItem->_title)
+            previousTitle = previousItem->_title;
+        char backLabel[160];
+        snprintf(backLabel, sizeof(backLabel), "\xe2\x80\xb9 %s",
+                 iosim_string_cstr(previousTitle));
+        UIBarButtonItem *back = [[UIBarButtonItem alloc]
+            initWithTitle:[NSString stringWithUTF8String:backLabel]
+                    style:UIBarButtonItemStylePlain
+                   target:self
+                   action:@selector(navBackTapped:)];
+        _leftButton = nav_bar_control(back, CGRectMake(8, 50, 160, 36), 0);
+    }
+    else if (leftItem)
+        _leftButton = nav_bar_control(leftItem, CGRectMake(8, 50, 140, 36),
+                                      0);
+    if (_leftButton)
+        [_navBar addSubview:(UIView *)_leftButton];
+    if (item && item->_rightBarButtonItem)
+    {
+        _rightButton = nav_bar_control(
+            (UIBarButtonItem *)item->_rightBarButtonItem,
+            CGRectMake(width - 148, 50, 140, 36), 1);
+        [_navBar addSubview:(UIView *)_rightButton];
+    }
     _view->_needsLayout = YES;
+}
+- (void)navBackTapped:(id)sender
+{
+    (void)sender;
+    [self popViewControllerAnimated:YES];
 }
 - (void)pushViewController:(UIViewController *)controller animated:(BOOL)animated
 {

@@ -165,6 +165,16 @@ controller, updates the title bar, and a second tap pops back. Both transitions
 were driven through `IOSIM_EVENT_FIFO` and captured in
 `build/nav-root.png` / `build/nav-pushed.png`.
 
+### UIKit: navigation bar items
+
+`demo/NavBarApp.m` gives its root controller a right `UIBarButtonItem`
+("Add") and prints its action. The suite taps the item at (341, 70) pt and
+sees `[nav] add`, taps the content button to push the detail controller
+(`[nav] detail appeared`), then taps the automatic "‹ Library" back control
+at (68, 70) pt and sees the root's `viewWillAppear:` fire. The bar buttons
+are real `UIControl`s in the navigation bar's subview hierarchy, not hit
+regions checked separately.
+
 ### UIKit: tab bar container
 
 `demo/TabApp.m` puts two controllers (red and green) inside a

@@ -469,6 +469,11 @@ decoded with libpng in `loader/image.c`.
   `registerClass:forCellWithReuseIdentifier:` and
   `dequeueReusableCellWithReuseIdentifier:forIndexPath:` create cells the way a
   data source expects.
+- `UINavigationController` reads each top controller's `navigationItem` and
+  renders its title plus left/right `UIBarButtonItem`s as real `UIControl`s
+  in the bar, so their targets fire through normal touch tracking. A pushed
+  controller gets an automatic "‹ Previous" back control that pops the stack;
+  an explicit left item or `hidesBackButton` replaces it.
 - `UITabBarController` is a real container: it owns up to 16 view controllers,
   gives each a `UITabBarItem` (title and optional bundle image), and lays out a
   floating glass bar inset 16 pt from the sides, 64 pt tall, 12 pt above the
