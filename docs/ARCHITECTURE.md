@@ -397,6 +397,16 @@ the receiver's fast enumeration: `@count`, `@sum`, `@avg`, `@max`, `@min`,
 with a trailing key path applied to every element. `NSDictionary` overrides
 `valueForKey:` to return `objectForKey:` for ordinary keys.
 
+`CoreGraphics.framework` ships a direct-framebuffer `CGContext`: fill and
+stroke colors, alpha, line width, rect/ellipse fills and strokes, a point
+path with fill/stroke/close, transform/scale and a saved graphics-state
+stack. `iosim_cg_begin_view` maps points through the view origin and device
+scale and draws through the loader's framebuffer primitives, so clipping and
+view alpha apply. The renderer calls `drawRect:` for every view after its
+background and before its sublayers; plain `UIView` implements a no-op and
+custom subclasses can paint immediately. `UIGraphics` image contexts and
+full CGPath/color-space APIs remain future work.
+
 UIScrollView tracks recent pointer velocity while dragging instead of
 averaging the whole gesture. A release above 50 pt/s records the deceleration
 velocity, target and start time and adds the view to a small animation

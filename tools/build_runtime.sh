@@ -18,6 +18,7 @@ B="$ROOT/build/runtime"
 mkdir -p "$B" \
   "$OUT/System/Library/Frameworks/UIKit.framework" \
   "$OUT/System/Library/Frameworks/Foundation.framework" \
+  "$OUT/System/Library/Frameworks/CoreGraphics.framework" \
   "$OUT/System/Library/Frameworks/CoreFoundation.framework" \
   "$OUT/System/Library/Frameworks/QuartzCore.framework" \
   "$OUT/System/Library/PrivateFrameworks" \
@@ -43,10 +44,16 @@ build_dylib "$ROOT/frameworks/Foundation.m" \
 
 "$CC" -target "$SDK_TARGET" -ffreestanding -fPIC -c "$ROOT/frameworks/protocol_export.s" -o "$B/protocol_export.o"
 
+build_dylib "$ROOT/frameworks/CoreGraphics.m" \
+  "$OUT/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics" \
+  /System/Library/Frameworks/CoreGraphics.framework/CoreGraphics ""
+
 build_dylib "$ROOT/frameworks/UIKit.m" \
   "$OUT/System/Library/Frameworks/UIKit.framework/UIKit" \
   /System/Library/Frameworks/UIKit.framework/UIKit \
-  "$OUT/System/Library/Frameworks/Foundation.framework/Foundation" "$B/protocol_export.o"
+  "$OUT/System/Library/Frameworks/Foundation.framework/Foundation" \
+  "$OUT/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics" \
+  "$B/protocol_export.o"
 
 # Dependency anchors: real runtime layout, empty implementations for now.
 "$CC" -target "$SDK_TARGET" -ffreestanding -fPIC -c "$ROOT/frameworks/empty.c" -o "$B/empty.o"

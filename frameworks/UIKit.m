@@ -8,6 +8,7 @@
  * UIColor, UIFont, UIScreen, CALayer (cornerRadius), UIResponder. */
 
 #include "foundation_lite.h"
+#include "coregraphics_lite.h"
 
 extern int printf(const char *fmt, ...);
 extern int fflush(void *stream);
@@ -112,9 +113,6 @@ extern void iosim_fb_fill_linear_gradient_round_rect(int x, int y, int w,
                                                      unsigned end_color,
                                                      double sx, double sy,
                                                      double ex, double ey);
-
-typedef const void *CGPathRef;
-typedef void *CGColorRef;
 
 @class UIView;
 @class UIWindowScene;
@@ -2994,6 +2992,7 @@ static CGPoint window_point_for_view(UIView *view, CGPoint point)
 - (CGAffineTransform)transform { return _transform; }
 - (void)setTransform:(CGAffineTransform)transform { _transform = transform; }
 - (void)layoutSubviews { }
+- (void)drawRect:(CGRect)rect { (void)rect; }
 - (void)setNeedsLayout { _needsLayout = YES; }
 - (void)layoutIfNeeded
 {
@@ -8431,6 +8430,17 @@ static void render_view(UIView *view, double originX, double originY,
                                      color);
         else
             iosim_fb_fill_rect(x, y, w, h, color);
+        iosim_fb_set_opacity(alpha);
+    }
+
+    if (w > 0 && h > 0)
+    {
+        CGContextRef context = iosim_cg_begin_view(x, y, w, h, scale, alpha);
+        if (context)
+        {
+            [view drawRect:[view bounds]];
+            iosim_cg_end_view(context);
+        }
         iosim_fb_set_opacity(alpha);
     }
 

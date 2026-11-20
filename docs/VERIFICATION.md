@@ -619,6 +619,16 @@ Counts are exactly `2` and `2`; after `removeObserver:` the next
 `setName:@"erin"` produces no notification while the getter returns `erin`.
 The suite asserts all ten lines.
 
+### UIKit: CoreGraphics drawRect:
+
+`tests/coregraphics_test.m` draws a red rect, green ellipse, blue stroked
+rect, yellow filled triangle and a translated blue rect into a captured
+framebuffer and checks the sampled pixels. `tests/draw_rect_test.m` runs a
+real `UIApplicationMain` scene with a custom `DrawView`; its `drawRect:`
+paints four shapes, writes a PNG and exits. The suite samples the PNG at
+`(60,180)` red, `(250,190)` green, `(20,300)` blue stroke and `(90,455)`
+yellow path, proving the renderer-to-CGContext bridge and device scale.
+
 ### Foundation: NSRegularExpression
 
 `tests/regex_test.m` matches `([A-Za-z]+) (\\d+)` against

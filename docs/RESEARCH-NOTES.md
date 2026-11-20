@@ -245,6 +245,12 @@ a real CoreGraphics surface, not more renderer special cases:
 - Verify with a custom view fixture that fills a rect, strokes a path and
   draws an offscreen image, then sample framebuffer pixels.
 
+CoreGraphics MVP status: `CoreGraphics.framework` now exports a
+direct-framebuffer CGContext and UIKit calls `drawRect:` between background
+and sublayers. Fixtures cover fills/strokes/ellipses/paths and a full app
+frame. Still missing: `UIGraphics` image contexts, CGPath objects, color
+spaces, clipping paths beyond the framebuffer rect, text and images.
+
 ## Open directions
 
 - `metal-cpp` + macOS SDK Metal headers make it possible to implement a

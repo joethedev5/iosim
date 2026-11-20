@@ -2,6 +2,7 @@
 #define IOSIM_UIKIT_STUB_H
 
 #include "../frameworks/objc_lite.h"
+#include "../frameworks/coregraphics_lite.h"
 
 typedef struct {
     unsigned long location;
@@ -275,6 +276,7 @@ enum {
 @property CGAffineTransform transform;
 @property(nonatomic, retain) UIColor *backgroundColor;
 @property(readonly) CALayer *layer;
+- (void)drawRect:(CGRect)rect;
 - (void)addSubview:(UIView *)view;
 - (void)addGestureRecognizer:(id)recognizer;
 @property BOOL translatesAutoresizingMaskIntoConstraints;

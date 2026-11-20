@@ -3126,6 +3126,44 @@ check "[regex] ci=1" "$out" \
 check "[regex] replace=a<1>b<22>" "$out" \
     "template replacement expands \$1 capture references"
 
+# ---------- 34. CoreGraphics and the UIView drawRect: bridge ----------
+"$ROOT/tools/build_app.sh" "$ROOT/tests/draw_rect_test.m" \
+    "$T/draw_rect_test" >/dev/null
+out="$(IOSIM_TEST_PNG="$T/draw_rect.png" DYLD_ROOT_PATH="$ROOT/runtime" \
+    "$RUN" "$T/draw_rect_test" 2>&1)"
+check "[draw] rect painted" "$out" \
+    "a custom UIView receives drawRect: through the renderer"
+check "written to $T/draw_rect.png" "$out" \
+    "the drawRect: fixture writes its framebuffer"
+if out="$(python3 - "$ROOT/tools" "$T/draw_rect.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+
+def px(x, y):
+    return pngpixel.px(rows, bpp, x * 3, y * 3)
+
+r, g, b = (lambda c: ((c >> 16) & 255, (c >> 8) & 255, c & 255))(px(60, 180))
+if not (r > 200 and g < 80 and b < 80):
+    raise SystemExit("CGContextFillRect not visible: %02x%02x%02x" % (r, g, b))
+r, g, b = (lambda c: ((c >> 16) & 255, (c >> 8) & 255, c & 255))(px(250, 190))
+if not (g > 180 and r < 80):
+    raise SystemExit("CGContextFillEllipseInRect not visible: %02x%02x%02x" % (r, g, b))
+r, g, b = (lambda c: ((c >> 16) & 255, (c >> 8) & 255, c & 255))(px(20, 300))
+if not (b > 220 and r < 80):
+    raise SystemExit("CGContextStrokeRect not visible: %02x%02x%02x" % (r, g, b))
+r, g, b = (lambda c: ((c >> 16) & 255, (c >> 8) & 255, c & 255))(px(90, 455))
+if not (r > 240 and g > 180 and b < 60):
+    raise SystemExit("CGContextFillPath not visible: %02x%02x%02x" % (r, g, b))
+print("ok   CoreGraphics fills, strokes and paths render through drawRect:")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL CoreGraphics drawRect"; echo "$out"; fails=$((fails+1))
+fi
+
 if [ "$fails" -ne 0 ]; then
     echo "$fails test(s) failed" >&2
     exit 1
