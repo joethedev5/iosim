@@ -46,6 +46,7 @@ jobs:
             <key>MinimumOSVersion</key><string>18.0</string>
             <key>UIDeviceFamily</key><array><integer>1</integer></array>
             <key>LSRequiresIPhoneOS</key><true/>
+            <key>UIUserInterfaceStyle</key><string>Dark</string>
             <key>UILaunchScreen</key><dict/>
             <key>UISupportedInterfaceOrientations</key>
             <array><string>UIInterfaceOrientationPortrait</string></array>
@@ -67,31 +68,73 @@ jobs:
               if '.iOS-' not in rt:
                   continue
               for dev in devs:
-                  if dev.get('isAvailable', True) and dev['name'].startswith('iPhone'):
-                      score = (rt, dev['name'] == 'iPhone 18 Pro')
-                      if best is None or score > best[0]:
-                          best = (score, dev['udid'], dev['name'], rt)
+                  if not dev.get('isAvailable', True):
+                      continue
+                  name = dev['name']
+                  if not name.startswith('iPhone'):
+                      continue
+                  pref = 2 if name == 'iPhone 18 Pro' else (0 if 'Duo' in name else 1)
+                  score = (pref, rt)
+                  if best is None or score > best[0]:
+                      best = (score, dev['udid'], name, rt)
           if best:
               print(best[1])
           PY
           )
           echo "UDID=$UDID" > out/boot.txt
           if [ -n "$UDID" ]; then
+            xcrun simctl help status_bar > out/status-bar-help.txt 2>&1
             xcrun simctl boot "$UDID" >> out/boot.txt 2>&1
             xcrun simctl bootstatus "$UDID" -b >> out/boot.txt 2>&1
             xcrun simctl install "$UDID" HelloSim.app >> out/boot.txt 2>&1
-            xcrun simctl launch "$UDID" com.iosim.hellosim > out/launch.txt 2>&1
-            sleep 6
+            xcrun simctl status_bar "$UDID" override --time '9:41' \
+              --dataNetwork 5G --wifiMode active --wifiBars 3 \
+              --cellularMode active --cellularBars 4 \
+              --batteryState discharging --batteryLevel 100 \
+              > out/statusbar.txt 2>&1 || true
+            ( xcrun simctl launch --console-pty "$UDID" com.iosim.hellosim \
+                > out/console.txt 2>&1 & echo $! > /tmp/console.pid )
+            sleep 7
             xcrun simctl io "$UDID" screenshot out/real-sim.png >> out/boot.txt 2>&1
+            if [ ! -s out/real-sim.png ]; then
+              xcrun simctl io "$UDID" screenshot --display=1 out/real-sim.png >> out/boot.txt 2>&1
+            fi
+            kill "$(cat /tmp/console.pid)" 2>/dev/null || true
             xcrun simctl spawn "$UDID" ps aux > out/ps.txt 2>&1
             xcrun simctl spawn "$UDID" log show --last 3m --style compact \
               --predicate 'process == "HelloSim" OR eventMessage CONTAINS "HelloSim"' \
               > out/app-log.txt 2>&1
             xcrun simctl terminate "$UDID" com.iosim.hellosim >> out/boot.txt 2>&1
+            find "$HOME/Library/Logs/DiagnosticReports" -maxdepth 2 \
+              -iname 'HelloSim*' -mmin -15 -print -exec cp {} out/ \; \
+              > out/crash-reports.txt 2>&1 || true
             xcrun simctl shutdown "$UDID" >> out/boot.txt 2>&1
           fi
           tail -30 out/boot.txt
-          cat out/launch.txt
+          cat out/console.txt
+
+      - name: Collect the iOS runtime fonts
+        run: |
+          set +e
+          xcrun simctl runtime list -j > out/runtime-list.json
+          RT=$(python3 - <<'PY'
+          import json
+          d = json.load(open('out/runtime-list.json'))
+          cands = []
+          for v in d.values():
+              if v.get('platformIdentifier') == 'com.apple.platform.iphonesimulator' and v.get('state') == 'Ready':
+                  cands.append(v)
+          cands.sort(key=lambda v: v.get('version', ''))
+          print(cands[-1]['runtimeBundlePath'] if cands else '')
+          PY
+          )
+          echo "$RT" > out/runtime-path.txt
+          RTROOT="$RT/Contents/Resources/RuntimeRoot"
+          echo "$RTROOT" > out/runtime-root.txt
+          find "$RTROOT/System/Library/Fonts" -type f -exec ls -l {} \; > out/font-list.txt 2>&1
+          cat out/font-list.txt
+          tar czf artifact/ios-fonts.tgz -C "$RTROOT/System/Library/Fonts" . 2> out/fonts-tar.err
+          du -sh artifact/ios-fonts.tgz
 
       - name: Collect artifacts
         run: |
