@@ -137,8 +137,14 @@ typedef enum {
     options:(UISceneConnectionOptions *)connectionOptions;
 @end
 
+@class UIImage;
+
 @interface CALayer : NSObject
 @property CGRect frame;
+@property CGRect bounds;
+@property CGPoint position;
+@property CGPoint anchorPoint;
+@property(nonatomic, retain) id contents;
 @property double cornerRadius;
 @property double opacity;
 @property(nonatomic, retain) id backgroundColor;

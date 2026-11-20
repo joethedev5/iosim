@@ -531,6 +531,16 @@ child inside a scroll view with contentOffset (10,20) maps its point (1,1) to
 −4,−13 in the scroll and −4,87 in the root, proving the offset is applied in
 the same direction as hit-testing.
 
+### Core Animation: layer position, anchor and bounds
+
+`tests/calayer_geometry_test.m` starts a layer at (10,20,100,50): its
+position is 60,45 with the default 0.5/0.5 anchor. `setPosition:(100,100)`
+moves the frame origin to 50,75. Changing the anchor to 0,0 preserves the
+position and recomputes the origin to 100,100, and `setBounds:` to 120×60
+keeps position at 100,100 with the new size. A UIImage assigned to
+`contents` is drawn into the layer's frame by the renderer after the
+background fill.
+
 ### Foundation: files, URLs and JSON
 
 `tests/foundation_io_test.m` is a Foundation-only executable. It creates

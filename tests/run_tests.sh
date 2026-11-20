@@ -2945,6 +2945,19 @@ check "[geo] scroll -4 -13" "$out" \
 check "[geo] scroll root -4 87" "$out" \
     "conversion composes scroll offset and frame origins"
 
+# ---------- 26. CALayer position, anchorPoint and bounds ----------
+"$ROOT/tools/build_app.sh" "$ROOT/tests/calayer_geometry_test.m" \
+    "$T/calayer_geometry_test" >/dev/null
+out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/calayer_geometry_test" 2>&1)"
+check "[layer] position 60 45" "$out" \
+    "CALayer position is the frame origin plus the default anchor"
+check "[layer] setposition 50 75" "$out" \
+    "setPosition moves the frame origin"
+check "[layer] anchor 100 100 pos 100 100" "$out" \
+    "setAnchorPoint preserves position and recomputes the frame"
+check "[layer] bounds 100 100 120 60 pos 100 100" "$out" \
+    "setBounds changes size around the anchor"
+
 if [ "$fails" -ne 0 ]; then
     echo "$fails test(s) failed" >&2
     exit 1

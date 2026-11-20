@@ -153,6 +153,15 @@ Measured with `zig-x86_64-linux-0.17.1` from ziglang.org:
 - Fixtures `tests/textfield_delegate_test.m` and
   `tests/uiview_geometry_test.m` (section 25).
 
+## 2026-11-20: CALayer geometry and contents
+
+- `position`, `anchorPoint` and `bounds` are derived from `_frame` so the
+  existing renderer needed no layout change; setters preserve position using
+  anchorPoint * size.
+- `contents` accepts a UIImage and the renderer blits it scaled into the layer
+  frame after background and before gradient/shape/sublayers.
+- Fixture `tests/calayer_geometry_test.m` (section 26).
+
 ## Open directions
 
 - `metal-cpp` + macOS SDK Metal headers make it possible to implement a

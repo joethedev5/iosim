@@ -162,11 +162,21 @@ struct layer_anim {
     double _borderWidth;
     UIColor *_borderColor;
     double _zPosition;
+    CGPoint _anchorPoint;
+    id _contents;
 }
 - (double)cornerRadius;
 - (void)setCornerRadius:(double)radius;
 - (CGRect)frame;
 - (void)setFrame:(CGRect)frame;
+- (CGRect)bounds;
+- (void)setBounds:(CGRect)bounds;
+- (CGPoint)position;
+- (void)setPosition:(CGPoint)position;
+- (CGPoint)anchorPoint;
+- (void)setAnchorPoint:(CGPoint)anchorPoint;
+- (void)setContents:(id)contents;
+- (id)contents;
 - (void)setBackgroundColor:(UIColor *)color;
 - (UIColor *)backgroundColor;
 - (void)setOpacity:(double)opacity;
@@ -1715,6 +1725,7 @@ static double layer_key_value(CALayer *layer, const char *key, double base);
         _shadowRadius = 3.0;
         _shadowOffset = CGSizeMake(0, -3);
         _shadowColor = [UIColor blackColor];
+        _anchorPoint = CGPointMake(0.5, 0.5);
     }
     return self;
 }
@@ -1738,6 +1749,35 @@ static double layer_key_value(CALayer *layer, const char *key, double base);
 - (double)zPosition { return _zPosition; }
 - (CGRect)frame { return _frame; }
 - (void)setFrame:(CGRect)frame { _frame = frame; }
+- (CGRect)bounds
+{
+    return CGRectMake(0, 0, _frame.size.width, _frame.size.height);
+}
+- (CGPoint)position
+{
+    return CGPointMake(_frame.origin.x + _anchorPoint.x * _frame.size.width,
+                       _frame.origin.y + _anchorPoint.y * _frame.size.height);
+}
+- (void)setPosition:(CGPoint)position
+{
+    _frame.origin.x = position.x - _anchorPoint.x * _frame.size.width;
+    _frame.origin.y = position.y - _anchorPoint.y * _frame.size.height;
+}
+- (void)setBounds:(CGRect)bounds
+{
+    CGPoint position = [self position];
+    _frame.size = bounds.size;
+    [self setPosition:position];
+}
+- (CGPoint)anchorPoint { return _anchorPoint; }
+- (void)setAnchorPoint:(CGPoint)anchorPoint
+{
+    CGPoint position = [self position];
+    _anchorPoint = anchorPoint;
+    [self setPosition:position];
+}
+- (void)setContents:(id)contents { _contents = contents; }
+- (id)contents { return _contents; }
 - (void)setBackgroundColor:(UIColor *)color { _backgroundColor = color; }
 - (UIColor *)backgroundColor { return _backgroundColor; }
 - (void)setOpacity:(double)opacity { _opacity = opacity; }
@@ -7877,6 +7917,14 @@ static void render_layer(CALayer *layer, double parentX, double parentY,
                                      color);
         else
             iosim_fb_fill_rect(x, y, w, h, color);
+        iosim_fb_set_opacity(alpha);
+    }
+    if (layer->_contents && [layer->_contents isKindOfClass:[UIImage class]] &&
+        w > 0 && h > 0)
+    {
+        UIImage *image = (UIImage *)layer->_contents;
+        iosim_fb_blit_rgba_scaled(x, y, w, h, image->_rgba, image->_width,
+                                  image->_height, image->_width * 4);
         iosim_fb_set_opacity(alpha);
     }
     if ([layer isKindOfClass:[CAGradientLayer class]])

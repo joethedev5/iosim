@@ -594,6 +594,10 @@ decoded with libpng in `loader/image.c`.
 `frameworks/UIKit.m` maps the object model onto those primitives:
 
 - `UIView` renders its background, its `CALayer` sublayers, then its subviews.
+  `CALayer` derives `position` from the frame and `anchorPoint` (default
+  0.5,0.5); `setPosition:`, `setAnchorPoint:` and `setBounds:` keep the
+  position anchored, and a `UIImage` in `contents` is blit into the layer
+  frame after its background and before its sublayers.
   `center` is derived from the frame, `setCenter:` moves the origin,
   `setBounds:` changes the size, and `convertPoint:/convertRect:` walk the
   superview chain adding frame origins and subtracting a scroll ancestor's

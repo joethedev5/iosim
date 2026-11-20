@@ -40,7 +40,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | UIView animations (frame, alpha), delay/curve/repeat options, completion blocks | ✅ |
 | `CADisplayLink`, presentation layers, multiple concurrent layer animations | ✅ |
 | `CAAnimationGroup`: grouped opacity/corner animations, group removal clears children | ✅ |
-| CoreAnimation paths, gradients, sublayers (z-ordered), PNG images | ✅ |
+| CoreAnimation paths, gradients, layer geometry/contents, sublayers (z-ordered), PNG images | ✅ |
 | Foundation collections, strings, selector/block notifications with userInfo, timers, NSIndexPath | ✅ |
 | Foundation fast enumeration (`for-in`) and indexed/keyed collection subscripting | ✅ |
 | Key-value coding (accessor lookup, scalar boxing, key paths) and automatic KVO | ✅ |
