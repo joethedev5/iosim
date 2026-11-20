@@ -317,6 +317,14 @@ fire sends the argument instead of the timer, and the
 `NSThread` answers `isMainThread` through a `pthread_main_np` shim that
 records the loader's first thread, and sleeps with the same shim.
 
+`NSCalendar` implements the Gregorian calendar over the same civil-date
+arithmetic as the property-list writer: `components:fromDate:` splits a
+`timeIntervalSince1970` into year, month, day, hour, minute, second and a
+Sunday-based weekday (plus ISO week and nanoseconds), and
+`dateFromComponents:` runs the inverse through days-from-civil. Defaults
+follow Foundation for an unset year/month/day, and
+`NSCalendarIdentifierGregorian` names the calendar.
+
 Bundle resources follow the executable: when a guest image lives inside
 `Foo.app`, the loader exports `IOSIM_BUNDLE_DIR=Foo.app` (derived from the real
 executable path, so an app launched by SpringBoard does not inherit the system

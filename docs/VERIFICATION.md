@@ -478,6 +478,16 @@ the 150 ms delayed perform then runs (`fired=1 timing=1`) and the cancelled
 one never does. A repeating 50 ms timer fires twice and invalidates itself,
 and `sleepForTimeInterval:` really waits (`sleeping=1 cancelled=0`).
 
+### Foundation: calendar components
+
+`tests/calendar_test.m` decomposes the Unix epoch and reports
+`1970-01-01 00:00:00 wd=5` (Thursday under the Sunday-based weekday), builds
+`2024-02-29 12:34:56` from `NSDateComponents`, and decomposes the result back
+to the same fields with epoch `1709210096` — the leap day lands on the
+expected Thursday and the seconds match Python's `calendar.timegm` for that
+timestamp. The current calendar also reports its
+`NSCalendarIdentifierGregorian` identifier.
+
 ### UIKit: app bundle resources
 
 `demo/ResourceApp.m` is installed as a real `.app` with a 4 x 4 red `dot.png`

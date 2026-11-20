@@ -382,6 +382,70 @@ extern id NSDefaultRunLoopMode;
 - (id)stringFromDate:(NSDate *)date;
 @end
 
+enum {
+    NSCalendarUnitEra = 1 << 1,
+    NSCalendarUnitYear = 1 << 2,
+    NSCalendarUnitMonth = 1 << 3,
+    NSCalendarUnitDay = 1 << 4,
+    NSCalendarUnitHour = 1 << 5,
+    NSCalendarUnitMinute = 1 << 6,
+    NSCalendarUnitSecond = 1 << 7,
+    NSCalendarUnitWeekday = 1 << 9,
+    NSCalendarUnitWeekOfYear = 1 << 13,
+    NSCalendarUnitYearForWeekOfYear = 1 << 14,
+    NSCalendarUnitNanosecond = 1 << 15
+};
+
+extern id NSCalendarIdentifierGregorian;
+
+@interface NSDateComponents : NSObject {
+@public
+    long _era;
+    long _year;
+    long _month;
+    long _day;
+    long _hour;
+    long _minute;
+    long _second;
+    long _nanosecond;
+    long _weekday;
+    long _weekOfYear;
+}
+- (long)era;
+- (void)setEra:(long)value;
+- (long)year;
+- (void)setYear:(long)value;
+- (long)month;
+- (void)setMonth:(long)value;
+- (long)day;
+- (void)setDay:(long)value;
+- (long)hour;
+- (void)setHour:(long)value;
+- (long)minute;
+- (void)setMinute:(long)value;
+- (long)second;
+- (void)setSecond:(long)value;
+- (long)nanosecond;
+- (void)setNanosecond:(long)value;
+- (long)weekday;
+- (void)setWeekday:(long)value;
+- (long)weekOfYear;
+- (void)setWeekOfYear:(long)value;
+@end
+
+@interface NSCalendar : NSObject {
+@public
+    id _identifier;
+}
++ (NSCalendar *)currentCalendar;
++ (NSCalendar *)calendarWithIdentifier:(id)identifier;
+- (id)initWithCalendarIdentifier:(id)identifier;
+- (id)calendarIdentifier;
+- (NSDateComponents *)components:(unsigned long)unitFlags
+                        fromDate:(NSDate *)date;
+- (NSDate *)dateFromComponents:(NSDateComponents *)components;
+@end
+
 @interface NSError : NSObject {
 @public
     id _domain;

@@ -317,6 +317,22 @@ out="$(SIMULATOR_SHARED_RESOURCES_DIRECTORY="$PB_SHARED" \
 check "[paste] data=3/1 change=2" "$out" \
     "a second process reads the typed pasteboard data"
 
+# ---------- 4g. NSCalendar components ----------
+"$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
+    -ffreestanding -O1 -I "$ROOT/frameworks" \
+    -c "$ROOT/tests/calendar_test.m" -o "$T/calendar.o"
+"$LD64" -arch x86_64 -platform_version $PLATFORM -e _main -o "$T/calendar" \
+    "$T/calendar.o" \
+    "$ROOT/runtime/System/Library/Frameworks/Foundation.framework/Foundation" \
+    -undefined dynamic_lookup
+out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/calendar" 2>&1)"
+check "[cal] epoch 1970-01-01 00:00:00 wd=5" "$out" \
+    "NSCalendar decomposes the Unix epoch with its weekday"
+check "[cal] back 2024-02-29 12:34:56 wd=5 epoch=1709210096" "$out" \
+    "NSDateComponents builds a leap-day date and round-trips"
+check "[cal] id=NSCalendarIdentifierGregorian" "$out" \
+    "the current calendar reports its identifier"
+
 # ---------- 5. UIKit-lite framework dylib ----------
 cat > "$T/uikit_app.c" <<'EOF'
 extern int printf(const char *fmt, ...);

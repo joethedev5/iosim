@@ -3518,3 +3518,120 @@ static id keyed_resolve(NSKeyedUnarchiver *unarchiver, long index)
     return object;
 }
 @end
+
+/* ------------------------------------------------------------ calendars */
+
+id NSCalendarIdentifierGregorian = @"NSCalendarIdentifierGregorian";
+
+@implementation NSDateComponents
+- (long)era { return _era; }
+- (void)setEra:(long)value { _era = value; }
+- (long)year { return _year; }
+- (void)setYear:(long)value { _year = value; }
+- (long)month { return _month; }
+- (void)setMonth:(long)value { _month = value; }
+- (long)day { return _day; }
+- (void)setDay:(long)value { _day = value; }
+- (long)hour { return _hour; }
+- (void)setHour:(long)value { _hour = value; }
+- (long)minute { return _minute; }
+- (void)setMinute:(long)value { _minute = value; }
+- (long)second { return _second; }
+- (void)setSecond:(long)value { _second = value; }
+- (long)nanosecond { return _nanosecond; }
+- (void)setNanosecond:(long)value { _nanosecond = value; }
+- (long)weekday { return _weekday; }
+- (void)setWeekday:(long)value { _weekday = value; }
+- (long)weekOfYear { return _weekOfYear; }
+- (void)setWeekOfYear:(long)value { _weekOfYear = value; }
+@end
+
+@implementation NSCalendar
++ (NSCalendar *)currentCalendar
+{
+    static NSCalendar *calendar;
+    if (!calendar)
+        calendar = [[self alloc]
+            initWithCalendarIdentifier:NSCalendarIdentifierGregorian];
+    return calendar;
+}
++ (NSCalendar *)calendarWithIdentifier:(id)identifier
+{
+    return [[self alloc] initWithCalendarIdentifier:identifier];
+}
+- (id)initWithCalendarIdentifier:(id)identifier
+{
+    self = [super init];
+    if (self)
+        _identifier = identifier;
+    return self;
+}
+- (id)calendarIdentifier { return _identifier; }
+- (NSDateComponents *)components:(unsigned long)unitFlags
+                        fromDate:(NSDate *)date
+{
+    NSDateComponents *components = [[NSDateComponents alloc] init];
+    if (!date)
+        return components;
+    double seconds = [date timeIntervalSince1970];
+    long long whole = (long long)seconds;
+    if (seconds < 0 && seconds != (double)whole)
+        whole--;
+    long long days = whole / 86400;
+    long long sod = whole % 86400;
+    if (sod < 0)
+    {
+        sod += 86400;
+        days--;
+    }
+    long long year;
+    int month, day;
+    civil_from_days(days, &year, &month, &day);
+    long long weekday = ((days % 7) + 7 + 4) % 7 + 1;
+    if (unitFlags & NSCalendarUnitEra)
+        components->_era = 1;
+    if (unitFlags & NSCalendarUnitYear)
+        components->_year = (long)year;
+    if (unitFlags & NSCalendarUnitMonth)
+        components->_month = month;
+    if (unitFlags & NSCalendarUnitDay)
+        components->_day = day;
+    if (unitFlags & NSCalendarUnitHour)
+        components->_hour = (long)(sod / 3600);
+    if (unitFlags & NSCalendarUnitMinute)
+        components->_minute = (long)((sod / 60) % 60);
+    if (unitFlags & NSCalendarUnitSecond)
+        components->_second = (long)(sod % 60);
+    if (unitFlags & NSCalendarUnitWeekday)
+        components->_weekday = (long)weekday;
+    if (unitFlags & NSCalendarUnitWeekOfYear)
+    {
+        long long iso = (weekday + 5) % 7 + 1; /* Monday = 1 */
+        components->_weekOfYear = (long)((days - iso + 10) / 7);
+    }
+    if (unitFlags & NSCalendarUnitNanosecond)
+    {
+        double fraction = seconds - (double)whole;
+        if (fraction < 0)
+            fraction += 1.0;
+        components->_nanosecond = (long)(fraction * 1e9);
+    }
+    return components;
+}
+- (NSDate *)dateFromComponents:(NSDateComponents *)components
+{
+    if (!components)
+        return nil;
+    long long year = components->_year ? components->_year : 1970;
+    int month = components->_month > 0 ? (int)components->_month : 1;
+    int day = components->_day > 0 ? (int)components->_day : 1;
+    long long seconds = days_from_civil(year, month, day) * 86400 +
+                        (long long)components->_hour * 3600 +
+                        (long long)components->_minute * 60 +
+                        components->_second;
+    double value = (double)seconds;
+    if (components->_nanosecond > 0)
+        value += components->_nanosecond / 1e9;
+    return [NSDate dateWithTimeIntervalSince1970:value];
+}
+@end
