@@ -1556,6 +1556,54 @@ fi
 "$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
 sleep 0.4
 
+# ---------- 9l. UIStepper halves and ValueChanged ----------
+"$ROOT/tools/build_app.sh" "$ROOT/demo/StepperApp.m" "$T/StepperApp" >/dev/null
+mkdir -p "$T/StepperApp.app"
+cp "$T/StepperApp" "$T/StepperApp.app/StepperApp"
+python3 - "$T/StepperApp.app/Info.plist" <<'PY'
+import plistlib, sys
+with open(sys.argv[1], "wb") as f:
+    plistlib.dump({
+        "CFBundleIdentifier": "com.iosim.stepper",
+        "CFBundleExecutable": "StepperApp",
+        "CFBundleName": "Stepper",
+        "CFBundlePackageType": "APPL",
+        "CFBundleVersion": "1",
+        "CFBundleShortVersionString": "1.0",
+    }, f)
+PY
+"$ROOT/tools/iosimctl" install "$UDID" "$T/StepperApp.app" >/dev/null
+sleep 0.5
+# Twenty-fourth installed app: grid slot 30, second page row 3 column 2.
+"$ROOT/tools/iosimctl" ui "$UDID" tap 247.2778 422.8333 >/dev/null
+if wait_log "[stepper] ready"; then
+    echo "ok   SpringBoard launches the stepper fixture"
+else
+    echo "FAIL stepper fixture launch"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" tap 224 316 >/dev/null
+if wait_log "[stepper] value=1"; then
+    echo "ok   the plus half increments and sends ValueChanged"
+else
+    echo "FAIL stepper increment"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" tap 224 316 >/dev/null
+if wait_log "[stepper] value=2"; then
+    echo "ok   the value tracks the step each tap"
+else
+    echo "FAIL stepper second increment"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" tap 178 316 >/dev/null
+sleep 0.3
+value_lines="$(grep -Fc "[stepper] value=" "$SBLOG" 2>/dev/null || true)"
+if [ "$value_lines" -eq 3 ]; then
+    echo "ok   the minus half decrements the value again"
+else
+    echo "FAIL stepper decrement (events=$value_lines)"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
+sleep 0.4
+
 # ---------- 10. cross-process Mach services ----------
 # launchd owns the bootstrap namespace; two independent guest processes find
 # each other through it and exchange a Mach message over the service port.

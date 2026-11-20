@@ -165,6 +165,15 @@ controller, updates the title bar, and a second tap pops back. Both transitions
 were driven through `IOSIM_EVENT_FIFO` and captured in
 `build/nav-root.png` / `build/nav-pushed.png`.
 
+### UIKit: stepper control
+
+`demo/StepperApp.m` puts a `UIStepper` (0..10, step 1) on screen with a label
+that follows its value. The suite taps the plus half at (224, 316) pt twice
+and observes `value=1` and `value=2` from `ValueChanged`, then taps the
+minus half at (178, 316) and the third event confirms the value dropped
+again. The two halves are real `UIControl`s, so hit-testing and tracking are
+the same path as other controls.
+
 ### UIKit: search bar text input
 
 `demo/SearchBarApp.m` places a `UISearchBar` with a visible Cancel button and

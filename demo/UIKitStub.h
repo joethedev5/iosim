@@ -368,6 +368,13 @@ enum { UIAlertActionStyleDefault = 0, UIAlertActionStyleCancel = 1,
     forControlEvents:(unsigned long)events;
 @end
 
+@interface UIStepper : UIControl
+@property double value;
+@property double minimumValue;
+@property double maximumValue;
+@property double stepValue;
+@end
+
 @interface UISlider : UIView
 - (void)setValue:(double)value animated:(BOOL)animated;
 - (double)value;

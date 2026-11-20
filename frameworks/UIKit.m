@@ -1108,6 +1108,35 @@ enum {
 - (void)setValueFromPoint:(CGPoint)point;
 @end
 
+@interface UIStepper : UIControl {
+@public
+    double _value;
+    double _minimumValue;
+    double _maximumValue;
+    double _stepValue;
+    BOOL _continuous;
+    BOOL _autorepeat;
+    BOOL _wraps;
+    id _plusButton;
+    id _minusButton;
+    id _divider;
+}
+- (double)value;
+- (void)setValue:(double)value;
+- (double)minimumValue;
+- (void)setMinimumValue:(double)value;
+- (double)maximumValue;
+- (void)setMaximumValue:(double)value;
+- (double)stepValue;
+- (void)setStepValue:(double)value;
+- (BOOL)isContinuous;
+- (void)setContinuous:(BOOL)continuous;
+- (BOOL)autorepeats;
+- (void)setAutorepeats:(BOOL)repeats;
+- (BOOL)wraps;
+- (void)setWraps:(BOOL)wraps;
+@end
+
 @interface UIProgressView : UIView {
 @public
     double _progress;
@@ -3287,6 +3316,127 @@ static id g_firstResponder;
 {
     return CGSizeMake(_numberOfPages * 17.5, 20);
 }
+@end
+
+@implementation UIStepper
+- (id)initWithFrame:(CGRect)frame
+{
+    self = [super initWithFrame:frame];
+    if (self)
+    {
+        _value = 0;
+        _minimumValue = 0;
+        _maximumValue = 100;
+        _stepValue = 1;
+        _continuous = YES;
+        [self setBackgroundColor:
+            [UIColor colorWithRed:0.16 green:0.17 blue:0.19 alpha:1.0]];
+        [[self layer] setCornerRadius:8];
+
+        double half = frame.size.width / 2;
+        double height = frame.size.height;
+
+        UIControl *minus = [[UIControl alloc]
+            initWithFrame:CGRectMake(0, 0, half, height)];
+        UILabel *minusLabel = [[UILabel alloc]
+            initWithFrame:CGRectMake(0, 0, half, height)];
+        minusLabel->_text = @"\xe2\x88\x92";
+        minusLabel->_font = [UIFont systemFontOfSize:20];
+        minusLabel->_textColor = [UIColor whiteColor];
+        minusLabel->_textAlignment = 1;
+        [minus addSubview:minusLabel];
+        [minus addTarget:self action:@selector(minusTapped)
+         forControlEvents:UIControlEventTouchUpInside];
+        [self addSubview:minus];
+        _minusButton = minus;
+
+        UIControl *plus = [[UIControl alloc]
+            initWithFrame:CGRectMake(half, 0, half, height)];
+        UILabel *plusLabel = [[UILabel alloc]
+            initWithFrame:CGRectMake(0, 0, half, height)];
+        plusLabel->_text = @"+";
+        plusLabel->_font = [UIFont systemFontOfSize:20];
+        plusLabel->_textColor = [UIColor whiteColor];
+        plusLabel->_textAlignment = 1;
+        [plus addSubview:plusLabel];
+        [plus addTarget:self action:@selector(plusTapped)
+         forControlEvents:UIControlEventTouchUpInside];
+        [self addSubview:plus];
+        _plusButton = plus;
+
+        UIView *divider = [[UIView alloc] initWithFrame:
+            CGRectMake(half, 5, 1, height - 10)];
+        divider->_backgroundColor =
+            [UIColor colorWithRed:0.35 green:0.36 blue:0.38 alpha:1.0];
+        [self addSubview:divider];
+        _divider = divider;
+        _needsLayout = YES;
+    }
+    return self;
+}
+- (void)layoutSubviews
+{
+    double width = _frame.size.width;
+    double height = _frame.size.height;
+    if (_minusButton)
+        ((UIView *)_minusButton)->_frame =
+            CGRectMake(0, 0, width / 2, height);
+    if (_plusButton)
+        ((UIView *)_plusButton)->_frame =
+            CGRectMake(width / 2, 0, width / 2, height);
+    if (_divider)
+        ((UIView *)_divider)->_frame =
+            CGRectMake(width / 2, 5, 1, height - 10);
+}
+- (double)value { return _value; }
+- (void)setValue:(double)value
+{
+    if (value < _minimumValue)
+        value = _minimumValue;
+    if (value > _maximumValue)
+        value = _maximumValue;
+    _value = value;
+}
+- (double)minimumValue { return _minimumValue; }
+- (void)setMinimumValue:(double)value { _minimumValue = value; }
+- (double)maximumValue { return _maximumValue; }
+- (void)setMaximumValue:(double)value { _maximumValue = value; }
+- (double)stepValue { return _stepValue; }
+- (void)setStepValue:(double)value
+{
+    _stepValue = value > 0 ? value : 1;
+}
+- (BOOL)isContinuous { return _continuous; }
+- (void)setContinuous:(BOOL)continuous { _continuous = continuous; }
+- (BOOL)autorepeats { return _autorepeat; }
+- (void)setAutorepeats:(BOOL)repeats { _autorepeat = repeats; }
+- (BOOL)wraps { return _wraps; }
+- (void)setWraps:(BOOL)wraps { _wraps = wraps; }
+- (void)plusTapped
+{
+    double value = _value + _stepValue;
+    if (_wraps && value > _maximumValue)
+        value = _minimumValue;
+    if (value > _maximumValue)
+        value = _maximumValue;
+    if (value == _value)
+        return;
+    _value = value;
+    [self sendActionsForControlEvents:UIControlEventValueChanged];
+}
+- (void)minusTapped
+{
+    double value = _value - _stepValue;
+    if (_wraps && value < _minimumValue)
+        value = _maximumValue;
+    if (value < _minimumValue)
+        value = _minimumValue;
+    if (value == _value)
+        return;
+    _value = value;
+    [self sendActionsForControlEvents:UIControlEventValueChanged];
+}
+- (CGSize)intrinsicContentSize { return CGSizeMake(94, 32); }
 @end
 
 @implementation UISegmentedControl

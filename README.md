@@ -67,6 +67,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | UILongPressGestureRecognizer duration, movement tolerance and state changes | ✅ |
 | UIBarButtonItem/UINavigationItem, right bar buttons and automatic back button | ✅ |
 | UISearchBar with delegate edits, Return action, Cancel and keyboard focus | ✅ |
+| UIStepper plus/minus halves, stepping, limits and ValueChanged | ✅ |
 
 The test suite exercises a real Apple-toolchain-built x86_64 UIKit app, a
 Foundation app using `NSLog` with a constant `CFString`, a Foundation

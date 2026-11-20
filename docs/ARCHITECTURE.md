@@ -487,6 +487,9 @@ decoded with libpng in `loader/image.c`.
   `registerClass:forCellWithReuseIdentifier:` and
   `dequeueReusableCellWithReuseIdentifier:forIndexPath:` create cells the way a
   data source expects.
+- `UIStepper` lays out two `UIControl` halves around a divider; each half
+  steps the value within minimum/maximum (honouring stepValue and wraps) and
+  sends `UIControlEventValueChanged`.
 - `UISearchBar` embeds a real `UITextField` subclass, so focusing it raises
   the software keyboard and hardware keys edit the same text. EditingChanged
   reaches `searchBar:textDidChange:`; Return is intercepted before it can
