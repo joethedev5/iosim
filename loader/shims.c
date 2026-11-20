@@ -19,6 +19,140 @@
 #include <stdarg.h>
 #include <limits.h>
 #include <sys/wait.h>
+#include <sys/stat.h>
+#include <dirent.h>
+
+/* ---------- guest file-system helpers ----------
+ * Flag-free wrappers so guest dylibs never pass Darwin open(2) flags to the
+ * host. All paths are NUL-terminated UTF-8 strings. */
+
+int iosim_fs_exists(const char *path)
+{
+    return path && access(path, F_OK) == 0;
+}
+
+int iosim_fs_is_dir(const char *path)
+{
+    struct stat st;
+    return path && stat(path, &st) == 0 && S_ISDIR(st.st_mode);
+}
+
+long iosim_fs_size(const char *path)
+{
+    struct stat st;
+    if (!path || stat(path, &st) != 0 || !S_ISREG(st.st_mode))
+        return -1;
+    return (long)st.st_size;
+}
+
+int iosim_fs_read(const char *path, unsigned char **out, unsigned long *out_len)
+{
+    if (!path || !out || !out_len)
+        return -1;
+    FILE *f = fopen(path, "rb");
+    if (!f)
+        return -1;
+    if (fseek(f, 0, SEEK_END) != 0)
+    {
+        fclose(f);
+        return -1;
+    }
+    long n = ftell(f);
+    if (n < 0)
+    {
+        fclose(f);
+        return -1;
+    }
+    rewind(f);
+    unsigned char *buf = malloc((size_t)n + 1);
+    if (!buf)
+    {
+        fclose(f);
+        return -1;
+    }
+    size_t got = fread(buf, 1, (size_t)n, f);
+    fclose(f);
+    buf[got] = 0;
+    *out = buf;
+    *out_len = (unsigned long)got;
+    return 0;
+}
+
+int iosim_fs_write(const char *path, const void *bytes, unsigned long len)
+{
+    if (!path || (!bytes && len))
+        return -1;
+    FILE *f = fopen(path, "wb");
+    if (!f)
+        return -1;
+    size_t put = len ? fwrite(bytes, 1, len, f) : 0;
+    int rc = fclose(f);
+    return (put == len && rc == 0) ? 0 : -1;
+}
+
+int iosim_fs_remove(const char *path)
+{
+    return path ? remove(path) : -1;
+}
+
+int iosim_fs_rename(const char *from, const char *to)
+{
+    return (from && to) ? rename(from, to) : -1;
+}
+
+int iosim_fs_mkdir(const char *path, int intermediates)
+{
+    if (!path || !*path)
+        return -1;
+    if (!intermediates)
+        return mkdir(path, 0755);
+    char tmp[PATH_MAX];
+    size_t n = strlen(path);
+    if (n >= sizeof(tmp))
+        return -1;
+    memcpy(tmp, path, n + 1);
+    for (char *p = tmp + 1; *p; p++)
+    {
+        if (*p != '/')
+            continue;
+        *p = 0;
+        if (mkdir(tmp, 0755) != 0 && errno != EEXIST)
+            return -1;
+        *p = '/';
+    }
+    if (mkdir(tmp, 0755) != 0 && errno != EEXIST)
+        return -1;
+    return 0;
+}
+
+/* Newline-separated directory entries, with the dot entries filtered out. */
+int iosim_fs_list(const char *path, char *out, unsigned long cap)
+{
+    if (!path || !out || !cap)
+        return -1;
+    DIR *dir = opendir(path);
+    if (!dir)
+        return -1;
+    unsigned long used = 0;
+    int count = 0;
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL)
+    {
+        const char *name = entry->d_name;
+        if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0)
+            continue;
+        size_t len = strlen(name);
+        if (used + len + 2 > cap)
+            break;
+        memcpy(out + used, name, len);
+        used += len;
+        out[used++] = '\n';
+        count++;
+    }
+    out[used] = 0;
+    closedir(dir);
+    return count;
+}
 
 /* ---------- launching apps from the system UI ---------- */
 
@@ -453,6 +587,15 @@ static const struct iosim_shim shims[] = {
     SHIM_DIRECT(iosim_event_open),
     SHIM_DIRECT(iosim_event_next),
     SHIM_DIRECT(iosim_event_close),
+    SHIM_DIRECT(iosim_fs_exists),
+    SHIM_DIRECT(iosim_fs_is_dir),
+    SHIM_DIRECT(iosim_fs_size),
+    SHIM_DIRECT(iosim_fs_read),
+    SHIM_DIRECT(iosim_fs_write),
+    SHIM_DIRECT(iosim_fs_remove),
+    SHIM_DIRECT(iosim_fs_rename),
+    SHIM_DIRECT(iosim_fs_mkdir),
+    SHIM_DIRECT(iosim_fs_list),
     SHIM_DIRECT(iosim_spawn_app),
     SHIM_DIRECT(iosim_spawn_wait),
     SHIM_DIRECT(iosim_dispatch_drain_main),

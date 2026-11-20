@@ -41,6 +41,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | `CADisplayLink`, presentation layers, `CAKeyframeAnimation` on layer properties | ✅ |
 | CoreAnimation paths, gradients, sublayers (z-ordered), PNG images | ✅ |
 | Foundation collections, strings, notifications, timers, NSIndexPath | ✅ |
+| `NSFileManager`, `NSData` file I/O, `NSURL`, `NSJSONSerialization` | ✅ |
 | libdispatch queues, groups, semaphores; main-queue drain from UIKit | ✅ |
 | Mach ports/messages, bootstrap service registry, in-process XPC | ✅ |
 | SpringBoard system UI: measured iOS 26 home screen, installed apps, real app launching | ✅ |
@@ -49,8 +50,10 @@ runners**, combined with the public Darling and Apple dyld sources.
 | Switch, slider, segmented, progress, page and activity controls in the iOS 26 glass design | ✅ |
 
 The test suite exercises a real Apple-toolchain-built x86_64 UIKit app, a
-Foundation app using `NSLog` with a constant `CFString`, an Objective-C app
-with its own class, and a two-image dylib app. Three additional fixtures run
+Foundation app using `NSLog` with a constant `CFString`, a Foundation
+file/URL/JSON app that creates directories, round-trips files and parses
+compact JSON, an Objective-C app with its own class, and a two-image dylib
+app. Three additional fixtures run
 natively: a graphics app using `CAGradientLayer`, `CAShapeLayer` and
 `UIImageView`; a `UITableView` app with a data source, reusable-style cells,
 accessories and selection; an Auto Layout app using anchors, guides and a

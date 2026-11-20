@@ -326,6 +326,41 @@ because the link ticks, the box moves because the animation timeline is
 interpolated in the renderer, and the layer pulse is a keyframe animation
 composited into the view's alpha.
 
+### Foundation: files, URLs and JSON
+
+`tests/foundation_io_test.m` is a Foundation-only executable. It creates
+`Documents/IOTest` under the app's `HOME`, writes and reads a payload through
+`NSData`/`NSString`, lists the directory, copies and removes an item, walks an
+`NSURL`, and round-trips a dictionary through `NSJSONSerialization`:
+
+```
+mkdir 1
+dir exists 1 isdir 1
+write 1
+read hello file
+items 1 note.txt
+copy 1
+copy exists 1
+remove 1
+copy gone 1
+url file://<home>/Documents/IOTest/note.txt
+url path <home>/Documents/IOTest/note.txt
+last note.txt
+ext txt
+append extra
+valid 1
+json {"name":"Sim","count":42,"list":[1.5,true,null]}
+parsed Sim 42 1.5 1
+invalid 1
+```
+
+The JSON line is exactly what the serializer emits (no spaces, insertion
+order, booleans and null preserved); the parser reproduces the string, the
+integer, the double and the boolean, and rejects `{oops`. These file
+operations go through host-side wrappers for `fopen`, `stat`, `mkdir`,
+`rename` and `readdir`, so Darwin flag values and `struct stat` layouts never
+reach glibc.
+
 ### Services: dispatch, Mach, bootstrap and XPC
 
 `tests/services_test.m` is an Apple-clang x86_64 executable with no UI. It
@@ -430,6 +465,8 @@ repainted the same measured home screen. Installing while booted sends the
 The framework surface is still a subset. Auto Layout supports equality and
 inequality anchors with priorities evaluated by relaxation, intrinsic sizing
 and guides, but not the full Cassowary solver or every UIKit layout API.
+`NSUserDefaults` is still memory-only, and JSON covers Foundation objects
+without comments, streaming or fragments unless enabled.
 Text input is a single-line `UITextField` with a QWERTY keyboard; UITextView,
 multitap gestures and selection handles are not implemented. Touch input is
 single-finger: there is no multitouch, touch prediction or pressure. Cross-process Mach ports and

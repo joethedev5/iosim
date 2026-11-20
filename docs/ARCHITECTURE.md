@@ -254,9 +254,16 @@ symbols and structure layouts. Implemented so far:
 - `sysctlbyname` for memory/CPU/version keys.
 - `NSLog` with constant `CFString` decoding, `UIApplicationMain` fallback,
   the `__CFConstantStringClassReference` data symbol.
+- Constant `CFString` receivers: the runtime recognises their flags word
+  (`0x7c8` for ASCII, `0x7d0` for UTF-16) and routes method lookup and
+  `isKindOfClass:` through `NSString`, so `[@"literal" length]` and friends
+  behave like real constant strings without rewriting their read-only isa.
+- Flag-free file-system helpers (`iosim_fs_*`) wrap `fopen`, `stat`, `mkdir`,
+  `rename` and `readdir` on the host, so guest dylibs never pass Darwin
+  `open(2)` flags or Darwin `struct stat` layouts to glibc.
 - Missing symbols are bound to per-symbol stubs that print the symbol name.
 
-The next ABI work items are `struct stat` translation, Darwin pthread
+The next ABI work items are general `struct stat` translation, Darwin pthread
 semantics (Darwin `pthread_t` is a pointer), kqueue, Mach traps and `dispatch`.
 
 ### 2.7 Framework substitution
@@ -277,6 +284,14 @@ this path and calls our `UIApplicationMain`; a Foundation app calls our
 `NSLog`. This proves the framework-replacement model end to end; filling in
 the frameworks is now an application-library effort rather than a loader
 effort.
+
+The Foundation library builds on that substrate: `NSFileManager` creates,
+lists, copies, moves and removes items through the flag-free host helpers;
+`NSData` reads and writes files; `NSURL` carries file paths and path
+components; and `NSJSONSerialization` is a dependency-free recursive
+serializer and parser over `NSDictionary`, `NSArray`, `NSString`, `NSNumber`
+and `NSNull`. Compact output is deterministic (dictionary insertion order on
+this runtime) and the parser rejects truncated or malformed input.
 
 ### 2.8 Device lifecycle
 
@@ -494,7 +509,8 @@ Python for iteration speed.
   transport, launchd job control or multi-process app launch.
 - `libdispatch` covers main/global queues, groups, semaphores and timers.
   Foundation is a subset (strings, collections, numbers, data, notifications,
-  timers, dates, errors, bundles, defaults); it is not the full Foundation.
+  timers, dates, errors, bundles, defaults, file manager, URLs and JSON); it
+  is not the full Foundation. `NSUserDefaults` is still memory-only.
 - Auto Layout is a relaxation solver over anchors and guides, not Cassowary;
   it does not cover every UIKit layout API or content-size class.
 - Text input is a single-line `UITextField` with a QWERTY/numeric keyboard;

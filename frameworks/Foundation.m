@@ -21,11 +21,25 @@ extern void *calloc(unsigned long n, unsigned long size);
 extern void *realloc(void *ptr, unsigned long size);
 extern void  free(void *ptr);
 extern int   snprintf(char *buf, unsigned long size, const char *fmt, ...);
+extern double strtod(const char *s, char **end);
+extern int   iosim_fs_exists(const char *path);
+extern int   iosim_fs_is_dir(const char *path);
+extern long  iosim_fs_size(const char *path);
+extern int   iosim_fs_read(const char *path, unsigned char **out,
+                           unsigned long *out_len);
+extern int   iosim_fs_write(const char *path, const void *bytes,
+                            unsigned long len);
+extern int   iosim_fs_remove(const char *path);
+extern int   iosim_fs_rename(const char *from, const char *to);
+extern int   iosim_fs_mkdir(const char *path, int intermediates);
+extern int   iosim_fs_list(const char *path, char *out, unsigned long cap);
 extern unsigned long strlen(const char *s);
 extern int   strcmp(const char *a, const char *b);
 extern int   strncmp(const char *a, const char *b, unsigned long n);
 extern void *memcpy(void *dst, const void *src, unsigned long n);
 extern void *memset(void *dst, int c, unsigned long n);
+extern int   memcmp(const void *a, const void *b, unsigned long n);
+extern char *strstr(const char *haystack, const char *needle);
 
 struct cf_constant_string {
     void *isa;
@@ -319,13 +333,15 @@ static char *format_va(const char *fmt, va_list ap)
     free(buf);
     return self;
 }
-- (const char *)UTF8String { return _cstr ? _cstr : ""; }
-- (unsigned long)length { return _length; }
+- (const char *)UTF8String { return iosim_string_cstr(self); }
+- (unsigned long)length { return strlen(iosim_string_cstr(self)); }
 - (unsigned short)characterAtIndex:(unsigned long)index
 {
-    if (!_cstr || index >= _length)
+    const char *chars = iosim_string_cstr(self);
+    unsigned long len = strlen(chars);
+    if (index >= len)
         return 0;
-    return (unsigned short)(unsigned char)_cstr[index];
+    return (unsigned short)(unsigned char)chars[index];
 }
 - (BOOL)isEqual:(id)other
 {
@@ -338,9 +354,11 @@ static char *format_va(const char *fmt, va_list ap)
 - (BOOL)isEqualToString:(id)other { return [self isEqual:other]; }
 - (unsigned long)hash
 {
+    const char *chars = iosim_string_cstr(self);
+    unsigned long len = strlen(chars);
     unsigned long h = 5381;
-    for (unsigned long i = 0; i < _length; i++)
-        h = (h * 33) + (unsigned char)_cstr[i];
+    for (unsigned long i = 0; i < len; i++)
+        h = (h * 33) + (unsigned char)chars[i];
     return h;
 }
 - (id)description { return self; }
@@ -360,7 +378,7 @@ static char *format_va(const char *fmt, va_list ap)
 }
 - (id)uppercaseString
 {
-    char *buf = copy_cstr(_cstr ? _cstr : "", 0);
+    char *buf = copy_cstr(iosim_string_cstr(self), 0);
     if (!buf)
         return self;
     for (char *p = buf; *p; p++)
@@ -370,7 +388,7 @@ static char *format_va(const char *fmt, va_list ap)
 }
 - (id)lowercaseString
 {
-    char *buf = copy_cstr(_cstr ? _cstr : "", 0);
+    char *buf = copy_cstr(iosim_string_cstr(self), 0);
     if (!buf)
         return self;
     for (char *p = buf; *p; p++)
@@ -380,12 +398,14 @@ static char *format_va(const char *fmt, va_list ap)
 }
 - (id)substringToIndex:(unsigned long)index
 {
-    if (index > _length)
-        index = _length;
+    const char *chars = iosim_string_cstr(self);
+    unsigned long len = strlen(chars);
+    if (index > len)
+        index = len;
     char *buf = malloc(index + 1);
     if (!buf)
         return self;
-    memcpy(buf, _cstr, index);
+    memcpy(buf, chars, index);
     buf[index] = 0;
     NSString *s = [[NSString alloc] initWithUTF8String:buf];
     free(buf);
@@ -393,21 +413,26 @@ static char *format_va(const char *fmt, va_list ap)
 }
 - (id)substringFromIndex:(unsigned long)index
 {
-    if (index > _length)
-        index = _length;
-    return [NSString stringWithUTF8String:_cstr + index];
+    const char *chars = iosim_string_cstr(self);
+    unsigned long len = strlen(chars);
+    if (index > len)
+        index = len;
+    return [NSString stringWithUTF8String:chars + index];
 }
 - (BOOL)hasPrefix:(id)prefix
 {
     const char *p = iosim_string_cstr(prefix);
     unsigned long n = strlen(p);
-    return (BOOL)(n <= _length && strncmp(_cstr, p, n) == 0);
+    const char *chars = iosim_string_cstr(self);
+    return (BOOL)(n <= strlen(chars) && strncmp(chars, p, n) == 0);
 }
 - (BOOL)hasSuffix:(id)suffix
 {
     const char *s = iosim_string_cstr(suffix);
     unsigned long n = strlen(s);
-    return (BOOL)(n <= _length && strcmp(_cstr + _length - n, s) == 0);
+    const char *chars = iosim_string_cstr(self);
+    unsigned long len = strlen(chars);
+    return (BOOL)(n <= len && strcmp(chars + len - n, s) == 0);
 }
 - (id)componentsSeparatedByString:(id)separator
 {
@@ -419,8 +444,9 @@ static char *format_va(const char *fmt, va_list ap)
         [result addObject:self];
         return result;
     }
-    const char *start = _cstr;
-    for (const char *p = _cstr; ; p++)
+    const char *chars = iosim_string_cstr(self);
+    const char *start = chars;
+    for (const char *p = chars; ; p++)
     {
         if (strncmp(p, sep, sn) == 0)
         {
@@ -451,7 +477,7 @@ static char *format_va(const char *fmt, va_list ap)
         return self;
     char *out = 0;
     unsigned long cap = 0, len = 0;
-    const char *p = _cstr;
+    const char *p = iosim_string_cstr(self);
     while (*p)
     {
         if (strncmp(p, t, tn) == 0)
@@ -468,6 +494,126 @@ static char *format_va(const char *fmt, va_list ap)
     NSString *s = [[NSString alloc] initWithUTF8String:out ? out : ""];
     free(out);
     return s;
+}
+- (id)stringByAppendingPathComponent:(id)component
+{
+    const char *base = iosim_string_cstr(self);
+    const char *comp = iosim_string_cstr(component);
+    unsigned long bn = strlen(base), cn = strlen(comp);
+    char *buf = malloc(bn + cn + 2);
+    if (!buf)
+        return self;
+    memcpy(buf, base, bn);
+    unsigned long n = bn;
+    while (n > 1 && buf[n - 1] == '/')
+        n--;
+    if (n && buf[n - 1] != '/')
+        buf[n++] = '/';
+    memcpy(buf + n, comp, cn);
+    n += cn;
+    buf[n] = 0;
+    NSString *path = [[NSString alloc] initWithUTF8String:buf];
+    free(buf);
+    return path;
+}
+- (id)lastPathComponent
+{
+    const char *s = iosim_string_cstr(self);
+    unsigned long n = strlen(s);
+    while (n > 1 && s[n - 1] == '/')
+        n--;
+    unsigned long start = n;
+    while (start > 0 && s[start - 1] != '/')
+        start--;
+    char buf[1024];
+    unsigned long len = n - start;
+    if (len >= sizeof(buf))
+        len = sizeof(buf) - 1;
+    memcpy(buf, s + start, len);
+    buf[len] = 0;
+    return [NSString stringWithUTF8String:buf];
+}
+- (id)pathExtension
+{
+    const char *name = iosim_string_cstr([self lastPathComponent]);
+    const char *dot = 0;
+    for (const char *p = name; *p; p++)
+        if (*p == '.')
+            dot = p;
+    if (!dot || dot == name)
+        return @"";
+    return [NSString stringWithUTF8String:dot + 1];
+}
+- (id)stringByDeletingLastPathComponent
+{
+    const char *s = iosim_string_cstr(self);
+    unsigned long n = strlen(s);
+    while (n > 1 && s[n - 1] == '/')
+        n--;
+    while (n > 0 && s[n - 1] != '/')
+        n--;
+    while (n > 1 && s[n - 1] == '/')
+        n--;
+    char buf[1024];
+    if (n >= sizeof(buf))
+        n = sizeof(buf) - 1;
+    memcpy(buf, s, n);
+    buf[n] = 0;
+    if (n == 0)
+        return @"";
+    return [NSString stringWithUTF8String:buf];
+}
+- (id)stringByDeletingPathExtension
+{
+    const char *s = iosim_string_cstr(self);
+    unsigned long n = strlen(s);
+    unsigned long slash = n;
+    for (unsigned long i = n; i > 0; i--)
+        if (s[i - 1] == '/')
+        {
+            slash = i - 1;
+            break;
+        }
+    unsigned long dot = n;
+    for (unsigned long i = n; i > slash + 1; i--)
+        if (s[i - 1] == '.')
+        {
+            dot = i - 1;
+            break;
+        }
+    if (dot == n)
+        return self;
+    char buf[1024];
+    unsigned long len = dot;
+    if (len >= sizeof(buf))
+        len = sizeof(buf) - 1;
+    memcpy(buf, s, len);
+    buf[len] = 0;
+    return [NSString stringWithUTF8String:buf];
+}
+- (id)dataUsingEncoding:(unsigned long)encoding
+{
+    (void)encoding;
+    const char *chars = iosim_string_cstr(self);
+    return [NSData dataWithBytes:chars length:strlen(chars)];
+}
+- (id)initWithData:(id)data encoding:(unsigned long)encoding
+{
+    (void)encoding;
+    self = [super init];
+    if (self && data)
+    {
+        const char *bytes = (const char *)[data bytes];
+        _cstr = copy_cstr(bytes, &_length);
+    }
+    return self;
+}
+- (BOOL)containsString:(id)needle
+{
+    const char *n = iosim_string_cstr(needle);
+    if (!n || !*n)
+        return NO;
+    return strstr(iosim_string_cstr(self), n) != 0;
 }
 @end
 
@@ -977,17 +1123,240 @@ static char *format_va(const char *fmt, va_list ap)
 + (id)dataWithBytes:(const void *)bytes length:(unsigned long)length
 {
     NSData *d = [[self alloc] init];
-    if (d)
+    if (d && bytes)
     {
-        d->_bytes = malloc(length);
+        d->_bytes = malloc(length + 1);
         if (d->_bytes)
+        {
             memcpy(d->_bytes, bytes, length);
+            ((char *)d->_bytes)[length] = 0;
+        }
         d->_length = length;
     }
     return d;
 }
++ (id)dataWithContentsOfFile:(id)path
+{
+    unsigned char *bytes = 0;
+    unsigned long length = 0;
+    if (iosim_fs_read(iosim_string_cstr(path), &bytes, &length) != 0)
+        return nil;
+    NSData *d = [[self alloc] init];
+    d->_bytes = bytes;
+    d->_length = length;
+    return d;
+}
++ (id)dataWithContentsOfURL:(id)url
+{
+    return [self dataWithContentsOfFile:[url path]];
+}
+- (id)initWithBytes:(const void *)bytes length:(unsigned long)length
+{
+    self = [super init];
+    if (self)
+    {
+        _bytes = malloc(length + 1);
+        if (_bytes && bytes)
+        {
+            memcpy(_bytes, bytes, length);
+            ((char *)_bytes)[length] = 0;
+        }
+        _length = bytes ? length : 0;
+    }
+    return self;
+}
+- (id)initWithContentsOfFile:(id)path
+{
+    unsigned char *bytes = 0;
+    unsigned long length = 0;
+    if (iosim_fs_read(iosim_string_cstr(path), &bytes, &length) != 0)
+        return nil;
+    self = [super init];
+    if (self)
+    {
+        _bytes = bytes;
+        _length = length;
+    }
+    return self;
+}
 - (const void *)bytes { return _bytes; }
 - (unsigned long)length { return _length; }
+- (BOOL)writeToFile:(id)path atomically:(BOOL)atomically
+{
+    (void)atomically;
+    return iosim_fs_write(iosim_string_cstr(path), _bytes, _length) == 0;
+}
+- (BOOL)writeToURL:(id)url atomically:(BOOL)atomically
+{
+    return [self writeToFile:[url path] atomically:atomically];
+}
+- (id)subdataWithRange:(NSRange)range
+{
+    if (range.location > _length)
+        return [NSData data];
+    unsigned long length = range.length;
+    if (range.location + length > _length)
+        length = _length - range.location;
+    return [NSData dataWithBytes:(const char *)_bytes + range.location
+                          length:length];
+}
+- (BOOL)isEqualToData:(id)other
+{
+    if (!other || ![other isKindOfClass:[NSData class]])
+        return NO;
+    NSData *data = (NSData *)other;
+    return data->_length == _length &&
+           (_length == 0 || memcmp(data->_bytes, _bytes, _length) == 0);
+}
+- (id)description
+{
+    return [NSString stringWithFormat:@"<NSData: %lu bytes>", _length];
+}
+@end
+
+/* ---------------------------------------------------------- files & URLs */
+
+@implementation NSFileManager
++ (NSFileManager *)defaultManager
+{
+    static NSFileManager *manager;
+    if (!manager)
+        manager = [[self alloc] init];
+    return manager;
+}
+- (BOOL)fileExistsAtPath:(id)path
+{
+    return iosim_fs_exists(iosim_string_cstr(path));
+}
+- (BOOL)fileExistsAtPath:(id)path isDirectory:(BOOL *)isDirectory
+{
+    const char *c = iosim_string_cstr(path);
+    BOOL exists = iosim_fs_exists(c);
+    if (isDirectory)
+        *isDirectory = exists && iosim_fs_is_dir(c);
+    return exists;
+}
+- (BOOL)createDirectoryAtPath:(id)path
+    withIntermediateDirectories:(BOOL)createIntermediates
+                     attributes:(id)attributes error:(id *)error
+{
+    (void)attributes;
+    int rc = iosim_fs_mkdir(iosim_string_cstr(path),
+                            createIntermediates ? 1 : 0);
+    if (rc != 0 && error)
+        *error = [NSError errorWithDomain:@"NSCocoaErrorDomain" code:513
+                                   userInfo:nil];
+    return rc == 0;
+}
+- (id)contentsOfDirectoryAtPath:(id)path error:(id *)error
+{
+    char buf[16384];
+    int n = iosim_fs_list(iosim_string_cstr(path), buf, sizeof(buf));
+    if (n < 0)
+    {
+        if (error)
+            *error = [NSError errorWithDomain:@"NSCocoaErrorDomain" code:260
+                                       userInfo:nil];
+        return nil;
+    }
+    NSMutableArray *items = [NSMutableArray array];
+    char *line = buf;
+    while (*line)
+    {
+        char *end = line;
+        while (*end && *end != '\n')
+            end++;
+        char saved = *end;
+        *end = 0;
+        [items addObject:[NSString stringWithUTF8String:line]];
+        *end = saved;
+        line = saved ? end + 1 : end;
+    }
+    return items;
+}
+- (BOOL)removeItemAtPath:(id)path error:(id *)error
+{
+    int rc = iosim_fs_remove(iosim_string_cstr(path));
+    if (rc != 0 && error)
+        *error = [NSError errorWithDomain:@"NSCocoaErrorDomain" code:4
+                                   userInfo:nil];
+    return rc == 0;
+}
+- (BOOL)moveItemAtPath:(id)fromPath toPath:(id)toPath error:(id *)error
+{
+    int rc = iosim_fs_rename(iosim_string_cstr(fromPath),
+                             iosim_string_cstr(toPath));
+    if (rc != 0 && error)
+        *error = [NSError errorWithDomain:@"NSCocoaErrorDomain" code:4
+                                   userInfo:nil];
+    return rc == 0;
+}
+- (BOOL)copyItemAtPath:(id)fromPath toPath:(id)toPath error:(id *)error
+{
+    NSData *data = [NSData dataWithContentsOfFile:fromPath];
+    if (!data || ![data writeToFile:toPath atomically:NO])
+    {
+        if (error)
+            *error = [NSError errorWithDomain:@"NSCocoaErrorDomain" code:4
+                                       userInfo:nil];
+        return NO;
+    }
+    return YES;
+}
+- (id)contentsAtPath:(id)path
+{
+    return [NSData dataWithContentsOfFile:path];
+}
+- (BOOL)createFileAtPath:(id)path contents:(id)contents attributes:(id)attrs
+{
+    (void)attrs;
+    NSData *data = contents ? contents : [NSData data];
+    return [data writeToFile:path atomically:NO];
+}
+- (id)currentDirectoryPath
+{
+    const char *home = getenv("HOME");
+    return [NSString stringWithUTF8String:home && *home ? home : "."];
+}
+@end
+
+@implementation NSURL
++ (id)fileURLWithPath:(id)path
+{
+    NSURL *url = [[self alloc] init];
+    url->_path = path;
+    url->_fileURL = YES;
+    const char *c = iosim_string_cstr(path);
+    char buf[1024];
+    snprintf(buf, sizeof(buf), "file://%s", c);
+    url->_string = [NSString stringWithUTF8String:buf];
+    return url;
+}
++ (id)URLWithString:(id)string
+{
+    NSURL *url = [[self alloc] init];
+    url->_string = string;
+    const char *c = iosim_string_cstr(string);
+    url->_fileURL = strncmp(c, "file://", 7) == 0;
+    url->_path = url->_fileURL
+        ? [NSString stringWithUTF8String:c + 7] : nil;
+    return url;
+}
+- (id)path { return _path; }
+- (id)absoluteString { return _string; }
+- (BOOL)isFileURL { return _fileURL; }
+- (id)lastPathComponent { return [_path lastPathComponent]; }
+- (id)pathExtension { return [_path pathExtension]; }
+- (id)URLByAppendingPathComponent:(id)component
+{
+    return [NSURL fileURLWithPath:
+        [_path stringByAppendingPathComponent:component]];
+}
+- (id)URLByDeletingLastPathComponent
+{
+    return [NSURL fileURLWithPath:[_path stringByDeletingLastPathComponent]];
+}
+- (id)description { return _string; }
 @end
 
 /* ------------------------------------------------------- Notifications */
@@ -1284,6 +1653,414 @@ static void iosim_civil_from_days(long long z, int *year, int *month, int *day)
         [(id)_userInfo respondsToSelector:@selector(objectForKey:)])
         return [(id)_userInfo objectForKey:@"NSLocalizedDescription"];
     return @"";
+}
+@end
+
+/* ---------------------------------------------------- JSON serialization */
+
+static BOOL json_write_indent(NSMutableString *out, BOOL pretty, int depth)
+{
+    if (!pretty)
+        return YES;
+    [out appendString:@"\n"];
+    for (int i = 0; i < depth; i++)
+        [out appendString:@"  "];
+    return YES;
+}
+
+static void json_write_string(NSMutableString *out, const char *s)
+{
+    [out appendString:@"\""];
+    char buf[16];
+    for (const unsigned char *p = (const unsigned char *)(s ? s : ""); *p; p++)
+    {
+        if (*p == '"')
+            [out appendString:@"\\\""];
+        else if (*p == '\\')
+            [out appendString:@"\\\\"];
+        else if (*p == '\n')
+            [out appendString:@"\\n"];
+        else if (*p == '\r')
+            [out appendString:@"\\r"];
+        else if (*p == '\t')
+            [out appendString:@"\\t"];
+        else if (*p < 0x20)
+        {
+            snprintf(buf, sizeof(buf), "\\u%04x", *p);
+            [out appendString:[NSString stringWithUTF8String:buf]];
+        }
+        else
+        {
+            char one[2] = {(char)*p, 0};
+            [out appendString:[NSString stringWithUTF8String:one]];
+        }
+    }
+    [out appendString:@"\""];
+}
+
+static BOOL json_write_value(NSMutableString *out, id value, BOOL pretty,
+                             int depth)
+{
+    if (!value || [value isKindOfClass:[NSNull class]])
+    {
+        [out appendString:@"null"];
+        return YES;
+    }
+    if ([value isKindOfClass:[NSString class]])
+    {
+        json_write_string(out, iosim_string_cstr(value));
+        return YES;
+    }
+    if ([value isKindOfClass:[NSNumber class]])
+    {
+        NSNumber *number = (NSNumber *)value;
+        char buf[64];
+        if (number->_kind == 2)
+            [out appendString:number->_ival ? @"true" : @"false"];
+        else if (number->_kind == 1)
+        {
+            snprintf(buf, sizeof(buf), "%.15g", number->_dval);
+            [out appendString:[NSString stringWithUTF8String:buf]];
+        }
+        else
+        {
+            snprintf(buf, sizeof(buf), "%lld", number->_ival);
+            [out appendString:[NSString stringWithUTF8String:buf]];
+        }
+        return YES;
+    }
+    if ([value isKindOfClass:[NSArray class]])
+    {
+        NSArray *array = (NSArray *)value;
+        unsigned long count = [array count];
+        if (count == 0)
+        {
+            [out appendString:@"[]"];
+            return YES;
+        }
+        [out appendString:@"["];
+        for (unsigned long i = 0; i < count; i++)
+        {
+            if (i)
+                [out appendString:@","];
+            json_write_indent(out, pretty, depth + 1);
+            if (!json_write_value(out, [array objectAtIndex:i], pretty,
+                                  depth + 1))
+                return NO;
+        }
+        json_write_indent(out, pretty, depth);
+        [out appendString:@"]"];
+        return YES;
+    }
+    if ([value isKindOfClass:[NSDictionary class]])
+    {
+        NSDictionary *dict = (NSDictionary *)value;
+        NSArray *keys = [dict allKeys];
+        unsigned long count = [keys count];
+        if (count == 0)
+        {
+            [out appendString:@"{}"];
+            return YES;
+        }
+        [out appendString:@"{"];
+        for (unsigned long i = 0; i < count; i++)
+        {
+            id key = [keys objectAtIndex:i];
+            if (![key isKindOfClass:[NSString class]])
+                return NO;
+            if (i)
+                [out appendString:@","];
+            json_write_indent(out, pretty, depth + 1);
+            json_write_string(out, iosim_string_cstr(key));
+            [out appendString:pretty ? @": " : @":"];
+            if (!json_write_value(out, [dict objectForKey:key], pretty,
+                                  depth + 1))
+                return NO;
+        }
+        json_write_indent(out, pretty, depth);
+        [out appendString:@"}"];
+        return YES;
+    }
+    return NO;
+}
+
+struct json_state {
+    const char *s;
+    unsigned long i;
+    unsigned long n;
+    int error;
+};
+
+static void json_skip_ws(struct json_state *p)
+{
+    while (p->i < p->n)
+    {
+        char c = p->s[p->i];
+        if (c != ' ' && c != '\t' && c != '\n' && c != '\r')
+            break;
+        p->i++;
+    }
+}
+
+static id json_parse_string(struct json_state *p)
+{
+    if (p->i >= p->n || p->s[p->i] != '"')
+    {
+        p->error = 1;
+        return nil;
+    }
+    p->i++;
+    char *buf = malloc(p->n - p->i + 1);
+    unsigned long len = 0;
+    while (p->i < p->n && p->s[p->i] != '"')
+    {
+        unsigned char c = (unsigned char)p->s[p->i++];
+        if (c == '\\')
+        {
+            if (p->i >= p->n)
+                break;
+            c = (unsigned char)p->s[p->i++];
+            if (c == 'n') c = '\n';
+            else if (c == 't') c = '\t';
+            else if (c == 'r') c = '\r';
+            else if (c == 'b') c = '\b';
+            else if (c == 'f') c = '\f';
+            else if (c == 'u')
+            {
+                unsigned int code = 0;
+                for (int k = 0; k < 4; k++)
+                {
+                    if (p->i >= p->n)
+                    {
+                        p->error = 1;
+                        break;
+                    }
+                    char h = p->s[p->i++];
+                    unsigned int v = 0;
+                    if (h >= '0' && h <= '9') v = (unsigned int)(h - '0');
+                    else if (h >= 'a' && h <= 'f')
+                        v = (unsigned int)(h - 'a' + 10);
+                    else if (h >= 'A' && h <= 'F')
+                        v = (unsigned int)(h - 'A' + 10);
+                    else
+                        p->error = 1;
+                    code = code * 16 + v;
+                }
+                if (code < 0x80)
+                    buf[len++] = (char)code;
+                else if (code < 0x800)
+                {
+                    buf[len++] = (char)(0xC0 | (code >> 6));
+                    buf[len++] = (char)(0x80 | (code & 0x3F));
+                }
+                else
+                {
+                    buf[len++] = (char)(0xE0 | (code >> 12));
+                    buf[len++] = (char)(0x80 | ((code >> 6) & 0x3F));
+                    buf[len++] = (char)(0x80 | (code & 0x3F));
+                }
+                continue;
+            }
+            else if (c != '"' && c != '\\' && c != '/')
+            {
+                p->error = 1;
+                break;
+            }
+        }
+        else if (c < 0x20)
+        {
+            p->error = 1;
+            break;
+        }
+        buf[len++] = (char)c;
+    }
+    if (p->i >= p->n || p->s[p->i] != '"')
+        p->error = 1;
+    else
+        p->i++;
+    if (p->error)
+    {
+        free(buf);
+        return nil;
+    }
+    buf[len] = 0;
+    NSString *string = [NSString stringWithUTF8String:buf];
+    free(buf);
+    return string;
+}
+
+static id json_parse_value(struct json_state *p, int depth)
+{
+    if (depth > 64)
+    {
+        p->error = 1;
+        return nil;
+    }
+    json_skip_ws(p);
+    if (p->i >= p->n)
+    {
+        p->error = 1;
+        return nil;
+    }
+    char c = p->s[p->i];
+    if (c == '"')
+        return json_parse_string(p);
+    if (c == '{')
+    {
+        p->i++;
+        NSMutableDictionary *dict = [NSMutableDictionary dictionary];
+        json_skip_ws(p);
+        if (p->i < p->n && p->s[p->i] == '}')
+        {
+            p->i++;
+            return dict;
+        }
+        while (!p->error)
+        {
+            json_skip_ws(p);
+            id key = json_parse_string(p);
+            if (!key)
+                break;
+            json_skip_ws(p);
+            if (p->i >= p->n || p->s[p->i] != ':')
+            {
+                p->error = 1;
+                break;
+            }
+            p->i++;
+            id value = json_parse_value(p, depth + 1);
+            if (!value)
+                break;
+            [dict setObject:value forKey:key];
+            json_skip_ws(p);
+            if (p->i < p->n && p->s[p->i] == ',')
+            {
+                p->i++;
+                continue;
+            }
+            if (p->i < p->n && p->s[p->i] == '}')
+            {
+                p->i++;
+                return dict;
+            }
+            p->error = 1;
+            break;
+        }
+        return nil;
+    }
+    if (c == '[')
+    {
+        p->i++;
+        NSMutableArray *array = [NSMutableArray array];
+        json_skip_ws(p);
+        if (p->i < p->n && p->s[p->i] == ']')
+        {
+            p->i++;
+            return array;
+        }
+        while (!p->error)
+        {
+            id value = json_parse_value(p, depth + 1);
+            if (!value)
+                break;
+            [array addObject:value];
+            json_skip_ws(p);
+            if (p->i < p->n && p->s[p->i] == ',')
+            {
+                p->i++;
+                continue;
+            }
+            if (p->i < p->n && p->s[p->i] == ']')
+            {
+                p->i++;
+                return array;
+            }
+            p->error = 1;
+            break;
+        }
+        return nil;
+    }
+    if (c == 't' && p->n - p->i >= 4 && strncmp(p->s + p->i, "true", 4) == 0)
+    {
+        p->i += 4;
+        return [NSNumber numberWithBool:YES];
+    }
+    if (c == 'f' && p->n - p->i >= 5 &&
+        strncmp(p->s + p->i, "false", 5) == 0)
+    {
+        p->i += 5;
+        return [NSNumber numberWithBool:NO];
+    }
+    if (c == 'n' && p->n - p->i >= 4 &&
+        strncmp(p->s + p->i, "null", 4) == 0)
+    {
+        p->i += 4;
+        return [NSNull null];
+    }
+    if (c == '-' || (c >= '0' && c <= '9'))
+    {
+        char *end = 0;
+        double value = strtod(p->s + p->i, &end);
+        if (!end || end == p->s + p->i)
+        {
+            p->error = 1;
+            return nil;
+        }
+        unsigned long start = p->i;
+        int integral = 1;
+        for (const char *q = p->s + start; q < end; q++)
+            if (*q == '.' || *q == 'e' || *q == 'E')
+                integral = 0;
+        p->i = (unsigned long)(end - p->s);
+        if (integral)
+            return [NSNumber numberWithLongLong:(long long)value];
+        return [NSNumber numberWithDouble:value];
+    }
+    p->error = 1;
+    return nil;
+}
+
+@implementation NSJSONSerialization
++ (BOOL)isValidJSONObject:(id)object
+{
+    NSMutableString *scratch = [NSMutableString string];
+    return object && json_write_value(scratch, object, NO, 0);
+}
++ (id)dataWithJSONObject:(id)object options:(unsigned long)options
+                   error:(id *)error
+{
+    (void)options;
+    NSMutableString *text = [NSMutableString string];
+    if (!object || !json_write_value(text, object, NO, 0))
+    {
+        if (error)
+            *error = [NSError errorWithDomain:@"NSCocoaErrorDomain" code:3840
+                                       userInfo:nil];
+        return nil;
+    }
+    return [text dataUsingEncoding:4];
+}
++ (id)JSONObjectWithData:(id)data options:(unsigned long)options
+                   error:(id *)error
+{
+    (void)options;
+    if (!data)
+        return nil;
+    struct json_state p;
+    p.s = (const char *)[data bytes];
+    p.i = 0;
+    p.n = [data length];
+    p.error = 0;
+    id value = json_parse_value(&p, 0);
+    json_skip_ws(&p);
+    if (!value || p.error || p.i != p.n)
+    {
+        if (error)
+            *error = [NSError errorWithDomain:@"NSCocoaErrorDomain" code:3840
+                                       userInfo:nil];
+        return nil;
+    }
+    return value;
 }
 @end
 

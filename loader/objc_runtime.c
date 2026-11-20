@@ -314,9 +314,29 @@ void *iosim_objc_alloc(void *cls)
     return objc_alloc(cls);
 }
 
+/* Constant CFStrings carry a marker in their flags word instead of a real
+ * class pointer. Route their messages and class checks to NSString. */
+static void *constant_string_class(void *obj)
+{
+    if (!obj)
+        return NULL;
+    uint32_t flags = 0;
+    memcpy(&flags, (const char *)obj + 8, sizeof(flags));
+    if (flags != 0x7c8 && flags != 0x7d0)
+        return NULL;
+    return objc_getClass("NSString");
+}
+
 void *iosim_objc_class_of(void *obj)
 {
-    return (obj && *(void **)obj) ? *(void **)obj : NULL;
+    void *cls = (obj && *(void **)obj) ? *(void **)obj : NULL;
+    if (cls && !find_class_entry(cls))
+    {
+        void *stringClass = constant_string_class(obj);
+        if (stringClass)
+            return stringClass;
+    }
+    return cls;
 }
 
 void *iosim_objc_superclass(void *cls)
@@ -328,7 +348,8 @@ int iosim_objc_is_kind_of(void *obj, void *cls)
 {
     if (!obj || !cls)
         return 0;
-    struct objc_class_min *c = (struct objc_class_min *)(*(void **)obj);
+    struct objc_class_min *c =
+        (struct objc_class_min *)iosim_objc_class_of(obj);
     for (int depth = 0; c && depth < 64; depth++)
     {
         if (c == cls)
@@ -393,8 +414,9 @@ int iosim_objc_responds(void *obj, void *sel)
     struct class_entry *ce = find_class_entry(obj);
     if (ce)
         return lookup_class_method(ce->cls, (const char *)sel) != NULL;
-    return lookup_instance_method((struct objc_class_min *)(*(void **)obj),
-                                  (const char *)sel) != NULL;
+    return lookup_instance_method(
+               (struct objc_class_min *)iosim_objc_class_of(obj),
+               (const char *)sel) != NULL;
 }
 
 void *objc_lookup_imp(void *obj, void *sel)
@@ -416,6 +438,13 @@ void *objc_lookup_imp(void *obj, void *sel)
     {
         cls = (struct objc_class_min *)(*(void **)obj);
         imp = lookup_instance_method(cls, name);
+    }
+    if (!imp && !ce)
+    {
+        void *stringClass = constant_string_class(obj);
+        if (stringClass)
+            imp = lookup_instance_method(
+                (struct objc_class_min *)stringClass, name);
     }
     if (!imp)
     {

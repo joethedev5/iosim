@@ -3,6 +3,11 @@
 
 #include "objc_lite.h"
 
+typedef struct {
+    unsigned long location;
+    unsigned long length;
+} NSRange;
+
 __attribute__((objc_root_class))
 @interface NSObject {
     Class isa;
@@ -51,6 +56,14 @@ __attribute__((objc_root_class))
 - (BOOL)hasSuffix:(id)suffix;
 - (id)componentsSeparatedByString:(id)separator;
 - (id)stringByReplacingOccurrencesOfString:(id)target withString:(id)replacement;
+- (id)stringByAppendingPathComponent:(id)component;
+- (id)lastPathComponent;
+- (id)pathExtension;
+- (id)stringByDeletingLastPathComponent;
+- (id)stringByDeletingPathExtension;
+- (id)dataUsingEncoding:(unsigned long)encoding;
+- (id)initWithData:(id)data encoding:(unsigned long)encoding;
+- (BOOL)containsString:(id)needle;
 @end
 
 @interface NSMutableString : NSString
@@ -194,8 +207,65 @@ __attribute__((objc_root_class))
 }
 + (id)dataWithBytes:(const void *)bytes length:(unsigned long)length;
 + (id)data;
++ (id)dataWithContentsOfFile:(id)path;
++ (id)dataWithContentsOfURL:(id)url;
+- (id)initWithBytes:(const void *)bytes length:(unsigned long)length;
+- (id)initWithContentsOfFile:(id)path;
 - (const void *)bytes;
 - (unsigned long)length;
+- (BOOL)writeToFile:(id)path atomically:(BOOL)atomically;
+- (BOOL)writeToURL:(id)url atomically:(BOOL)atomically;
+- (id)subdataWithRange:(NSRange)range;
+- (BOOL)isEqualToData:(id)other;
+@end
+
+@interface NSURL : NSObject {
+@public
+    id _string;
+    id _path;
+    BOOL _fileURL;
+}
++ (id)fileURLWithPath:(id)path;
++ (id)URLWithString:(id)string;
+- (id)path;
+- (id)absoluteString;
+- (BOOL)isFileURL;
+- (id)lastPathComponent;
+- (id)pathExtension;
+- (id)URLByAppendingPathComponent:(id)component;
+- (id)URLByDeletingLastPathComponent;
+@end
+
+@interface NSFileManager : NSObject
++ (NSFileManager *)defaultManager;
+- (BOOL)fileExistsAtPath:(id)path;
+- (BOOL)fileExistsAtPath:(id)path isDirectory:(BOOL *)isDirectory;
+- (BOOL)createDirectoryAtPath:(id)path
+    withIntermediateDirectories:(BOOL)createIntermediates
+                     attributes:(id)attributes error:(id *)error;
+- (id)contentsOfDirectoryAtPath:(id)path error:(id *)error;
+- (BOOL)removeItemAtPath:(id)path error:(id *)error;
+- (BOOL)moveItemAtPath:(id)fromPath toPath:(id)toPath error:(id *)error;
+- (BOOL)copyItemAtPath:(id)fromPath toPath:(id)toPath error:(id *)error;
+- (id)contentsAtPath:(id)path;
+- (BOOL)createFileAtPath:(id)path contents:(id)contents attributes:(id)attributes;
+- (id)currentDirectoryPath;
+@end
+
+enum {
+    NSJSONReadingMutableContainers = 1 << 0,
+    NSJSONReadingMutableLeaves = 1 << 1,
+    NSJSONReadingAllowFragments = 1 << 2,
+    NSJSONWritingPrettyPrinted = 1 << 0,
+    NSJSONWritingSortedKeys = 1 << 1
+};
+
+@interface NSJSONSerialization : NSObject
++ (BOOL)isValidJSONObject:(id)object;
++ (id)dataWithJSONObject:(id)object options:(unsigned long)options
+                   error:(id *)error;
++ (id)JSONObjectWithData:(id)data options:(unsigned long)options
+                   error:(id *)error;
 @end
 
 @interface NSNotification : NSObject {

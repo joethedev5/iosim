@@ -150,6 +150,32 @@ out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/date_test" 2>&1)"
 check "date=1970-01-01 00:00:00" "$out" "NSDate/NSDateFormatter"
 check "error domain=Test code=42" "$out" "NSError"
 
+# ---------- 4b. Foundation file system, URLs and JSON ----------
+"$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
+    -ffreestanding -O1 -I "$ROOT/frameworks" \
+    -c "$ROOT/tests/foundation_io_test.m" -o "$T/fio.o"
+"$LD64" -arch x86_64 -platform_version $PLATFORM -e _main -o "$T/fio" \
+    "$T/fio.o" \
+    "$ROOT/runtime/System/Library/Frameworks/Foundation.framework/Foundation" \
+    -undefined dynamic_lookup
+FIO_HOME="$T/fio-home"
+rm -rf "$FIO_HOME"
+mkdir -p "$FIO_HOME"
+out="$(cd "$FIO_HOME" && HOME="$FIO_HOME" DYLD_ROOT_PATH="$ROOT/runtime" \
+    "$RUN" "$T/fio" 2>&1)"
+check "mkdir 1" "$out" "NSFileManager creates intermediate directories"
+check "dir exists 1 isdir 1" "$out" "fileExistsAtPath:isDirectory:"
+check "read hello file" "$out" "NSData/NSString file round trip"
+check "items 1 note.txt" "$out" "contentsOfDirectoryAtPath:"
+check "copy exists 1" "$out" "copyItemAtPath:toPath:"
+check "copy gone 1" "$out" "removeItemAtPath:"
+check "ext txt" "$out" "NSURL path components"
+check 'json {"name":"Sim","count":42,"list":[1.5,true,null]}' "$out" \
+    "NSJSONSerialization writes deterministic compact JSON"
+check "parsed Sim 42 1.5 1" "$out" \
+    "NSJSONSerialization parses strings, numbers, arrays, bools and null"
+check "invalid 1" "$out" "malformed JSON is rejected"
+
 # ---------- 5. UIKit-lite framework dylib ----------
 cat > "$T/uikit_app.c" <<'EOF'
 extern int printf(const char *fmt, ...);
