@@ -274,6 +274,7 @@ extern id kCAMediaTimingFunctionEaseInEaseOut;
 - (void)setBackgroundColor:(UIColor *)color;
 - (UIColor *)backgroundColor;
 - (void)addSubview:(UIView *)view;
+- (void)removeFromSuperview;
 - (CALayer *)layer;
 - (void)setHidden:(BOOL)hidden;
 - (BOOL)isHidden;
@@ -314,6 +315,7 @@ extern id kCAMediaTimingFunctionEaseInEaseOut;
 - (int)textAlignment;
 - (void)setNumberOfLines:(int)n;
 - (int)numberOfLines;
+- (CGSize)intrinsicContentSize;
 @end
 
 @interface UIImageView : UIView {
@@ -332,8 +334,13 @@ extern id kCAMediaTimingFunctionEaseInEaseOut;
 @public
     UIView *_view;
     BOOL _viewLoaded;
+    id _title;
+    id _navigationController;
 }
 - (id)init;
+- (id)title;
+- (void)setTitle:(id)title;
+- (id)navigationController;
 - (UIView *)view;
 - (void)setView:(UIView *)view;
 - (void)loadView;
@@ -344,6 +351,47 @@ extern id kCAMediaTimingFunctionEaseInEaseOut;
 - (void)viewDidDisappear:(BOOL)animated;
 - (void)viewWillLayoutSubviews;
 - (void)viewDidLayoutSubviews;
+@end
+
+@interface UIStackView : UIView {
+@public
+    id _arranged[32];
+    int _arrangedCount;
+    long _axis;
+    double _spacing;
+    long _distribution;
+    long _alignment;
+}
+- (id)initWithArrangedSubviews:(NSArray *)views;
+- (void)addArrangedSubview:(UIView *)view;
+- (void)removeArrangedSubview:(UIView *)view;
+- (NSArray *)arrangedSubviews;
+- (void)setAxis:(long)axis;
+- (long)axis;
+- (void)setSpacing:(double)spacing;
+- (double)spacing;
+- (void)setDistribution:(long)distribution;
+- (long)distribution;
+- (void)setAlignment:(long)alignment;
+- (long)alignment;
+@end
+
+@interface UINavigationController : UIViewController {
+@public
+    id _stack[32];
+    int _stackCount;
+    UIView *_navBar;
+    UILabel *_navTitleLabel;
+    BOOL _navBarHidden;
+    UIView *_contentView;
+}
+- (id)initWithRootViewController:(UIViewController *)root;
+- (UIViewController *)topViewController;
+- (NSArray *)viewControllers;
+- (void)pushViewController:(UIViewController *)controller animated:(BOOL)animated;
+- (UIViewController *)popViewControllerAnimated:(BOOL)animated;
+- (void)setNavigationBarHidden:(BOOL)hidden animated:(BOOL)animated;
+- (BOOL)isNavigationBarHidden;
 @end
 
 enum {
@@ -775,6 +823,21 @@ int iosim_animations_active(void)
     if (_subviewCount < 32)
         _subviews[_subviewCount++] = view;
 }
+- (void)removeFromSuperview
+{
+    if (!_superview)
+        return;
+    UIView *parent = (UIView *)_superview;
+    for (int i = 0; i < parent->_subviewCount; i++)
+        if (parent->_subviews[i] == self)
+        {
+            for (int j = i; j + 1 < parent->_subviewCount; j++)
+                parent->_subviews[j] = parent->_subviews[j + 1];
+            parent->_subviewCount--;
+            break;
+        }
+    _superview = nil;
+}
 - (CALayer *)layer { return _layer; }
 - (void)setHidden:(BOOL)hidden { _hidden = hidden; }
 - (BOOL)isHidden { return _hidden; }
@@ -869,6 +932,19 @@ int iosim_animations_active(void)
 {
     (void)point;
     return nil;
+}
+- (CGSize)intrinsicContentSize
+{
+    const char *text = iosim_string_cstr(_text);
+    double points = _font ? _font->_size : 17.0;
+    int style = _font && _font->_bold ? IOSIM_FONT_BOLD : IOSIM_FONT_REGULAR;
+    double scale = [[UIScreen mainScreen] scale];
+    int width = 0, ascent = 0, descent = 0, lineHeight = 0;
+    if (text)
+        width = iosim_fb_font_text_width(text, style, points, scale);
+    iosim_fb_font_metrics(style, points, scale, &ascent, &descent,
+                          &lineHeight);
+    return CGSizeMake(width / scale, lineHeight / scale);
 }
 @end
 
@@ -1042,6 +1118,15 @@ int iosim_animations_active(void)
 
 @implementation UIViewController
 - (id)init { return [super init]; }
+- (id)title { return _title; }
+- (void)setTitle:(id)title
+{
+    _title = title;
+    UINavigationController *nav = (UINavigationController *)_navigationController;
+    if (nav && nav->_navTitleLabel)
+        nav->_navTitleLabel->_text = title;
+}
+- (id)navigationController { return _navigationController; }
 - (void)loadView
 {
     _view = [[UIView alloc] initWithFrame:[[UIScreen mainScreen] bounds]];
@@ -1075,6 +1160,242 @@ int iosim_animations_active(void)
 - (void)viewDidLoad
 {
 }
+@end
+
+
+/* --------------------------------------------------------- stack views */
+
+@implementation UIStackView
+- (id)init
+{
+    self = [super initWithFrame:CGRectMake(0, 0, 0, 0)];
+    if (self)
+    {
+        _axis = 0;
+        _spacing = 0;
+        _distribution = 0;
+        _alignment = 0;
+        _needsLayout = YES;
+    }
+    return self;
+}
+- (id)initWithArrangedSubviews:(NSArray *)views
+{
+    self = [self init];
+    if (self && views)
+        for (unsigned long i = 0; i < [views count] && _arrangedCount < 32; i++)
+            [self addArrangedSubview:[views objectAtIndex:i]];
+    return self;
+}
+- (void)addArrangedSubview:(UIView *)view
+{
+    if (!view)
+        return;
+    [self addSubview:view];
+    if (_arrangedCount < 32)
+        _arranged[_arrangedCount++] = view;
+    _needsLayout = YES;
+}
+- (void)removeArrangedSubview:(UIView *)view
+{
+    for (int i = 0; i < _arrangedCount; i++)
+        if (_arranged[i] == view)
+        {
+            for (int j = i; j + 1 < _arrangedCount; j++)
+                _arranged[j] = _arranged[j + 1];
+            _arrangedCount--;
+            break;
+        }
+    _needsLayout = YES;
+}
+- (NSArray *)arrangedSubviews
+{
+    NSMutableArray *a = [NSMutableArray array];
+    for (int i = 0; i < _arrangedCount; i++)
+        [a addObject:_arranged[i]];
+    return a;
+}
+- (void)setAxis:(long)axis { _axis = axis; _needsLayout = YES; }
+- (long)axis { return _axis; }
+- (void)setSpacing:(double)spacing { _spacing = spacing; _needsLayout = YES; }
+- (double)spacing { return _spacing; }
+- (void)setDistribution:(long)distribution { _distribution = distribution; _needsLayout = YES; }
+- (long)distribution { return _distribution; }
+- (void)setAlignment:(long)alignment { _alignment = alignment; _needsLayout = YES; }
+- (long)alignment { return _alignment; }
+- (void)layoutSubviews
+{
+    if (_arrangedCount == 0)
+        return;
+    double W = _frame.size.width, H = _frame.size.height;
+    double totalSpacing = _spacing * (_arrangedCount - 1);
+    if (_axis == 1)
+    {
+        double equal = _distribution == 1
+                           ? (H - totalSpacing) / _arrangedCount : 0;
+        double y = 0;
+        for (int i = 0; i < _arrangedCount; i++)
+        {
+            UIView *v = _arranged[i];
+            CGSize intrinsic = [v respondsToSelector:@selector(intrinsicContentSize)]
+                                   ? [v intrinsicContentSize] : CGSizeMake(0, 0);
+            double h = equal > 0 ? equal
+                                 : (v->_frame.size.height > 0
+                                        ? v->_frame.size.height : intrinsic.height);
+            if (h <= 0) h = 44;
+            double w = v->_frame.size.width > 0 ? v->_frame.size.width : W;
+            double x = 0;
+            if (_alignment == 2) x = (W - w) / 2;
+            else if (_alignment == 3) x = W - w;
+            v->_frame = CGRectMake(x, y, w, h);
+            [v setNeedsLayout];
+            [v layoutIfNeeded];
+            y += h + _spacing;
+        }
+    }
+    else
+    {
+        double equal = _distribution == 1
+                           ? (W - totalSpacing) / _arrangedCount : 0;
+        double x = 0;
+        for (int i = 0; i < _arrangedCount; i++)
+        {
+            UIView *v = _arranged[i];
+            CGSize intrinsic = [v respondsToSelector:@selector(intrinsicContentSize)]
+                                   ? [v intrinsicContentSize] : CGSizeMake(0, 0);
+            double w = equal > 0 ? equal
+                                 : (v->_frame.size.width > 0
+                                        ? v->_frame.size.width : intrinsic.width);
+            if (w <= 0) w = 80;
+            double h = v->_frame.size.height > 0 ? v->_frame.size.height : H;
+            double y = 0;
+            if (_alignment == 2) y = (H - h) / 2;
+            else if (_alignment == 3) y = H - h;
+            v->_frame = CGRectMake(x, y, w, h);
+            [v setNeedsLayout];
+            [v layoutIfNeeded];
+            x += w + _spacing;
+        }
+    }
+}
+@end
+
+/* ----------------------------------------------------- navigation stack */
+
+@implementation UINavigationController
+- (id)initWithRootViewController:(UIViewController *)root
+{
+    self = [super init];
+    if (self && root)
+    {
+        _stack[0] = root;
+        _stackCount = 1;
+        _viewLoaded = NO;
+        root->_navigationController = self;
+    }
+    return self;
+}
+- (UIViewController *)topViewController
+{
+    return _stackCount > 0 ? (UIViewController *)_stack[_stackCount - 1] : nil;
+}
+- (NSArray *)viewControllers
+{
+    NSMutableArray *a = [NSMutableArray array];
+    for (int i = 0; i < _stackCount; i++)
+        [a addObject:_stack[i]];
+    return a;
+}
+- (void)loadView
+{
+    _view = [[UIView alloc] initWithFrame:[[UIScreen mainScreen] bounds]];
+}
+- (void)viewDidLoad
+{
+    if (_view)
+    {
+        CGRect bounds = [[UIScreen mainScreen] bounds];
+        unsigned color = 0x05070d;
+        _view->_backgroundColor = [UIColor colorWithRed:0.02 green:0.03 blue:0.05
+                                                  alpha:1.0];
+        _navBar = [[UIView alloc] initWithFrame:CGRectMake(0, 0, bounds.size.width,
+                                                          100)];
+        _navBar->_backgroundColor = [UIColor colorWithRed:0.04 green:0.055
+                                                    blue:0.10 alpha:1.0];
+        [_view addSubview:_navBar];
+        _navTitleLabel = [[UILabel alloc]
+            initWithFrame:CGRectMake(60, 45, bounds.size.width - 120, 30)];
+        _navTitleLabel->_textAlignment = 1;
+        _navTitleLabel->_font = [UIFont systemFontOfSize:17];
+        _navTitleLabel->_textColor = [UIColor whiteColor];
+        [_navBar addSubview:_navTitleLabel];
+        (void)color;
+        [self installTopViewController];
+    }
+}
+- (void)installTopViewController
+{
+    UIViewController *top = [self topViewController];
+    if (!top || !_view)
+        return;
+    if (_contentView)
+        [_contentView removeFromSuperview];
+    double navHeight = _navBarHidden ? 0 : 100;
+    CGRect bounds = _view->_frame;
+    UIView *content = [top view];
+    content->_frame = CGRectMake(0, navHeight, bounds.size.width,
+                                 bounds.size.height - navHeight);
+    [_view addSubview:content];
+    _contentView = content;
+    _navTitleLabel->_text = top->_title;
+    _view->_needsLayout = YES;
+}
+- (void)pushViewController:(UIViewController *)controller animated:(BOOL)animated
+{
+    (void)animated;
+    if (!controller || _stackCount >= 32)
+        return;
+    UIViewController *old = [self topViewController];
+    if (old)
+    {
+        [old viewWillDisappear:NO];
+        [old viewDidDisappear:NO];
+    }
+    controller->_navigationController = self;
+    _stack[_stackCount++] = controller;
+    [self installTopViewController];
+    [controller viewWillAppear:NO];
+    [controller viewDidAppear:NO];
+}
+- (UIViewController *)popViewControllerAnimated:(BOOL)animated
+{
+    (void)animated;
+    if (_stackCount <= 1)
+        return nil;
+    UIViewController *old = [self topViewController];
+    [old viewWillDisappear:NO];
+    [old viewDidDisappear:NO];
+    _stackCount--;
+    UIViewController *top = [self topViewController];
+    [self installTopViewController];
+    [top viewWillAppear:NO];
+    [top viewDidAppear:NO];
+    return old;
+}
+- (void)setNavigationBarHidden:(BOOL)hidden animated:(BOOL)animated
+{
+    (void)animated;
+    _navBarHidden = hidden;
+    _navBar->_hidden = hidden;
+    if (_contentView && _view)
+    {
+        double navHeight = hidden ? 0 : 100;
+        CGRect bounds = _view->_frame;
+        _contentView->_frame = CGRectMake(0, navHeight, bounds.size.width,
+                                          bounds.size.height - navHeight);
+    }
+}
+- (BOOL)isNavigationBarHidden { return _navBarHidden; }
 @end
 
 @implementation UIControl
@@ -1131,6 +1452,12 @@ int iosim_animations_active(void)
     (void)state;
     _titleColor = color;
     _titleLabel->_textColor = color;
+}
+- (CGSize)intrinsicContentSize
+{
+    CGSize titleSize = _titleLabel ? [_titleLabel intrinsicContentSize]
+                                   : CGSizeMake(80, 22);
+    return CGSizeMake(titleSize.width + 32, 44);
 }
 @end
 

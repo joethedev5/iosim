@@ -25,6 +25,8 @@ jobs:
             2> out/build-graphics.err
           xcrun clang -arch x86_64 $CFLAGS -framework UIKit -framework Foundation \
             demo/ListApp.m -o ListApp_x86_64 2> out/build-list.err
+          xcrun clang -arch x86_64 $CFLAGS -framework UIKit -framework Foundation \
+            demo/NavApp.m -o NavApp_x86_64 2> out/build-nav.err
           xcrun clang -arch x86_64 $CFLAGS tests/services_test.m \
             -o services_test_x86_64 2> out/build-services.err
           file HelloSim_x86_64 GraphicsApp_x86_64 ListApp_x86_64 services_test_x86_64
@@ -35,6 +37,7 @@ jobs:
             HelloSim_x86_64
             GraphicsApp_x86_64
             ListApp_x86_64
+            NavApp_x86_64
             services_test_x86_64
             out/*.err
           retention-days: 7
