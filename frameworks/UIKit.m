@@ -8304,24 +8304,10 @@ static void render_view(UIView *view, double originX, double originY,
     iosim_fb_set_opacity(1.0);
 }
 
-static void draw_device_chrome(int fbWidth, double scale)
+/* Right side of the status bar: cellular, Wi-Fi and battery. The lock screen
+ * draws these without the time, which it shows at display size. */
+static void draw_status_icons(int fbWidth, double scale)
 {
-    (void)fbWidth;
-    /* Status bar: time, cellular, Wi-Fi and battery. */
-    int margin = (int)(24 * scale);
-    int right = fbWidth - margin;
-    double timeSize = getenv("IOSIM_TIME_SIZE") ? atof(getenv("IOSIM_TIME_SIZE"))
-                                                : 18.0;
-    double timeBaseline = getenv("IOSIM_TIME_BASELINE")
-                              ? atof(getenv("IOSIM_TIME_BASELINE")) : 38.9;
-    const char *statusTime = getenv("IOSIM_STATUS_TIME");
-    if (!statusTime || !*statusTime)
-        statusTime = "9:41";
-    int timeWidth = iosim_fb_font_text_width(statusTime, IOSIM_FONT_SEMIBOLD,
-                                             timeSize, scale);
-    iosim_fb_font_text((int)(80.67 * scale) - timeWidth / 2,
-                       (int)(timeBaseline * scale), statusTime,
-                       IOSIM_FONT_SEMIBOLD, timeSize, scale, 0xffffff);
     /* Cellular signal placeholders, Wi-Fi and battery, measured from the
      * iPhone 18 Pro status bar. IOSIM_STATUS_SIGNAL=bars draws the white
      * override style; IOSIM_STATUS_BATTERY=charging draws the green battery. */
@@ -8383,6 +8369,25 @@ static void draw_device_chrome(int fbWidth, double scale)
                                  (int)(2.0 * scale), (int)(5.0 * scale),
                                  (int)(1.0 * scale), 0xffffff);
     }
+}
+
+static void draw_device_chrome(int fbWidth, double scale)
+{
+    (void)fbWidth;
+    /* Status bar: time, cellular, Wi-Fi and battery. */
+    double timeSize = getenv("IOSIM_TIME_SIZE") ? atof(getenv("IOSIM_TIME_SIZE"))
+                                                : 18.0;
+    double timeBaseline = getenv("IOSIM_TIME_BASELINE")
+                              ? atof(getenv("IOSIM_TIME_BASELINE")) : 38.9;
+    const char *statusTime = getenv("IOSIM_STATUS_TIME");
+    if (!statusTime || !*statusTime)
+        statusTime = "9:41";
+    int timeWidth = iosim_fb_font_text_width(statusTime, IOSIM_FONT_SEMIBOLD,
+                                             timeSize, scale);
+    iosim_fb_font_text((int)(80.67 * scale) - timeWidth / 2,
+                       (int)(timeBaseline * scale), statusTime,
+                       IOSIM_FONT_SEMIBOLD, timeSize, scale, 0xffffff);
+    draw_status_icons(fbWidth, scale);
 }
 
 
@@ -8993,6 +8998,8 @@ extern int iosim_resume_app(int pid);
 extern int iosim_terminate_app(int pid);
 extern void iosim_on_switcher_request(void (*handler)(void));
 extern int iosim_request_switcher(void);
+extern void iosim_on_lock_request(void (*handler)(void));
+extern int iosim_request_lock(void);
 extern void iosim_event_close(void);
 
 #define SHELL_MAX_APPS 40
@@ -10193,6 +10200,13 @@ static int g_search;
 static char g_search_query[64];
 static UITextField *g_search_field;
 static int g_control_center;
+/* Lock screen state. g_lock_requested is set by SIGUSR2 from a foreground
+ * app that received a lock event and stopped itself; SpringBoard then shows
+ * the lock screen instead of the home screen. */
+static int g_locked;
+static volatile int g_lock_requested;
+static int g_lock_resume_app = -1;
+static int g_fg_app = -1;
 /* airplane, cellular, wifi, bluetooth */
 static int g_cc_toggles[4] = {0, 1, 1, 0};
 static double g_cc_brightness = 0.62;
@@ -10204,6 +10218,11 @@ static void shell_repaint(int fbWidth, int fbHeight, double scale,
 static void shell_switcher_requested(void)
 {
     g_switcher_requested = 1;
+}
+
+static void shell_lock_requested(void)
+{
+    g_lock_requested = 1;
 }
 
 static int shell_suspended_count(void)
@@ -10884,9 +10903,134 @@ static int shell_switcher_hit(int xpx, int ypx, int fbWidth, int fbHeight,
     return -1;
 }
 
+/* The lock screen: the wallpaper at full brightness, the real date and the
+ * big status time, and the bottom utility glass. */
+static void shell_draw_lock(int fbWidth, int fbHeight, double scale,
+                            const char *path)
+{
+    shell_wallpaper_build(fbWidth, fbHeight);
+    if (g_shell_wallpaper)
+        iosim_fb_paste_xrgb(g_shell_wallpaper);
+    else
+    {
+        iosim_fb_set_opacity(1.0);
+        iosim_fb_fill_rect(0, 0, fbWidth, fbHeight, 0x0b1020);
+    }
+
+    NSDate *now = [NSDate date];
+    NSCalendar *cal = [NSCalendar currentCalendar];
+    NSDateComponents *parts =
+        [cal components:(NSCalendarUnitMonth | NSCalendarUnitDay |
+                         NSCalendarUnitWeekday)
+              fromDate:now];
+    static const char *weekdays[8] = {"", "Sunday", "Monday", "Tuesday",
+                                      "Wednesday", "Thursday", "Friday",
+                                      "Saturday"};
+    static const char *months[13] = {"", "January", "February", "March",
+                                     "April", "May", "June", "July", "August",
+                                     "September", "October", "November",
+                                     "December"};
+    long wd = [parts weekday], mo = [parts month], day = [parts day];
+    char date[64];
+    if (wd >= 1 && wd <= 7 && mo >= 1 && mo <= 12)
+        snprintf(date, sizeof date, "%s, %s %ld", weekdays[wd], months[mo],
+                 day);
+    else
+        shell_copy(date, (int)sizeof date, "Lock Screen");
+    int dw = iosim_fb_font_text_width(date, IOSIM_FONT_SEMIBOLD, 17, scale);
+    iosim_fb_font_text((fbWidth - dw) / 2, (int)(78 * scale), date,
+                       IOSIM_FONT_SEMIBOLD, 17, scale, 0xffffff);
+
+    const char *statusTime = getenv("IOSIM_STATUS_TIME");
+    if (!statusTime || !*statusTime)
+        statusTime = "9:41";
+    int tw = iosim_fb_font_text_width(statusTime, IOSIM_FONT_SEMIBOLD, 76,
+                                      scale);
+    iosim_fb_font_text((fbWidth - tw) / 2, (int)(186 * scale), statusTime,
+                       IOSIM_FONT_SEMIBOLD, 76, scale, 0xffffff);
+
+    double W = fbWidth / scale;
+    double H = fbHeight / scale;
+    for (int side = 0; side < 2; side++)
+    {
+        double cx = side == 0 ? 62.0 : W - 62.0;
+        double cy = H - 92.0;
+        iosim_fb_set_opacity(0.55);
+        iosim_fb_fill_circle((int)(cx * scale), (int)(cy * scale),
+                             (int)(24 * scale), 0x2c2c2e);
+        iosim_fb_set_opacity(1.0);
+        if (side == 0)
+        {
+            /* Flashlight: a head over a handle. */
+            iosim_fb_fill_round_rect((int)((cx - 7) * scale),
+                                     (int)((cy - 12) * scale),
+                                     (int)(14 * scale), (int)(8 * scale),
+                                     (int)(3 * scale), 0xffffff);
+            iosim_fb_fill_round_rect((int)((cx - 3) * scale),
+                                     (int)((cy - 5) * scale),
+                                     (int)(6 * scale), (int)(16 * scale),
+                                     (int)(2 * scale), 0xffffff);
+        }
+        else
+        {
+            /* Camera: body, viewfinder bump and a lens. */
+            iosim_fb_fill_round_rect((int)((cx - 11) * scale),
+                                     (int)((cy - 6) * scale),
+                                     (int)(22 * scale), (int)(15 * scale),
+                                     (int)(4 * scale), 0xffffff);
+            iosim_fb_fill_round_rect((int)((cx - 11) * scale),
+                                     (int)((cy - 10) * scale),
+                                     (int)(8 * scale), (int)(4 * scale),
+                                     (int)(2 * scale), 0xffffff);
+            iosim_fb_fill_circle((int)(cx * scale),
+                                 (int)((cy + 1.5) * scale),
+                                 (int)(5 * scale), 0x2c2c2e);
+            iosim_fb_fill_circle((int)(cx * scale),
+                                 (int)((cy + 1.5) * scale),
+                                 (int)(3.2 * scale), 0xffffff);
+        }
+    }
+    iosim_fb_set_opacity(0.85);
+    iosim_fb_fill_round_rect((int)((W / 2.0 - 69.5) * scale),
+                             (int)((H - 13) * scale), (int)(139 * scale),
+                             (int)(5 * scale), (int)(2.5 * scale), 0xffffff);
+    iosim_fb_set_opacity(1.0);
+
+    draw_status_icons(fbWidth, scale);
+    if (path && *path)
+        iosim_fb_present(path);
+}
+
+/* Lock from the home screen or the switcher. An app-originated lock goes
+ * through shell_after_app_stop, which keeps the app index to resume. */
+static void shell_lock(int fbWidth, int fbHeight, double scale,
+                       const char *path, int resume_app)
+{
+    g_locked = 1;
+    g_lock_resume_app = resume_app;
+    g_switcher = 0;
+    g_control_center = 0;
+    g_open_folder = -1;
+    if (g_search)
+    {
+        g_search = 0;
+        if (g_search_field)
+            [g_search_field resignFirstResponder];
+    }
+    printf("[SpringBoard] locked\n");
+    fflush(0);
+    shell_draw_lock(fbWidth, fbHeight, scale, path);
+}
+
 static void shell_after_app_stop(int fbWidth, int fbHeight, double scale,
                                  const char *path)
 {
+    if (g_lock_requested)
+    {
+        g_lock_requested = 0;
+        shell_lock(fbWidth, fbHeight, scale, path, g_fg_app);
+        return;
+    }
     if (g_switcher_requested)
     {
         int count = shell_suspended_count();
@@ -10927,6 +11071,7 @@ static void shell_launch(int index, int fbWidth, int fbHeight, double scale,
                          const char *path)
 {
     struct shell_app *a = &g_shell_apps[index];
+    g_fg_app = index;
     if (a->pid > 0)
     {
         /* The app stopped itself from the home event. Hand the event
@@ -10985,6 +11130,26 @@ static void shell_launch(int index, int fbWidth, int fbHeight, double scale,
     }
 }
 
+/* Unlock resumes the app that was foreground when the lock happened, or
+ * returns to the home screen. */
+static void shell_unlock(int fbWidth, int fbHeight, double scale,
+                         const char *path)
+{
+    if (!g_locked)
+        return;
+    g_locked = 0;
+    int app = g_lock_resume_app;
+    g_lock_resume_app = -1;
+    printf("[SpringBoard] unlocked\n");
+    fflush(0);
+    if (app >= 0 && app < g_shell_app_count && g_shell_apps[app].pid > 0)
+    {
+        shell_launch(app, fbWidth, fbHeight, scale, path);
+        return;
+    }
+    shell_repaint(fbWidth, fbHeight, scale, path, 0);
+}
+
 static void shell_repaint(int fbWidth, int fbHeight, double scale,
                           const char *path, int switcher)
 {
@@ -11014,6 +11179,7 @@ static int run_springboard(void)
         return 1;
 
     iosim_on_switcher_request(shell_switcher_requested);
+    iosim_on_lock_request(shell_lock_requested);
     shell_load_apps();
     shell_folders_load();
     shell_folders_prune();
@@ -11044,6 +11210,11 @@ static int run_springboard(void)
                 g_home_page = shell_page_count() - 1;
             if (g_home_page < 0)
                 g_home_page = 0;
+            if (g_locked)
+            {
+                shell_draw_lock(fbWidth, fbHeight, scale, path);
+                continue;
+            }
             if (g_control_center)
             {
                 shell_draw_control_center(fbWidth, fbHeight, scale, path);
@@ -11061,6 +11232,8 @@ static int run_springboard(void)
         }
         if (r == 1 && type == 9)
         {
+            if (g_locked)
+                continue;
             if (g_open_folder >= 0)
             {
                 g_open_folder = -1;
@@ -11094,6 +11267,18 @@ static int run_springboard(void)
                 printf("[SpringBoard] app switcher closed\n");
             fflush(0);
             shell_repaint(fbWidth, fbHeight, scale, path, g_switcher);
+            continue;
+        }
+        if (r == 1 && type == 10)
+        {
+            if (!g_locked)
+                shell_lock(fbWidth, fbHeight, scale, path, -1);
+            continue;
+        }
+        if (r == 1 && type == 11)
+        {
+            if (g_locked)
+                shell_unlock(fbWidth, fbHeight, scale, path);
             continue;
         }
         if (r == 1 && type == 2)
@@ -11132,6 +11317,14 @@ static int run_springboard(void)
             g_sb_icon_hold = 0;
             if (!down)
                 continue;
+            if (g_locked)
+            {
+                /* Swiping up anywhere on the lock screen unlocks, the same
+                 * gesture a Face ID phone accepts. */
+                if (dy < -80)
+                    shell_unlock(fbWidth, fbHeight, scale, path);
+                continue;
+            }
             if (g_control_center)
             {
                 if (dy < -90)
@@ -11275,6 +11468,11 @@ static int run_springboard(void)
         }
         if (r == 1 && type == 7)
         {
+            if (g_locked)
+            {
+                shell_unlock(fbWidth, fbHeight, scale, path);
+                continue;
+            }
             if (g_open_folder >= 0)
             {
                 g_open_folder = -1;
@@ -11305,6 +11503,8 @@ static int run_springboard(void)
         if (r != 1 || type != 1)
             continue;
         double px = x / scale, py = y / scale;
+        if (g_locked)
+            continue;
         if (g_control_center)
         {
             int toggle = shell_cc_toggle_at(px, py);
@@ -11681,7 +11881,7 @@ static void app_lifecycle_call(id delegate, SEL selector, id argument)
 }
 
 static void app_enter_background(id sceneDelegate, id scene,
-                                 int requestSwitcher)
+                                 int requestSwitcher, int requestLock)
 {
     UIApplication *app = [UIApplication sharedApplication];
     id appDelegate = [app delegate];
@@ -11705,6 +11905,8 @@ static void app_enter_background(id sceneDelegate, id scene,
     fflush(0);
     if (requestSwitcher)
         iosim_request_switcher();
+    if (requestLock)
+        iosim_request_lock();
     iosim_event_close();
     iosim_suspend_self();
     iosim_event_open();
@@ -11907,13 +12109,22 @@ int UIApplicationMain(int argc, char **argv, id principal, id delegateName)
                 /* The system asked the app to background. */
                 haveTouchDown = 0;
                 requestSwitcher = 0;
-                app_enter_background(sceneDelegate, scene, 0);
+                app_enter_background(sceneDelegate, scene, 0, 0);
+                redraw = 1;
+            }
+            else if (r == 1 && type == 10)
+            {
+                /* The device locked while this app was foreground: the
+                 * system background it and shows the lock screen. */
+                haveTouchDown = 0;
+                requestSwitcher = 0;
+                app_enter_background(sceneDelegate, scene, 0, 1);
                 redraw = 1;
             }
             if (requestSwitcher)
             {
                 requestSwitcher = 0;
-                app_enter_background(sceneDelegate, scene, 1);
+                app_enter_background(sceneDelegate, scene, 1, 0);
                 redraw = 1;
             }
             if ([window tickGestureRecognizers])

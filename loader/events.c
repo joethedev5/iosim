@@ -116,6 +116,20 @@ int iosim_event_next(int *type, int *x, int *y)
         *y = 0;
         return 1;
     }
+    if (strncmp(line, "lock", 4) == 0)
+    {
+        *type = 10;
+        *x = 0;
+        *y = 0;
+        return 1;
+    }
+    if (strncmp(line, "unlock", 6) == 0)
+    {
+        *type = 11;
+        *x = 0;
+        *y = 0;
+        return 1;
+    }
     if (sscanf(line, "tap %d %d", &px, &py) == 2)
     {
         *type = 1;

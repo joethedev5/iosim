@@ -60,6 +60,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | App switcher: bottom-edge gestures, cached frames, resume, swipe-up kill | ✅ |
 | Multi-page home screen: 16-slot pages, page dots, horizontal swipe paging | ✅ |
 | Home-screen folders: drag to group apps, member launch, persisted across boots | ✅ |
+| Lock screen: date and clock, lock/unlock, apps suspend on lock and resume in place | ✅ |
 | Spotlight search: pill opens a keyboard-driven search over installed apps | ✅ |
 | Control Center: top-right drag, connectivity toggles, media, brightness/volume and utilities | ✅ |
 | UIView 2D affine transforms (translate/scale/rotate), layout callbacks, UIScrollView offsets | ✅ (basic) |
@@ -118,6 +119,8 @@ tools/iosimctl ui $UDID backspace                # deletes backward
 tools/iosimctl ui $UDID swipe 300 700 60 200 0.25  # down/moves/up in one call
 tools/iosimctl ui $UDID drag 339.8 222.2 62.2 322.5 # long-press then drag an icon
 tools/iosimctl ui $UDID home                     # scene backgrounds, home returns
+tools/iosimctl ui $UDID lock                     # lock screen; apps suspend
+tools/iosimctl ui $UDID unlock                   # resume the foreground app
 tools/iosimctl launchd-load $UDID MyJob.plist    # install + load a LaunchDaemon job
 tools/iosimctl shutdown $UDID
 

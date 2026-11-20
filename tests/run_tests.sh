@@ -2251,6 +2251,143 @@ else
     echo "FAIL folder restore"; echo "$out"; fails=$((fails+1))
 fi
 
+# ---------- 15. lock screen ----------
+# Locking draws the lock screen over the wallpaper; swiping up unlocks. An
+# app that is foreground when the device locks backgrounds, and the unlock
+# resumes the same process.
+"$ROOT/tools/iosimctl" ui "$UDID" lock >/dev/null
+if wait_log "[SpringBoard] locked"; then
+    echo "ok   the lock event shows the lock screen"
+else
+    echo "FAIL lock from home"; fails=$((fails+1))
+fi
+sleep 0.4
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/lock-home.png" >/dev/null
+if out="$(python3 - "$ROOT/tools" "$T/lock-home.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+
+def count(x0, x1, y0, y1):
+    n = 0
+    for y in range(y0 * 3, y1 * 3):
+        for x in range(x0 * 3, x1 * 3):
+            c = pngpixel.px(rows, bpp, x, y)
+            if ((c >> 16) & 255) > 245 and ((c >> 8) & 255) > 245 and \
+                    (c & 255) > 245:
+                n += 1
+    return n
+
+big = count(110, 290, 115, 195)
+date = count(120, 282, 62, 85)
+status = count(55, 105, 18, 48)
+if big < 20000 or date < 3000:
+    raise SystemExit("lock clock missing: big=%d date=%d" % (big, date))
+if status > 50:
+    raise SystemExit("status-bar time still drawn: %d px" % status)
+cam = pngpixel.px(rows, bpp, 333 * 3, 783 * 3)
+if cam != 0xffffff:
+    raise SystemExit("camera glyph not drawn: %06x" % cam)
+print("ok   the lock screen draws the date, big clock and utility glass")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL lock screen rendering"; echo "$out"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" swipe 200 830 200 600 0.3 >/dev/null
+if wait_log "[SpringBoard] unlocked"; then
+    echo "ok   swiping up on the lock screen unlocks"
+else
+    echo "FAIL lock swipe unlock"; fails=$((fails+1))
+fi
+sleep 0.4
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/unlock-home.png" >/dev/null
+if out="$(python3 - "$ROOT/tools" "$T/unlock-home.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+n = 0
+for y in range(18 * 3, 48 * 3):
+    for x in range(55 * 3, 105 * 3):
+        c = pngpixel.px(rows, bpp, x, y)
+        if ((c >> 16) & 255) > 245 and ((c >> 8) & 255) > 245 and \
+                (c & 255) > 245:
+            n += 1
+if n < 500:
+    raise SystemExit("home screen status time not restored: %d px" % n)
+print("ok   the unlocked device returns to the home screen")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL unlock home rendering"; echo "$out"; fails=$((fails+1))
+fi
+"$ROOT/tools/build_app.sh" "$ROOT/demo/LockApp.m" "$T/LockApp" >/dev/null
+mkdir -p "$T/LockApp.app"
+cp "$T/LockApp" "$T/LockApp.app/LockApp"
+python3 - "$T/LockApp.app/Info.plist" <<'PY'
+import plistlib, sys
+with open(sys.argv[1], "wb") as f:
+    plistlib.dump({
+        "CFBundleIdentifier": "com.iosim.lockapp",
+        "CFBundleExecutable": "LockApp",
+        "CFBundleName": "LockApp",
+        "CFBundlePackageType": "APPL",
+        "CFBundleVersion": "1",
+        "CFBundleShortVersionString": "1.0",
+    }, f)
+PY
+"$ROOT/tools/iosimctl" install "$UDID" "$T/LockApp.app" >/dev/null
+sleep 0.5
+# Twenty-ninth installed app: third page row 0 column 2.
+"$ROOT/tools/iosimctl" ui "$UDID" tap 247.2778 121.8333 >/dev/null
+if wait_log "[lockapp] ready state=0"; then
+    echo "ok   SpringBoard launches the lock fixture"
+else
+    echo "FAIL lock fixture launch"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" lock >/dev/null
+if wait_log "[lockapp] background state=2"; then
+    echo "ok   locking with an app foreground backgrounds the app"
+else
+    echo "FAIL lock background app"; fails=$((fails+1))
+fi
+sleep 0.5
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/lock-app.png" >/dev/null
+if out="$(python3 - "$ROOT/tools" "$T/lock-app.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+n = 0
+for y in range(115 * 3, 195 * 3):
+    for x in range(110 * 3, 290 * 3):
+        c = pngpixel.px(rows, bpp, x, y)
+        if ((c >> 16) & 255) > 245 and ((c >> 8) & 255) > 245 and \
+                (c & 255) > 245:
+            n += 1
+if n < 20000:
+    raise SystemExit("lock clock missing after app lock: %d px" % n)
+print("ok   the app-originated lock draws the same lock screen")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL app lock screen rendering"; echo "$out"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" unlock >/dev/null
+if wait_log "[SpringBoard] resuming LockApp (pid" &&
+    wait_log "[lockapp] foreground state=1"; then
+    echo "ok   unlocking resumes the same app process"
+else
+    echo "FAIL unlock app resume"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
+sleep 0.4
+
 "$ROOT/tools/iosimctl" shutdown "$UDID" >/dev/null
 
 if [ "$fails" -ne 0 ]; then

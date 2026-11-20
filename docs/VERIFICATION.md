@@ -852,6 +852,27 @@ the member mapping and the launch path are both real. Tapping outside at
 boots it again, swipes to page 3 and reads the same `#3a3a3c` tile pixel: the
 folder was restored from disk, not kept only in SpringBoard's memory.
 
+### Lock screen
+
+Locking is a real system event, not a drawn overlay the test triggers directly.
+From the home screen, `ui lock` logs `[SpringBoard] locked`; the screenshot then
+shows more than 20 000 pure-white pixels in the big clock band (110–290 pt by
+115–195 pt), more than 3 000 in the date band, the camera glyph at (333, 783) pt
+as `#ffffff`, and *no* pure white in the status-bar time band (55–105 pt by
+18–48 pt) — the lock screen suppresses the status clock because the time is at
+display size. A swipe up from (200, 830) to (200, 600) pt logs
+`[SpringBoard] unlocked`, and a screenshot again finds the status-bar clock
+(greater than 500 white pixels), so the real home screen is back.
+
+The app-lock path is asserted through lifecycle order. The suite installs
+`demo/LockApp.m` (a scene app that prints its state at every transition), taps
+its third-page icon and waits for `[lockapp] ready state=0`. Sending `lock`
+then produces `[lockapp] resign state=1`, `[lockapp] background state=2`, and a
+lock screen screenshot with the same big-clock pixel count. Unlocking logs
+`[SpringBoard] resuming LockApp (pid ...)` followed by
+`[lockapp] foreground state=1` and `[lockapp] active state=0`: the same stopped
+process continued, and its view controller was never recreated.
+
 ### App lifecycle: delegate callbacks and application state
 
 `demo/LifecycleApp.m` prints every transition with
@@ -884,7 +905,8 @@ page animation, and the switcher shows at most three cards with no scrolling
 animation; stock system apps have no executables in this runtime. Home-screen
 folders group apps by bundle identifier and persist, but cannot be renamed,
 nested, reordered or moved between pages, and the grid compacts entries when a
-folder forms.
+folder forms. The lock screen has no passcode, Face ID, notifications or
+widgets; unlocking is the swipe-up/home gesture.
 Backgrounded apps are suspended in place (SIGSTOP) and resumed from their icon
 or switcher card, with no memory-pressure termination policy.
 `UIApplication` tracks active/inactive/background state and posts the

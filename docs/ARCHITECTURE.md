@@ -747,6 +747,20 @@ as `name|bundle,bundle` lines, reloaded and pruned at the next SpringBoard boot
 when a member's bundle is no longer installed. Stock system apps carry no
 bundle identifier and cannot be folded.
 
+Locking draws the lock screen: the sampled wallpaper at full brightness, the
+real date from `NSCalendar` and the status time at 76 pt, the flashlight and
+camera glass circles, and the home indicator. The status bar shows only the
+right-side icons — the time lives on the lock screen. A swipe up (or the home
+event) unlocks. When an app is foreground at lock time, the app's event loop
+receives the lock event, runs `applicationWillResignActive:` /
+`applicationDidEnterBackground:` with the scene callbacks, signals its
+SpringBoard parent with `SIGUSR2` and `SIGSTOP`s itself. SpringBoard recognizes
+the pending lock request when `waitpid(WUNTRACED)` reports the stop, captures
+the switcher snapshot, and draws the lock screen instead of the home screen.
+Unlocking resumes that stopped process and waits on it again, so the app
+returns in place with `applicationWillEnterForeground:` /
+`applicationDidBecomeActive:` and its `viewDidLoad` still ran only once.
+
 ## 3. Why this design
 
 **Why not run Apple's runtime?** Because the iOS 27 simulator runtime is

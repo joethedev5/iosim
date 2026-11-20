@@ -266,6 +266,28 @@ int iosim_request_switcher(void)
     return kill(getppid(), SIGUSR1);
 }
 
+/* An app that receives a lock event tells its SpringBoard parent to show the
+ * lock screen once the process has stopped, just like the switcher request. */
+static void (*lock_request_handler)(void);
+
+static void lock_signal_trampoline(int sig)
+{
+    (void)sig;
+    if (lock_request_handler)
+        lock_request_handler();
+}
+
+void iosim_on_lock_request(void (*handler)(void))
+{
+    lock_request_handler = handler;
+    signal(SIGUSR2, lock_signal_trampoline);
+}
+
+int iosim_request_lock(void)
+{
+    return kill(getppid(), SIGUSR2);
+}
+
 void  *objc_opt_class(void *obj);
 double iosim_now(void);
 void *_Block_copy(void *block);
@@ -664,6 +686,8 @@ static const struct iosim_shim shims[] = {
     SHIM_DIRECT(iosim_terminate_app),
     SHIM_DIRECT(iosim_on_switcher_request),
     SHIM_DIRECT(iosim_request_switcher),
+    SHIM_DIRECT(iosim_on_lock_request),
+    SHIM_DIRECT(iosim_request_lock),
     SHIM_DIRECT(iosim_dispatch_drain_main),
     SHIM_DIRECT(_Block_copy),
     SHIM_DIRECT(_Block_release),
