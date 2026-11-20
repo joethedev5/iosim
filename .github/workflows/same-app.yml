@@ -98,6 +98,7 @@ jobs:
       - name: Boot and capture each app
         run: |
           set +e
+          run_timeout() { python3 -c 'import subprocess,sys; sys.exit(subprocess.run(sys.argv[2:], timeout=float(sys.argv[1])).returncode)' "$@"; }
           xcrun simctl list devices available -j > out/devices.json
           UDID=$(python3 - <<'PY'
           import json
@@ -122,20 +123,21 @@ jobs:
           )
           echo "UDID=$UDID"
           [ -z "$UDID" ] && exit 0
-          timeout 300 xcrun simctl boot "$UDID"
-          timeout 300 xcrun simctl bootstatus "$UDID" -b
-          timeout 30 xcrun simctl io "$UDID" screenshot out/springboard-real.png
+          run_timeout 300 xcrun simctl boot "$UDID"
+          run_timeout 300 xcrun simctl bootstatus "$UDID" -b
+          run_timeout 30 xcrun simctl io "$UDID" screenshot out/springboard-real.png
           for spec in "HelloSim com.iosim.hellosim real-sim" "GraphicsApp com.iosim.graphicsapp graphics-real" "ListApp com.iosim.listapp listapp-real"; do
             set -- $spec
-            timeout 60 xcrun simctl install "$UDID" "$1.app" || echo "install $1 failed"
-            timeout 30 xcrun simctl launch "$UDID" "$2" || echo "launch $1 failed"
+            run_timeout 60 xcrun simctl install "$UDID" "$1.app" || echo "install $1 failed"
+            run_timeout 30 xcrun simctl launch "$UDID" "$2" || echo "launch $1 failed"
             sleep 6
-            timeout 30 xcrun simctl io "$UDID" screenshot "out/$3.png" || echo "screenshot $1 failed"
-            timeout 30 xcrun simctl terminate "$UDID" "$2" || echo "terminate $1 failed"
+            run_timeout 30 xcrun simctl io "$UDID" screenshot "out/$3.png" || echo "screenshot $1 failed"
+            run_timeout 30 xcrun simctl terminate "$UDID" "$2" || echo "terminate $1 failed"
           done
-          timeout 60 xcrun simctl shutdown "$UDID" || true
+          run_timeout 60 xcrun simctl shutdown "$UDID" || true
           ls -l out/*.png
-      - uses: actions/upload-artifact@v4
+      - if: always()
+        uses: actions/upload-artifact@v4
         with:
           name: real-screens
           path: out/*.png
@@ -253,6 +255,7 @@ jobs:
       - name: Boot simulator, install and launch the app
         run: |
           set +e
+          run_timeout() { python3 -c 'import subprocess,sys; sys.exit(subprocess.run(sys.argv[2:], timeout=float(sys.argv[1])).returncode)' "$@"; }
           xcrun simctl list devices available -j > out/devices.json
           UDID=$(python3 - <<'PY'
           import json
@@ -279,13 +282,13 @@ jobs:
           if [ -n "$UDID" ]; then
             xcrun simctl help status_bar > out/status-bar-help.txt 2>&1
             xcrun simctl boot "$UDID" >> out/boot.txt 2>&1
-            timeout 300 xcrun simctl bootstatus "$UDID" -b >> out/boot.txt 2>&1
-            timeout 30 xcrun simctl io "$UDID" screenshot out/springboard-real.png >> out/boot.txt 2>&1 || echo "springboard screenshot timed out" >> out/boot.txt
+            run_timeout 300 xcrun simctl bootstatus "$UDID" -b >> out/boot.txt 2>&1
+            run_timeout 30 xcrun simctl io "$UDID" screenshot out/springboard-real.png >> out/boot.txt 2>&1 || echo "springboard screenshot timed out" >> out/boot.txt
             xcrun simctl install "$UDID" HelloSim.app >> out/boot.txt 2>&1
             ( xcrun simctl launch --console-pty "$UDID" com.iosim.hellosim \
                 > out/console.txt 2>&1 & echo $! > /tmp/console.pid )
             sleep 7
-            timeout 30 xcrun simctl io "$UDID" screenshot out/real-sim.png >> out/boot.txt 2>&1 || echo "hello screenshot timed out" >> out/boot.txt
+            run_timeout 30 xcrun simctl io "$UDID" screenshot out/real-sim.png >> out/boot.txt 2>&1 || echo "hello screenshot timed out" >> out/boot.txt
             if [ ! -s out/real-sim.png ]; then
               xcrun simctl io "$UDID" screenshot --display=1 out/real-sim.png >> out/boot.txt 2>&1
             fi
@@ -299,14 +302,14 @@ jobs:
             ( xcrun simctl launch --console-pty "$UDID" com.iosim.graphicsapp \
                 > out/graphics-console.txt 2>&1 & echo $! > /tmp/gconsole.pid )
             sleep 6
-            timeout 30 xcrun simctl io "$UDID" screenshot out/graphics-real.png >> out/boot.txt 2>&1 || echo "graphics screenshot timed out" >> out/boot.txt
+            run_timeout 30 xcrun simctl io "$UDID" screenshot out/graphics-real.png >> out/boot.txt 2>&1 || echo "graphics screenshot timed out" >> out/boot.txt
             kill "$(cat /tmp/gconsole.pid)" 2>/dev/null || true
             xcrun simctl terminate "$UDID" com.iosim.graphicsapp >> out/boot.txt 2>&1
             xcrun simctl install "$UDID" ListApp.app >> out/boot.txt 2>&1
             ( xcrun simctl launch --console-pty "$UDID" com.iosim.listapp \
                 > out/list-console.txt 2>&1 & echo $! > /tmp/lconsole.pid )
             sleep 6
-            timeout 30 xcrun simctl io "$UDID" screenshot out/listapp-real.png >> out/boot.txt 2>&1 || echo "list screenshot timed out" >> out/boot.txt
+            run_timeout 30 xcrun simctl io "$UDID" screenshot out/listapp-real.png >> out/boot.txt 2>&1 || echo "list screenshot timed out" >> out/boot.txt
             kill "$(cat /tmp/lconsole.pid)" 2>/dev/null || true
             xcrun simctl terminate "$UDID" com.iosim.listapp >> out/boot.txt 2>&1
             find "$HOME/Library/Logs/DiagnosticReports" -maxdepth 2 \
