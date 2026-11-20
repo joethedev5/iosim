@@ -450,6 +450,7 @@ static const struct iosim_shim shims[] = {
     SHIM_DIRECT(iosim_fb_font_text),
     SHIM_DIRECT(iosim_fb_font_metrics),
     SHIM_DIRECT(iosim_fb_present),
+    SHIM_DIRECT(iosim_event_open),
     SHIM_DIRECT(iosim_event_next),
     SHIM_DIRECT(iosim_event_close),
     SHIM_DIRECT(iosim_spawn_app),

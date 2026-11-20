@@ -635,18 +635,42 @@ def cmd_ui(args):
     udid, dev = find_device(state, args.device)
     require_booted(dev)
     scale = SCREEN.get(dev["deviceType"], (1206, 2622, 3.0))[2]
-    if args.action == "tap":
+    def send(line):
+        if not notify_ui(udid, line):
+            die("no system UI is listening on the device event stream")
+
+    if args.action in ("tap", "down", "move", "up"):
         if len(args.coords) != 2:
-            die("usage: iosimctl ui <device> tap <x> <y>")
+            die(f"usage: iosimctl ui <device> {args.action} <x> <y>")
         x, y = args.coords
-        line = f"tap {int(round(x * scale))} {int(round(y * scale))}"
+        line = (f"{args.action} {int(round(x * scale))} "
+                f"{int(round(y * scale))}")
+        send(line)
+        print(f"sent {line}")
+    elif args.action == "swipe":
+        if len(args.coords) not in (4, 5):
+            die("usage: iosimctl ui <device> swipe <x0> <y0> <x1> <y1> "
+                "[seconds]")
+        x0, y0, x1, y1 = args.coords[:4]
+        seconds = args.coords[4] if len(args.coords) == 5 else 0.3
+        if seconds <= 0:
+            seconds = 0.3
+        steps = max(4, int(seconds / 0.02))
+        send(f"down {int(round(x0 * scale))} {int(round(y0 * scale))}")
+        for i in range(1, steps + 1):
+            t = i / steps
+            x = x0 + (x1 - x0) * t
+            y = y0 + (y1 - y0) * t
+            send(f"move {int(round(x * scale))} {int(round(y * scale))}")
+            time.sleep(seconds / steps)
+        send(f"up {int(round(x1 * scale))} {int(round(y1 * scale))}")
+        print(f"sent swipe {x0} {y0} -> {x1} {y1} over {seconds}s")
     elif args.action == "home":
-        line = "home"
+        send("home")
+        print("sent home")
     else:
-        line = "apps"
-    if not notify_ui(udid, line):
-        die("no system UI is listening on the device event stream")
-    print(f"sent {line}")
+        send("apps")
+        print("sent apps")
     return 0
 
 
@@ -743,7 +767,9 @@ def main():
 
     p = sub.add_parser("ui", help="inject a system UI event")
     p.add_argument("device")
-    p.add_argument("action", choices=["tap", "home", "apps"])
+    p.add_argument("action",
+                   choices=["tap", "down", "move", "up", "swipe", "home",
+                            "apps"])
     p.add_argument("coords", nargs="*", type=float)
     p.set_defaults(func=cmd_ui)
 

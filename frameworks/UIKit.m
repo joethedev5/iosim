@@ -55,6 +55,7 @@ extern void iosim_fb_font_metrics(int style, double size_pt, double scale,
                                   int *line_height);
 extern int  iosim_fb_present(const char *path);
 extern int  iosim_event_next(int *type, int *x, int *y);
+extern int  iosim_event_open(void);
 extern void iosim_fb_set_opacity(double opacity);
 extern int iosim_fb_push_clip(int x, int y, int w, int h);
 extern void iosim_fb_pop_clip(void);
@@ -281,7 +282,51 @@ extern id kCAMediaTimingFunctionEaseInEaseOut;
 - (double)scale;
 @end
 
+typedef enum {
+    UITouchPhaseBegan = 0,
+    UITouchPhaseMoved = 1,
+    UITouchPhaseStationary = 2,
+    UITouchPhaseEnded = 3,
+    UITouchPhaseCancelled = 4
+} UITouchPhase;
+
+@class UIWindow;
+
+@interface UITouch : NSObject {
+@public
+    CGPoint _location;
+    CGPoint _previousLocation;
+    long _phase;
+    double _timestamp;
+    UIView *_view;
+    UIWindow *_window;
+    unsigned long _tapCount;
+}
+- (CGPoint)locationInView:(UIView *)view;
+- (CGPoint)previousLocationInView:(UIView *)view;
+- (long)phase;
+- (double)timestamp;
+- (unsigned long)tapCount;
+- (UIView *)view;
+- (UIWindow *)window;
+@end
+
+@interface UIEvent : NSObject {
+@public
+    UITouch *_touch;
+}
+- (id)initWithTouch:(UITouch *)touch;
+- (NSSet *)allTouches;
+- (NSSet *)touchesForView:(UIView *)view;
+- (NSSet *)touchesForWindow:(UIWindow *)window;
+@end
+
 @interface UIResponder : NSObject
+- (UIResponder *)nextResponder;
+- (void)touchesBegan:(NSSet *)touches withEvent:(UIEvent *)event;
+- (void)touchesMoved:(NSSet *)touches withEvent:(UIEvent *)event;
+- (void)touchesEnded:(NSSet *)touches withEvent:(UIEvent *)event;
+- (void)touchesCancelled:(NSSet *)touches withEvent:(UIEvent *)event;
 @end
 
 enum {
@@ -674,11 +719,21 @@ enum {
 
 enum {
     UIControlStateNormal = 0,
-    UIControlStateHighlighted = 1
+    UIControlStateHighlighted = 1 << 0,
+    UIControlStateDisabled = 1 << 1,
+    UIControlStateSelected = 1 << 2
 };
 
 enum {
+    UIControlEventTouchDown = 1 << 0,
+    UIControlEventTouchDownRepeat = 1 << 1,
+    UIControlEventTouchDragInside = 1 << 2,
+    UIControlEventTouchDragOutside = 1 << 3,
+    UIControlEventTouchDragEnter = 1 << 4,
+    UIControlEventTouchDragExit = 1 << 5,
     UIControlEventTouchUpInside = 1 << 6,
+    UIControlEventTouchUpOutside = 1 << 7,
+    UIControlEventTouchCancel = 1 << 8,
     UIControlEventValueChanged = 1 << 12,
     UIControlEventEditingDidBegin = 1 << 16,
     UIControlEventEditingChanged = 1 << 17,
@@ -695,10 +750,26 @@ enum {
     id _target;
     SEL _action;
     unsigned long _controlEvents;
+    BOOL _highlighted;
+    BOOL _enabled;
+    BOOL _selected;
+    BOOL _tracking;
+    int _touchInside;
 }
 - (void)addTarget:(id)target action:(SEL)action
     forControlEvents:(unsigned long)events;
 - (void)sendActionsForControlEvents:(unsigned long)events;
+- (BOOL)isHighlighted;
+- (void)setHighlighted:(BOOL)highlighted;
+- (BOOL)isEnabled;
+- (void)setEnabled:(BOOL)enabled;
+- (BOOL)isSelected;
+- (void)setSelected:(BOOL)selected;
+- (unsigned long)state;
+- (BOOL)beginTrackingWithTouch:(UITouch *)touch withEvent:(UIEvent *)event;
+- (BOOL)continueTrackingWithTouch:(UITouch *)touch withEvent:(UIEvent *)event;
+- (void)endTrackingWithTouch:(UITouch *)touch withEvent:(UIEvent *)event;
+- (void)cancelTrackingWithEvent:(UIEvent *)event;
 @end
 
 @interface UIButton : UIControl {
@@ -760,6 +831,7 @@ enum {
     BOOL _on;
     UIColor *_onTintColor;
 }
+- (void)setOn:(BOOL)on;
 - (void)setOn:(BOOL)on animated:(BOOL)animated;
 - (BOOL)isOn;
 - (void)setOnTintColor:(UIColor *)color;
@@ -775,6 +847,7 @@ enum {
     UIColor *_maxTrackTintColor;
     UIColor *_thumbTintColor;
 }
+- (void)updateValueFromPoint:(CGPoint)point;
 - (void)setValue:(double)value animated:(BOOL)animated;
 - (double)value;
 - (void)setMinimumValue:(double)value;
@@ -965,6 +1038,7 @@ enum {
     CGPoint _dragStartPoint;
     UIView *_touchHit;
     UIPanGestureRecognizer *_activePan;
+    UITouch *_touch;
 }
 - (id)initWithWindowScene:(UIWindowScene *)scene;
 - (void)setRootViewController:(UIViewController *)controller;
@@ -1230,6 +1304,100 @@ int iosim_animations_active(void)
 }
 
 @implementation UIResponder
+- (UIResponder *)nextResponder { return nil; }
+- (void)touchesBegan:(NSSet *)touches withEvent:(UIEvent *)event
+{
+    (void)touches;
+    (void)event;
+    [[self nextResponder] touchesBegan:touches withEvent:event];
+}
+- (void)touchesMoved:(NSSet *)touches withEvent:(UIEvent *)event
+{
+    (void)touches;
+    (void)event;
+    [[self nextResponder] touchesMoved:touches withEvent:event];
+}
+- (void)touchesEnded:(NSSet *)touches withEvent:(UIEvent *)event
+{
+    (void)touches;
+    (void)event;
+    [[self nextResponder] touchesEnded:touches withEvent:event];
+}
+- (void)touchesCancelled:(NSSet *)touches withEvent:(UIEvent *)event
+{
+    (void)touches;
+    (void)event;
+    [[self nextResponder] touchesCancelled:touches withEvent:event];
+}
+@end
+
+/* ---------------------------------------------------------------- touches */
+
+/* Window-point to view-local conversion along the view hierarchy. Scroll
+ * views shift their content, as do the controls that use them. */
+static CGPoint touch_point_in_view(UIView *view, CGPoint point)
+{
+    double ox = 0, oy = 0;
+    for (UIView *v = view; v; v = (UIView *)v->_superview)
+    {
+        ox += v->_frame.origin.x;
+        oy += v->_frame.origin.y;
+        if ([v isKindOfClass:[UIScrollView class]])
+        {
+            UIScrollView *scroll = (UIScrollView *)v;
+            ox -= scroll->_contentOffset.x;
+            oy -= scroll->_contentOffset.y;
+        }
+    }
+    return CGPointMake(point.x - ox, point.y - oy);
+}
+
+@implementation UITouch
+- (CGPoint)locationInView:(UIView *)view
+{
+    if (!view || (id)view == (id)_window)
+        return _location;
+    return touch_point_in_view(view, _location);
+}
+- (CGPoint)previousLocationInView:(UIView *)view
+{
+    if (!view || (id)view == (id)_window)
+        return _previousLocation;
+    return touch_point_in_view(view, _previousLocation);
+}
+- (long)phase { return _phase; }
+- (double)timestamp { return _timestamp; }
+- (unsigned long)tapCount { return _tapCount; }
+- (UIView *)view { return _view; }
+- (UIWindow *)window { return _window; }
+@end
+
+@implementation UIEvent
+- (id)initWithTouch:(UITouch *)touch
+{
+    self = [super init];
+    if (self)
+        _touch = touch;
+    return self;
+}
+- (NSSet *)allTouches
+{
+    if (!_touch)
+        return [NSSet set];
+    return [NSSet setWithObject:_touch];
+}
+- (NSSet *)touchesForView:(UIView *)view
+{
+    if (_touch && (id)_touch->_view == (id)view)
+        return [NSSet setWithObject:_touch];
+    return [NSSet set];
+}
+- (NSSet *)touchesForWindow:(UIWindow *)window
+{
+    if (_touch && (id)_touch->_window == (id)window)
+        return [NSSet setWithObject:_touch];
+    return [NSSet set];
+}
 @end
 
 /* ------------------------------------------------------- auto layout */
@@ -1704,6 +1872,7 @@ static int wrap_text_lines(const char *text, int style, double points,
 }
 - (double)alpha { return _alpha; }
 - (id)superview { return _superview; }
+- (UIResponder *)nextResponder { return _superview; }
 - (CGAffineTransform)transform { return _transform; }
 - (void)setTransform:(CGAffineTransform)transform { _transform = transform; }
 - (void)layoutSubviews { }
@@ -2027,6 +2196,11 @@ static UITextField *g_firstResponder;
     return YES;
 }
 - (BOOL)isFirstResponder { return _firstResponder; }
+- (void)touchesBegan:(NSSet *)touches withEvent:(UIEvent *)event
+{
+    [self becomeFirstResponder];
+    [super touchesBegan:touches withEvent:event];
+}
 - (BOOL)hasText
 {
     const char *s = iosim_string_cstr(_text);
@@ -2094,10 +2268,15 @@ static UITextField *g_firstResponder;
 - (UIColor *)onTintColor { return _onTintColor; }
 - (void)sendActionsForControlEvents:(unsigned long)events
 {
-    if (events & 1 << 6)
+    if (events & UIControlEventTouchUpInside)
+    {
         [self setOn:!_on animated:YES];
+        [super sendActionsForControlEvents:UIControlEventValueChanged];
+        return;
+    }
     [super sendActionsForControlEvents:events];
 }
+- (void)setOn:(BOOL)on { [self setOn:on animated:NO]; }
 - (CGSize)intrinsicContentSize { return CGSizeMake(63, 28); }
 @end
 
@@ -2146,6 +2325,12 @@ static UITextField *g_firstResponder;
     _currentPageTintColor = color;
 }
 - (UIColor *)currentPageTintColor { return _currentPageTintColor; }
+- (void)touchesEnded:(NSSet *)touches withEvent:(UIEvent *)event
+{
+    UITouch *touch = [touches anyObject];
+    [self selectPageAtPoint:[touch locationInView:self]];
+    [super touchesEnded:touches withEvent:event];
+}
 - (void)selectPageAtPoint:(CGPoint)point
 {
     if (_numberOfPages <= 1)
@@ -2200,6 +2385,12 @@ static UITextField *g_firstResponder;
 - (long)selectedSegmentIndex { return _selectedSegmentIndex; }
 - (void)setTintColor:(UIColor *)color { _tintColor = color; }
 - (UIColor *)tintColor { return _tintColor; }
+- (void)touchesEnded:(NSSet *)touches withEvent:(UIEvent *)event
+{
+    UITouch *touch = [touches anyObject];
+    [self selectSegmentAtPoint:[touch locationInView:self]];
+    [super touchesEnded:touches withEvent:event];
+}
 - (void)selectSegmentAtPoint:(CGPoint)point
 {
     if (_itemCount <= 0 || _frame.size.width <= 0)
@@ -2258,7 +2449,7 @@ static UITextField *g_firstResponder;
 - (UIColor *)maximumTrackTintColor { return _maxTrackTintColor; }
 - (void)setThumbTintColor:(UIColor *)color { _thumbTintColor = color; }
 - (UIColor *)thumbTintColor { return _thumbTintColor; }
-- (void)setValueFromPoint:(CGPoint)point
+- (void)updateValueFromPoint:(CGPoint)point
 {
     double span = _maximumValue - _minimumValue;
     double thumb = 36.3333;
@@ -2268,8 +2459,34 @@ static UITextField *g_firstResponder;
     double t = (point.x - thumb / 2) / usable;
     if (t < 0) t = 0;
     if (t > 1) t = 1;
-    [self setValue:_minimumValue + span * t animated:NO];
+    double value = _minimumValue + span * t;
+    if (value == _value)
+        return;
+    _value = value;
+    _needsLayout = YES;
     [self sendActionsForControlEvents:UIControlEventValueChanged];
+}
+- (void)setValueFromPoint:(CGPoint)point
+{
+    [self updateValueFromPoint:point];
+}
+- (void)touchesBegan:(NSSet *)touches withEvent:(UIEvent *)event
+{
+    UITouch *touch = [touches anyObject];
+    [self updateValueFromPoint:[touch locationInView:self]];
+    [super touchesBegan:touches withEvent:event];
+}
+- (void)touchesMoved:(NSSet *)touches withEvent:(UIEvent *)event
+{
+    UITouch *touch = [touches anyObject];
+    [self updateValueFromPoint:[touch locationInView:self]];
+    [super touchesMoved:touches withEvent:event];
+}
+- (void)touchesEnded:(NSSet *)touches withEvent:(UIEvent *)event
+{
+    UITouch *touch = [touches anyObject];
+    [self updateValueFromPoint:[touch locationInView:self]];
+    [super touchesEnded:touches withEvent:event];
 }
 - (CGSize)intrinsicContentSize
 {
@@ -2826,6 +3043,13 @@ static UITextField *g_firstResponder;
 @end
 
 @implementation UIControl
+- (id)initWithFrame:(CGRect)frame
+{
+    self = [super initWithFrame:frame];
+    if (self)
+        _enabled = YES;
+    return self;
+}
 - (void)addTarget:(id)target action:(SEL)action
     forControlEvents:(unsigned long)events
 {
@@ -2840,6 +3064,103 @@ static UITextField *g_firstResponder;
         void (*imp)(id, SEL, id) = (void (*)(id, SEL, id))objc_msgSend;
         imp(_target, _action, self);
     }
+}
+- (BOOL)isHighlighted { return _highlighted; }
+- (void)setHighlighted:(BOOL)highlighted { _highlighted = highlighted; }
+- (BOOL)isEnabled { return _enabled; }
+- (void)setEnabled:(BOOL)enabled { _enabled = enabled; }
+- (BOOL)isSelected { return _selected; }
+- (void)setSelected:(BOOL)selected { _selected = selected; }
+- (unsigned long)state
+{
+    unsigned long state = UIControlStateNormal;
+    if (_highlighted)
+        state |= UIControlStateHighlighted;
+    if (!_enabled)
+        state |= UIControlStateDisabled;
+    if (_selected)
+        state |= UIControlStateSelected;
+    return state;
+}
+- (BOOL)beginTrackingWithTouch:(UITouch *)touch withEvent:(UIEvent *)event
+{
+    (void)touch;
+    (void)event;
+    return YES;
+}
+- (BOOL)continueTrackingWithTouch:(UITouch *)touch withEvent:(UIEvent *)event
+{
+    (void)touch;
+    (void)event;
+    return YES;
+}
+- (void)endTrackingWithTouch:(UITouch *)touch withEvent:(UIEvent *)event
+{
+    (void)touch;
+    (void)event;
+}
+- (void)cancelTrackingWithEvent:(UIEvent *)event { (void)event; }
+- (void)touchesBegan:(NSSet *)touches withEvent:(UIEvent *)event
+{
+    if (!_enabled)
+    {
+        [super touchesBegan:touches withEvent:event];
+        return;
+    }
+    UITouch *touch = [touches anyObject];
+    _tracking = YES;
+    _touchInside = 1;
+    _highlighted = YES;
+    [self beginTrackingWithTouch:touch withEvent:event];
+    [self sendActionsForControlEvents:UIControlEventTouchDown];
+}
+- (void)touchesMoved:(NSSet *)touches withEvent:(UIEvent *)event
+{
+    if (!_tracking)
+    {
+        [super touchesMoved:touches withEvent:event];
+        return;
+    }
+    UITouch *touch = [touches anyObject];
+    int inside = [self pointInside:[touch locationInView:self]];
+    _highlighted = inside ? YES : NO;
+    if (inside && !_touchInside)
+        [self sendActionsForControlEvents:UIControlEventTouchDragEnter |
+                                         UIControlEventTouchDragInside];
+    else if (inside)
+        [self sendActionsForControlEvents:UIControlEventTouchDragInside];
+    else if (_touchInside)
+        [self sendActionsForControlEvents:UIControlEventTouchDragExit |
+                                         UIControlEventTouchDragOutside];
+    else
+        [self sendActionsForControlEvents:UIControlEventTouchDragOutside];
+    _touchInside = inside;
+    [self continueTrackingWithTouch:touch withEvent:event];
+}
+- (void)touchesEnded:(NSSet *)touches withEvent:(UIEvent *)event
+{
+    if (!_tracking)
+    {
+        [super touchesEnded:touches withEvent:event];
+        return;
+    }
+    UITouch *touch = [touches anyObject];
+    int inside = [self pointInside:[touch locationInView:self]];
+    _tracking = NO;
+    _highlighted = NO;
+    [self endTrackingWithTouch:touch withEvent:event];
+    if (!_enabled)
+        return;
+    [self sendActionsForControlEvents:inside ? UIControlEventTouchUpInside
+                                             : UIControlEventTouchUpOutside];
+}
+- (void)touchesCancelled:(NSSet *)touches withEvent:(UIEvent *)event
+{
+    _tracking = NO;
+    _highlighted = NO;
+    [self cancelTrackingWithEvent:event];
+    if (_enabled)
+        [self sendActionsForControlEvents:UIControlEventTouchCancel];
 }
 @end
 
@@ -3101,6 +3422,58 @@ static double clamp_scroll(double value, double low, double high)
         [self addSubview:[controller view]];
 }
 - (UIViewController *)rootViewController { return _rootViewController; }
+- (void)beginTouchAtPoint:(CGPoint)point
+{
+    if (_touch)
+        [self endTouchAtPoint:_touch->_location cancelled:YES];
+    UITouch *touch = [[UITouch alloc] init];
+    touch->_location = point;
+    touch->_previousLocation = point;
+    touch->_phase = UITouchPhaseBegan;
+    touch->_timestamp = iosim_now();
+    touch->_view = _touchHit;
+    touch->_window = self;
+    touch->_tapCount = 1;
+    _touch = touch;
+    if (_touchHit)
+    {
+        UIEvent *event = [[UIEvent alloc] initWithTouch:touch];
+        [_touchHit touchesBegan:[NSSet setWithObject:touch] withEvent:event];
+    }
+}
+- (void)moveTouchToPoint:(CGPoint)point
+{
+    if (!_touch)
+        return;
+    _touch->_previousLocation = _touch->_location;
+    _touch->_location = point;
+    _touch->_phase = UITouchPhaseMoved;
+    _touch->_timestamp = iosim_now();
+    if (_touchHit)
+    {
+        UIEvent *event = [[UIEvent alloc] initWithTouch:_touch];
+        [_touchHit touchesMoved:[NSSet setWithObject:_touch] withEvent:event];
+    }
+}
+- (void)endTouchAtPoint:(CGPoint)point cancelled:(BOOL)cancelled
+{
+    if (!_touch)
+        return;
+    _touch->_previousLocation = _touch->_location;
+    _touch->_location = point;
+    _touch->_phase = cancelled ? UITouchPhaseCancelled : UITouchPhaseEnded;
+    _touch->_timestamp = iosim_now();
+    if (_touchHit)
+    {
+        NSSet *set = [NSSet setWithObject:_touch];
+        UIEvent *event = [[UIEvent alloc] initWithTouch:_touch];
+        if (cancelled)
+            [_touchHit touchesCancelled:set withEvent:event];
+        else
+            [_touchHit touchesEnded:set withEvent:event];
+    }
+    _touch = nil;
+}
 - (void)dispatchTouchDownX:(int)x y:(int)y
 {
     double scale = [[UIScreen mainScreen] scale];
@@ -3135,6 +3508,7 @@ static double clamp_scroll(double value, double low, double high)
     if (getenv("IOSIM_DEBUG_TOUCH"))
         printf("[touch] down hit=%p scroll=%p pan=%p\n", _touchHit,
                _dragScroll, _activePan);
+    [self beginTouchAtPoint:point];
 }
 - (void)dispatchTouchMoveX:(int)x y:(int)y
 {
@@ -3173,6 +3547,7 @@ static double clamp_scroll(double value, double low, double high)
                    _dragScroll->_contentOffset.x,
                    _dragScroll->_contentOffset.y, maxX, maxY);
     }
+    [self moveTouchToPoint:point];
 }
 - (void)dispatchTouchUpX:(int)x y:(int)y
 {
@@ -3229,6 +3604,7 @@ static double clamp_scroll(double value, double low, double high)
                 }
             }
     }
+    [self endTouchAtPoint:point cancelled:NO];
     _touchHit = nil;
 }
 - (void)dispatchTapX:(int)x y:(int)y
@@ -3250,50 +3626,10 @@ static double clamp_scroll(double value, double low, double high)
                 send_gesture_action(g, UIGestureRecognizerStateEnded);
             }
         }
-    for (UIView *tv = hit; tv; tv = [tv superview])
-        if ([tv isKindOfClass:[UITextField class]])
-        {
-            [(UITextField *)tv becomeFirstResponder];
-            break;
-        }
-    if (hit && [hit isKindOfClass:[UIPageControl class]])
-    {
-        double ox = 0, oy = 0;
-        for (UIView *a = hit; a; a = [a superview])
-        {
-            ox += a->_frame.origin.x;
-            oy += a->_frame.origin.y;
-        }
-        [(UIPageControl *)hit selectPageAtPoint:CGPointMake(point.x - ox,
-                                                            point.y - oy)];
-        return;
-    }
-    if (hit && [hit isKindOfClass:[UISegmentedControl class]])
-    {
-        double ox = 0, oy = 0;
-        for (UIView *a = hit; a; a = [a superview])
-        {
-            ox += a->_frame.origin.x;
-            oy += a->_frame.origin.y;
-        }
-        [(UISegmentedControl *)hit
-            selectSegmentAtPoint:CGPointMake(point.x - ox, point.y - oy)];
-        return;
-    }
-    if (hit && [hit isKindOfClass:[UISlider class]])
-    {
-        double ox = 0, oy = 0;
-        for (UIView *a = hit; a; a = [a superview])
-        {
-            ox += a->_frame.origin.x;
-            oy += a->_frame.origin.y;
-        }
-        [(UISlider *)hit setValueFromPoint:CGPointMake(point.x - ox,
-                                                       point.y - oy)];
-        return;
-    }
-    if (hit && [hit isKindOfClass:[UIControl class]])
-        [(UIControl *)hit sendActionsForControlEvents:UIControlEventTouchUpInside];
+    _touchHit = hit;
+    [self beginTouchAtPoint:point];
+    [self endTouchAtPoint:point cancelled:NO];
+    _touchHit = nil;
     UIView *tableHit = hit;
     while (tableHit && ![tableHit isKindOfClass:[UITableView class]])
         tableHit = [tableHit superview];
@@ -6497,6 +6833,10 @@ int UIApplicationMain(int argc, char **argv, id principal, id delegateName)
     const char *shellMode = getenv("IOSIM_SHELL");
     if (shellMode && *shellMode)
         return run_springboard();
+
+    /* Open the event stream before the first frame so the system UI can
+     * deliver events while the scene is still being built. */
+    iosim_event_open();
 
     const char *name = string_cstr(delegateName);
     Class delegateClass = name ? (Class)objc_getClass(name) : 0;

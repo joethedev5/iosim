@@ -239,6 +239,62 @@ else
     echo "FAIL SpringBoard home"; fails=$((fails+1))
 fi
 
+# ---------- 7. UITouch delivery and control tracking ----------
+wait_log() {
+    needle="$1"
+    i=0
+    while [ "$i" -lt 50 ]; do
+        if grep -Fq -- "$needle" "$SBLOG" 2>/dev/null; then
+            return 0
+        fi
+        sleep 0.1
+        i=$((i+1))
+    done
+    return 1
+}
+"$ROOT/tools/build_app.sh" "$ROOT/demo/TouchApp.m" "$T/TouchApp" >/dev/null
+mkdir -p "$T/TouchApp.app"
+cp "$T/TouchApp" "$T/TouchApp.app/TouchApp"
+python3 - "$T/TouchApp.app/Info.plist" <<'PY'
+import plistlib, sys
+with open(sys.argv[1], "wb") as f:
+    plistlib.dump({
+        "CFBundleIdentifier": "com.iosim.touch",
+        "CFBundleExecutable": "TouchApp",
+        "CFBundleName": "TouchApp",
+        "CFBundlePackageType": "APPL",
+        "CFBundleVersion": "1",
+        "CFBundleShortVersionString": "1.0",
+    }, f)
+PY
+"$ROOT/tools/iosimctl" install "$UDID" "$T/TouchApp.app" >/dev/null
+sleep 0.5
+# Third installed app: grid slot 9, row 2 column 1.
+"$ROOT/tools/iosimctl" ui "$UDID" tap 154.7222 322.5 >/dev/null
+if wait_log "[touch] app ready"; then
+    echo "ok   SpringBoard launches the touch fixture"
+else
+    echo "FAIL touch fixture launch"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" down 60 300 >/dev/null
+"$ROOT/tools/iosimctl" ui "$UDID" move 120 320 >/dev/null
+"$ROOT/tools/iosimctl" ui "$UDID" up 200 300 >/dev/null
+"$ROOT/tools/iosimctl" ui "$UDID" down 40 525 >/dev/null
+"$ROOT/tools/iosimctl" ui "$UDID" move 360 525 >/dev/null
+"$ROOT/tools/iosimctl" ui "$UDID" up 360 525 >/dev/null
+"$ROOT/tools/iosimctl" ui "$UDID" tap 55 614 >/dev/null
+"$ROOT/tools/iosimctl" ui "$UDID" tap 200 758 >/dev/null
+sleep 0.5
+out="$(cat "$SBLOG")"
+check "[touch] began 36.0 104.0" "$out" \
+    "touch down hit-tests and reports view-local coordinates"
+check "[touch] moved 96.0 124.0" "$out" "touch move tracks the finger"
+check "[touch] ended 176.0 104.0" "$out" "touch up ends the sequence"
+check "[slider] 1.000" "$out" "slider tracks a drag to its maximum"
+check "[switch] 1" "$out" "switch toggles on touch up inside"
+check "[button] pressed" "$out" \
+    "button target/action fires from the touch pipeline"
+
 "$ROOT/tools/iosimctl" shutdown "$UDID" >/dev/null
 
 if [ "$fails" -ne 0 ]; then

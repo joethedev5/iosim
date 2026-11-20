@@ -118,6 +118,30 @@ __attribute__((objc_root_class))
 - (void)removeObject:(id)object;
 @end
 
+@interface NSSet : NSObject {
+@public
+    id *_items;
+    unsigned long _count;
+}
++ (id)set;
++ (id)setWithObject:(id)object;
++ (id)setWithObjects:(id)first, ...;
++ (id)setWithObjects:(const id *)objects count:(unsigned long)count;
++ (id)setWithArray:(id)array;
+- (unsigned long)count;
+- (id)anyObject;
+- (id)allObjects;
+- (BOOL)containsObject:(id)object;
+- (id)member:(id)object;
+@end
+
+@interface NSMutableSet : NSSet
++ (id)set;
+- (void)addObject:(id)object;
+- (void)removeObject:(id)object;
+- (void)removeAllObjects;
+@end
+
 @interface NSDictionary : NSObject {
 @public
     id *_keys;

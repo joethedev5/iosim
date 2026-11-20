@@ -302,10 +302,14 @@ exist: `list`, `create`, `delete`, `boot`, `bootstatus`, `shutdown`, `erase`,
   `CFFIXED_USER_HOME`, `_DYLD_CLOSURE_HOME`), `DYLD_ROOT_PATH`, screen geometry,
   model identifier and `XPC_SERVICE_NAME=UIKitApplication:...`.
 - `SIMCTL_CHILD_*` variables are forwarded to the child, matching simctl.
-- `ui <device> tap x y | home | apps` injects a system UI event into the
-  device event FIFO. `tap` takes point coordinates and scales them to pixels.
-  The frontmost process reads the stream: at home SpringBoard hit-tests icons,
-  while an app receives touches, keys and the `home` background request.
+- `ui <device> tap x y | down x y | move x y | up x y | swipe x0 y0 x1 y1
+  [seconds] | home | apps` injects system UI events into the device event
+  FIFO, in point coordinates scaled to pixels. `swipe` emits a down, an
+  interpolated run of moves and an up. The frontmost process reads the stream:
+  at home SpringBoard hit-tests icons, while an app receives touches, keys and
+  the `home` background request. `UIApplicationMain` opens the stream before
+  its first frame so events sent during scene construction are queued rather
+  than lost.
 
 ### 2.9 Services: libdispatch, Mach and XPC
 
@@ -345,8 +349,12 @@ decoded with libpng in `loader/image.c`.
   stroke; `CAGradientLayer` interpolates up to two color stops; `UIImageView`
   blits a decoded image with aspect-fit or centered content modes.
 - Touch events from `IOSIM_EVENT_FIFO` are converted from device pixels to
-  points, hit-tested against the view tree, routed to `UIControl` actions or
-  table delegates, and followed by a re-render.
+  points and delivered as `UITouch`/`UIEvent` objects through the responder
+  chain. `UIControl` implements begin/continue/end tracking with highlighting,
+  drag-inside/outside and touch-up actions; subclasses such as `UISlider`
+  update continuously while the finger moves. A single `tap` is synthesised
+  as a down/up pair through the same path, then run-loop ticks, dispatch and
+  active animations decide whether to re-render.
 - `UIView` animations interpolate frames and alpha; `CAAnimation` key paths
   drive layer opacity and corner radius. Transforms apply translation and scale
   around the view center.
@@ -363,7 +371,21 @@ their solved width. Safe-area guides contribute the measured iPhone 18 Pro
 insets (62 pt top, 34 pt bottom).
 
 Touches from `IOSIM_EVENT_FIFO` include tap, down, move and up records.
-UIScrollView drags update `contentOffset` with a rubber-band clamp; tap, pan
+`UIWindow` hit-tests on down and creates a `UITouch` (window point,
+previous point, phase, timestamp, hit view). Touches are delivered as an
+`UIEvent` carrying an `NSSet`: `touchesBegan:` reaches the hit view, whose
+default implementation forwards up the responder chain to the superview,
+view controller and window; `touchesMoved:`/`touchesEnded:` go to the same
+view. `locationInView:` converts window points into any ancestor's
+coordinates, including scroll offsets.
+
+`UIControl` tracks the touch: it highlights on down, sends `TouchDown`,
+reports `TouchDragInside`/`TouchDragOutside` (and enter/exit transitions) as
+the finger moves, then sends `TouchUpInside` or `TouchUpOutside` on release.
+`UISlider` maps every down/move/up to its track, `UISwitch` toggles on release,
+`UISegmentedControl` and `UIPageControl` select the segment or dot under the
+release point, and `UITextField` becomes first responder on down.
+`UIScrollView` drags update `contentOffset` with a rubber-band clamp; tap, pan
 and swipe `UIGestureRecognizer` subclasses deliver target actions. The
 framebuffer has an intersection clip stack, used by scroll views and
 `clipsToBounds`/`masksToBounds`, so content cannot paint outside its host.

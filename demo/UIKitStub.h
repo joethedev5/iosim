@@ -13,7 +13,52 @@ __attribute__((objc_root_class))
 - (id)autorelease;
 @end
 
+@interface NSString : NSObject
++ (id)stringWithFormat:(id)format, ...;
+- (const char *)UTF8String;
+- (unsigned long)length;
+@end
+
+@interface NSSet : NSObject
+- (unsigned long)count;
+- (id)anyObject;
+- (id)allObjects;
+- (BOOL)containsObject:(id)object;
+@end
+
+@class UIView;
+@class UIWindow;
+
+typedef enum {
+    UITouchPhaseBegan = 0,
+    UITouchPhaseMoved = 1,
+    UITouchPhaseStationary = 2,
+    UITouchPhaseEnded = 3,
+    UITouchPhaseCancelled = 4
+} UITouchPhase;
+
+@interface UITouch : NSObject
+- (CGPoint)locationInView:(UIView *)view;
+- (CGPoint)previousLocationInView:(UIView *)view;
+- (long)phase;
+- (double)timestamp;
+- (unsigned long)tapCount;
+- (UIView *)view;
+- (UIWindow *)window;
+@end
+
+@interface UIEvent : NSObject
+- (NSSet *)allTouches;
+- (NSSet *)touchesForView:(UIView *)view;
+- (NSSet *)touchesForWindow:(UIWindow *)window;
+@end
+
 @interface UIResponder : NSObject
+- (UIResponder *)nextResponder;
+- (void)touchesBegan:(NSSet *)touches withEvent:(UIEvent *)event;
+- (void)touchesMoved:(NSSet *)touches withEvent:(UIEvent *)event;
+- (void)touchesEnded:(NSSet *)touches withEvent:(UIEvent *)event;
+- (void)touchesCancelled:(NSSet *)touches withEvent:(UIEvent *)event;
 @end
 
 @class UIApplication;
@@ -64,7 +109,6 @@ __attribute__((objc_root_class))
 @end
 
 @class NSArray;
-@class NSString;
 @class NSLayoutConstraint;
 @class NSLayoutAnchor;
 @class NSLayoutDimension;
@@ -162,7 +206,13 @@ enum {
     UIControlStateHighlighted = 1
 };
 enum {
-    UIControlEventTouchUpInside = 1 << 6
+    UIControlEventTouchDown = 1 << 0,
+    UIControlEventTouchDragInside = 1 << 2,
+    UIControlEventTouchDragOutside = 1 << 3,
+    UIControlEventTouchUpInside = 1 << 6,
+    UIControlEventTouchUpOutside = 1 << 7,
+    UIControlEventTouchCancel = 1 << 8,
+    UIControlEventValueChanged = 1 << 12
 };
 enum {
     UIButtonTypeSystem = 1
@@ -171,6 +221,10 @@ enum {
 @interface UIControl : UIView
 - (void)addTarget:(id)target action:(SEL)action
     forControlEvents:(unsigned long)events;
+- (BOOL)isHighlighted;
+- (BOOL)isEnabled;
+- (void)setEnabled:(BOOL)enabled;
+- (unsigned long)state;
 @end
 
 @interface UIButton : UIControl
@@ -206,20 +260,31 @@ enum { UIAlertActionStyleDefault = 0, UIAlertActionStyleCancel = 1,
 @interface UIPageControl : UIView
 - (void)setNumberOfPages:(long)pages;
 - (void)setCurrentPage:(long)page;
+- (void)addTarget:(id)target action:(SEL)action
+    forControlEvents:(unsigned long)events;
 @end
 
 @interface UISegmentedControl : UIView
 - (id)initWithItems:(NSArray *)items;
 - (void)setSelectedSegmentIndex:(long)index;
 - (long)selectedSegmentIndex;
+- (void)addTarget:(id)target action:(SEL)action
+    forControlEvents:(unsigned long)events;
 @end
 
 @interface UISwitch : UIView
+- (void)setOn:(BOOL)on;
 - (void)setOn:(BOOL)on animated:(BOOL)animated;
+- (BOOL)isOn;
+- (void)addTarget:(id)target action:(SEL)action
+    forControlEvents:(unsigned long)events;
 @end
 
 @interface UISlider : UIView
 - (void)setValue:(double)value animated:(BOOL)animated;
+- (double)value;
+- (void)addTarget:(id)target action:(SEL)action
+    forControlEvents:(unsigned long)events;
 @end
 
 @interface UIProgressView : UIView

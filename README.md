@@ -30,6 +30,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | Scene lifecycle (`UIWindowScene`, `UISceneDelegate`) required by iOS 27 | ✅ |
 | Software framebuffer, SF font rendering, UIKit view rendering | ✅ |
 | Touch hit-testing, target/action, table selection, event FIFO run loop | ✅ |
+| `UITouch`/`UIEvent` responder delivery, continuous control tracking | ✅ |
 | Drag scrolling with rubber-band clamp, tap/pan/swipe gesture recognizers | ✅ |
 | Auto Layout: NSLayoutConstraint, anchors, guides, intrinsic sizing, priorities | ✅ (subset) |
 | Multiline UILabel wrapping, UITextField focus, caret and software keyboard | ✅ |
@@ -42,7 +43,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | libdispatch queues, groups, semaphores; main-queue drain from UIKit | ✅ |
 | Mach ports/messages, bootstrap service registry, in-process XPC | ✅ |
 | SpringBoard system UI: measured iOS 26 home screen, installed apps, real app launching | ✅ |
-| UIView transforms (translation/scale), layout callbacks, UIScrollView offsets | ✅ (basic) |
+| UIView 2D affine transforms (translate/scale/rotate), layout callbacks, UIScrollView offsets | ✅ (basic) |
 | Layer clipping (`clipsToBounds`/`masksToBounds`), shadows and borders | ✅ |
 | Switch, slider, segmented, progress, page and activity controls in the iOS 26 glass design | ✅ |
 
@@ -70,6 +71,10 @@ tools/iosimctl install $UDID MyApp.app
 tools/iosimctl io $UDID screenshot home.png      # SpringBoard home screen
 tools/iosimctl ui $UDID tap 339.8 222.2          # point coordinates
 tools/iosimctl io $UDID screenshot app.png       # the app's own frame
+tools/iosimctl ui $UDID down 40 525              # finger down, in points
+tools/iosimctl ui $UDID move 360 525             # moves track the finger
+tools/iosimctl ui $UDID up 360 525               # up completes the touch
+tools/iosimctl ui $UDID swipe 300 700 60 200 0.25  # down/moves/up in one call
 tools/iosimctl ui $UDID home                     # scene backgrounds, home returns
 tools/iosimctl shutdown $UDID
 

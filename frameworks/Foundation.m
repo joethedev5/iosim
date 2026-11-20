@@ -694,6 +694,104 @@ static char *format_va(const char *fmt, va_list ap)
 }
 @end
 
+/* --------------------------------------------------------------- NSSet */
+
+@implementation NSSet
++ (id)set { return [[[self alloc] init] autorelease]; }
++ (id)setWithObject:(id)object
+{
+    NSMutableSet *s = [NSMutableSet set];
+    [s addObject:object];
+    return s;
+}
++ (id)setWithObjects:(const id *)objects count:(unsigned long)count
+{
+    NSMutableSet *s = [NSMutableSet set];
+    for (unsigned long i = 0; i < count; i++)
+        [s addObject:objects[i]];
+    return s;
+}
++ (id)setWithObjects:(id)first, ...
+{
+    NSMutableSet *s = [NSMutableSet set];
+    va_list ap;
+    va_start(ap, first);
+    id obj = first;
+    while (obj)
+    {
+        [s addObject:obj];
+        obj = va_arg(ap, id);
+    }
+    va_end(ap);
+    return s;
+}
++ (id)setWithArray:(id)array
+{
+    NSMutableSet *s = [NSMutableSet set];
+    for (unsigned long i = 0; i < [array count]; i++)
+        [s addObject:[array objectAtIndex:i]];
+    return s;
+}
+- (unsigned long)count { return _count; }
+- (id)anyObject { return _count ? _items[0] : nil; }
+- (id)allObjects
+{
+    return [NSArray arrayWithObjects:_items count:_count];
+}
+- (BOOL)containsObject:(id)object
+{
+    return [self member:object] != nil;
+}
+- (id)member:(id)object
+{
+    for (unsigned long i = 0; i < _count; i++)
+        if (objects_equal(_items[i], object))
+            return _items[i];
+    return nil;
+}
+- (id)description
+{
+    NSMutableString *s = [NSMutableString string];
+    [s appendString:@"{("];
+    for (unsigned long i = 0; i < _count; i++)
+    {
+        if (i)
+            [s appendString:@", "];
+        [s appendString:[NSString stringWithUTF8String:obj_cstr(_items[i])]];
+    }
+    [s appendString:@")}"];
+    return s;
+}
+@end
+
+@implementation NSMutableSet
++ (id)set { return [[[self alloc] init] autorelease]; }
+- (void)addObject:(id)object
+{
+    if (!object || [self containsObject:object])
+        return;
+    id *items = realloc(_items, (_count + 1) * sizeof(id));
+    if (!items)
+        return;
+    _items = items;
+    _items[_count++] = object;
+}
+- (void)removeObject:(id)object
+{
+    for (unsigned long i = 0; i < _count; i++)
+    {
+        if (objects_equal(_items[i], object))
+        {
+            for (unsigned long j = i; j + 1 < _count; j++)
+                _items[j] = _items[j + 1];
+            _count--;
+            return;
+        }
+    }
+}
+- (void)removeAllObjects { _count = 0; }
+@end
+
 /* --------------------------------------------------------- NSDictionary */
 
 @implementation NSDictionary

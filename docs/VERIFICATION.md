@@ -254,6 +254,43 @@ glass fills composite correctly.
 | Segmented band (13 pt glyph edges inside) | 1.50 / 255 |
 | Progress bar band | 0.24 / 255 |
 
+### Touch: responder delivery and live controls
+
+`demo/TouchApp.m` is a real app launched by SpringBoard. It puts a custom
+`UIView` subclass in the middle of its screen, a slider, a switch, a segmented
+control and a button. The custom view overrides `touchesBegan:withEvent:`,
+`touchesMoved:withEvent:` and `touchesEnded:withEvent:`, prints the view-local
+point for each phase and drops a dot at that point. The runtime turns each
+event-FIFO record into a `UITouch` with a phase, timestamp, hit view and
+window, wraps it in a `UIEvent`, and delivers it through the responder chain.
+
+The test drives a drag across the custom view, a drag across the slider, a
+tap on the switch and a tap on the button, then asserts on the app's own
+output:
+
+```sh
+tools/iosimctl ui $UDID down 60 300
+tools/iosimctl ui $UDID move 120 320
+tools/iosimctl ui $UDID up 200 300
+```
+
+```
+[touch] began 36.0 104.0
+[touch] moved 96.0 124.0
+[touch] ended 176.0 104.0
+[slider] 0.497
+[slider] 1.000
+[switch] 1
+[button] pressed
+```
+
+The view-local points are exact (the panel starts at 24,196 pt). The slider
+tracks every move and reaches its maximum; the switch toggles on touch-up
+inside; the button's target/action fires through `UIControl`'s tracking path.
+The same synthetic tap path focuses a `UITextField` and the runtime keyboard
+accepts the next tap, verified by the text-input fixture. `ui swipe` emits a
+whole down/moves/up gesture in one command.
+
 ### Services: dispatch, Mach, bootstrap and XPC
 
 `tests/services_test.m` is an Apple-clang x86_64 executable with no UI. It
@@ -359,10 +396,12 @@ The framework surface is still a subset. Auto Layout supports equality and
 inequality anchors with priorities evaluated by relaxation, intrinsic sizing
 and guides, but not the full Cassowary solver or every UIKit layout API.
 Text input is a single-line `UITextField` with a QWERTY keyboard; UITextView,
-multitap gestures and selection handles are not implemented. Cross-process Mach ports and
+multitap gestures and selection handles are not implemented. Touch input is
+single-finger: there is no multitouch, touch prediction or pressure. Cross-process Mach ports and
 XPC remain in-process, the SpringBoard grid is a single 16-slot page with no
 paging or app switcher, a backgrounded app is terminated rather than suspended,
 and stock system apps have no executables in this runtime. CoreText shaping is limited to the glyphs in SFUI;
-right-to-left and complex scripts are not shaped. `UIView.transform` applies
-translation and scale, not arbitrary rotation. XPC is an in-process transport.
+right-to-left and complex scripts are not shaped. `UIView.transform` applies a
+full 2D affine transform (translation, scale and rotation) through an offscreen
+composite; `CATransform3D` is not supported. XPC is an in-process transport.
 Metal and video remain unimplemented.

@@ -19,17 +19,21 @@ void iosim_event_close(void)
     }
 }
 
+int iosim_event_open(void)
+{
+    if (event_fd >= 0)
+        return 1;
+    const char *path = getenv("IOSIM_EVENT_FIFO");
+    if (!path || !*path)
+        return 0;
+    event_fd = open(path, O_RDWR);
+    return event_fd >= 0;
+}
+
 int iosim_event_next(int *type, int *x, int *y)
 {
-    if (event_fd < 0)
-    {
-        const char *path = getenv("IOSIM_EVENT_FIFO");
-        if (!path || !*path)
-            return 0;
-        event_fd = open(path, O_RDWR);
-        if (event_fd < 0)
-            return 0;
-    }
+    if (event_fd < 0 && !iosim_event_open())
+        return 0;
 
     struct pollfd pfd;
     pfd.fd = event_fd;
