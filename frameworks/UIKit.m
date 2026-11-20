@@ -107,6 +107,7 @@ typedef void *CGColorRef;
     CGSize _shadowOffset;
     double _borderWidth;
     UIColor *_borderColor;
+    double _zPosition;
 }
 - (double)cornerRadius;
 - (void)setCornerRadius:(double)radius;
@@ -982,6 +983,8 @@ static void animation_mark_active(double duration, double repeat);
 - (double)borderWidth { return _borderWidth; }
 - (void)setBorderColor:(UIColor *)color { _borderColor = color; }
 - (UIColor *)borderColor { return _borderColor; }
+- (void)setZPosition:(double)z { _zPosition = z; }
+- (double)zPosition { return _zPosition; }
 - (CGRect)frame { return _frame; }
 - (void)setFrame:(CGRect)frame { _frame = frame; }
 - (void)setBackgroundColor:(UIColor *)color { _backgroundColor = color; }
@@ -3872,8 +3875,27 @@ static void render_view(UIView *view, double originX, double originY,
 
     if (view->_layer)
     {
-        for (int i = 0; i < view->_layer->_sublayerCount; i++)
-            render_layer((CALayer *)view->_layer->_sublayers[i],
+        int order[16];
+        int n = view->_layer->_sublayerCount;
+        for (int i = 0; i < n && i < 16; i++)
+            order[i] = i;
+        for (int i = 1; i < n && i < 16; i++)
+        {
+            int key = order[i];
+            CALayer *keyLayer = (CALayer *)view->_layer->_sublayers[key];
+            int j = i - 1;
+            while (j >= 0)
+            {
+                CALayer *other = (CALayer *)view->_layer->_sublayers[order[j]];
+                if (other->_zPosition <= keyLayer->_zPosition)
+                    break;
+                order[j + 1] = order[j];
+                j--;
+            }
+            order[j + 1] = key;
+        }
+        for (int i = 0; i < n && i < 16; i++)
+            render_layer((CALayer *)view->_layer->_sublayers[order[i]],
                          originX + frame.origin.x, originY + frame.origin.y,
                          scale, alpha);
     }

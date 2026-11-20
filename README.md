@@ -37,7 +37,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | UIAlertController alerts, actions and modal presentation | ✅ |
 | UINavigationController push/pop, UIStackView intrinsic layout, UIButton titles | ✅ |
 | UIView animations (frame, alpha), CALayer backing/opacity/corner radius | ✅ |
-| CoreAnimation paths, gradients, sublayers, PNG images | ✅ |
+| CoreAnimation paths, gradients, sublayers (z-ordered), PNG images | ✅ |
 | Foundation collections, strings, notifications, timers, NSIndexPath | ✅ |
 | libdispatch queues, groups, semaphores; main-queue drain from UIKit | ✅ |
 | Mach ports/messages, bootstrap service registry, in-process XPC | ✅ |
