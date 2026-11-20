@@ -64,6 +64,9 @@ extern void iosim_fb_blit_rgba_scaled(int x, int y, int w, int h,
                                       const unsigned char *rgba,
                                       int sw, int sh, int stride);
 
+typedef const void *CGPathRef;
+typedef void *CGColorRef;
+
 @class UIView;
 @class UIWindowScene;
 
@@ -108,17 +111,17 @@ extern void iosim_fb_blit_rgba_scaled(int x, int y, int w, int h,
 
 @interface CAShapeLayer : CALayer {
 @public
-    UIBezierPath *_path;
-    UIColor *_fillColor;
-    UIColor *_strokeColor;
+    id _path;
+    id _fillColor;
+    id _strokeColor;
     double _lineWidth;
 }
-- (void)setPath:(UIBezierPath *)path;
-- (UIBezierPath *)path;
-- (void)setFillColor:(UIColor *)color;
-- (UIColor *)fillColor;
-- (void)setStrokeColor:(UIColor *)color;
-- (UIColor *)strokeColor;
+- (void)setPath:(id)path;
+- (id)path;
+- (void)setFillColor:(id)color;
+- (id)fillColor;
+- (void)setStrokeColor:(id)color;
+- (id)strokeColor;
 - (void)setLineWidth:(double)width;
 - (double)lineWidth;
 @end
@@ -160,6 +163,7 @@ extern void iosim_fb_blit_rgba_scaled(int x, int y, int w, int h,
 - (void)addRect:(CGRect)rect;
 - (void)addOvalInRect:(CGRect)rect;
 - (void)addRoundedRect:(CGRect)rect cornerRadius:(double)radius;
+- (CGPathRef)CGPath;
 @end
 
 @interface UIImage : NSObject {
@@ -217,6 +221,7 @@ extern id kCAMediaTimingFunctionEaseInEaseOut;
 + (UIColor *)blackColor;
 + (UIColor *)clearColor;
 + (UIColor *)systemBlueColor;
+- (CGColorRef)CGColor;
 @end
 
 @interface UIFont : NSObject {
@@ -519,6 +524,7 @@ id kCAMediaTimingFunctionEaseInEaseOut = @"easeInEaseOut";
 {
     return [self colorWithRed:0.0 green:0.5686 blue:1.0 alpha:1];
 }
+- (CGColorRef)CGColor { return (CGColorRef)self; }
 @end
 
 /* ----------------------------------------------------------------- fonts */
@@ -799,6 +805,7 @@ int iosim_animations_active(void)
 - (void)addOvalInRect:(CGRect)rect { (void)rect; }
 - (void)addRoundedRect:(CGRect)rect cornerRadius:(double)radius
 { (void)rect; (void)radius; }
+- (CGPathRef)CGPath { return (CGPathRef)self; }
 @end
 
 @implementation CAShapeLayer
@@ -809,12 +816,12 @@ int iosim_animations_active(void)
         _lineWidth = 1.0;
     return self;
 }
-- (void)setPath:(UIBezierPath *)path { _path = path; }
-- (UIBezierPath *)path { return _path; }
-- (void)setFillColor:(UIColor *)color { _fillColor = color; }
-- (UIColor *)fillColor { return _fillColor; }
-- (void)setStrokeColor:(UIColor *)color { _strokeColor = color; }
-- (UIColor *)strokeColor { return _strokeColor; }
+- (void)setPath:(id)path { _path = path; }
+- (id)path { return _path; }
+- (void)setFillColor:(id)color { _fillColor = color; }
+- (id)fillColor { return _fillColor; }
+- (void)setStrokeColor:(id)color { _strokeColor = color; }
+- (id)strokeColor { return _strokeColor; }
 - (void)setLineWidth:(double)width { _lineWidth = width; }
 - (double)lineWidth { return _lineWidth; }
 @end
@@ -1283,8 +1290,9 @@ static void render_layer(CALayer *layer, double parentX, double parentY,
     else if ([layer isKindOfClass:[CAShapeLayer class]])
     {
         CAShapeLayer *sl = (CAShapeLayer *)layer;
-        render_shape_path(sl->_path, x, y, w, h, scale, sl->_fillColor,
-                          sl->_strokeColor, sl->_lineWidth);
+        render_shape_path((UIBezierPath *)sl->_path, x, y, w, h, scale,
+                          (UIColor *)sl->_fillColor,
+                          (UIColor *)sl->_strokeColor, sl->_lineWidth);
     }
 
     for (int i = 0; i < layer->_sublayerCount; i++)

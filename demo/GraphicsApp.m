@@ -62,8 +62,8 @@
     gradient.frame = CGRectMake(0, 0, width - 48, 150);
     gradient.cornerRadius = 20;
     gradient.colors = @[
-        [UIColor colorWithRed:0.10 green:0.36 blue:0.98 alpha:1.0],
-        [UIColor colorWithRed:0.55 green:0.20 blue:0.86 alpha:1.0],
+        (id)[UIColor colorWithRed:0.10 green:0.36 blue:0.98 alpha:1.0].CGColor,
+        (id)[UIColor colorWithRed:0.55 green:0.20 blue:0.86 alpha:1.0].CGColor,
     ];
     gradient.startPoint = CGPointMake(0, 0);
     gradient.endPoint = CGPointMake(1, 1);
@@ -122,17 +122,17 @@
     [area addLineToPoint:CGPointMake(18 + plotW, 168)];
     CAShapeLayer *fill = [[CAShapeLayer alloc] init];
     fill.frame = CGRectMake(0, 0, width - 48, 210);
-    fill.path = area;
+    fill.path = area.CGPath;
     fill.fillColor =
-        [UIColor colorWithRed:0.10 green:0.20 blue:0.40 alpha:1.0];
+        (id)[UIColor colorWithRed:0.10 green:0.20 blue:0.40 alpha:1.0].CGColor;
     fill.strokeColor = nil;
     [chart.layer addSublayer:fill];
 
     CAShapeLayer *stroke = [[CAShapeLayer alloc] init];
     stroke.frame = CGRectMake(0, 0, width - 48, 210);
-    stroke.path = line;
+    stroke.path = line.CGPath;
     stroke.strokeColor =
-        [UIColor colorWithRed:0.30 green:0.82 blue:1.0 alpha:1.0];
+        (id)[UIColor colorWithRed:0.30 green:0.82 blue:1.0 alpha:1.0].CGColor;
     stroke.fillColor = nil;
     stroke.lineWidth = 4;
     [chart.layer addSublayer:stroke];

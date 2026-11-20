@@ -24,11 +24,13 @@ jobs:
             echo "services test build failed:"; cat out/build-services.err; exit 1
           fi
           if ! xcrun clang -arch arm64 $CFLAGS -framework UIKit -framework Foundation \
-              demo/GraphicsApp.m -o GraphicsApp_arm64 2> out/build-graphics-arm64.err; then
+              demo/GraphicsApp.m -o GraphicsApp_arm64 \
+            -framework QuartzCore 2> out/build-graphics-arm64.err; then
             echo "GraphicsApp arm64 build failed:"; cat out/build-graphics-arm64.err; exit 1
           fi
           if ! xcrun clang -arch x86_64 $CFLAGS -framework UIKit -framework Foundation \
-              demo/GraphicsApp.m -o GraphicsApp_x86_64 2> out/build-graphics-x86_64.err; then
+              demo/GraphicsApp.m -o GraphicsApp_x86_64 \
+            -framework QuartzCore 2> out/build-graphics-x86_64.err; then
             echo "GraphicsApp x86_64 build failed:"; cat out/build-graphics-x86_64.err; exit 1
           fi
           file HelloSim_arm64 HelloSim_x86_64 services_test_x86_64 > out/file.txt

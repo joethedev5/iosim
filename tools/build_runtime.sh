@@ -19,6 +19,7 @@ mkdir -p "$B" \
   "$OUT/System/Library/Frameworks/UIKit.framework" \
   "$OUT/System/Library/Frameworks/Foundation.framework" \
   "$OUT/System/Library/Frameworks/CoreFoundation.framework" \
+  "$OUT/System/Library/Frameworks/QuartzCore.framework" \
   "$OUT/System/Library/PrivateFrameworks" \
   "$OUT/usr/lib/system" \
   "$OUT/System/Library/CoreServices"
@@ -52,7 +53,8 @@ build_dylib "$ROOT/frameworks/UIKit.m" \
 for spec in \
   "/usr/lib/libSystem.B.dylib:/usr/lib/libSystem.B.dylib" \
   "/usr/lib/libobjc.A.dylib:/usr/lib/libobjc.A.dylib" \
-  "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation:/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation"
+  "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation:/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation" \
+  "/System/Library/Frameworks/QuartzCore.framework/QuartzCore:/System/Library/Frameworks/QuartzCore.framework/QuartzCore"
 do
   out="${spec%%:*}"; install="${spec##*:}"
   "$LD64" -arch x86_64 -platform_version ios-simulator 18.0 18.0 \
