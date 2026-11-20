@@ -411,6 +411,47 @@ void iosim_fb_blit_xrgb_scaled(const uint32_t *src, int sw, int sh,
     }
 }
 
+/* Multiply the alpha of an offscreen layer by a rounded-rect mask. The
+ * colour channels are left untouched, so compositing the layer later
+ * produces the same antialiased edge the shape would have drawn. */
+void iosim_fb_mask_round_rect(int x, int y, int w, int h, int radius)
+{
+    if (!fb_pixels || !fb_alpha || w <= 0 || h <= 0)
+        return;
+    if (radius < 0) radius = 0;
+    if (radius * 2 > w) radius = w / 2;
+    if (radius * 2 > h) radius = h / 2;
+    double cx = x + w / 2.0, cy = y + h / 2.0;
+    double exr = w / 2.0 - radius, eyr = h / 2.0 - radius;
+    for (int yy = 0; yy < (int)fb_height; yy++)
+    {
+        uint32_t *row = fb_pixels + (size_t)yy * fb_width;
+        double py = yy + 0.5 - cy;
+        double qy = __builtin_fabs(py) - eyr;
+        for (int xx = 0; xx < (int)fb_width; xx++)
+        {
+            double px = xx + 0.5 - cx;
+            double qx = __builtin_fabs(px) - exr;
+            double axr = qx > 0 ? qx : 0, ayr = qy > 0 ? qy : 0;
+            double outside = __builtin_sqrt(axr * axr + ayr * ayr);
+            double inside = qx > qy ? qx : qy;
+            double d = outside + (inside < 0 ? inside : 0) - radius;
+            double coverage = 0.5 - d;
+            if (coverage <= 0)
+            {
+                row[xx] = 0;
+                continue;
+            }
+            if (coverage >= 1)
+                continue;
+            unsigned a = row[xx] >> 24;
+            unsigned na = (unsigned)(a * coverage + 0.5);
+            if (na > 255) na = 255;
+            row[xx] = (na << 24) | (row[xx] & 0x00FFFFFFu);
+        }
+    }
+}
+
 void iosim_fb_blit_affine(const uint32_t *src, int sw, int sh,
                           double fa, double fb, double fc, double f_d,
                           double ftx, double fty, double opacity)
@@ -471,16 +512,24 @@ void iosim_fb_blit_affine(const uint32_t *src, int sw, int sh,
             uint32_t p11 = src[(size_t)v1c * sw + u1c];
             double w00 = (1 - tu) * (1 - tv), w10 = tu * (1 - tv);
             double w01 = (1 - tu) * tv, w11 = tu * tv;
-            double sa = ((p00 >> 24) & 0xFF) * w00 + ((p10 >> 24) & 0xFF) * w10 +
-                        ((p01 >> 24) & 0xFF) * w01 + ((p11 >> 24) & 0xFF) * w11;
+            double a00 = (p00 >> 24) & 0xFF, a10 = (p10 >> 24) & 0xFF,
+                   a01 = (p01 >> 24) & 0xFF, a11 = (p11 >> 24) & 0xFF;
+            double sa = a00 * w00 + a10 * w10 + a01 * w01 + a11 * w11;
             if (sa <= 0.5)
                 continue;
-            double sr = ((p00 >> 16) & 0xFF) * w00 + ((p10 >> 16) & 0xFF) * w10 +
-                        ((p01 >> 16) & 0xFF) * w01 + ((p11 >> 16) & 0xFF) * w11;
-            double sg = ((p00 >> 8) & 0xFF) * w00 + ((p10 >> 8) & 0xFF) * w10 +
-                        ((p01 >> 8) & 0xFF) * w01 + ((p11 >> 8) & 0xFF) * w11;
-            double sb = (p00 & 0xFF) * w00 + (p10 & 0xFF) * w10 +
-                        (p01 & 0xFF) * w01 + (p11 & 0xFF) * w11;
+            /* Weight colour by alpha so transparent neighbours do not bleed
+             * black into the edge of a composited layer. */
+            double sr = (((p00 >> 16) & 0xFF) * a00 * w00 +
+                         ((p10 >> 16) & 0xFF) * a10 * w10 +
+                         ((p01 >> 16) & 0xFF) * a01 * w01 +
+                         ((p11 >> 16) & 0xFF) * a11 * w11) / sa;
+            double sg = (((p00 >> 8) & 0xFF) * a00 * w00 +
+                         ((p10 >> 8) & 0xFF) * a10 * w10 +
+                         ((p01 >> 8) & 0xFF) * a01 * w01 +
+                         ((p11 >> 8) & 0xFF) * a11 * w11) / sa;
+            double sb = ((p00 & 0xFF) * a00 * w00 + (p10 & 0xFF) * a10 * w10 +
+                         (p01 & 0xFF) * a01 * w01 +
+                         (p11 & 0xFF) * a11 * w11) / sa;
             double f = (sa / 255.0) * opacity;
             uint32_t dst = row[x];
             unsigned dr = (dst >> 16) & 0xFF, dg = (dst >> 8) & 0xFF,
@@ -624,6 +673,199 @@ void iosim_fb_fill_round_rect(int x, int y, int w, int h, int radius,
             unsigned g = (fg_g * a + ((dst >> 8) & 0xFF) * (255 - a) + 127) / 255;
             unsigned b = (fg_b * a + (dst & 0xFF) * (255 - a) + 127) / 255;
             row[xx] = fb_pack(dst, r, g, b, a);
+        }
+    }
+}
+
+void iosim_fb_fill_circle_gradient(int cx, int cy, int radius,
+                                   uint32_t top_color, uint32_t bottom_color)
+{
+    if (!fb_pixels || radius <= 0)
+        return;
+    int x0 = cx - radius - 1, x1 = cx + radius + 2;
+    int y0 = cy - radius - 1, y1 = cy + radius + 2;
+    if (x0 < fb_clip_x0()) x0 = fb_clip_x0();
+    if (y0 < fb_clip_y0()) y0 = fb_clip_y0();
+    if (x1 > fb_clip_x1()) x1 = fb_clip_x1();
+    if (y1 > fb_clip_y1()) y1 = fb_clip_y1();
+    int tr = (top_color >> 16) & 0xFF, tg = (top_color >> 8) & 0xFF,
+        tb = top_color & 0xFF;
+    int br = (bottom_color >> 16) & 0xFF, bg = (bottom_color >> 8) & 0xFF,
+        bb = bottom_color & 0xFF;
+    for (int y = y0; y < y1; y++)
+    {
+        double dy = y + 0.5 - cy;
+        double t = (y + 0.5 - (cy - radius)) / (2.0 * radius);
+        if (t < 0) t = 0;
+        if (t > 1) t = 1;
+        unsigned r = (unsigned)(tr + (br - tr) * t + 0.5);
+        unsigned g = (unsigned)(tg + (bg - tg) * t + 0.5);
+        unsigned b = (unsigned)(tb + (bb - tb) * t + 0.5);
+        for (int x = x0; x < x1; x++)
+        {
+            double dx = x + 0.5 - cx;
+            double d = __builtin_sqrt(dx * dx + dy * dy) - radius;
+            double coverage = (0.5 - d) * fb_opacity;
+            if (coverage <= 0)
+                continue;
+            if (coverage > fb_opacity)
+                coverage = fb_opacity;
+            fb_blend_pixel(x, y, (r << 16) | (g << 8) | b, coverage);
+        }
+    }
+}
+
+void iosim_fb_fill_ellipse_gradient(int cx, int cy, int rx, int ry,
+                                    uint32_t top_color, uint32_t bottom_color)
+{
+    if (!fb_pixels || rx <= 0 || ry <= 0)
+        return;
+    int x0 = cx - rx - 1, x1 = cx + rx + 2;
+    int y0 = cy - ry - 1, y1 = cy + ry + 2;
+    if (x0 < fb_clip_x0()) x0 = fb_clip_x0();
+    if (y0 < fb_clip_y0()) y0 = fb_clip_y0();
+    if (x1 > fb_clip_x1()) x1 = fb_clip_x1();
+    if (y1 > fb_clip_y1()) y1 = fb_clip_y1();
+    int tr = (top_color >> 16) & 0xFF, tg = (top_color >> 8) & 0xFF,
+        tb = top_color & 0xFF;
+    int br = (bottom_color >> 16) & 0xFF, bg = (bottom_color >> 8) & 0xFF,
+        bb = bottom_color & 0xFF;
+    double irx = 1.0 / rx, iry = 1.0 / ry;
+    for (int y = y0; y < y1; y++)
+    {
+        double dy = (y + 0.5 - cy) * iry;
+        double t = (y + 0.5 - (cy - ry)) / (2.0 * ry);
+        if (t < 0) t = 0;
+        if (t > 1) t = 1;
+        unsigned r = (unsigned)(tr + (br - tr) * t + 0.5);
+        unsigned g = (unsigned)(tg + (bg - tg) * t + 0.5);
+        unsigned b = (unsigned)(tb + (bb - tb) * t + 0.5);
+        for (int x = x0; x < x1; x++)
+        {
+            double dx = (x + 0.5 - cx) * irx;
+            double dist = __builtin_sqrt(dx * dx + dy * dy);
+            double d = (dist - 1.0) * (rx < ry ? rx : ry);
+            double coverage = (0.5 - d) * fb_opacity;
+            if (coverage <= 0)
+                continue;
+            if (coverage > fb_opacity)
+                coverage = fb_opacity;
+            fb_blend_pixel(x, y, (r << 16) | (g << 8) | b, coverage);
+        }
+    }
+}
+
+/* A stroked circular arc with a colour ramp along its length. start_deg
+ * begins at the positive x axis (clockwise, as screen y grows downward);
+ * sweep_deg is the arc length. Colours are interpolated across stops in
+ * [0,1] along the arc. Used for the activity rings. */
+void iosim_fb_fill_arc_gradient(int cx, int cy, int radius, int thickness,
+                                double start_deg, double sweep_deg,
+                                const uint32_t *colors, const double *stops,
+                                int nstops)
+{
+    if (!fb_pixels || radius <= 0 || thickness <= 0 || nstops <= 0 ||
+        sweep_deg <= 0)
+        return;
+    double half = thickness / 2.0;
+    int range = radius + (int)(half + 2.0);
+    int x0 = cx - range, x1 = cx + range + 1;
+    int y0 = cy - range, y1 = cy + range + 1;
+    if (x0 < fb_clip_x0()) x0 = fb_clip_x0();
+    if (y0 < fb_clip_y0()) y0 = fb_clip_y0();
+    if (x1 > fb_clip_x1()) x1 = fb_clip_x1();
+    if (y1 > fb_clip_y1()) y1 = fb_clip_y1();
+    for (int y = y0; y < y1; y++)
+    {
+        double dy = y + 0.5 - cy;
+        for (int x = x0; x < x1; x++)
+        {
+            double dx = x + 0.5 - cx;
+            double dist = __builtin_sqrt(dx * dx + dy * dy);
+            double d = __builtin_fabs(dist - radius) - half;
+            double coverage = (0.5 - d) * fb_opacity;
+            if (coverage <= 0)
+                continue;
+            double ang = __builtin_atan2(dy, dx) * 57.29577951308232;
+            double t = ang - start_deg;
+            while (t < 0) t += 360.0;
+            while (t >= 360.0) t -= 360.0;
+            if (t > sweep_deg)
+                continue;
+            t /= sweep_deg;
+            if (t < 0) t = 0;
+            if (t > 1) t = 1;
+            int k = 0;
+            while (k < nstops - 2 && t > stops[k + 1])
+                k++;
+            double span = stops[k + 1] - stops[k];
+            double f = span > 1e-9 ? (t - stops[k]) / span : 0;
+            if (f < 0) f = 0;
+            if (f > 1) f = 1;
+            unsigned c0 = colors[k], c1 = colors[k + 1];
+            int cr0 = (c0 >> 16) & 0xFF, cg0 = (c0 >> 8) & 0xFF,
+                cb0 = c0 & 0xFF;
+            int cr1 = (c1 >> 16) & 0xFF, cg1 = (c1 >> 8) & 0xFF,
+                cb1 = c1 & 0xFF;
+            unsigned r = (unsigned)(cr0 + (cr1 - cr0) * f + 0.5);
+            unsigned g = (unsigned)(cg0 + (cg1 - cg0) * f + 0.5);
+            unsigned b = (unsigned)(cb0 + (cb1 - cb0) * f + 0.5);
+            if (coverage > fb_opacity)
+                coverage = fb_opacity;
+            fb_blend_pixel(x, y, (r << 16) | (g << 8) | b, coverage);
+        }
+    }
+}
+
+/* A stroked ellipse with a colour ramp around it (0 = east, clockwise).
+ * Distances are measured in ellipse-normalised space scaled back by the
+ * smaller radius, which tracks the true ring closely for mild ellipses. */
+void iosim_fb_fill_ellipse_ring_gradient(int cx, int cy, int rx, int ry,
+                                         int thickness,
+                                         const uint32_t *colors,
+                                         const double *stops, int nstops)
+{
+    if (!fb_pixels || rx <= 0 || ry <= 0 || thickness <= 0 || nstops <= 0)
+        return;
+    double half = thickness / 2.0;
+    int x0 = cx - rx - 2, x1 = cx + rx + 3;
+    int y0 = cy - ry - 2, y1 = cy + ry + 3;
+    if (x0 < fb_clip_x0()) x0 = fb_clip_x0();
+    if (y0 < fb_clip_y0()) y0 = fb_clip_y0();
+    if (x1 > fb_clip_x1()) x1 = fb_clip_x1();
+    if (y1 > fb_clip_y1()) y1 = fb_clip_y1();
+    double minr = rx < ry ? rx : ry;
+    for (int y = y0; y < y1; y++)
+    {
+        double ny = (y + 0.5 - cy) / ry;
+        for (int x = x0; x < x1; x++)
+        {
+            double nx = (x + 0.5 - cx) / rx;
+            double d = (__builtin_sqrt(nx * nx + ny * ny) - 1.0) * minr;
+            double dd = __builtin_fabs(d) - half;
+            double coverage = (0.5 - dd) * fb_opacity;
+            if (coverage <= 0)
+                continue;
+            double ang = __builtin_atan2(ny, nx) * 0.15915494309189535;
+            if (ang < 0) ang += 1.0;
+            int k = 0;
+            while (k < nstops - 2 && ang > stops[k + 1])
+                k++;
+            double span = stops[k + 1] - stops[k];
+            double f = span > 1e-9 ? (ang - stops[k]) / span : 0;
+            if (f < 0) f = 0;
+            if (f > 1) f = 1;
+            unsigned c0 = colors[k], c1 = colors[k + 1];
+            int cr0 = (c0 >> 16) & 0xFF, cg0 = (c0 >> 8) & 0xFF,
+                cb0 = c0 & 0xFF;
+            int cr1 = (c1 >> 16) & 0xFF, cg1 = (c1 >> 8) & 0xFF,
+                cb1 = c1 & 0xFF;
+            unsigned r = (unsigned)(cr0 + (cr1 - cr0) * f + 0.5);
+            unsigned g = (unsigned)(cg0 + (cg1 - cg0) * f + 0.5);
+            unsigned b = (unsigned)(cb0 + (cb1 - cb0) * f + 0.5);
+            if (coverage > fb_opacity)
+                coverage = fb_opacity;
+            fb_blend_pixel(x, y, (r << 16) | (g << 8) | b, coverage);
         }
     }
 }

@@ -427,6 +427,16 @@ def cmd_boot(args):
         dev["launchdPid"] = proc.pid
         dev["lastBootedAt"] = now_iso()
         save_state(state)
+    # Wait for the system UI to open its event stream, so callers can install
+    # and send events as soon as boot returns.
+    fifo = event_fifo_path(udid)
+    for _ in range(100):
+        try:
+            fd = os.open(str(fifo), os.O_WRONLY | os.O_NONBLOCK)
+            os.close(fd)
+            break
+        except OSError:
+            time.sleep(0.05)
     print(f"Booted {dev['name']} ({udid})")
     return 0
 

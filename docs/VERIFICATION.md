@@ -314,17 +314,23 @@ same status bar), the full-frame parity is:
 
 | Region | Mean error (0–255) |
 |---|---|
-| Whole screen | 9.55 |
+| Whole screen | 7.03 |
 | Status bar | 3.97 |
 | Search pill | 4.23 |
 | Placeholder app icon | 5.8 |
-| Demo apps (placeholder art) | 4.8–13.9 |
-| Stock icons (Fitness, Watch, …) | 15.1–47.6 |
-| Dock | 18.3 |
+| Stock icons | 7.4–26.2 |
+| Dock | 9.4 |
 
-11.99 % of pixels fall outside the 24/255 tolerance, concentrated in the stock
-system-app artwork, whose hand-drawn vector art is the remaining gap; the
-wallpaper-only bands stay around 4/255.
+8.15 % of pixels fall outside the 24/255 tolerance. The stock artwork is
+composed the way the real icons are: each icon is drawn into its own layer and
+masked by the measured 43 px rounded-rect face, with measured art for the
+Fitness rings (17/16/14 px strokes on 68.5/46/25 px radii with a colour ramp and
+rounded caps), the Watch band (a 63 × 70 px ellipse ring with a case and crown),
+the Files folder (tab, inner sheet and a blue ramp), the Safari dial (76.5 px
+radius, 32 ticks, red/white needle), the Messages bubble (69.5 × 57 px ellipse,
+tail and shadow), the Contacts avatar disc and colour tabs, and the Utilities
+folder with its mini apps. The largest remaining icon error is Preview's
+photorealistic lens (26.2); the wallpaper-only bands sit near 4/255.
 
 The system UI is not a mock launcher. The boot flow is exercised end to end:
 

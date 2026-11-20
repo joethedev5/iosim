@@ -152,8 +152,9 @@ def main():
         return cells
 
     def in_icon(x, y):
-        for cx, cy in ((461, 2456), (744, 2456)):
-            if abs(x - cx) < 104 and abs(y - cy) < 104:
+        # Measured dock icon centres and 64 pt faces.
+        for cx, cy in ((471, 2416), (735, 2416)):
+            if abs(x - cx) < 100 and abs(y - cy) < 100:
                 return True
         return False
 

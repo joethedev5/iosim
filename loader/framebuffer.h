@@ -11,6 +11,10 @@ void iosim_fb_clear(uint32_t color);
 void iosim_fb_fill_rect(int x, int y, int w, int h, uint32_t color);
 void iosim_fb_fill_round_rect(int x, int y, int w, int h, int radius,
                               uint32_t color);
+void iosim_fb_fill_ellipse_gradient(int cx, int cy, int rx, int ry, uint32_t top_color, uint32_t bottom_color);
+void iosim_fb_fill_ellipse_ring_gradient(int cx, int cy, int rx, int ry, int thickness, const uint32_t *colors, const double *stops, int nstops);
+void iosim_fb_fill_arc_gradient(int cx, int cy, int radius, int thickness, double start_deg, double sweep_deg, const uint32_t *colors, const double *stops, int nstops);
+void iosim_fb_fill_circle_gradient(int cx, int cy, int radius, uint32_t top_color, uint32_t bottom_color);
 void iosim_fb_fill_circle(int cx, int cy, int radius, uint32_t color);
 void iosim_fb_stroke_circle(int cx, int cy, int radius, int thickness,
                             uint32_t color);
@@ -72,6 +76,7 @@ void iosim_fb_fill_field(int x, int y, int w, int h, int radius,
 void iosim_fb_blit_xrgb_scaled(const uint32_t *src, int sw, int sh,
                                int x, int y, int w, int h,
                                double opacity);
+void iosim_fb_mask_round_rect(int x, int y, int w, int h, int radius);
 void iosim_fb_blit_affine(const uint32_t *src, int sw, int sh,
                           double fa, double fb, double fc, double fd,
                           double ftx, double fty, double opacity);
