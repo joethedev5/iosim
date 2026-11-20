@@ -9012,18 +9012,29 @@ static struct shell_app g_shell_apps[SHELL_MAX_APPS];
 static int g_shell_app_count;
 static int g_home_page;
 
-static int shell_grid_count(void)
-{
-    int count = 0;
-    for (int i = 0; i < g_shell_app_count; i++)
-        if (!g_shell_apps[i].dock)
-            count++;
-    return count;
-}
+#define SHELL_MAX_FOLDERS 16
+#define SHELL_FOLDER_MAX_APPS 12
+struct shell_folder {
+    char name[64];
+    char bundles[SHELL_FOLDER_MAX_APPS][128];
+    int count;
+};
+static struct shell_folder g_folders[SHELL_MAX_FOLDERS];
+static int g_folder_count;
+static int g_open_folder = -1;
 
+struct shell_grid_entry {
+    int app;
+    int folder;
+};
+
+static int shell_grid_entries(struct shell_grid_entry *out, int cap);
+
+/* Pages follow grid entries, not raw apps: a folder occupies one slot no
+ * matter how many apps it holds. */
 static int shell_page_count(void)
 {
-    int grid = shell_grid_count();
+    int grid = shell_grid_entries(0, SHELL_MAX_APPS + SHELL_MAX_FOLDERS);
     return grid > 0 ? (grid + 15) / 16 : 1;
 }
 static unsigned *g_shell_wallpaper;
@@ -9247,6 +9258,294 @@ static void shell_load_apps(void)
             iosim_terminate_app(saved[j].pid);
 }
 
+/* --------------------------------------------------------------- folders
+ *
+ * A folder groups installed apps by bundle id. Creating one by dropping an
+ * icon onto another removes both tiles from the grid and draws a folder at
+ * the first app's position. The grouping is written to the device data
+ * container so it survives SpringBoard restarts. Stock apps (no bundle id)
+ * cannot be grouped because their identity is not persisted. */
+
+static int shell_folder_for_bundle(const char *bundle)
+{
+    if (!bundle || !*bundle)
+        return -1;
+    for (int f = 0; f < g_folder_count; f++)
+        for (int k = 0; k < g_folders[f].count; k++)
+            if (strcmp(g_folders[f].bundles[k], bundle) == 0)
+                return f;
+    return -1;
+}
+
+static int shell_folder_for_app(int index)
+{
+    if (index < 0 || index >= g_shell_app_count)
+        return -1;
+    return shell_folder_for_bundle(g_shell_apps[index].bundle);
+}
+
+static int shell_folder_member_app(int folder, int member)
+{
+    if (folder < 0 || folder >= g_folder_count)
+        return -1;
+    if (member < 0 || member >= g_folders[folder].count)
+        return -1;
+    const char *bundle = g_folders[folder].bundles[member];
+    for (int i = 0; i < g_shell_app_count; i++)
+        if (g_shell_apps[i].bundle[0] &&
+            strcmp(g_shell_apps[i].bundle, bundle) == 0)
+            return i;
+    return -1;
+}
+
+/* True when this app is the tile that represents its folder on the grid. */
+static int shell_folder_app_is_first(int index)
+{
+    int folder = shell_folder_for_app(index);
+    if (folder < 0)
+        return 0;
+    for (int j = 0; j < index; j++)
+        if (!g_shell_apps[j].dock && shell_folder_for_app(j) == folder)
+            return 0;
+    return 1;
+}
+
+static void shell_folders_path(char *out, unsigned long cap)
+{
+    const char *shared = getenv("SIMULATOR_SHARED_RESOURCES_DIRECTORY");
+    out[0] = 0;
+    if (!shared || !*shared)
+        return;
+    snprintf(out, cap, "%s/Library/SpringBoard/folders.txt", shared);
+}
+
+static void shell_folders_save(void)
+{
+    char path[1024];
+    shell_folders_path(path, sizeof path);
+    if (!path[0])
+        return;
+    int slash = -1;
+    for (int i = 0; path[i]; i++)
+        if (path[i] == '/')
+            slash = i;
+    if (slash > 0)
+    {
+        char dir[1024];
+        memcpy(dir, path, (unsigned long)slash);
+        dir[slash] = 0;
+        iosim_fs_mkdir(dir, 1);
+    }
+    static char buf[8192];
+    unsigned long o = 0;
+    for (int f = 0; f < g_folder_count && o < sizeof(buf) - 2; f++)
+    {
+        o += (unsigned long)snprintf(buf + o, sizeof(buf) - o, "%s|",
+                                     g_folders[f].name);
+        for (int k = 0; k < g_folders[f].count && o < sizeof(buf) - 2; k++)
+            o += (unsigned long)snprintf(buf + o, sizeof(buf) - o, "%s%s",
+                                         k ? "," : "",
+                                         g_folders[f].bundles[k]);
+        if (o < sizeof(buf) - 1)
+            buf[o++] = '\n';
+    }
+    iosim_fs_write(path, buf, o);
+}
+
+static void shell_folders_load(void)
+{
+    char path[1024];
+    shell_folders_path(path, sizeof path);
+    if (!path[0])
+        return;
+    unsigned char *bytes = 0;
+    unsigned long len = 0;
+    if (iosim_fs_read(path, &bytes, &len) != 0 || !bytes)
+        return;
+    char *text = (char *)bytes;
+    unsigned long i = 0;
+    while (i < len && g_folder_count < SHELL_MAX_FOLDERS)
+    {
+        unsigned long start = i;
+        while (i < len && text[i] != '\n')
+            i++;
+        unsigned long end = i;
+        if (i < len)
+            i++;
+        if (start >= end || text[start] == '#')
+            continue;
+        struct shell_folder *f = &g_folders[g_folder_count];
+        f->count = 0;
+        unsigned long bar = start;
+        while (bar < end && text[bar] != '|')
+            bar++;
+        unsigned long nlen = bar - start;
+        if (nlen > sizeof(f->name) - 1)
+            nlen = sizeof(f->name) - 1;
+        memcpy(f->name, text + start, nlen);
+        f->name[nlen] = 0;
+        if (!f->name[0])
+            shell_copy(f->name, (int)sizeof(f->name), "Folder");
+        unsigned long p = bar < end ? bar + 1 : end;
+        while (p < end && f->count < SHELL_FOLDER_MAX_APPS)
+        {
+            unsigned long bs = p;
+            while (p < end && text[p] != ',')
+                p++;
+            unsigned long be = p;
+            if (p < end)
+                p++;
+            if (be <= bs)
+                continue;
+            unsigned long blen = be - bs;
+            if (blen > sizeof(f->bundles[0]) - 1)
+                blen = sizeof(f->bundles[0]) - 1;
+            memcpy(f->bundles[f->count], text + bs, blen);
+            f->bundles[f->count][blen] = 0;
+            f->count++;
+        }
+        if (f->count > 0)
+            g_folder_count++;
+    }
+    free(bytes);
+}
+
+/* Drop members whose bundle is no longer installed and folders that became
+ * empty; the grid and the saved state both follow. */
+static void shell_folders_prune(void)
+{
+    for (int f = 0; f < g_folder_count; f++)
+    {
+        int kept = 0;
+        for (int k = 0; k < g_folders[f].count; k++)
+        {
+            int found = 0;
+            for (int i = 0; i < g_shell_app_count; i++)
+                if (g_shell_apps[i].bundle[0] &&
+                    strcmp(g_shell_apps[i].bundle, g_folders[f].bundles[k]) ==
+                        0)
+                {
+                    found = 1;
+                    break;
+                }
+            if (!found)
+                continue;
+            if (kept != k)
+                shell_copy(g_folders[f].bundles[kept],
+                           (int)sizeof(g_folders[f].bundles[0]),
+                           g_folders[f].bundles[k]);
+            kept++;
+        }
+        g_folders[f].count = kept;
+    }
+    int out = 0;
+    for (int f = 0; f < g_folder_count; f++)
+    {
+        if (g_folders[f].count <= 0)
+            continue;
+        if (out != f)
+            g_folders[out] = g_folders[f];
+        out++;
+    }
+    g_folder_count = out;
+    if (g_open_folder >= g_folder_count)
+        g_open_folder = -1;
+    shell_folders_save();
+}
+
+static int shell_folder_create(int add_app, int into_folder, int other_app)
+{
+    int folder = into_folder;
+    if (folder < 0)
+    {
+        if (g_folder_count >= SHELL_MAX_FOLDERS)
+            return -1;
+        folder = g_folder_count++;
+        struct shell_folder *f = &g_folders[folder];
+        f->count = 0;
+        shell_copy(f->name, (int)sizeof(f->name), "Folder");
+        const char *first = g_shell_apps[other_app].bundle;
+        if (first[0])
+            shell_copy(f->bundles[f->count++],
+                       (int)sizeof(f->bundles[0]), first);
+    }
+    struct shell_folder *f = &g_folders[folder];
+    const char *bundle = g_shell_apps[add_app].bundle;
+    if (!bundle[0] || f->count >= SHELL_FOLDER_MAX_APPS)
+        return folder;
+    for (int k = 0; k < f->count; k++)
+        if (strcmp(f->bundles[k], bundle) == 0)
+            return folder;
+    shell_copy(f->bundles[f->count++], (int)sizeof(f->bundles[0]), bundle);
+    shell_folders_save();
+    if (into_folder >= 0)
+        printf("[SpringBoard] folder added %s (%d apps)\n",
+               g_shell_apps[add_app].name, f->count);
+    else
+        printf("[SpringBoard] folder created name=%s (%d apps)\n", f->name,
+               f->count);
+    fflush(0);
+    return folder;
+}
+
+static int shell_grid_entries(struct shell_grid_entry *out, int cap)
+{
+    int n = 0;
+    for (int i = 0; i < g_shell_app_count && n < cap; i++)
+    {
+        struct shell_app *a = &g_shell_apps[i];
+        if (a->dock)
+            continue;
+        int folder = shell_folder_for_app(i);
+        if (folder >= 0)
+        {
+            if (!shell_folder_app_is_first(i))
+                continue;
+            if (out)
+            {
+                out[n].app = -1;
+                out[n].folder = folder;
+            }
+        }
+        else if (out)
+        {
+            out[n].app = i;
+            out[n].folder = -1;
+        }
+        n++;
+    }
+    return n;
+}
+
+/* Which grid entry, if any, sits under a home-screen point. */
+static int shell_grid_entry_at(double px, double py, double W, double scale,
+                               int *out_app, int *out_folder)
+{
+    double pitch = (W - 2 * SHELL_MARGIN_PT - SHELL_ICON_PT) / 3.0;
+    struct shell_grid_entry entries[SHELL_MAX_APPS + SHELL_MAX_FOLDERS];
+    int count = shell_grid_entries(entries, SHELL_MAX_APPS + SHELL_MAX_FOLDERS);
+    for (int e = 0; e < count; e++)
+    {
+        int page = e / 16;
+        if (page != g_home_page)
+            continue;
+        int slot = e % 16;
+        int col = slot % 4, row = slot / 4;
+        double cx = SHELL_MARGIN_PT + SHELL_ICON_PT / 2 + col * pitch;
+        double cy = shell_row_center[row];
+        if (px >= cx - 34 && px < cx + 34 && py >= cy - 34 && py < cy + 50)
+        {
+            if (out_app)
+                *out_app = entries[e].app;
+            if (out_folder)
+                *out_folder = entries[e].folder;
+            return 1;
+        }
+    }
+    (void)scale;
+    return 0;
+}
+
 static void shell_label(const char *name, int cx, int baseline, double scale)
 {
     int tw = iosim_fb_font_text_width(name, IOSIM_FONT_REGULAR, 12, scale);
@@ -9351,6 +9650,100 @@ static void shell_stock_icon(int kind, int x, int y, int s, double scale)
         iosim_fb_blit_affine(buf, bw, bh, 1.0, 0.0, 0.0, 1.0, x, y, 1.0);
         iosim_fb_free_offscreen(buf);
     }
+}
+
+/* A folder tile: the glass backplate with up to four mini app icons. */
+static void shell_folder_icon(int folder, int cx, int cy, int s, double scale)
+{
+    int x = cx - s / 2, y = cy - s / 2;
+    int r = (int)(s * 0.2237 + 0.5);
+    iosim_fb_fill_round_rect(x, y, s, s, r, 0x3a3a3c);
+    struct shell_folder *f = &g_folders[folder];
+    int mini = (int)(s * 0.34 + 0.5);
+    int gap = (int)(s * 0.06 + 0.5);
+    int startx = x + (s - (2 * mini + gap)) / 2;
+    int starty = y + (s - (2 * mini + gap)) / 2;
+    for (int k = 0; k < f->count && k < 4; k++)
+    {
+        int app = shell_folder_member_app(folder, k);
+        int mx = startx + (k % 2) * (mini + gap);
+        int my = starty + (k / 2) * (mini + gap);
+        if (app >= 0)
+            shell_stock_icon(g_shell_apps[app].stock, mx, my, mini, scale);
+        else
+            iosim_fb_fill_round_rect(mx, my, mini, mini,
+                                     (int)(mini * 0.22 + 0.5), 0x55555a);
+    }
+}
+
+static void shell_draw_folder(int fbWidth, int fbHeight, double scale,
+                              const char *path)
+{
+    shell_wallpaper_build(fbWidth, fbHeight);
+    if (g_shell_wallpaper)
+        iosim_fb_paste_xrgb(g_shell_wallpaper);
+    else
+    {
+        iosim_fb_set_opacity(1.0);
+        iosim_fb_fill_rect(0, 0, fbWidth, fbHeight, 0x0b1020);
+    }
+    iosim_fb_set_opacity(0.58);
+    iosim_fb_fill_rect(0, 0, fbWidth, fbHeight, 0x000000);
+    iosim_fb_set_opacity(1.0);
+
+    double W = fbWidth / scale;
+    if (g_open_folder >= 0 && g_open_folder < g_folder_count)
+    {
+        int tw = iosim_fb_font_text_width(g_folders[g_open_folder].name,
+                                          IOSIM_FONT_SEMIBOLD, 22, scale);
+        iosim_fb_font_text((fbWidth - tw) / 2, (int)(92 * scale),
+                           g_folders[g_open_folder].name,
+                           IOSIM_FONT_SEMIBOLD, 22, scale, 0xffffff);
+        iosim_fb_set_opacity(0.90);
+        iosim_fb_fill_round_rect((int)(24 * scale), (int)(120 * scale),
+                                 (int)((W - 48) * scale),
+                                 (int)(332 * scale), (int)(36 * scale),
+                                 0x1c1c1e);
+        iosim_fb_set_opacity(1.0);
+        double cellW = (W - 48) / 4.0;
+        int iconSize = (int)(56 * scale + 0.5);
+        for (int k = 0; k < g_folders[g_open_folder].count &&
+                        k < SHELL_FOLDER_MAX_APPS;
+             k++)
+        {
+            int app = shell_folder_member_app(g_open_folder, k);
+            if (app < 0)
+                continue;
+            int col = k % 4, row = k / 4;
+            int cx = (int)((24 + cellW * (col + 0.5)) * scale + 0.5);
+            int cy = (int)((190 + row * 96) * scale + 0.5);
+            shell_stock_icon(g_shell_apps[app].stock, cx - iconSize / 2,
+                             cy - iconSize / 2, iconSize, scale);
+            shell_label(g_shell_apps[app].name, cx,
+                        cy + iconSize / 2 + (int)(16.1 * scale + 0.5),
+                        scale);
+        }
+    }
+    draw_device_chrome(fbWidth, scale);
+    if (path && *path)
+        iosim_fb_present(path);
+}
+
+/* Member row under a point in the open folder overlay, or -1. */
+static int shell_folder_member_at(double px, double py, double W)
+{
+    if (g_open_folder < 0 || g_open_folder >= g_folder_count)
+        return -1;
+    double cellW = (W - 48) / 4.0;
+    for (int k = 0; k < g_folders[g_open_folder].count; k++)
+    {
+        int col = k % 4, row = k / 4;
+        double cx = 24 + cellW * (col + 0.5);
+        double cy = 190 + row * 96;
+        if (px >= cx - 32 && px < cx + 32 && py >= cy - 32 && py < cy + 44)
+            return k;
+    }
+    return -1;
 }
 
 static void shell_stock_icon_draw(int kind, int x, int y, int s, double scale)
@@ -9698,25 +10091,32 @@ static void shell_draw(int fbWidth, int fbHeight, double scale)
     double W = fbWidth / scale;
     double pitch = (W - 2 * SHELL_MARGIN_PT - SHELL_ICON_PT) / 3.0;
     int s = (int)(SHELL_ICON_PT * scale + 0.5);
-    int grid_index = 0;
-    for (int i = 0; i < g_shell_app_count; i++)
+    struct shell_grid_entry entries[SHELL_MAX_APPS + SHELL_MAX_FOLDERS];
+    int entry_count =
+        shell_grid_entries(entries, SHELL_MAX_APPS + SHELL_MAX_FOLDERS);
+    for (int e = 0; e < entry_count; e++)
     {
-        struct shell_app *a = &g_shell_apps[i];
-        if (a->dock)
+        int page = e / 16;
+        int page_slot = e % 16;
+        if (page != g_home_page)
             continue;
-        int page = grid_index / 16;
-        int page_slot = grid_index % 16;
-        if (page == g_home_page)
+        int col = page_slot % 4, row = page_slot / 4;
+        int cx = (int)((SHELL_MARGIN_PT + SHELL_ICON_PT / 2 + col * pitch) *
+                       scale + 0.5);
+        int cy = (int)(shell_row_center[row] * scale + 0.5);
+        int baseline = cy + s / 2 + (int)(16.1 * scale + 0.5);
+        if (entries[e].folder >= 0)
         {
-            int col = page_slot % 4, row = page_slot / 4;
-            int cx = (int)((SHELL_MARGIN_PT + SHELL_ICON_PT / 2 + col * pitch) *
-                           scale + 0.5);
-            int cy = (int)(shell_row_center[row] * scale + 0.5);
+            shell_folder_icon(entries[e].folder, cx, cy, s, scale);
+            shell_label(g_folders[entries[e].folder].name, cx, baseline,
+                        scale);
+        }
+        else
+        {
+            struct shell_app *a = &g_shell_apps[entries[e].app];
             shell_stock_icon(a->stock, cx - s / 2, cy - s / 2, s, scale);
-            int baseline = cy + s / 2 + (int)(16.1 * scale + 0.5);
             shell_label(a->name, cx, baseline, scale);
         }
-        grid_index++;
     }
 
     /* Page dots sit between the grid and the search pill and are hidden for
@@ -9783,6 +10183,12 @@ static int g_switcher_index;
 static volatile int g_switcher_requested;
 static int g_sb_down;
 static double g_sb_down_x, g_sb_down_y;
+/* A home-screen icon drag starts only after the finger rests long enough for
+ * the long press; a quick swipe that happens to start on an icon still pages. */
+static double g_sb_down_time;
+static int g_sb_moved;
+static int g_sb_icon_hold;
+#define SHELL_ICON_HOLD_SECONDS 0.30
 static int g_search;
 static char g_search_query[64];
 static UITextField *g_search_field;
@@ -10609,6 +11015,8 @@ static int run_springboard(void)
 
     iosim_on_switcher_request(shell_switcher_requested);
     shell_load_apps();
+    shell_folders_load();
+    shell_folders_prune();
     shell_draw(fbWidth, fbHeight, scale);
     const char *path = getenv("IOSIM_SCREENSHOT_PATH");
     if (path && *path)
@@ -10629,7 +11037,9 @@ static int run_springboard(void)
         {
             /* The set of installed apps changed: rebuild the home screen. */
             g_switcher = 0;
+            g_open_folder = -1;
             shell_load_apps();
+            shell_folders_prune();
             if (g_home_page >= shell_page_count())
                 g_home_page = shell_page_count() - 1;
             if (g_home_page < 0)
@@ -10651,6 +11061,16 @@ static int run_springboard(void)
         }
         if (r == 1 && type == 9)
         {
+            if (g_open_folder >= 0)
+            {
+                g_open_folder = -1;
+                printf("[SpringBoard] folder closed\n");
+                fflush(0);
+                shell_draw(fbWidth, fbHeight, scale);
+                if (path && *path)
+                    iosim_fb_present(path);
+                continue;
+            }
             if (g_control_center)
             {
                 shell_close_control_center(fbWidth, fbHeight, scale, path);
@@ -10681,6 +11101,25 @@ static int run_springboard(void)
             g_sb_down = 1;
             g_sb_down_x = x / scale;
             g_sb_down_y = y / scale;
+            g_sb_down_time = iosim_now();
+            g_sb_moved = 0;
+            g_sb_icon_hold = 0;
+            continue;
+        }
+        if (r == 1 && type == 3)
+        {
+            double px = x / scale, py = y / scale;
+            if (g_sb_down && !g_sb_moved)
+            {
+                double mdx = px - g_sb_down_x, mdy = py - g_sb_down_y;
+                if (__builtin_fabs(mdx) + __builtin_fabs(mdy) > 10)
+                {
+                    g_sb_moved = 1;
+                    if (iosim_now() - g_sb_down_time >=
+                        SHELL_ICON_HOLD_SECONDS)
+                        g_sb_icon_hold = 1;
+                }
+            }
             continue;
         }
         if (r == 1 && type == 4)
@@ -10688,7 +11127,9 @@ static int run_springboard(void)
             double px = x / scale, py = y / scale;
             double dx = px - g_sb_down_x, dy = py - g_sb_down_y;
             int down = g_sb_down;
+            int icon_hold = g_sb_icon_hold;
             g_sb_down = 0;
+            g_sb_icon_hold = 0;
             if (!down)
                 continue;
             if (g_control_center)
@@ -10698,6 +11139,19 @@ static int run_springboard(void)
                                                path);
                 continue;
             }
+            if (g_open_folder >= 0)
+            {
+                if (dy < -90 || dy > 90)
+                {
+                    g_open_folder = -1;
+                    printf("[SpringBoard] folder closed\n");
+                    fflush(0);
+                    shell_draw(fbWidth, fbHeight, scale);
+                    if (path && *path)
+                        iosim_fb_present(path);
+                }
+                continue;
+            }
             if (!g_switcher && !g_search && g_sb_down_y < 60 &&
                 g_sb_down_x > fbWidth / scale - 120 && dy > 90)
             {
@@ -10705,6 +11159,35 @@ static int run_springboard(void)
                  * Control Center, like the real system gesture. */
                 shell_open_control_center(fbWidth, fbHeight, scale, path);
                 continue;
+            }
+            if (!g_switcher && !g_search && !g_control_center &&
+                g_open_folder < 0 && icon_hold &&
+                __builtin_fabs(dx) + __builtin_fabs(dy) > 40)
+            {
+                /* Dropping an icon onto another groups them into a folder;
+                 * dropping it onto a folder adds it there. */
+                int start_app = -1, start_folder = -1;
+                int end_app = -1, end_folder = -1;
+                if (shell_grid_entry_at(g_sb_down_x, g_sb_down_y, fbWidth / scale,
+                                        scale, &start_app, &start_folder) &&
+                    shell_grid_entry_at(px, py, fbWidth / scale, scale,
+                                        &end_app, &end_folder) &&
+                    start_app >= 0 && g_shell_apps[start_app].bundle[0])
+                {
+                    if (end_folder >= 0 && end_folder != start_folder)
+                    {
+                        shell_folder_create(start_app, end_folder, -1);
+                        shell_repaint(fbWidth, fbHeight, scale, path, 0);
+                        continue;
+                    }
+                    if (end_app >= 0 && end_app != start_app &&
+                        g_shell_apps[end_app].bundle[0])
+                    {
+                        shell_folder_create(start_app, -1, end_app);
+                        shell_repaint(fbWidth, fbHeight, scale, path, 0);
+                        continue;
+                    }
+                }
             }
             if (g_search)
             {
@@ -10752,7 +11235,7 @@ static int run_springboard(void)
                     g_switcher_index = count > 0 ? count - 1 : 0;
                 shell_repaint(fbWidth, fbHeight, scale, path, 1);
             }
-            else if (!g_switcher && (dx > 80 || dx < -80) &&
+            else if (!g_switcher && !icon_hold && (dx > 80 || dx < -80) &&
                      dy > -60 && dy < 60)
             {
                 int pages = shell_page_count();
@@ -10792,6 +11275,16 @@ static int run_springboard(void)
         }
         if (r == 1 && type == 7)
         {
+            if (g_open_folder >= 0)
+            {
+                g_open_folder = -1;
+                printf("[SpringBoard] folder closed\n");
+                fflush(0);
+                shell_draw(fbWidth, fbHeight, scale);
+                if (path && *path)
+                    iosim_fb_present(path);
+                continue;
+            }
             if (g_control_center)
             {
                 shell_close_control_center(fbWidth, fbHeight, scale, path);
@@ -10819,6 +11312,34 @@ static int run_springboard(void)
                 shell_cc_toggle(toggle, fbWidth, fbHeight, scale, path);
             else if (py > 620.0)
                 shell_close_control_center(fbWidth, fbHeight, scale, path);
+            continue;
+        }
+        if (g_open_folder >= 0)
+        {
+            int member = shell_folder_member_at(px, py, W);
+            if (member >= 0)
+            {
+                int app = shell_folder_member_app(g_open_folder, member);
+                g_open_folder = -1;
+                if (app >= 0)
+                    shell_launch(app, fbWidth, fbHeight, scale, path);
+                else
+                {
+                    shell_draw(fbWidth, fbHeight, scale);
+                    if (path && *path)
+                        iosim_fb_present(path);
+                }
+                continue;
+            }
+            if (py > 470.0 || py < 100.0 || px < 24.0 || px > W - 24.0)
+            {
+                g_open_folder = -1;
+                printf("[SpringBoard] folder closed\n");
+                fflush(0);
+                shell_draw(fbWidth, fbHeight, scale);
+                if (path && *path)
+                    iosim_fb_present(path);
+            }
             continue;
         }
         if (g_switcher)
@@ -10878,23 +11399,16 @@ static int run_springboard(void)
             }
             continue;
         }
-        int hit = -1, slot = 0;
-        for (int i = 0; i < g_shell_app_count && hit < 0; i++)
+        int hit = -1, folder_hit = -1;
+        if (shell_grid_entry_at(px, py, W, scale, &hit, &folder_hit) &&
+            folder_hit >= 0)
         {
-            if (g_shell_apps[i].dock)
-                continue;
-            int page = slot / 16;
-            int page_slot = slot % 16;
-            if (page == g_home_page)
-            {
-                int col = page_slot % 4, row = page_slot / 4;
-                double cx = SHELL_MARGIN_PT + SHELL_ICON_PT / 2 + col * pitch;
-                double cy = shell_row_center[row];
-                if (px >= cx - 34 && px < cx + 34 && py >= cy - 34 &&
-                    py < cy + 50)
-                    hit = i;
-            }
-            slot++;
+            g_open_folder = folder_hit;
+            printf("[SpringBoard] folder opened name=%s (%d apps)\n",
+                   g_folders[folder_hit].name, g_folders[folder_hit].count);
+            fflush(0);
+            shell_draw_folder(fbWidth, fbHeight, scale, path);
+            continue;
         }
         if (hit < 0 && px >= 158.0 && px <= 244.0 && py >= 698.0 &&
             py <= 739.0)

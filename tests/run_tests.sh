@@ -1140,6 +1140,7 @@ if wait_log "[collection] ready"; then
 else
     echo "FAIL collection fixture launch"; fails=$((fails+1))
 fi
+sleep 0.3
 "$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/collection.png" >/dev/null
 if out="$(python3 - "$ROOT/tools" "$T/collection.png" <<'PY'
 import sys
@@ -1680,6 +1681,7 @@ if wait_log "[sectioncollection] ready"; then
 else
     echo "FAIL sectioned collection launch"; fails=$((fails+1))
 fi
+sleep 0.3
 "$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/sectioncollection.png" >/dev/null
 if out="$(python3 - "$ROOT/tools" "$T/sectioncollection.png" <<'PY'
 import sys
@@ -1747,6 +1749,7 @@ if wait_log "[picker] ready"; then
 else
     echo "FAIL picker fixture launch"; fails=$((fails+1))
 fi
+sleep 0.3
 "$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/picker.png" >/dev/null
 if out="$(python3 - "$ROOT/tools" "$T/picker.png" <<'PY'
 import sys
@@ -2131,6 +2134,121 @@ if wait_log "[SpringBoard] control center closed"; then
     echo "ok   a swipe up dismisses Control Center"
 else
     echo "FAIL control center close"; fails=$((fails+1))
+fi
+
+# ---------- 14. home-screen folders ----------
+# Dragging one home-screen icon onto another groups them into a folder; the
+# folder opens on tap, its members launch their apps, and the grouping is
+# persisted and restored on the next boot.
+"$ROOT/tools/iosimctl" ui "$UDID" drag 62.1667 121.8333 154.7222 121.8333 >/dev/null
+if wait_log "[SpringBoard] folder created name=Folder (2 apps)"; then
+    echo "ok   dragging one icon onto another creates a folder"
+else
+    echo "FAIL folder creation"; fails=$((fails+1))
+fi
+sleep 0.4
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/folder-home.png" >/dev/null
+if out="$(python3 - "$ROOT/tools" "$T/folder-home.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+c = pngpixel.px(rows, bpp, 62 * 3, 92 * 3)
+r, g, b = (c >> 16) & 255, (c >> 8) & 255, c & 255
+if not (48 <= r <= 70 and 48 <= g <= 70 and 50 <= b <= 72):
+    raise SystemExit("folder tile not drawn: %06x" % c)
+print("ok   the home screen draws a folder tile in the first page-3 slot")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL folder tile rendering"; echo "$out"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" tap 62.1667 121.8333 >/dev/null
+if wait_log "[SpringBoard] folder opened name=Folder (2 apps)"; then
+    echo "ok   tapping the folder opens it over a dimmed home screen"
+else
+    echo "FAIL folder open"; fails=$((fails+1))
+fi
+sleep 0.4
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/folder-overlay.png" >/dev/null
+if out="$(python3 - "$ROOT/tools" "$T/folder-home.png" "$T/folder-overlay.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+
+def px(path, x, y):
+    w, h, bpp, rows = pngpixel.load(path)
+    return pngpixel.px(rows, bpp, x * 3, y * 3)
+
+home = px(sys.argv[2], 201, 600)
+opened = px(sys.argv[3], 201, 600)
+hr, hg, hb = (home >> 16) & 255, (home >> 8) & 255, home & 255
+or_, og, ob = (opened >> 16) & 255, (opened >> 8) & 255, opened & 255
+if not (or_ * 2 <= hr + 8 and og * 2 <= hg + 8 and ob * 2 <= hb + 8):
+    raise SystemExit("background not dimmed: %06x -> %06x" % (home, opened))
+w, h, bpp, rows = pngpixel.load(sys.argv[3])
+white = 0
+for y in range(66 * 3, 100 * 3):
+    for x in range(120 * 3, 282 * 3):
+        c = pngpixel.px(rows, bpp, x, y)
+        if ((c >> 16) & 255) > 225 and ((c >> 8) & 255) > 225 and (c & 255) > 225:
+            white += 1
+if white < 60:
+    raise SystemExit("folder title not drawn: %d white pixels" % white)
+print("ok   the overlay dims the home screen and titles the folder")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL folder overlay rendering"; echo "$out"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" tap 156.75 190 >/dev/null
+if wait_log "[SpringBoard] resuming Picker (pid"; then
+    echo "ok   tapping a folder member resumes that app"
+else
+    echo "FAIL folder member launch"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
+sleep 0.4
+"$ROOT/tools/iosimctl" ui "$UDID" tap 62.1667 121.8333 >/dev/null
+sleep 0.3
+"$ROOT/tools/iosimctl" ui "$UDID" tap 201 700 >/dev/null
+if wait_log "[SpringBoard] folder closed"; then
+    echo "ok   tapping outside the folder returns to the home screen"
+else
+    echo "FAIL folder close"; fails=$((fails+1))
+fi
+if grep -Fq -- "Folder|com.iosim.datepicker,com.iosim.picker" \
+    "$IOSIM_HOME/Devices/$UDID/data/Library/SpringBoard/folders.txt" \
+    2>/dev/null; then
+    echo "ok   the folder grouping is persisted to folders.txt"
+else
+    echo "FAIL folder persistence file"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" shutdown "$UDID" >/dev/null
+"$ROOT/tools/iosimctl" boot "$UDID" >/dev/null
+sleep 1
+"$ROOT/tools/iosimctl" ui "$UDID" swipe 350 400 50 400 0.3 >/dev/null
+sleep 0.4
+"$ROOT/tools/iosimctl" ui "$UDID" swipe 350 400 50 400 0.3 >/dev/null
+sleep 0.4
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/folder-reboot.png" >/dev/null
+if out="$(python3 - "$ROOT/tools" "$T/folder-reboot.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+c = pngpixel.px(rows, bpp, 62 * 3, 92 * 3)
+r, g, b = (c >> 16) & 255, (c >> 8) & 255, c & 255
+if not (48 <= r <= 70 and 48 <= g <= 70 and 50 <= b <= 72):
+    raise SystemExit("folder tile not restored: %06x" % c)
+print("ok   the saved folder is restored on the next boot")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL folder restore"; echo "$out"; fails=$((fails+1))
 fi
 
 "$ROOT/tools/iosimctl" shutdown "$UDID" >/dev/null

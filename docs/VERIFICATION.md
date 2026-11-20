@@ -830,6 +830,28 @@ page and #8e8e93 for the inactive one; tapping the top-left slot then launches
 the grid and the search pill is a modeled iOS 26 relationship; the rest of the
 layout (pitch, icon size, labels, dock and pill) remains the measured capture.
 
+### Home-screen folders
+
+`ui drag` holds the finger still for 0.5 s before moving, the same long press a
+person uses to pick up an icon; a plain `ui swipe` starts moving after 20 ms and
+pages instead, even when it begins on an icon. Dragging the Picker icon at
+(62.1667, 121.8333) pt onto the DatePicker icon at (154.7222, 121.8333) pt logs
+`[SpringBoard] folder created name=Folder (2 apps)`. The screenshot taken after
+the drop reads the top centre of the former Picker slot, (62, 92) pt, as
+`#3a3a3c` — the folder tile with its 22.37 % corner radius and mini icons.
+Tapping the tile logs `folder opened name=Folder (2 apps)`; in the overlay
+screenshot the background pixel at (201, 600) pt is at most half the brightness
+of the same pixel on the home screen (the 58 % black dim), and the title's y
+band contains more than 60 near-white pixels. Tapping the second member at
+(156.75, 190) pt resumes the suspended Picker process
+(`[SpringBoard] resuming Picker (pid ...)`) rather than starting a new one, so
+the member mapping and the launch path are both real. Tapping outside at
+(201, 700) pt logs `folder closed`. The test then reads
+`data/Library/SpringBoard/folders.txt` for the
+`Folder|com.iosim.datepicker,com.iosim.picker` line, shuts the device down,
+boots it again, swipes to page 3 and reads the same `#3a3a3c` tile pixel: the
+folder was restored from disk, not kept only in SpringBoard's memory.
+
 ### App lifecycle: delegate callbacks and application state
 
 `demo/LifecycleApp.m` prints every transition with
@@ -859,7 +881,10 @@ single-finger: there is no multitouch, touch prediction or pressure. Mach
 messages, the bootstrap namespace and serialized XPC dictionaries are shared
 across guest processes. SpringBoard pages in groups of 16 without a sliding
 page animation, and the switcher shows at most three cards with no scrolling
-animation; stock system apps have no executables in this runtime.
+animation; stock system apps have no executables in this runtime. Home-screen
+folders group apps by bundle identifier and persist, but cannot be renamed,
+nested, reordered or moved between pages, and the grid compacts entries when a
+folder forms.
 Backgrounded apps are suspended in place (SIGSTOP) and resumed from their icon
 or switcher card, with no memory-pressure termination policy.
 `UIApplication` tracks active/inactive/background state and posts the

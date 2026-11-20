@@ -731,6 +731,22 @@ swipe up from the bottom edge or the home event closes it. Test screenshots
 sample the Wi-Fi circle before and after the tap, so the panel and its state
 colors are real pixels, not a static overlay.
 
+A held drag on the home screen picks up an icon: the finger must rest for
+300 ms before its first movement, which arms the drag, so a quick swipe that
+happens to start on an icon still turns the page. Dropping the icon on another
+groups both into a home-screen folder, matched by bundle identifier rather than
+by executable; the grid entry collapses into the first member's slot and is
+drawn as a dark tile holding up to four mini icons. Dropping it on an existing
+tile adds it to that folder. Tap the tile to open an overlay over the dimmed
+wallpaper: the folder title at 22 pt, a rounded panel, and members in a
+four-column grid. Tapping a member launches or resumes its app; tapping
+outside, a vertical swipe, or the home event closes the overlay. The grouping
+is written to
+`Library/SpringBoard/folders.txt` under the device's shared resources directory
+as `name|bundle,bundle` lines, reloaded and pruned at the next SpringBoard boot
+when a member's bundle is no longer installed. Stock system apps carry no
+bundle identifier and cannot be folded.
+
 ## 3. Why this design
 
 **Why not run Apple's runtime?** Because the iOS 27 simulator runtime is

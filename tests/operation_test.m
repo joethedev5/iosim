@@ -5,6 +5,8 @@
 extern int printf(const char *fmt, ...);
 extern int fflush(void *stream);
 
+/* The three blocks run concurrently, so the counter must be updated
+ * atomically: a plain ++ loses increments when two blocks race. */
 static long g_blocks;
 
 int main(void)
@@ -13,7 +15,7 @@ int main(void)
     for (int i = 0; i < 3; i++)
     {
         [queue addOperationWithBlock:^{
-            g_blocks++;
+            __atomic_fetch_add(&g_blocks, 1, __ATOMIC_SEQ_CST);
             printf("[op] block %d\n", i);
             fflush(0);
         }];
