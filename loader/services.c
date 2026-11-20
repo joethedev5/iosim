@@ -1664,11 +1664,55 @@ int xpc_connection_get_pid(void *conn)
 }
 void xpc_main(void (*handler)(void *)) { (void)handler; }
 
-int launch_activate_socket(const char *name, int *fds, size_t *count)
+/* liblaunch's socket activation entry point. launchd_sim keeps the listening
+ * sockets and passes their descriptors to the started job through
+ * IOSIM_ACTIVATED_SOCKET_FDS ("name=fd[,name=fd]"), the same handoff contract
+ * the real launchd expresses with its check-in protocol. */
+int launch_activate_socket(const char *name, int **fds, size_t *count)
 {
-    (void)name;
-    if (fds) fds[0] = -1;
-    if (count) *count = 0;
+    if (!name || !fds || !count)
+        return EINVAL;
+    *fds = NULL;
+    *count = 0;
+    const char *env = getenv("IOSIM_ACTIVATED_SOCKET_FDS");
+    if (!env || !*env)
+        return ENOENT;
+    size_t nlen = strlen(name);
+    int found = 0;
+    const char *p = env;
+    while (*p)
+    {
+        const char *eq = strchr(p, '=');
+        if (!eq)
+            break;
+        const char *end = strchr(p, ',');
+        if (!end)
+            end = p + strlen(p);
+        if ((size_t)(eq - p) == nlen && strncmp(p, name, nlen) == 0)
+            found++;
+        p = *end ? end + 1 : end;
+    }
+    if (!found)
+        return ENOENT;
+    int *arr = malloc((size_t)found * sizeof(int));
+    if (!arr)
+        return ENOMEM;
+    int k = 0;
+    p = env;
+    while (*p && k < found)
+    {
+        const char *eq = strchr(p, '=');
+        if (!eq)
+            break;
+        const char *end = strchr(p, ',');
+        if (!end)
+            end = p + strlen(p);
+        if ((size_t)(eq - p) == nlen && strncmp(p, name, nlen) == 0)
+            arr[k++] = atoi(eq + 1);
+        p = *end ? end + 1 : end;
+    }
+    *fds = arr;
+    *count = (size_t)k;
     return 0;
 }
 int launch_msg(void *msg) { (void)msg; return 0; }

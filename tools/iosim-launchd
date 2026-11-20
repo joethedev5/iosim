@@ -104,11 +104,23 @@ def start_job(job):
     cmd += job["program"][1:]
     env = ctx["ctl"].device_environment(ctx["udid"], ctx["dev"])
     env.update(job.get("environment", {}))
+    ensure_job_sockets(job)
+    pass_fds = []
+    activated = []
+    for sock_name, listener in job.get("listeners", {}).items():
+        fd = listener.fileno()
+        if fd >= 0:
+            pass_fds.append(fd)
+            activated.append(f"{sock_name}={fd}")
+    if activated:
+        env["IOSIM_ACTIVATED_SOCKET_FDS"] = ",".join(activated)
     log_path = job_log_path(ctx["device_dir"], job["label"])
     log = open(log_path, "ab")
     proc = subprocess.Popen(cmd, env=env, stdout=log, stderr=log,
-                            start_new_session=True, cwd=ctx["device_dir"])
+                            start_new_session=True, cwd=ctx["device_dir"],
+                            pass_fds=tuple(pass_fds))
     log.close()
+    job["proc"] = proc
     job["pid"] = proc.pid
     job["lastStart"] = time.monotonic()
     print(f"launchd_sim: job {job['label']} started pid={proc.pid}",
@@ -130,6 +142,20 @@ def parse_job(path):
     mach = pl.get("MachServices") or {}
     services = [str(k) for k in mach.keys()] if isinstance(mach, dict) else []
     env = pl.get("EnvironmentVariables") or {}
+    sockets_cfg = pl.get("Sockets") or {}
+    sockets = []
+    if isinstance(sockets_cfg, dict):
+        for sock_name, conf in sockets_cfg.items():
+            if not isinstance(conf, dict):
+                continue
+            sock_path = conf.get("SockPathName")
+            if not sock_path:
+                continue
+            sockets.append({
+                "name": str(sock_name),
+                "path": str(sock_path),
+                "type": str(conf.get("SockType", "stream")),
+            })
     return {
         "label": label,
         "plist": str(path),
@@ -138,9 +164,45 @@ def parse_job(path):
         "runAtLoad": bool(pl.get("RunAtLoad", False)),
         "keepAlive": pl.get("KeepAlive") is True,
         "environment": {str(k): str(v) for k, v in env.items()},
+        "sockets": sockets,
+        "listeners": {},
+        "socketPaths": [],
+        "proc": None,
         "pid": 0,
         "lastStart": 0.0,
     }
+
+
+def ensure_job_sockets(job):
+    """Create the job's inherited listening sockets, like launchd does when a
+    job with a Sockets dictionary is loaded. The descriptors stay in launchd
+    until the job starts, then are handed to the guest by number."""
+    if job.get("listeners"):
+        return
+    for sock in job.get("sockets", []):
+        if sock["name"] in job["listeners"]:
+            continue
+        kind = socket.SOCK_DGRAM if sock["type"] == "dgram" \
+            else socket.SOCK_STREAM
+        path = sock["path"]
+        try:
+            if os.path.exists(path):
+                os.unlink(path)
+            parent = os.path.dirname(path)
+            if parent:
+                os.makedirs(parent, exist_ok=True)
+            listener = socket.socket(socket.AF_UNIX, kind)
+            listener.bind(path)
+            if kind == socket.SOCK_STREAM:
+                listener.listen(16)
+            listener.setblocking(False)
+            job["listeners"][sock["name"]] = listener
+            job["socketPaths"].append(path)
+            print(f"launchd_sim: job {job['label']} socket {sock['name']} "
+                  f"listening at {path}", flush=True)
+        except OSError as exc:
+            print(f"launchd_sim: job {job['label']} socket {sock['name']} "
+                  f"failed: {exc}", flush=True)
 
 
 def scan_jobs(device_dir):
@@ -161,16 +223,38 @@ def scan_jobs(device_dir):
 
 def prune_jobs():
     for job in jobs.values():
-        if job["pid"] and not pid_alive(job["pid"]):
+        was_running = bool(job["pid"])
+        proc = job.get("proc")
+        if proc is not None:
+            # poll() also reaps the child, so a finished job is really gone
+            # instead of lingering as a zombie that kill(pid, 0) still sees.
+            if proc.poll() is None:
+                continue
+            job["proc"] = None
             job["pid"] = 0
-            if job["keepAlive"] and \
-                    time.monotonic() - job.get("lastStart", 0.0) > 1.0:
-                start_job(job)
+        elif job["pid"] and not pid_alive(job["pid"]):
+            job["pid"] = 0
+        if was_running and not job["pid"] and job["keepAlive"] and \
+                time.monotonic() - job.get("lastStart", 0.0) > 1.0:
+            start_job(job)
 
 
 def load_job_into_runtime(path):
     job = parse_job(path)
+    old = jobs.get(job["label"])
+    if old and old is not job:
+        for listener in old.get("listeners", {}).values():
+            try:
+                listener.close()
+            except OSError:
+                pass
+        for sock_path in old.get("socketPaths", []):
+            try:
+                os.unlink(sock_path)
+            except FileNotFoundError:
+                pass
     jobs[job["label"]] = job
+    ensure_job_sockets(job)
     print(f"launchd_sim: job {job['label']} loaded", flush=True)
     if job["runAtLoad"]:
         start_job(job)
@@ -187,14 +271,26 @@ def job_for_service(name):
 def stop_jobs():
     for job in jobs.values():
         pid = job.get("pid", 0)
-        if not pid:
-            continue
-        try:
-            os.killpg(pid, signal.SIGCONT)
-            os.killpg(pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
+        if pid:
+            try:
+                os.killpg(pid, signal.SIGCONT)
+                os.killpg(pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
         job["pid"] = 0
+        job["proc"] = None
+        for listener in job.get("listeners", {}).values():
+            try:
+                listener.close()
+            except OSError:
+                pass
+        job["listeners"] = {}
+        for sock_path in job.get("socketPaths", []):
+            try:
+                os.unlink(sock_path)
+            except FileNotFoundError:
+                pass
+        job["socketPaths"] = []
 
 
 def boot_springboard(ctl, device_dir, udid, name):
@@ -325,6 +421,8 @@ def main():
     job_ctx.update({"ctl": ctl, "udid": udid, "dev": dev,
                     "device_dir": device_dir})
     jobs.update(scan_jobs(device_dir))
+    for job in jobs.values():
+        ensure_job_sockets(job)
 
     try:
         boot_springboard(ctl, device_dir, udid, name)
@@ -336,11 +434,34 @@ def main():
     persist()
 
     while running:
+        listener_jobs = []
+        for job in jobs.values():
+            for listener in job.get("listeners", {}).values():
+                listener_jobs.append((listener, job))
+        rlist = [srv] + [entry[0] for entry in listener_jobs]
         try:
-            ready, _, _ = select.select([srv], [], [], 0.5)
+            ready, _, _ = select.select(rlist, [], [], 0.5)
         except InterruptedError:
             continue
         if not ready:
+            continue
+        for listener, job in listener_jobs:
+            if listener not in ready:
+                continue
+            proc = job.get("proc")
+            alive = proc.poll() is None if proc is not None \
+                else pid_alive(job["pid"])
+            if alive:
+                continue
+            if proc is not None:
+                job["proc"] = None
+                job["pid"] = 0
+            print(f"launchd_sim: job {job['label']} activated by socket",
+                  flush=True)
+            start_job(job)
+        if srv not in ready:
+            if listener_jobs:
+                time.sleep(0.01)
             continue
         try:
             conn, _ = srv.accept()

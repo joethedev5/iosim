@@ -2476,6 +2476,82 @@ fi
 "$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
 sleep 0.4
 
+# ---------- 17. launchd socket activation ----------
+# A LaunchDaemon with a Sockets dictionary is not started until a client
+# connects; launchd keeps the listener and hands its descriptor to the job,
+# which fetches it with launch_activate_socket.
+obj "$ROOT/tests/launchd_socket_test.c" "$T/launchd_socket.o"
+exe "$T/launchd_socket" "$T/launchd_socket.o"
+SOCKPATH="/tmp/iosim-sockjob-$UDID.sock"
+python3 - "$T/SocketJob.plist" "$T/launchd_socket" "$SOCKPATH" <<'PY'
+import plistlib, sys
+with open(sys.argv[1], "wb") as f:
+    plistlib.dump({
+        "Label": "com.iosim.socketjob",
+        "ProgramArguments": [sys.argv[2]],
+        "Sockets": {
+            "MySock": {
+                "SockPathName": sys.argv[3],
+                "SockType": "stream",
+                "SockPassive": True,
+            }
+        },
+    }, f)
+PY
+"$ROOT/tools/iosimctl" launchd-load "$UDID" "$T/SocketJob.plist" >/dev/null
+sleep 0.3
+if out="$(python3 - "$SOCKPATH" <<'PY'
+import socket, sys
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+s.settimeout(10)
+s.connect(sys.argv[1])
+s.sendall(b"ping")
+print(s.recv(64).decode(), end="")
+PY
+)"; then
+    check "pong from socket job" "$out" \
+        "a socket connection starts the on-demand job"
+else
+    echo "FAIL socket activation client"; fails=$((fails+1))
+fi
+JOBLOG="$IOSIM_HOME/Devices/$UDID/logs/com.iosim.socketjob.log"
+if grep -Fq -- "[sockjob] activated rc=0 cnt=1" "$JOBLOG" 2>/dev/null; then
+    echo "ok   launch_activate_socket hands the listening descriptor over"
+else
+    echo "FAIL socket descriptor handoff"; cat "$JOBLOG" 2>/dev/null || true
+    fails=$((fails+1))
+fi
+if grep -Fq -- "[sockjob] got ping" "$JOBLOG" 2>/dev/null; then
+    echo "ok   the job reads the request over the inherited socket"
+else
+    echo "FAIL socket job request"; fails=$((fails+1))
+fi
+out="$(python3 - "$SOCKPATH" <<'PY'
+import socket, sys
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+s.settimeout(10)
+s.connect(sys.argv[1])
+s.sendall(b"ping")
+print(s.recv(64).decode(), end="")
+PY
+)"
+check "pong from socket job" "$out" \
+    "a second connection reaches a freshly started job"
+i=0
+while [ "$i" -lt 50 ]; do
+    [ "$(grep -Fc -- '[sockjob] activated rc=0 cnt=1' "$JOBLOG" \
+        2>/dev/null || echo 0)" -ge 2 ] && break
+    sleep 0.1
+    i=$((i+1))
+done
+if [ "$(grep -Fc -- '[sockjob] activated rc=0 cnt=1' "$JOBLOG" \
+    2>/dev/null || echo 0)" -ge 2 ]; then
+    echo "ok   the next connection starts a new job process"
+else
+    echo "FAIL socket job restart"; cat "$JOBLOG" 2>/dev/null || true
+    fails=$((fails+1))
+fi
+
 "$ROOT/tools/iosimctl" shutdown "$UDID" >/dev/null
 
 if [ "$fails" -ne 0 ]; then

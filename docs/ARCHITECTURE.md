@@ -483,7 +483,14 @@ transport and the bootstrap namespace are shared across the device.
   guest-side lookup retries across that window, then connects to the service
   socket once the job registers it (also retrying while the socket binds).
   Dead jobs are pruned, KeepAlive jobs are restarted, and shutdown terminates
-  every job.
+  every job. A job's `Sockets` dictionary is honored: launchd_sim binds each
+  `SockPathName` (stream or datagram) when the job is loaded, keeps the
+  listener, and starts the job when a connection makes it readable. The job
+  inherits the listening descriptors and `IOSIM_ACTIVATED_SOCKET_FDS` names
+  them; the guest-side `launch_activate_socket` liblaunch entry point parses
+  that handoff and returns the fds, so the job's own `accept` consumes the
+  queued connection. Jobs are reaped through their process handles, so the
+  next connection starts a fresh process.
 - **UIPasteboard** is a device-level service without a daemon: the general
   pasteboard is an XML property list at
   `$SIMULATOR_SHARED_RESOURCES_DIRECTORY/var/run/pasteboard.plist`, and each

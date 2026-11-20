@@ -53,6 +53,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | Mach ports/messages, launchd bootstrap namespace, cross-process messaging | ✅ |
 | XPC peer connections, async/sync request-reply and serialized dictionaries across processes | ✅ |
 | launchd_sim LaunchDaemon plists: RunAtLoad, on-demand MachServices jobs, KeepAlive | ✅ |
+| launchd socket activation: `Sockets` listeners, `launch_activate_socket`, on-demand restart | ✅ |
 | UIPasteboard general pasteboard shared across processes, with changeCount | ✅ |
 | SpringBoard system UI: measured iOS 26 home screen, installed apps, real app launching | ✅ |
 | Real app suspension: home stops the process, the icon resumes it in place | ✅ |

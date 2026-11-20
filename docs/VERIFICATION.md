@@ -682,6 +682,22 @@ RunAtLoad job is already serving when launchd loads it and answers the same
 exchange. This exercises the plist job model, on-demand MachServices
 naming, and the XPC reply transport together.
 
+### Services: launchd socket activation
+
+`tests/launchd_socket_test.c` is a job with no Mach service: its plist carries
+`Sockets = {MySock = {SockPathName, SockType = stream}}`. After
+`iosimctl launchd-load`, launchd_sim has bound the socket but the job has not
+started (its log is empty). Connecting a Python `AF_UNIX` client and sending
+`ping` makes the listener readable; launchd_sim starts the job with the
+listening descriptor inherited and `IOSIM_ACTIVATED_SOCKET_FDS` set. The job's
+`launch_activate_socket("MySock", ...)` returns `rc=0 cnt=1`, `accept`
+returns the queued connection, and it reads `ping` and writes
+`pong from socket job`; the client reads that reply and the job log records
+both `[sockjob] activated rc=0 cnt=1` and `[sockjob] got ping`. A second
+client gets another `pong`, and the log then holds two activation lines with
+different pids: the exited job was reaped and a new process was started by the
+next connection, which is launchd's on-demand socket behavior.
+
 ### System UI: SpringBoard, measured and real
 
 `IOSIM_SHELL=1` switches `UIApplicationMain` to the home screen, and
