@@ -143,6 +143,12 @@ jobs:
           run_timeout 300 xcrun simctl boot "$UDID"
           run_timeout 300 xcrun simctl bootstatus "$UDID" -b
           xcrun simctl status_bar "$UDID" override --time "9:41" --wifiBars 3 --cellularBars 4 --batteryLevel 100 2>/dev/null || true
+          # Disable the first-run slide-to-type keyboard tutorial so the software
+          # keyboard is visible in the TextInput capture.
+          for domain in com.apple.Preferences com.apple.keyboard.preferences com.apple.keyboard; do
+            xcrun simctl spawn "$UDID" defaults write "$domain" DidShowContinuousPathIntroduction -bool true 2>/dev/null || true
+            xcrun simctl spawn "$UDID" defaults write "$domain" UIKeyboardDidShowContinuousPathIntroduction -bool true 2>/dev/null || true
+          done
           run_timeout 30 xcrun simctl io "$UDID" screenshot out/springboard-real.png
           for spec in "HelloSim com.iosim.hellosim real-sim" "GraphicsApp com.iosim.graphicsapp graphics-real" "ListApp com.iosim.listapp listapp-real" "AutoLayout com.iosim.autolayout autolayout-real" "TextInput com.iosim.textinput textinput-real"; do
             set -- $spec

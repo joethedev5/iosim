@@ -130,6 +130,25 @@ controller, updates the title bar, and a second tap pops back. Both transitions
 were driven through `IOSIM_EVENT_FIFO` and captured in
 `build/nav-root.png` / `build/nav-pushed.png`.
 
+### UIKit layout: Auto Layout constraints and anchors
+
+`demo/AutoLayoutApp.m` positions every view with `NSLayoutAnchor` constraints:
+edges against the superview and the safe-area layout guide, sibling chains, a
+fixed-size card, intrinsic label heights and a multiline body label whose
+height follows its wrapped width. No view uses `setFrame:` for layout.
+
+| Metric | Value |
+|---|---|
+| Mean absolute channel error | **3.06 / 255** |
+| Pixels with max-channel error > 24 | **2.71 %** |
+| Best residual alignment | 1 px horizontal, 1 px vertical |
+| Safe-area top inset (iPhone 18 Pro, iOS 27.2) | 62 pt, matched |
+
+The same Apple-clang x86_64 binary (`AutoLayoutApp_x86_64`) is loaded by iosim;
+the runtime solves the constraint system with a projection solver over x, y,
+width and height, locks dimensions that are intrinsic rather than constrained,
+and writes the resulting frames before rendering.
+
 ### Services: dispatch, Mach, bootstrap and XPC
 
 `tests/services_test.m` is an Apple-clang x86_64 executable with no UI. It
@@ -172,10 +191,13 @@ reimplementation, not a launcher for separate app processes.
 
 ## Limitations
 
-The framework surface is still a subset. UIKit layout is frame-based; Auto
-Layout constraints, text input and keyboards, multi-process app launch,
-cross-process Mach ports, Metal and video are not implemented. CoreText shaping
-is limited to the glyphs in SFUI; right-to-left and complex scripts are not
-shaped. `UIView.transform` applies translation and scale, not arbitrary
-rotation. XPC is an in-process transport. These are the remaining roadmap
-items.
+The framework surface is still a subset. Auto Layout supports equality and
+inequality anchors with priorities evaluated by relaxation, intrinsic sizing
+and guides, but not the full Cassowary solver or every UIKit layout API.
+Text input is a single-line `UITextField` with a QWERTY keyboard; UITextView,
+multitap gestures and selection handles are not implemented. Multi-process app
+launch and cross-process Mach ports remain out of scope for the current
+single-process substrate. CoreText shaping is limited to the glyphs in SFUI;
+right-to-left and complex scripts are not shaped. `UIView.transform` applies
+translation and scale, not arbitrary rotation. XPC is an in-process transport.
+Metal and video remain unimplemented.
