@@ -17,6 +17,16 @@ __attribute__((objc_root_class))
 + (id)stringWithFormat:(id)format, ...;
 - (const char *)UTF8String;
 - (unsigned long)length;
+- (id)initWithData:(id)data encoding:(unsigned long)encoding;
+@end
+
+@interface NSData : NSObject
++ (NSData *)dataWithContentsOfFile:(NSString *)path;
+@end
+
+@interface NSBundle : NSObject
++ (NSBundle *)mainBundle;
+- (NSString *)pathForResource:(NSString *)name ofType:(NSString *)type;
 @end
 
 @interface NSNumber : NSObject
@@ -398,6 +408,8 @@ extern int UIApplicationMain(int argc, char **argv, id principal,
 
 @interface UIImage : NSObject
 + (UIImage *)imageNamed:(NSString *)name;
+- (int)width;
+- (int)height;
 @end
 
 @interface NSArray : NSObject

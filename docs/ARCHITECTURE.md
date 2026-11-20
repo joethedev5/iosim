@@ -295,6 +295,17 @@ components; and `NSJSONSerialization` is a dependency-free recursive
 serializer and parser over `NSDictionary`, `NSArray`, `NSString`, `NSNumber`
 and `NSNull`. Compact output is deterministic (dictionary insertion order on
 this runtime) and the parser rejects truncated or malformed input.
+`NSPropertyListSerialization` writes and reads XML property lists, and
+`NSUserDefaults` persists a domain to
+`$HOME/Library/Preferences/<bundle-id>.plist`.
+
+Bundle resources follow the executable: when a guest image lives inside
+`Foo.app`, the loader exports `IOSIM_BUNDLE_DIR=Foo.app` (derived from the real
+executable path, so an app launched by SpringBoard does not inherit the system
+UI's bundle). `NSBundle` answers `resourcePath`/`pathForResource:ofType:` from
+that directory and returns nil when the file is missing, and
+`UIImage imageNamed:` tries the exact name and then `name.png`, decoding the
+PNG through the framebuffer image loader.
 
 ### 2.8 Device lifecycle
 

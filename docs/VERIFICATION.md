@@ -384,6 +384,20 @@ arrays, strings, integers, reals, booleans, data and dates. Strings are
 XML-escaped on the way out and unescaped on the way in; the parser bounds
 nesting depth and only accepts well-formed tags.
 
+### UIKit: app bundle resources
+
+`demo/ResourceApp.m` is installed as a real `.app` with a 4 x 4 red `dot.png`
+and a `note.txt` beside its executable. The loader derives
+`IOSIM_BUNDLE_DIR` from the app's own executable path, and the fixture reports
+`[res] image 4 4` from `UIImage imageNamed:@"dot"`, `[res] note bundle
+resource` from `NSBundle pathForResource:ofType:` plus `NSData`, and draws the
+image into a 100 pt `UIImageView`. The test launches it from SpringBoard and
+reads the screenshot at (150, 350) pt, which is `#ff0000` — the decoded bundle
+PNG reached the framebuffer, so this is resource resolution and PNG decoding
+end to end rather than a path string check. Because the directory is derived
+from the executable, an app launched by SpringBoard replaces the system UI's
+inherited bundle path with its own.
+
 ### Services: dispatch, Mach, bootstrap and XPC
 
 `tests/services_test.m` is an Apple-clang x86_64 executable with no UI. It

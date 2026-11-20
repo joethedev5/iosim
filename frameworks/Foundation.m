@@ -1066,6 +1066,8 @@ static char *format_va(const char *fmt, va_list ap)
         snprintf(buf, sizeof(buf), "%s/%s.%s", dir, n, t);
     else
         snprintf(buf, sizeof(buf), "%s/%s", dir, n);
+    if (iosim_fs_exists(buf) != 1)
+        return nil;
     return [NSString stringWithUTF8String:buf];
 }
 @end

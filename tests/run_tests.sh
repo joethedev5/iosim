@@ -715,6 +715,73 @@ else
     echo "FAIL page back-swipe"; fails=$((fails+1))
 fi
 
+# ---------- 9b. app bundle resources ----------
+"$ROOT/tools/build_app.sh" "$ROOT/demo/ResourceApp.m" "$T/ResourceApp" >/dev/null
+mkdir -p "$T/ResourceApp.app"
+cp "$T/ResourceApp" "$T/ResourceApp.app/ResourceApp"
+python3 - "$T/ResourceApp.app/dot.png" <<'PY'
+import struct, sys, zlib
+w = h = 4
+raw = b"".join(b"\x00" + b"\xff\x00\x00\xff" * w for _ in range(h))
+def chunk(tag, data):
+    return struct.pack(">I", len(data)) + tag + data + \
+        struct.pack(">I", zlib.crc32(tag + data) & 0xffffffff)
+png = b"\x89PNG\r\n\x1a\n" + \
+    chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 6, 0, 0, 0)) + \
+    chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b"")
+with open(sys.argv[1], "wb") as f:
+    f.write(png)
+PY
+printf 'bundle resource' > "$T/ResourceApp.app/note.txt"
+python3 - "$T/ResourceApp.app/Info.plist" <<'PY'
+import plistlib, sys
+with open(sys.argv[1], "wb") as f:
+    plistlib.dump({
+        "CFBundleIdentifier": "com.iosim.resource",
+        "CFBundleExecutable": "ResourceApp",
+        "CFBundleName": "Resource",
+        "CFBundlePackageType": "APPL",
+        "CFBundleVersion": "1",
+        "CFBundleShortVersionString": "1.0",
+    }, f)
+PY
+"$ROOT/tools/iosimctl" install "$UDID" "$T/ResourceApp.app" >/dev/null
+sleep 0.5
+# Fifteenth installed app: grid slot 21, second page row 1 column 1.
+"$ROOT/tools/iosimctl" ui "$UDID" swipe 350 400 50 400 0.3 >/dev/null
+sleep 0.4
+"$ROOT/tools/iosimctl" ui "$UDID" tap 154.7222 222.1667 >/dev/null
+if wait_log "[res] app ready"; then
+    echo "ok   SpringBoard launches the resource fixture"
+else
+    echo "FAIL resource fixture launch"; fails=$((fails+1))
+fi
+sleep 0.4
+out="$(cat "$SBLOG")"
+check "[res] image 4 4" "$out" \
+    "UIImage imageNamed: loads a PNG from the app bundle"
+check "[res] note bundle resource" "$out" \
+    "NSBundle pathForResource: finds a bundle file"
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/res.png" >/dev/null
+if out="$(python3 - "$ROOT/tools" "$T/res.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+c = pngpixel.px(rows, bpp, 150 * 3, 350 * 3)
+r, g, b = (c >> 16) & 255, (c >> 8) & 255, c & 255
+if not (r > 200 and g < 80 and b < 80):
+    raise SystemExit("expected the red bundle image, got %06x" % c)
+print("ok   the bundle PNG renders through UIImageView")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL bundle image render"; echo "$out"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
+sleep 0.4
+
 # ---------- 10. cross-process Mach services ----------
 # launchd owns the bootstrap namespace; two independent guest processes find
 # each other through it and exchange a Mach message over the service port.

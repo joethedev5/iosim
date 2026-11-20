@@ -238,6 +238,23 @@ int main(int argc, char **argv)
 
     char *base = strrchr(iosim_exec_path, '/');
     iosim_progname = base ? base + 1 : iosim_exec_path;
+
+    /* An app executable lives inside Foo.app; NSBundle and UIImage resolve
+     * resources against that directory. Derive it from the executable, so a
+     * child launched by SpringBoard does not inherit the system UI's bundle. */
+    if (base)
+    {
+        char bundle[PATH_MAX];
+        snprintf(bundle, sizeof(bundle), "%s", iosim_exec_path);
+        char *slash = strrchr(bundle, '/');
+        if (slash)
+        {
+            *slash = 0;
+            size_t n = strlen(bundle);
+            if (n > 4 && strcmp(bundle + n - 4, ".app") == 0)
+                setenv("IOSIM_BUNDLE_DIR", bundle, 1);
+        }
+    }
     iosim_argc = guest_argc;
     iosim_argv = guest_argv;
     iosim_environ = environ;
