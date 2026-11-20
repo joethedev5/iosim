@@ -1114,6 +1114,83 @@ fi
 "$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
 sleep 0.4
 
+# ---------- 9g. application and scene lifecycle callbacks ----------
+"$ROOT/tools/build_app.sh" "$ROOT/demo/LifecycleApp.m" "$T/LifecycleApp" >/dev/null
+mkdir -p "$T/LifecycleApp.app"
+cp "$T/LifecycleApp" "$T/LifecycleApp.app/LifecycleApp"
+python3 - "$T/LifecycleApp.app/Info.plist" <<'PY'
+import plistlib, sys
+with open(sys.argv[1], "wb") as f:
+    plistlib.dump({
+        "CFBundleIdentifier": "com.iosim.lifecycle",
+        "CFBundleExecutable": "LifecycleApp",
+        "CFBundleName": "Lifecycle",
+        "CFBundlePackageType": "APPL",
+        "CFBundleVersion": "1",
+        "CFBundleShortVersionString": "1.0",
+    }, f)
+PY
+"$ROOT/tools/iosimctl" install "$UDID" "$T/LifecycleApp.app" >/dev/null
+sleep 0.5
+# Settle on page 2 so the nineteenth icon's slot is visible.
+"$ROOT/tools/iosimctl" ui "$UDID" swipe 50 400 350 400 0.3 >/dev/null
+sleep 0.3
+"$ROOT/tools/iosimctl" ui "$UDID" swipe 350 400 50 400 0.3 >/dev/null
+sleep 0.4
+# Nineteenth installed app: grid slot 25, second page row 2 column 1.
+"$ROOT/tools/iosimctl" ui "$UDID" tap 154.7222 322.5 >/dev/null
+if wait_log "[life] ready state=0"; then
+    echo "ok   a cold launch reports an active application state"
+else
+    echo "FAIL lifecycle launch"; fails=$((fails+1))
+fi
+if wait_log "[life] active state=0"; then
+    echo "ok   applicationDidBecomeActive runs after the scene connects"
+else
+    echo "FAIL lifecycle launch active"; fails=$((fails+1))
+fi
+sleep 0.3
+active_before="$(grep -Fc "[life] active state=0" "$SBLOG" 2>/dev/null || true)"
+"$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
+if wait_log "[life] resign state=1" &&
+    wait_log "[life] background state=2" &&
+    wait_log "[life] scene background"; then
+    echo "ok   backgrounding walks inactive, background, then the scene"
+else
+    echo "FAIL lifecycle background"; fails=$((fails+1))
+fi
+sleep 0.4
+"$ROOT/tools/iosimctl" ui "$UDID" tap 154.7222 322.5 >/dev/null
+if wait_log "[life] foreground state=1" &&
+    wait_log "[life] scene foreground"; then
+    echo "ok   resuming enters the foreground before reactivating"
+else
+    echo "FAIL lifecycle foreground"; fails=$((fails+1))
+fi
+active_now="$active_before"
+i=0
+while [ "$i" -lt 50 ]; do
+    active_now="$(grep -Fc "[life] active state=0" "$SBLOG" 2>/dev/null || true)"
+    [ "$active_now" -gt "$active_before" ] && break
+    sleep 0.1
+    i=$((i+1))
+done
+if [ "$active_now" -gt "$active_before" ]; then
+    echo "ok   the resumed scene becomes active with the same process"
+else
+    echo "FAIL lifecycle resume active ($active_before -> $active_now)"
+    fails=$((fails+1))
+fi
+ready_count="$(grep -Fc "[life] ready" "$SBLOG" 2>/dev/null || true)"
+if [ "$ready_count" -eq 1 ]; then
+    echo "ok   lifecycle: viewDidLoad ran once across suspend/resume"
+else
+    echo "FAIL lifecycle state preservation (ready=$ready_count)"
+    fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
+sleep 0.4
+
 # ---------- 10. cross-process Mach services ----------
 # launchd owns the bootstrap namespace; two independent guest processes find
 # each other through it and exchange a Mach message over the service port.

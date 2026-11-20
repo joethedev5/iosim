@@ -360,12 +360,16 @@ exist: `list`, `create`, `delete`, `boot`, `bootstatus`, `shutdown`, `erase`,
   than lost. The stream stays open across writer gaps: a FIFO with no current
   writer (between two `ui` commands) is idle, not closed, and only the explicit
   `quit` record ends a reader loop.
-- `home` is a real suspension: the app runs `sceneWillResignActive:` and
-  `sceneDidEnterBackground:`, closes the event stream and stops itself with
-  SIGSTOP. SpringBoard's `waitpid(WUNTRACED)` sees the stop, records the PID
+- `home` is a real suspension: the app sets its `applicationState` to
+  inactive, runs `applicationWillResignActive:`, posts the matching
+  notification, runs `sceneWillResignActive:`, then repeats that pattern with
+  background / `applicationDidEnterBackground:` / `sceneDidEnterBackground:`,
+  closes the event stream and stops itself with SIGSTOP. SpringBoard's `waitpid(WUNTRACED)` sees the stop, records the PID
   on the app's icon and repaints the home screen. Tapping that icon closes
   SpringBoard's reader, sends SIGCONT and waits again; the same process
-  reopens the stream, runs `sceneWillEnterForeground:`/`sceneDidBecomeActive:`
+  reopens the stream, walks inactive → active through
+  `applicationWillEnterForeground:`/`sceneWillEnterForeground:` and
+  `applicationDidBecomeActive:`/`sceneDidBecomeActive:` with its notifications,
   and continues from its in-memory state. `shutdown` sends SIGCONT before
   SIGTERM so stopped children terminate with the process group.
 - When an app stops, SpringBoard copies the device framebuffer into

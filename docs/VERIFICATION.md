@@ -612,7 +612,8 @@ swipe closes it; `ui switcher` injects the same toggle for headless tests.
 The same gesture works inside a foreground app. The test resumes TouchApp from
 a card, then swipes up from the bottom edge of the app itself: the app logs
 `backgrounded by the system; suspending`, signals SpringBoard, and stops with
-SIGSTOP; SpringBoard reports `app switcher opened (1 suspended)` without any
+SIGSTOP; SpringBoard reports `app switcher opened (2 suspended)` (UIKitApp is
+still suspended from the earlier launch) without any
 `ui switcher` command, and tapping the card resumes the same process. This
 exercises the runtime's nil-receiver semantics as well: the touch lands on a
 view with no touch overrides, the responder chain forwards `touchesBegan:`
@@ -651,6 +652,20 @@ page and #8e8e93 for the inactive one; tapping the top-left slot then launches
 the grid and the search pill is a modeled iOS 26 relationship; the rest of the
 layout (pitch, icon size, labels, dock and pill) remains the measured capture.
 
+### App lifecycle: delegate callbacks and application state
+
+`demo/LifecycleApp.m` prints every transition with
+`[[UIApplication sharedApplication] applicationState]`. A cold launch reports
+`launch state=0`, then `ready state=0` from `viewDidLoad` and
+`active state=0` from `applicationDidBecomeActive:`. Sending the app home logs
+`resign state=1`, `background state=2` and `scene background`: the application
+delegate and notification state walk inactive → background around the scene
+callbacks. Resuming from the icon logs `foreground state=1`,
+`scene foreground`, `active state=0` and `scene active`, and the fixture's
+`ready` line still appears only once — the same stopped process continued.
+The `UIApplicationWillResignActive`/`DidEnterBackground`/`WillEnterForeground`/
+`DidBecomeActive` notifications are posted alongside the delegate calls.
+
 ## Limitations
 
 The framework surface is still a subset. Auto Layout supports equality and
@@ -666,10 +681,13 @@ single-finger: there is no multitouch, touch prediction or pressure. Mach
 messages, the bootstrap namespace and serialized XPC dictionaries are shared
 across guest processes. SpringBoard pages in groups of 16 without a sliding
 page animation, and the switcher shows at most three cards with no scrolling
-animation or kill gesture; stock system apps have no executables in this
-runtime.
+animation; stock system apps have no executables in this runtime.
 Backgrounded apps are suspended in place (SIGSTOP) and resumed from their icon
-or switcher card, with no memory-pressure termination policy. CoreText shaping is limited to the glyphs in SFUI;
+or switcher card, with no memory-pressure termination policy.
+`UIApplication` tracks active/inactive/background state and posts the
+lifecycle notifications, but `beginBackgroundTaskWithExpirationHandler:`
+returns 0: the model suspends the process immediately instead of granting a
+background execution window. CoreText shaping is limited to the glyphs in SFUI;
 right-to-left and complex scripts are not shaped. `UIView.transform` applies a
 full 2D affine transform (translation, scale and rotation) through an offscreen
 composite; `CATransform3D` is not supported. Core Animation keeps four

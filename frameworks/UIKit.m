@@ -1279,14 +1279,22 @@ enum {
 + (UIWindow *)keyWindow;
 @end
 
+enum {
+    UIApplicationStateActive = 0,
+    UIApplicationStateInactive = 1,
+    UIApplicationStateBackground = 2
+};
+
 @interface UIApplication : UIResponder {
 @public
     id _delegate;
+    long _state;
 }
 + (UIApplication *)sharedApplication;
 - (void)setDelegate:(id)delegate;
 - (id)delegate;
 - (long)applicationState;
+- (double)backgroundTimeRemaining;
 - (unsigned long)beginBackgroundTaskWithExpirationHandler:(void (^)(void))handler;
 - (void)endBackgroundTask:(unsigned long)task;
 @end
@@ -4810,8 +4818,25 @@ static double clamp_scroll(double value, double low, double high)
         app = [[self alloc] init];
     return app;
 }
+- (id)init
+{
+    self = [super init];
+    if (self)
+        _state = UIApplicationStateActive;
+    return self;
+}
 - (void)setDelegate:(id)delegate { _delegate = delegate; }
 - (id)delegate { return _delegate; }
+- (long)applicationState { return _state; }
+- (double)backgroundTimeRemaining { return 0xFFFFFFFF; }
+- (unsigned long)beginBackgroundTaskWithExpirationHandler:(void (^)(void))handler
+{
+    /* The runtime suspends the process as soon as the scene backgrounds, so
+     * no background execution window exists to hand out. */
+    (void)handler;
+    return 0;
+}
+- (void)endBackgroundTask:(unsigned long)task { (void)task; }
 @end
 
 /* ---------------------------------------------------------------- scenes */
@@ -8914,15 +8939,33 @@ static int alert_handle_tap(UIViewController *root, int px, int py, int fbW,
 /* Runs the background lifecycle, releases the event stream and suspends the
  * process until SpringBoard continues it. request_switcher asks the system UI
  * to open the app switcher as it takes over. */
+static void app_lifecycle_call(id delegate, SEL selector, id argument)
+{
+    if (delegate && [delegate respondsToSelector:selector])
+        ((void (*)(id, SEL, id))objc_msgSend)(delegate, selector, argument);
+}
+
 static void app_enter_background(id sceneDelegate, id scene,
                                  int requestSwitcher)
 {
-    SEL willResign = @selector(sceneWillResignActive:);
-    SEL didEnter = @selector(sceneDidEnterBackground:);
-    if (sceneDelegate && [sceneDelegate respondsToSelector:willResign])
-        ((void (*)(id, SEL, id))objc_msgSend)(sceneDelegate, willResign, scene);
-    if (sceneDelegate && [sceneDelegate respondsToSelector:didEnter])
-        ((void (*)(id, SEL, id))objc_msgSend)(sceneDelegate, didEnter, scene);
+    UIApplication *app = [UIApplication sharedApplication];
+    id appDelegate = [app delegate];
+
+    app->_state = UIApplicationStateInactive;
+    app_lifecycle_call(appDelegate, @selector(applicationWillResignActive:), app);
+    [[NSNotificationCenter defaultCenter]
+        postNotificationName:UIApplicationWillResignActiveNotification
+                      object:app];
+    app_lifecycle_call(sceneDelegate, @selector(sceneWillResignActive:), scene);
+
+    app->_state = UIApplicationStateBackground;
+    app_lifecycle_call(appDelegate,
+                       @selector(applicationDidEnterBackground:), app);
+    [[NSNotificationCenter defaultCenter]
+        postNotificationName:UIApplicationDidEnterBackgroundNotification
+                      object:app];
+    app_lifecycle_call(sceneDelegate, @selector(sceneDidEnterBackground:), scene);
+
     printf("[UIKit-lite] backgrounded by the system; suspending\n");
     fflush(0);
     if (requestSwitcher)
@@ -8930,12 +8973,21 @@ static void app_enter_background(id sceneDelegate, id scene,
     iosim_event_close();
     iosim_suspend_self();
     iosim_event_open();
-    SEL willEnter = @selector(sceneWillEnterForeground:);
-    SEL didBecome = @selector(sceneDidBecomeActive:);
-    if (sceneDelegate && [sceneDelegate respondsToSelector:willEnter])
-        ((void (*)(id, SEL, id))objc_msgSend)(sceneDelegate, willEnter, scene);
-    if (sceneDelegate && [sceneDelegate respondsToSelector:didBecome])
-        ((void (*)(id, SEL, id))objc_msgSend)(sceneDelegate, didBecome, scene);
+
+    app->_state = UIApplicationStateInactive;
+    app_lifecycle_call(appDelegate,
+                       @selector(applicationWillEnterForeground:), app);
+    [[NSNotificationCenter defaultCenter]
+        postNotificationName:UIApplicationWillEnterForegroundNotification
+                      object:app];
+    app_lifecycle_call(sceneDelegate, @selector(sceneWillEnterForeground:), scene);
+
+    app->_state = UIApplicationStateActive;
+    app_lifecycle_call(appDelegate, @selector(applicationDidBecomeActive:), app);
+    [[NSNotificationCenter defaultCenter]
+        postNotificationName:UIApplicationDidBecomeActiveNotification
+                      object:app];
+    app_lifecycle_call(sceneDelegate, @selector(sceneDidBecomeActive:), scene);
     printf("[UIKit-lite] resumed from suspension\n");
     fflush(0);
 }
@@ -8996,6 +9048,10 @@ int UIApplicationMain(int argc, char **argv, id principal, id delegateName)
     if (sceneDelegate && [sceneDelegate respondsToSelector:didBecomeActive])
         ((void (*)(id, SEL, id))objc_msgSend)(sceneDelegate, didBecomeActive,
                                               scene);
+    app_lifecycle_call(delegate, @selector(applicationDidBecomeActive:), app);
+    [[NSNotificationCenter defaultCenter]
+        postNotificationName:UIApplicationDidBecomeActiveNotification
+                      object:app];
 
     UIWindow *window = [UIWindow keyWindow];
     SEL windowSel = @selector(window);

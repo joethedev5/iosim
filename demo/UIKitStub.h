@@ -392,7 +392,15 @@ extern id UIWindowSceneSessionRoleApplication;
 - (void)makeKeyAndVisible;
 @end
 
+enum {
+    UIApplicationStateActive = 0,
+    UIApplicationStateInactive = 1,
+    UIApplicationStateBackground = 2
+};
+
 @interface UIApplication : UIResponder
++ (UIApplication *)sharedApplication;
+- (long)applicationState;
 @end
 
 extern int UIApplicationMain(int argc, char **argv, id principal,
