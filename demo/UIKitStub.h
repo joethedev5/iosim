@@ -196,6 +196,12 @@ enum { UIAlertControllerStyleActionSheet = 0, UIAlertControllerStyleAlert = 1 };
 enum { UIAlertActionStyleDefault = 0, UIAlertActionStyleCancel = 1,
        UIAlertActionStyleDestructive = 2 };
 
+@interface UIActivityIndicatorView : UIView
+- (id)initWithActivityIndicatorStyle:(long)style;
+- (void)startAnimating;
+- (void)stopAnimating;
+@end
+
 @interface UIPageControl : UIView
 - (void)setNumberOfPages:(long)pages;
 - (void)setCurrentPage:(long)page;

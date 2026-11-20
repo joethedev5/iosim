@@ -798,6 +798,20 @@ enum {
 - (void)selectSegmentAtPoint:(CGPoint)point;
 @end
 
+@interface UIActivityIndicatorView : UIView {
+@public
+    BOOL _animating;
+    long _style;
+    UIColor *_color;
+}
+- (id)initWithActivityIndicatorStyle:(long)style;
+- (void)startAnimating;
+- (void)stopAnimating;
+- (BOOL)isAnimating;
+- (void)setColor:(UIColor *)color;
+- (UIColor *)color;
+@end
+
 @interface UIPageControl : UIControl {
 @public
     long _numberOfPages;
@@ -2033,6 +2047,30 @@ static UITextField *g_firstResponder;
     [super sendActionsForControlEvents:events];
 }
 - (CGSize)intrinsicContentSize { return CGSizeMake(51, 31); }
+@end
+
+@implementation UIActivityIndicatorView
+- (id)initWithActivityIndicatorStyle:(long)style
+{
+    CGRect frame = style == 2 ? CGRectMake(0, 0, 37, 37)
+                              : CGRectMake(0, 0, 20, 20);
+    self = [super initWithFrame:frame];
+    if (self)
+    {
+        _style = style;
+        _color = [UIColor whiteColor];
+    }
+    return self;
+}
+- (void)startAnimating
+{
+    _animating = YES;
+    animation_mark_active(1.0, -1);
+}
+- (void)stopAnimating { _animating = NO; }
+- (BOOL)isAnimating { return _animating; }
+- (void)setColor:(UIColor *)color { _color = color; }
+- (UIColor *)color { return _color; }
 @end
 
 @implementation UIPageControl
@@ -4163,7 +4201,33 @@ static void render_view(UIView *view, double originX, double originY,
         iosim_fb_set_opacity(1.0);
     }
 
-    if ([view isKindOfClass:[UIPageControl class]])
+    if ([view isKindOfClass:[UIActivityIndicatorView class]])
+    {
+        UIActivityIndicatorView *spinner = (UIActivityIndicatorView *)view;
+        int cx = x + w / 2, cy = y + h / 2;
+        int inner = (int)(w * 0.22);
+        int outer = (int)(w * 0.42);
+        unsigned color = spinner->_color ? color_rgb(spinner->_color)
+                                         : 0xffffff;
+        double phase = spinner->_animating
+                           ? iosim_now() - (long)iosim_now() : 0;
+        for (int i = 0; i < 8; i++)
+        {
+            double a = (i * 45.0 - 90.0) * 3.14159265358979323846 / 180.0;
+            double tail = (i + 8 - phase * 8.0);
+            while (tail >= 8)
+                tail -= 8;
+            double fade = 0.18 + 0.82 * (tail / 8.0);
+            iosim_fb_set_opacity(alpha * fade);
+            iosim_fb_draw_line(cx + (int)(__builtin_cos(a) * inner),
+                               cy + (int)(__builtin_sin(a) * inner),
+                               cx + (int)(__builtin_cos(a) * outer),
+                               cy + (int)(__builtin_sin(a) * outer),
+                               (int)(3 * scale), color);
+        }
+        iosim_fb_set_opacity(alpha);
+    }
+    else if ([view isKindOfClass:[UIPageControl class]])
     {
         UIPageControl *pc = (UIPageControl *)view;
         double spacing = 16 * scale;
