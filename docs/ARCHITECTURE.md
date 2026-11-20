@@ -468,7 +468,13 @@ composite back, so corner radii and layer alpha stay antialiased. A layer
 m41/m42 translation: the layer is rendered into an offscreen pass and
 composited with `blit_affine` around its center, so rotation, scale and
 translation match the view-transform path. Perspective terms and 3D rotation
-out of plane are not rendered. Path
+out of plane are not rendered. `CAShapeLayer` strokes honor
+`strokeStart`/`strokeEnd` as fractions of the outline's arc length: rectangles,
+rounded rectangles, ovals and arbitrary paths are flattened to polylines,
+trimmed from the start distance to the end distance, and drawn segment by
+segment; `lineCap` 1 adds round caps at the trimmed endpoints, closed paths
+include their closing segment, and both trim values read through
+`layer_key_value` so they can be animated. Path
 clipping is supported through
 even-odd masks; color management remains future work.
 

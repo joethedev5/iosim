@@ -224,6 +224,10 @@ struct layer_anim {
     id _fillColor;
     id _strokeColor;
     double _lineWidth;
+    double _strokeStart;
+    double _strokeEnd;
+    int _lineCap;
+    int _lineJoin;
     CGPathRef _cgPath;
     CGColorRef _cgFillColor;
     CGColorRef _cgStrokeColor;
@@ -236,6 +240,14 @@ struct layer_anim {
 - (id)strokeColor;
 - (void)setLineWidth:(double)width;
 - (double)lineWidth;
+- (void)setStrokeStart:(double)start;
+- (double)strokeStart;
+- (void)setStrokeEnd:(double)end;
+- (double)strokeEnd;
+- (void)setLineCap:(int)cap;
+- (int)lineCap;
+- (void)setLineJoin:(int)join;
+- (int)lineJoin;
 @end
 
 @interface CAGradientLayer : CALayer {
@@ -5523,7 +5535,13 @@ static void cg_to_bezier_applier(void *info, const CGPathElement *element)
 {
     self = [super init];
     if (self)
+    {
         _lineWidth = 1.0;
+        _strokeStart = 0.0;
+        _strokeEnd = 1.0;
+        _lineCap = 0;
+        _lineJoin = 0;
+    }
     return self;
 }
 - (void)setPath:(id)path
@@ -5578,6 +5596,14 @@ static void cg_to_bezier_applier(void *info, const CGPathElement *element)
 - (id)strokeColor { return _cgStrokeColor ? (id)_cgStrokeColor : _strokeColor; }
 - (void)setLineWidth:(double)width { _lineWidth = width; }
 - (double)lineWidth { return _lineWidth; }
+- (void)setStrokeStart:(double)start { _strokeStart = start; }
+- (double)strokeStart { return _strokeStart; }
+- (void)setStrokeEnd:(double)end { _strokeEnd = end; }
+- (double)strokeEnd { return _strokeEnd; }
+- (void)setLineCap:(int)cap { _lineCap = cap; }
+- (int)lineCap { return _lineCap; }
+- (void)setLineJoin:(int)join { _lineJoin = join; }
+- (int)lineJoin { return _lineJoin; }
 @end
 
 @implementation CAGradientLayer
@@ -9103,9 +9129,78 @@ static void iosim_layout_apply(UIView *root)
     layout_write(root, entries, count);
 }
 
+/* Stroke the portion of a polyline between strokeStart and strokeEnd
+ * (fractions of its length) and optionally round-cap the trimmed ends. */
+static void stroke_polyline_trimmed(const double *px, const double *py,
+                                    int count, int closed, double start,
+                                    double end, int thickness,
+                                    unsigned color, int lineCap)
+{
+    if (count < 2)
+        return;
+    int segments = closed ? count : count - 1;
+    double total = 0;
+    for (int i = 0; i < segments; i++)
+    {
+        int j = (i + 1) % count;
+        double dx = px[j] - px[i], dy = py[j] - py[i];
+        total += __builtin_sqrt(dx * dx + dy * dy);
+    }
+    if (total <= 1e-9)
+        return;
+    double s0 = start * total, s1 = end * total;
+    if (s0 < 0) s0 = 0;
+    if (s0 > total) s0 = total;
+    if (s1 < 0) s1 = 0;
+    if (s1 > total) s1 = total;
+    if (s1 <= s0)
+        return;
+    double walked = 0, first_x = 0, first_y = 0, last_x = 0, last_y = 0;
+    int have_ends = 0;
+    for (int i = 0; i < segments; i++)
+    {
+        int j = (i + 1) % count;
+        double ax = px[i], ay = py[i];
+        double bx = px[j], by = py[j];
+        double dx = bx - ax, dy = by - ay;
+        double len = __builtin_sqrt(dx * dx + dy * dy);
+        if (len <= 1e-9)
+            continue;
+        double seg_start = walked, seg_end = walked + len;
+        walked = seg_end;
+        if (seg_end <= s0 || seg_start >= s1)
+            continue;
+        double t0 = (s0 - seg_start) / len;
+        double t1 = (s1 - seg_start) / len;
+        if (t0 < 0) t0 = 0;
+        if (t1 > 1) t1 = 1;
+        double x0 = ax + dx * t0, y0 = ay + dy * t0;
+        double x1 = ax + dx * t1, y1 = ay + dy * t1;
+        if (!have_ends)
+        {
+            first_x = x0;
+            first_y = y0;
+            have_ends = 1;
+        }
+        last_x = x1;
+        last_y = y1;
+        iosim_fb_draw_line((int)x0, (int)y0, (int)x1, (int)y1, thickness,
+                           color);
+    }
+    if (have_ends && lineCap == 1)
+    {
+        int radius = thickness / 2;
+        if (radius < 1)
+            radius = 1;
+        iosim_fb_fill_circle((int)first_x, (int)first_y, radius, color);
+        iosim_fb_fill_circle((int)last_x, (int)last_y, radius, color);
+    }
+}
+
 static void render_shape_path(UIBezierPath *path, int x, int y, int w, int h,
                               double scale, UIColor *fill, UIColor *stroke,
-                              double lineWidth)
+                              double lineWidth, double strokeStart,
+                              double strokeEnd, int lineCap)
 {
     if (!path)
         return;
@@ -9132,10 +9227,46 @@ static void render_shape_path(UIBezierPath *path, int x, int y, int w, int h,
         }
         if (stroke)
         {
-            iosim_fb_draw_line(rx, ry, rx + rw, ry, thickness, stroke_color);
-            iosim_fb_draw_line(rx + rw, ry, rx + rw, ry + rh, thickness, stroke_color);
-            iosim_fb_draw_line(rx + rw, ry + rh, rx, ry + rh, thickness, stroke_color);
-            iosim_fb_draw_line(rx, ry + rh, rx, ry, thickness, stroke_color);
+            if (path->_shape == 2)
+            {
+                double rad = path->_cornerRadius * scale;
+                double limit = (rw < rh ? rw : rh) / 2.0;
+                if (rad > limit)
+                    rad = limit;
+                if (rad < 0)
+                    rad = 0;
+                double px[4 * 9], py[4 * 9];
+                int n = 0;
+                double centers[4][2] = {
+                    {rx + rad, ry + rad},
+                    {rx + rw - rad, ry + rad},
+                    {rx + rw - rad, ry + rh - rad},
+                    {rx + rad, ry + rh - rad}
+                };
+                double starts[4] = {3.14159265358979323846,
+                                    1.5 * 3.14159265358979323846, 0.0,
+                                    0.5 * 3.14159265358979323846};
+                for (int c = 0; c < 4; c++)
+                    for (int i = 0; i <= 8; i++)
+                    {
+                        double a = starts[c] + (i / 8.0) *
+                                   (0.5 * 3.14159265358979323846);
+                        px[n] = centers[c][0] + rad * __builtin_cos(a);
+                        py[n] = centers[c][1] + rad * __builtin_sin(a);
+                        n++;
+                    }
+                stroke_polyline_trimmed(px, py, n, 1, strokeStart,
+                                        strokeEnd, thickness, stroke_color,
+                                        lineCap);
+            }
+            else
+            {
+                double px[5] = {rx, rx + rw, rx + rw, rx, rx};
+                double py[5] = {ry, ry, ry + rh, ry + rh, ry};
+                stroke_polyline_trimmed(px, py, 5, 1, strokeStart,
+                                        strokeEnd, thickness, stroke_color,
+                                        lineCap);
+            }
         }
         return;
     }
@@ -9152,16 +9283,15 @@ static void render_shape_path(UIBezierPath *path, int x, int y, int w, int h,
         {
             double cx = rx + rw / 2.0, cy = ry + rh / 2.0;
             double ax = rw / 2.0, ay = rh / 2.0;
-            double px = cx + ax, py = cy;
-            for (int i = 1; i <= 64; i++)
+            double px[64], py[64];
+            for (int i = 0; i < 64; i++)
             {
                 double t = 2 * 3.14159265358979323846 * i / 64.0;
-                double nx = cx + ax * __builtin_cos(t);
-                double ny = cy + ay * __builtin_sin(t);
-                iosim_fb_draw_line((int)px, (int)py, (int)nx, (int)ny,
-                                   thickness, stroke_color);
-                px = nx; py = ny;
+                px[i] = cx + ax * __builtin_cos(t);
+                py[i] = cy + ay * __builtin_sin(t);
             }
+            stroke_polyline_trimmed(px, py, 64, 1, strokeStart, strokeEnd,
+                                    thickness, stroke_color, lineCap);
         }
         return;
     }
@@ -9181,12 +9311,15 @@ static void render_shape_path(UIBezierPath *path, int x, int y, int w, int h,
     }
     if (stroke)
     {
-        for (int i = 0; i + 1 < count; i++)
-            iosim_fb_draw_line((int)(x + path->_xs[i] * scale),
-                               (int)(y + path->_ys[i] * scale),
-                               (int)(x + path->_xs[i + 1] * scale),
-                               (int)(y + path->_ys[i + 1] * scale),
-                               thickness, stroke_color);
+        double px[512], py[512];
+        for (int i = 0; i < count; i++)
+        {
+            px[i] = x + path->_xs[i] * scale;
+            py[i] = y + path->_ys[i] * scale;
+        }
+        stroke_polyline_trimmed(px, py, count, path->_closed, strokeStart,
+                                strokeEnd, thickness, stroke_color,
+                                lineCap);
     }
 }
 
@@ -9389,7 +9522,11 @@ static void render_layer(CALayer *layer, double parentX, double parentY,
         CAShapeLayer *sl = (CAShapeLayer *)layer;
         render_shape_path((UIBezierPath *)sl->_path, x, y, w, h, scale,
                           (UIColor *)sl->_fillColor,
-                          (UIColor *)sl->_strokeColor, sl->_lineWidth);
+                          (UIColor *)sl->_strokeColor, sl->_lineWidth,
+                          layer_key_value(sl, "strokeStart",
+                                          sl->_strokeStart),
+                          layer_key_value(sl, "strokeEnd", sl->_strokeEnd),
+                          sl->_lineCap);
     }
 
     for (int i = 0; i < layer->_sublayerCount; i++)

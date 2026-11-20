@@ -376,6 +376,20 @@ management.
   corner and extends past the top edge, 2x scale widens both sides, identity
   is unchanged and translation moves the layer without leaving a copy.
 
+## 2026-11-20: CAShapeLayer stroke trimming
+
+- `strokeStart`/`strokeEnd` trim by arc length along the outline, and
+  `lineCap == 1` draws round caps at the trimmed ends. A shared
+  `stroke_polyline_trimmed` walks segment lengths, draws the covered pieces
+  and, for closed outlines, includes the closing segment.
+- Rectangles become 5-point loops, rounded rectangles an 8-step-per-corner
+  loop, ovals 64 samples and arbitrary paths their stored points. Fill still
+  uses the untrimmed shape.
+- Trim values are read through `layer_key_value`, so strokeEnd animations
+  update the drawn ring. Line joins and dash patterns remain unsupported.
+- Fixture `tests/shape_stroke_test.m` covers a trimmed capped line, a
+  half-stroked oval and a half-stroked rounded rectangle.
+
 ## Open directions
 
 - `metal-cpp` + macOS SDK Metal headers make it possible to implement a

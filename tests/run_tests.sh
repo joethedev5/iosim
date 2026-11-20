@@ -3392,6 +3392,71 @@ else
     echo "FAIL CALayer transform"; echo "$out"; fails=$((fails+1))
 fi
 
+"$ROOT/tools/build_app.sh" "$ROOT/tests/shape_stroke_test.m" \
+    "$T/shape_stroke_test" >/dev/null
+out="$(IOSIM_TEST_PNG="$T/shape_stroke.png" \
+    DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/shape_stroke_test" 2>&1)"
+check "[stroke] props 1" "$out" \
+    "CAShapeLayer stores strokeStart, strokeEnd and lineCap"
+check "[stroke] png written" "$out" \
+    "the stroke trimming fixture captures a frame"
+if out="$(python3 - "$ROOT/tools" "$T/shape_stroke.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+
+def rgb(x, y):
+    c = pngpixel.px(rows, bpp, x * 3, y * 3)
+    return ((c >> 16) & 255, (c >> 8) & 255, c & 255)
+
+r, g, b = rgb(110, 100)
+if not (g > 200 and r < 60):
+    raise SystemExit("trimmed line is not drawn: %02x%02x%02x" % (r, g, b))
+r, g, b = rgb(70, 100)
+if not (r < 40 and g < 40 and b < 60):
+    raise SystemExit("line start was not trimmed: %02x%02x%02x" % (r, g, b))
+r, g, b = rgb(230, 100)
+if not (r < 40 and g < 40 and b < 60):
+    raise SystemExit("line end was not trimmed: %02x%02x%02x" % (r, g, b))
+r, g, b = rgb(87, 100)
+if not (g > 200 and r < 60):
+    raise SystemExit("round start cap missing: %02x%02x%02x" % (r, g, b))
+r, g, b = rgb(193, 100)
+if not (g > 200 and r < 60):
+    raise SystemExit("round end cap missing: %02x%02x%02x" % (r, g, b))
+r, g, b = rgb(200, 340)
+if not (b > 200 and r < 60):
+    raise SystemExit("half-stroked oval bottom is not drawn: %02x%02x%02x" % (r, g, b))
+r, g, b = rgb(200, 180)
+if not (r < 40 and g < 40 and b < 60):
+    raise SystemExit("half-stroked oval top was not trimmed: %02x%02x%02x" % (r, g, b))
+r, g, b = rgb(280, 260)
+if not (b > 200 and r < 60):
+    raise SystemExit("oval start endpoint is missing: %02x%02x%02x" % (r, g, b))
+r, g, b = rgb(120, 260)
+if not (b > 200 and r < 60):
+    raise SystemExit("oval half-way endpoint is missing: %02x%02x%02x" % (r, g, b))
+r, g, b = rgb(120, 400)
+if not (r > 200 and 60 < g < 180 and b < 60):
+    raise SystemExit("rounded rect top segment is not drawn: %02x%02x%02x" % (r, g, b))
+r, g, b = rgb(120, 500)
+if not (r < 40 and g < 40 and b < 60):
+    raise SystemExit("rounded rect bottom segment was not trimmed: %02x%02x%02x" % (r, g, b))
+r, g, b = rgb(40, 424)
+if not (r > 200 and 60 < g < 180 and b < 60):
+    raise SystemExit("rounded rect start point is missing: %02x%02x%02x" % (r, g, b))
+r, g, b = rgb(44, 496)
+if not (r < 40 and g < 40 and b < 60):
+    raise SystemExit("rounded rect kept its bottom-left corner: %02x%02x%02x" % (r, g, b))
+print("ok   CAShapeLayer trims strokes by arc length and rounds caps")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL CAShapeLayer stroke trimming"; echo "$out"; fails=$((fails+1))
+fi
+
 "$ROOT/tools/build_app.sh" "$ROOT/tests/draw_rect_test.m" \
     "$T/draw_rect_test" >/dev/null
 out="$(IOSIM_TEST_PNG="$T/draw_rect.png" DYLD_ROOT_PATH="$ROOT/runtime" \

@@ -670,6 +670,10 @@ extern int UIApplicationMain(int argc, char **argv, id principal,
 @property(nonatomic, retain) id fillColor;
 @property(nonatomic, retain) id strokeColor;
 @property double lineWidth;
+@property double strokeStart;
+@property double strokeEnd;
+@property int lineCap;
+@property int lineJoin;
 @end
 
 @interface CAGradientLayer : CALayer

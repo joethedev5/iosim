@@ -723,6 +723,12 @@ the old square corner `(70,110)`, blue across `(30,330)` to `(200,330)` but
 not at `(5,330)`, green at the identity layer and yellow at the translated
 position `(110,630)` with background at its old position, proving the
 offscreen layer transform path.
+`tests/shape_stroke_test.m` draws a 200-point line with `strokeStart` 0.25,
+`strokeEnd` 0.75 and round caps (green at 110,100, caps reaching 87 and 193,
+background at 70 and 230), an oval stroked only halfway (blue at the bottom
+200,340 and both right/left endpoints, background on top), and a rounded
+rectangle stroked halfway (top and right-upper orange, bottom and bottom-left
+corner background), proving arc-length trimming across all shape kinds.
 `tests/draw_rect_test.m` runs a real `UIApplicationMain` scene with a custom
 `DrawView`; its `drawRect:`paints four shapes, writes a PNG and exits. The suite samples the PNG at
 `(60,180)` red, `(250,190)` green, `(20,300)` blue stroke and `(90,455)`
