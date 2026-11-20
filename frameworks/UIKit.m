@@ -798,6 +798,24 @@ enum {
 - (void)selectSegmentAtPoint:(CGPoint)point;
 @end
 
+@interface UIPageControl : UIControl {
+@public
+    long _numberOfPages;
+    long _currentPage;
+    UIColor *_pageTintColor;
+    UIColor *_currentPageTintColor;
+}
+- (void)setNumberOfPages:(long)pages;
+- (long)numberOfPages;
+- (void)setCurrentPage:(long)page;
+- (long)currentPage;
+- (void)setPageTintColor:(UIColor *)color;
+- (UIColor *)pageTintColor;
+- (void)setCurrentPageTintColor:(UIColor *)color;
+- (UIColor *)currentPageTintColor;
+- (void)selectPageAtPoint:(CGPoint)point;
+@end
+
 @interface UIScrollView : UIView {
 @public
     CGSize _contentSize;
@@ -2017,6 +2035,48 @@ static UITextField *g_firstResponder;
 - (CGSize)intrinsicContentSize { return CGSizeMake(51, 31); }
 @end
 
+@implementation UIPageControl
+- (void)setNumberOfPages:(long)pages
+{
+    _numberOfPages = pages;
+    _needsLayout = YES;
+}
+- (long)numberOfPages { return _numberOfPages; }
+- (void)setCurrentPage:(long)page
+{
+    _currentPage = page;
+    _needsLayout = YES;
+}
+- (long)currentPage { return _currentPage; }
+- (void)setPageTintColor:(UIColor *)color { _pageTintColor = color; }
+- (UIColor *)pageTintColor { return _pageTintColor; }
+- (void)setCurrentPageTintColor:(UIColor *)color
+{
+    _currentPageTintColor = color;
+}
+- (UIColor *)currentPageTintColor { return _currentPageTintColor; }
+- (void)selectPageAtPoint:(CGPoint)point
+{
+    if (_numberOfPages <= 1)
+        return;
+    double spacing = 16;
+    double total = (_numberOfPages - 1) * spacing;
+    double start = _frame.size.width / 2 - total / 2;
+    long page = (long)((point.x - start) / spacing + 0.5);
+    if (page < 0) page = 0;
+    if (page >= _numberOfPages) page = _numberOfPages - 1;
+    if (page != _currentPage)
+    {
+        _currentPage = page;
+        [self sendActionsForControlEvents:UIControlEventValueChanged];
+    }
+}
+- (CGSize)intrinsicContentSize
+{
+    return CGSizeMake(_numberOfPages * 16, 20);
+}
+@end
+
 @implementation UISegmentedControl
 - (id)initWithItems:(NSArray *)items
 {
@@ -3107,6 +3167,18 @@ static double clamp_scroll(double value, double low, double high)
             [(UITextField *)tv becomeFirstResponder];
             break;
         }
+    if (hit && [hit isKindOfClass:[UIPageControl class]])
+    {
+        double ox = 0, oy = 0;
+        for (UIView *a = hit; a; a = [a superview])
+        {
+            ox += a->_frame.origin.x;
+            oy += a->_frame.origin.y;
+        }
+        [(UIPageControl *)hit selectPageAtPoint:CGPointMake(point.x - ox,
+                                                            point.y - oy)];
+        return;
+    }
     if (hit && [hit isKindOfClass:[UISegmentedControl class]])
     {
         double ox = 0, oy = 0;
@@ -4091,7 +4163,28 @@ static void render_view(UIView *view, double originX, double originY,
         iosim_fb_set_opacity(1.0);
     }
 
-    if ([view isKindOfClass:[UISegmentedControl class]])
+    if ([view isKindOfClass:[UIPageControl class]])
+    {
+        UIPageControl *pc = (UIPageControl *)view;
+        double spacing = 16 * scale;
+        double total = (pc->_numberOfPages - 1) * spacing;
+        double start = x + w / 2.0 - total / 2;
+        int r = (int)(3.5 * scale);
+        int cy = y + h / 2;
+        for (long i = 0; i < pc->_numberOfPages; i++)
+        {
+            unsigned color;
+            if (i == pc->_currentPage)
+                color = pc->_currentPageTintColor
+                            ? color_rgb(pc->_currentPageTintColor) : 0xffffff;
+            else
+                color = pc->_pageTintColor
+                            ? color_rgb(pc->_pageTintColor) : 0x8e8e93;
+            iosim_fb_fill_circle((int)(start + i * spacing) + r, cy, r,
+                                 color);
+        }
+    }
+    else if ([view isKindOfClass:[UISegmentedControl class]])
     {
         UISegmentedControl *seg = (UISegmentedControl *)view;
         unsigned base = seg->_tintColor ? color_rgb(seg->_tintColor)

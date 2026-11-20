@@ -196,6 +196,11 @@ enum { UIAlertControllerStyleActionSheet = 0, UIAlertControllerStyleAlert = 1 };
 enum { UIAlertActionStyleDefault = 0, UIAlertActionStyleCancel = 1,
        UIAlertActionStyleDestructive = 2 };
 
+@interface UIPageControl : UIView
+- (void)setNumberOfPages:(long)pages;
+- (void)setCurrentPage:(long)page;
+@end
+
 @interface UISegmentedControl : UIView
 - (id)initWithItems:(NSArray *)items;
 - (void)setSelectedSegmentIndex:(long)index;
