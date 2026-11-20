@@ -196,8 +196,8 @@ status bar is redrawn above it exactly as on the reference.
 
 | Metric | Value |
 |---|---|
-| Mean absolute channel error | **0.75 / 255** |
-| Pixels with max-channel error > 24 | **0.77 %** |
+| Mean absolute channel error | **0.68 / 255** |
+| Pixels with max-channel error > 24 | **0.74 %** |
 | Best residual alignment | 0 px, 0 px |
 
 Tapping Delete through the event FIFO runs the handler and dismisses the
