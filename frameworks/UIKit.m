@@ -2057,8 +2057,7 @@ static UITextField *g_firstResponder;
 {
     self = [super initWithFrame:frame];
     if (self)
-        _onTintColor = [UIColor colorWithRed:0.20 green:0.78 blue:0.35
-                                       alpha:1.0];
+        _onTintColor = nil;
     return self;
 }
 - (void)setOn:(BOOL)on animated:(BOOL)animated
@@ -2076,7 +2075,7 @@ static UITextField *g_firstResponder;
         [self setOn:!_on animated:YES];
     [super sendActionsForControlEvents:events];
 }
-- (CGSize)intrinsicContentSize { return CGSizeMake(51, 31); }
+- (CGSize)intrinsicContentSize { return CGSizeMake(63, 28); }
 @end
 
 @implementation UIActivityIndicatorView
@@ -2088,7 +2087,8 @@ static UITextField *g_firstResponder;
     if (self)
     {
         _style = style;
-        _color = [UIColor whiteColor];
+        /* The style supplies the default ink; -color stays nil. */
+        _color = nil;
     }
     return self;
 }
@@ -2127,7 +2127,7 @@ static UITextField *g_firstResponder;
 {
     if (_numberOfPages <= 1)
         return;
-    double spacing = 16;
+    double spacing = 17.5;
     double total = (_numberOfPages - 1) * spacing;
     double start = _frame.size.width / 2 - total / 2;
     long page = (long)((point.x - start) / spacing + 0.5);
@@ -2141,7 +2141,7 @@ static UITextField *g_firstResponder;
 }
 - (CGSize)intrinsicContentSize
 {
-    return CGSizeMake(_numberOfPages * 16, 20);
+    return CGSizeMake(_numberOfPages * 17.5, 20);
 }
 @end
 
@@ -2202,11 +2202,11 @@ static UITextField *g_firstResponder;
         _minimumValue = 0.0;
         _maximumValue = 1.0;
         _value = 0.0;
-        _minTrackTintColor = [UIColor colorWithRed:0.04 green:0.52 blue:1.0
-                                             alpha:1.0];
-        _maxTrackTintColor = [UIColor colorWithRed:0.24 green:0.24 blue:0.26
-                                             alpha:1.0];
-        _thumbTintColor = [UIColor whiteColor];
+        /* Default tints come from the current design's glass palette and
+         * are resolved by the renderer; the properties stay nil. */
+        _minTrackTintColor = nil;
+        _maxTrackTintColor = nil;
+        _thumbTintColor = nil;
     }
     return self;
 }
@@ -2238,11 +2238,11 @@ static UITextField *g_firstResponder;
 - (void)setValueFromPoint:(CGPoint)point
 {
     double span = _maximumValue - _minimumValue;
-    double thumb = 14.0;
-    double usable = _frame.size.width - thumb * 2;
+    double thumb = 36.3333;
+    double usable = _frame.size.width - thumb;
     if (usable <= 0)
         return;
-    double t = (point.x - thumb) / usable;
+    double t = (point.x - thumb / 2) / usable;
     if (t < 0) t = 0;
     if (t > 1) t = 1;
     [self setValue:_minimumValue + span * t animated:NO];
@@ -2260,10 +2260,8 @@ static UITextField *g_firstResponder;
     self = [super initWithFrame:frame];
     if (self)
     {
-        _trackTintColor = [UIColor colorWithRed:0.24 green:0.24 blue:0.26
-                                          alpha:1.0];
-        _progressTintColor = [UIColor colorWithRed:0.04 green:0.52 blue:1.0
-                                             alpha:1.0];
+        _trackTintColor = nil;
+        _progressTintColor = nil;
     }
     return self;
 }
@@ -4235,10 +4233,27 @@ static void render_view(UIView *view, double originX, double originY,
     {
         UIActivityIndicatorView *spinner = (UIActivityIndicatorView *)view;
         int cx = x + w / 2, cy = y + h / 2;
-        int inner = (int)(w * 0.22);
-        int outer = (int)(w * 0.42);
-        unsigned color = spinner->_color ? color_rgb(spinner->_color)
-                                         : 0xffffff;
+        int inner, outer, thick;
+        unsigned color;
+        double fade_scale = 1.0;
+        if (spinner->_style == 2)
+        {
+            /* Deprecated gray style: a 20 pt spinner. On a dark surface it
+             * reads as translucent black, so the blades are dimmed. */
+            inner = (int)(4.8333 * scale + 0.5);
+            outer = (int)(8.5 * scale + 0.5);
+            thick = (int)(2.6667 * scale + 0.5);
+            color = spinner->_color ? color_rgb(spinner->_color) : 0x000000;
+            if (!spinner->_color)
+                fade_scale = 0.35;
+        }
+        else
+        {
+            inner = (int)(w * 0.22);
+            outer = (int)(w * 0.42);
+            thick = (int)(3 * scale);
+            color = spinner->_color ? color_rgb(spinner->_color) : 0xffffff;
+        }
         double phase = spinner->_animating
                            ? iosim_now() - (long)iosim_now() : 0;
         for (int i = 0; i < 8; i++)
@@ -4248,54 +4263,87 @@ static void render_view(UIView *view, double originX, double originY,
             while (tail >= 8)
                 tail -= 8;
             double fade = 0.18 + 0.82 * (tail / 8.0);
-            iosim_fb_set_opacity(alpha * fade);
+            iosim_fb_set_opacity(alpha * fade * fade_scale);
             iosim_fb_draw_line(cx + (int)(__builtin_cos(a) * inner),
                                cy + (int)(__builtin_sin(a) * inner),
                                cx + (int)(__builtin_cos(a) * outer),
                                cy + (int)(__builtin_sin(a) * outer),
-                               (int)(3 * scale), color);
+                               thick, color);
         }
         iosim_fb_set_opacity(alpha);
     }
     else if ([view isKindOfClass:[UIPageControl class]])
     {
         UIPageControl *pc = (UIPageControl *)view;
-        double spacing = 16 * scale;
+        double spacing = (53.0 / 3.0) * scale;
         double total = (pc->_numberOfPages - 1) * spacing;
-        double start = x + w / 2.0 - total / 2;
-        int r = (int)(3.5 * scale);
+        double start = x + w / 2.0 + 0.5 - total / 2;
+        int r = (int)(4.0 * scale + 0.5);
         int cy = y + h / 2;
         for (long i = 0; i < pc->_numberOfPages; i++)
         {
-            unsigned color;
+            int cx = (int)(start + i * spacing + 0.5);
             if (i == pc->_currentPage)
-                color = pc->_currentPageTintColor
-                            ? color_rgb(pc->_currentPageTintColor) : 0xffffff;
+            {
+                unsigned color = pc->_currentPageTintColor
+                                     ? color_rgb(pc->_currentPageTintColor)
+                                     : 0xffffff;
+                iosim_fb_fill_circle(cx, cy, r, color);
+            }
+            else if (pc->_pageTintColor)
+            {
+                iosim_fb_fill_circle(cx, cy, r,
+                                     color_rgb(pc->_pageTintColor));
+            }
             else
-                color = pc->_pageTintColor
-                            ? color_rgb(pc->_pageTintColor) : 0x8e8e93;
-            iosim_fb_fill_circle((int)(start + i * spacing) + r, cy, r,
-                                 color);
+            {
+                /* Unselected dots are 45% white in the current design. */
+                iosim_fb_set_opacity(alpha * 0.45);
+                iosim_fb_fill_circle(cx, cy, r, 0xffffff);
+                iosim_fb_set_opacity(alpha);
+            }
         }
     }
     else if ([view isKindOfClass:[UISegmentedControl class]])
     {
         UISegmentedControl *seg = (UISegmentedControl *)view;
-        unsigned base = seg->_tintColor ? color_rgb(seg->_tintColor)
-                                        : 0x2c2c2e;
-        iosim_fb_fill_round_rect(x, y, w, h, h / 2, base);
+        int custom_tint = seg->_tintColor != nil;
+        if (custom_tint)
+            iosim_fb_fill_round_rect(x, y, w, h, h / 2,
+                                     color_rgb(seg->_tintColor));
+        else
+        {
+            /* Glass track; the tint and alpha are measured so the
+             * composite lands on the captured color. */
+            iosim_fb_set_opacity(alpha * (29.0 / 255.0));
+            iosim_fb_fill_round_rect(x, y, w, h, h / 2, 0xe7eaf6);
+            iosim_fb_set_opacity(alpha);
+        }
         if (seg->_itemCount > 0)
         {
             int segW = w / seg->_itemCount;
             if (seg->_selectedSegmentIndex >= 0)
             {
                 int sx = x + (int)(seg->_selectedSegmentIndex * segW);
-                iosim_fb_fill_round_rect(sx + (int)(2 * scale),
-                                         y + (int)(2 * scale),
-                                         segW - (int)(4 * scale),
-                                         h - (int)(4 * scale),
-                                         (h - (int)(4 * scale)) / 2,
-                                         0x636366);
+                if (custom_tint)
+                    iosim_fb_fill_round_rect(sx + (int)(2 * scale),
+                                             y + (int)(2 * scale),
+                                             segW - (int)(4 * scale),
+                                             h - (int)(4 * scale),
+                                             (h - (int)(4 * scale)) / 2,
+                                             0x636366);
+                else
+                {
+                    /* Selected pill over the glass track. */
+                    iosim_fb_set_opacity(alpha * (74.0 / 255.0));
+                    iosim_fb_fill_round_rect(sx + (int)(2 * scale),
+                                             y + (int)(2 * scale),
+                                             segW - (int)(4 * scale),
+                                             h - (int)(4 * scale),
+                                             (h - (int)(4 * scale)) / 2,
+                                             0xf3f2fb);
+                    iosim_fb_set_opacity(alpha);
+                }
             }
             for (int i = 0; i < seg->_itemCount; i++)
             {
@@ -4316,73 +4364,154 @@ static void render_view(UIView *view, double originX, double originY,
     else if ([view isKindOfClass:[UISwitch class]])
     {
         UISwitch *sw = (UISwitch *)view;
-        int radius = h / 2;
-        unsigned track = sw->_on ? (sw->_onTintColor
-                                       ? color_rgb(sw->_onTintColor)
-                                       : 0x34c759)
-                                 : 0x39393d;
-        iosim_fb_fill_round_rect(x, y, w, h, radius, track);
-        int knob = h - (int)(4 * scale);
-        int kx = sw->_on ? x + w - knob - (int)(2 * scale)
-                         : x + (int)(2 * scale);
-        int ky = y + (int)(2 * scale);
-        iosim_fb_set_opacity(alpha * 0.25);
-        iosim_fb_fill_circle(kx + knob / 2, ky + knob / 2 + (int)(2 * scale),
-                             knob / 2, 0x000000);
-        iosim_fb_set_opacity(alpha);
-        iosim_fb_fill_circle(kx + knob / 2, ky + knob / 2, knob / 2,
-                             0xffffff);
+        /* The current switch is a 63 x 28 capsule with a 36.33 x 23.33
+         * white knob, anchored at the frame origin. */
+        int tw = (int)(63.0 * scale + 0.5);
+        int th = (int)(28.0 * scale + 0.5);
+        int kw = (int)(36.3333 * scale + 0.5);
+        int kh = (int)(23.3333 * scale + 0.5);
+        int inset = (int)(2.3333 * scale + 0.5);
+        if (inset * 2 + kh > th)
+            inset = (th - kh) / 2;
+        int kx = sw->_on ? x + tw - kw - inset : x + inset;
+        int ky = y + inset;
+        if (sw->_on)
+        {
+            unsigned track = sw->_onTintColor
+                                 ? color_rgb(sw->_onTintColor)
+                                 : 0x30d158;
+            iosim_fb_fill_round_rect(x, y, tw, th, th / 2, track);
+        }
+        else
+        {
+            /* The off track is a glass fill over the backdrop. */
+            iosim_fb_set_opacity(alpha * (74.0 / 255.0));
+            iosim_fb_fill_round_rect(x, y, tw, th, th / 2, 0xf2f1fa);
+            iosim_fb_set_opacity(alpha);
+        }
+        iosim_fb_fill_round_rect(kx, ky, kw, kh, kh / 2, 0xffffff);
     }
     else if ([view isKindOfClass:[UISlider class]])
     {
         UISlider *slider = (UISlider *)view;
-        int trackH = (int)(4 * scale);
+        int trackH = (int)(5.6667 * scale + 0.5);
         int ty = y + h / 2 - trackH / 2;
-        unsigned minColor = slider->_minTrackTintColor
-                                ? color_rgb(slider->_minTrackTintColor)
-                                : 0x0a84ff;
-        unsigned maxColor = slider->_maxTrackTintColor
-                                ? color_rgb(slider->_maxTrackTintColor)
-                                : 0x3a3a3c;
-        iosim_fb_fill_round_rect(x, ty, w, trackH, trackH / 2, maxColor);
+        if (!slider->_maxTrackTintColor)
+        {
+            /* The unfilled track is a glass fill over the backdrop. */
+            iosim_fb_set_opacity(alpha * (27.0 / 255.0));
+            iosim_fb_fill_round_rect(x, ty, w, trackH, trackH / 2,
+                                     0xeef0ea);
+            iosim_fb_set_opacity(alpha);
+        }
+        else
+            iosim_fb_fill_round_rect(x, ty, w, trackH, trackH / 2,
+                                     color_rgb(slider->_maxTrackTintColor));
         double span = slider->_maximumValue - slider->_minimumValue;
         double t = span > 0 ? (slider->_value - slider->_minimumValue) / span
                             : 0;
         if (t < 0) t = 0;
         if (t > 1) t = 1;
-        int thumb = (int)(28 * scale);
-        int usable = w - thumb;
-        int fillW = (int)(usable * t + thumb / 2);
+        /* The thumb is a wide glass lozenge, not a circle. */
+        int thumbW = (int)(36.3333 * scale + 0.5);
+        int thumbH = (int)(23.3333 * scale + 0.5);
+        int usable = w - thumbW;
+        if (usable < 0)
+            usable = 0;
+        int cx = x + thumbW / 2 + (int)(usable * t);
+        int cy = y + h / 2 + (int)(0.6667 * scale + 0.5);
+        unsigned minColor = slider->_minTrackTintColor
+                                ? color_rgb(slider->_minTrackTintColor)
+                                : 0x0091ff;
+        int fillW = thumbW / 2 + (int)(usable * t);
         if (fillW > 0)
             iosim_fb_fill_round_rect(x, ty, fillW, trackH, trackH / 2,
                                      minColor);
-        int cx = x + thumb / 2 + (int)(usable * t);
-        iosim_fb_set_opacity(alpha * 0.25);
-        iosim_fb_fill_circle(cx, y + h / 2 + (int)(2 * scale),
-                             thumb / 2, 0x000000);
+        /* The real track sits on a half-pixel boundary; its top and bottom
+         * rows carry a quarter-strength edge. */
+        int cap = trackH / 2;
+        int midW = w - 2 * cap;
+        if (midW > 0)
+        {
+            if (!slider->_maxTrackTintColor)
+            {
+                iosim_fb_set_opacity(alpha * (27.0 / 255.0) * 0.26);
+                iosim_fb_fill_rect(x + cap, ty - 1, midW, 1, 0xeef0ea);
+                iosim_fb_fill_rect(x + cap, ty + trackH, midW, 1, 0xeef0ea);
+            }
+            else
+            {
+                iosim_fb_set_opacity(alpha * 0.26);
+                iosim_fb_fill_rect(x + cap, ty - 1, midW, 1,
+                                   color_rgb(slider->_maxTrackTintColor));
+                iosim_fb_fill_rect(x + cap, ty + trackH, midW, 1,
+                                   color_rgb(slider->_maxTrackTintColor));
+            }
+            int blueW = fillW - cap;
+            if (blueW > midW)
+                blueW = midW;
+            if (blueW > 0)
+            {
+                iosim_fb_set_opacity(alpha * 0.26);
+                iosim_fb_fill_rect(x + cap, ty - 1, blueW, 1, minColor);
+                iosim_fb_fill_rect(x + cap, ty + trackH, blueW, 1, minColor);
+            }
+            iosim_fb_set_opacity(alpha);
+        }
+        for (int s = 4; s >= 1; s--)
+        {
+            int grow = (int)(s * 3.0 * scale / 3.0 + 0.5);
+            iosim_fb_set_opacity(alpha * 0.030);
+            iosim_fb_fill_round_rect(cx - thumbW / 2 - grow,
+                                     cy - thumbH / 2 - grow +
+                                         (int)(1.5 * scale + 0.5),
+                                     thumbW + 2 * grow, thumbH + 2 * grow,
+                                     thumbH / 2 + grow, 0x000000);
+        }
         iosim_fb_set_opacity(alpha);
-        iosim_fb_fill_circle(cx, y + h / 2, thumb / 2,
-                             slider->_thumbTintColor
-                                 ? color_rgb(slider->_thumbTintColor)
-                                 : 0xffffff);
+        iosim_fb_fill_round_rect(cx - thumbW / 2, cy - thumbH / 2, thumbW,
+                                 thumbH, thumbH / 2,
+                                 slider->_thumbTintColor
+                                     ? color_rgb(slider->_thumbTintColor)
+                                     : 0xffffff);
     }
     else if ([view isKindOfClass:[UIProgressView class]])
     {
         UIProgressView *pv = (UIProgressView *)view;
-        int trackH = (int)(4 * scale);
-        int ty = y + h / 2 - trackH / 2;
-        unsigned track = pv->_trackTintColor ? color_rgb(pv->_trackTintColor)
-                                             : 0x3a3a3c;
+        int trackH = (int)(4.0 * scale + 0.5);
+        /* The bar sits at the top of the view's bounds. */
+        int ty = y;
+        if (!pv->_trackTintColor)
+        {
+            /* Unfilled track: a glass fill over the backdrop. */
+            iosim_fb_set_opacity(alpha * (41.0 / 255.0));
+            iosim_fb_fill_round_rect(x, ty, w, trackH, trackH / 2,
+                                     0xf7f5fa);
+            iosim_fb_set_opacity(alpha);
+        }
+        else
+            iosim_fb_fill_round_rect(x, ty, w, trackH, trackH / 2,
+                                     color_rgb(pv->_trackTintColor));
         unsigned fill = pv->_progressTintColor
                             ? color_rgb(pv->_progressTintColor)
-                            : 0x0a84ff;
-        iosim_fb_fill_round_rect(x, ty, w, trackH, trackH / 2, track);
+                            : 0x0091ff;
         double p = pv->_progress;
         if (p < 0) p = 0;
         if (p > 1) p = 1;
         int fw = (int)(w * p + 0.5);
         if (fw > 0)
-            iosim_fb_fill_round_rect(x, ty, fw, trackH, trackH / 2, fill);
+        {
+            if (pv->_progressTintColor)
+                iosim_fb_fill_round_rect(x, ty, fw, trackH, trackH / 2,
+                                         fill);
+            else
+            {
+                /* The default fill carries a slight vertical sheen. */
+                iosim_fb_fill_linear_gradient_round_rect(
+                    x, ty, fw, trackH, trackH / 2, 0x008df9, 0x0091ff,
+                    0.0, 0.0, 0.0, 1.0);
+            }
+        }
     }
 
     if ([view isKindOfClass:[UITextField class]])

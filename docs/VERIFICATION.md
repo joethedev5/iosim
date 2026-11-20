@@ -219,6 +219,41 @@ sublabels, and a 24 pt bare delete glyph.
 | Pixels over 24 in the panel | **1.42 %** |
 | Full frame (capture includes the Dynamic Island) | **1.66 / 255**, 2.24 % |
 
+### Native controls
+
+`demo/ControlsApp.m` places one of each standard control at a fixed frame:
+a `UISwitch` in both states, a `UISlider` at 0.64, a three-item
+`UISegmentedControl`, a `UIProgressView` at 0.35, a five-page
+`UIPageControl` and the deprecated gray `UIActivityIndicatorView`. The iOS 26
+renderings were measured from the capture rather than assumed:
+
+- the switch is a 63 x 28 pt capsule with a 36.3 x 23.3 pt white knob inset
+  2.3 pt; the on track is system green (`#30d158`) and the off track is a
+  glass fill;
+- the slider track is 5.7 pt tall with a `#0091ff` fill and a glass unfilled
+  track; its thumb is the same 36.3 x 23.3 pt lozenge, not a circle;
+- the segmented control is a glass capsule, a 10.5 % white track with a
+  27.5 % white selected pill inset 2 pt from the segment bounds;
+- the progress bar is 4 pt tall and pinned to the top of its bounds, with a
+  slight vertical sheen in the fill and a 16 % glass track;
+- page dots are 8 pt across on a 17.7 pt pitch, 45 % white when unselected;
+- the gray activity indicator style is a 20 pt spinner whose ink reads as a
+  translucent black on a dark surface.
+
+Comparing the fixtures exposed a framebuffer bug: translucent rounded rects
+and circles composited their interiors at full opacity and only their edges at
+the requested alpha. Interiors now clamp coverage to the current opacity, so
+glass fills composite correctly.
+
+| Metric | Value |
+|---|---|
+| Full-frame mean error | **0.70 / 255** |
+| Pixels with max-channel error > 24 | **0.50 %** |
+| Switch band | 0.73 / 255 |
+| Slider band | 0.52 / 255 |
+| Segmented band (13 pt glyph edges inside) | 1.50 / 255 |
+| Progress bar band | 0.24 / 255 |
+
 ### Services: dispatch, Mach, bootstrap and XPC
 
 `tests/services_test.m` is an Apple-clang x86_64 executable with no UI. It

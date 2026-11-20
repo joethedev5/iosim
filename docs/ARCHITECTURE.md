@@ -375,6 +375,14 @@ redrawn above it, matching the reference. Action blocks are copied to the heap
 with `_Block_copy`, run on tap, then the modal dismisses through the same
 presentation stack as any other controller.
 
+Standard controls render with the measured iOS 26 design. `UISwitch` paints
+a 63 x 28 pt capsule with a 36.3 x 23.3 pt white knob; `UISlider` uses a
+5.7 pt track and the same lozenge as a thumb; `UISegmentedControl`,
+`UIProgressView` and `UIPageControl` use glass fills that composite at the
+measured opacities. The soft fills rely on the framebuffer's opacity clamp:
+for translucent rounded rects and circles, interior coverage is bounded by the
+current opacity instead of taking the opaque fast path.
+
 ### 2.12 SpringBoard-like shell
 
 With `IOSIM_SHELL=1`, `UIApplicationMain` calls `run_springboard` instead of

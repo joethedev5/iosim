@@ -186,6 +186,8 @@ void iosim_fb_fill_round_rect(int x, int y, int w, int h, int radius,
             double coverage = (0.5 - d) * fb_opacity;
             if (coverage <= 0)
                 continue;
+            if (coverage > fb_opacity)
+                coverage = fb_opacity;
             if (coverage >= 1)
             {
                 row[xx] = color;
@@ -224,6 +226,8 @@ void iosim_fb_fill_circle(int cx, int cy, int radius, uint32_t color)
             double coverage = (0.5 - d) * fb_opacity;
             if (coverage <= 0)
                 continue;
+            if (coverage > fb_opacity)
+                coverage = fb_opacity;
             if (coverage >= 1)
             {
                 row[x] = color;
@@ -956,6 +960,8 @@ void iosim_fb_fill_ellipse(int cx, int cy, int rx, int ry, uint32_t color)
             double coverage = (0.5 - d) * fb_opacity;
             if (coverage <= 0)
                 continue;
+            if (coverage > fb_opacity)
+                coverage = fb_opacity;
             uint32_t *row = fb_pixels + (size_t)y * fb_width;
             if (coverage >= 1)
             {
