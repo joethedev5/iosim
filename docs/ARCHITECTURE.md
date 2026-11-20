@@ -451,7 +451,13 @@ mask. Coverage masks multiply with any active polygon or alpha mask, giving
 nested masks and partial-alpha masks their expected cumulative effect.
 Masks on standalone layers and on view backing layers are applied; a mask on
 a view that is also rendered through the rotation offscreen path is not
-folded into the rotated composite. Path clipping is supported through
+folded into the rotated composite. `CAGradientLayer` carries the full color
+array plus optional `locations`; the renderer builds stop values from
+`CGColorRef` or `UIColor` entries, spaces them evenly when locations are
+absent, and fills through the same multi-stop path CoreGraphics uses. Rounded
+gradient layers render into an offscreen pass, mask their corners, and
+composite back, so corner radii and layer alpha stay antialiased. Path
+clipping is supported through
 even-odd masks; color management and adaptive curve subdivision remain future
 work.
 

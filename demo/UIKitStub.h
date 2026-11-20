@@ -664,6 +664,7 @@ extern int UIApplicationMain(int argc, char **argv, id principal,
 
 @interface CAGradientLayer : CALayer
 @property(nonatomic, retain) id colors;
+@property(nonatomic, retain) id locations;
 @property CGPoint startPoint;
 @property CGPoint endPoint;
 @end

@@ -95,6 +95,11 @@ extern void iosim_fb_fill_linear_gradient(int x, int y, int w, int h,
                                           unsigned end_color,
                                           double sx, double sy,
                                           double ex, double ey);
+extern void iosim_fb_fill_gradient_stops(int x, int y, int w, int h,
+                                         const unsigned *colors,
+                                         const double *locations, int count,
+                                         double ax, double ay, double bx,
+                                         double by);
 extern void *iosim_fb_begin_offscreen(unsigned width, unsigned height);
 extern unsigned *iosim_fb_end_offscreen(void *state, int *out_w, int *out_h);
 extern void iosim_fb_stroke_circle(int cx, int cy, int radius, int thickness,
@@ -226,11 +231,14 @@ struct layer_anim {
 @interface CAGradientLayer : CALayer {
 @public
     NSArray *_colors;
+    NSArray *_locations;
     CGPoint _startPoint;
     CGPoint _endPoint;
 }
 - (void)setColors:(NSArray *)colors;
 - (NSArray *)colors;
+- (void)setLocations:(NSArray *)locations;
+- (NSArray *)locations;
 - (void)setStartPoint:(CGPoint)point;
 - (CGPoint)startPoint;
 - (void)setEndPoint:(CGPoint)point;
@@ -5401,6 +5409,8 @@ static void cg_to_bezier_applier(void *info, const CGPathElement *element)
 }
 - (void)setColors:(NSArray *)colors { _colors = colors; }
 - (NSArray *)colors { return _colors; }
+- (void)setLocations:(NSArray *)locations { _locations = locations; }
+- (NSArray *)locations { return _locations; }
 - (void)setStartPoint:(CGPoint)point { _startPoint = point; }
 - (CGPoint)startPoint { return _startPoint; }
 - (void)setEndPoint:(CGPoint)point { _endPoint = point; }
@@ -8264,6 +8274,27 @@ static unsigned color_rgb(UIColor *color)
     return ((unsigned)r << 16) | ((unsigned)g << 8) | (unsigned)b;
 }
 
+/* CAGradientLayer.colors holds CGColorRefs in UIKit, but this runtime also
+ * accepts UIColor objects in fixtures. Both forms resolve to XRGB. */
+static unsigned gradient_entry_rgb(id value)
+{
+    if (value && iosim_cgcolor_is_valid((CGColorRef)value))
+    {
+        const double *c = CGColorGetComponents((CGColorRef)value);
+        if (c)
+        {
+            int r = (int)(c[0] * 255.0 + 0.5);
+            int g = (int)(c[1] * 255.0 + 0.5);
+            int b = (int)(c[2] * 255.0 + 0.5);
+            if (r < 0) r = 0; if (r > 255) r = 255;
+            if (g < 0) g = 0; if (g > 255) g = 255;
+            if (b < 0) b = 0; if (b > 255) b = 255;
+            return ((unsigned)r << 16) | ((unsigned)g << 8) | (unsigned)b;
+        }
+    }
+    return color_rgb((UIColor *)value);
+}
+
 static double curve_value(double t, int curve)
 {
     if (t < 0)
@@ -9070,22 +9101,59 @@ static void render_layer(CALayer *layer, double parentX, double parentY,
     if ([layer isKindOfClass:[CAGradientLayer class]])
     {
         CAGradientLayer *g = (CAGradientLayer *)layer;
-        unsigned a = 0, b = 0;
-        if (g->_colors && g->_colors->_count > 0)
+        long total = g->_colors ? (long)g->_colors->_count : 0;
+        if (total > 0)
         {
-            a = color_rgb((UIColor *)[g->_colors objectAtIndex:0]);
-            b = color_rgb((UIColor *)[g->_colors objectAtIndex:g->_colors->_count - 1]);
-            if (layer->_cornerRadius > 0)
-                iosim_fb_fill_linear_gradient_round_rect(
-                    x, y, w, h, (int)(layer->_cornerRadius * scale + 0.5), a,
-                    b, g->_startPoint.x, g->_startPoint.y, g->_endPoint.x,
-                    g->_endPoint.y);
+            enum { MAX_STOPS = 32 };
+            unsigned colors[MAX_STOPS];
+            double locations[MAX_STOPS];
+            int count = total < MAX_STOPS ? (int)total : MAX_STOPS;
+            long loc_count = g->_locations ? (long)g->_locations->_count : 0;
+            int explicit_locations = loc_count == total;
+            for (int i = 0; i < count; i++)
+            {
+                colors[i] = gradient_entry_rgb(
+                    [g->_colors objectAtIndex:i]);
+                if (explicit_locations)
+                    locations[i] = number_value(
+                        [g->_locations objectAtIndex:i], 0.0);
+                else
+                    locations[i] = total > 1 ? (double)i / (double)(total - 1)
+                                             : 0.0;
+            }
+            if (count == 1)
+            {
+                iosim_fb_fill_rect(x, y, w, h, colors[0]);
+            }
+            else if (layer->_cornerRadius > 0)
+            {
+                int radius = (int)(layer->_cornerRadius * scale + 0.5);
+                void *state = iosim_fb_begin_offscreen((unsigned)w,
+                                                       (unsigned)h);
+                if (state)
+                {
+                    iosim_fb_fill_gradient_stops(
+                        0, 0, w, h, colors, locations, count,
+                        g->_startPoint.x * w, g->_startPoint.y * h,
+                        g->_endPoint.x * w, g->_endPoint.y * h);
+                    iosim_fb_mask_round_rect(0, 0, w, h, radius);
+                    int bw = 0, bh = 0;
+                    unsigned *buf = iosim_fb_end_offscreen(state, &bw, &bh);
+                    if (buf)
+                    {
+                        iosim_fb_blit_affine(buf, bw, bh, 1.0, 0.0, 0.0,
+                                             1.0, x, y, alpha);
+                        iosim_fb_free_offscreen(buf);
+                    }
+                }
+            }
             else
-                iosim_fb_fill_linear_gradient(x, y, w, h, a, b,
-                                              g->_startPoint.x,
-                                              g->_startPoint.y,
-                                              g->_endPoint.x,
-                                              g->_endPoint.y);
+            {
+                iosim_fb_fill_gradient_stops(
+                    x, y, w, h, colors, locations, count,
+                    x + g->_startPoint.x * w, y + g->_startPoint.y * h,
+                    x + g->_endPoint.x * w, y + g->_endPoint.y * h);
+            }
         }
     }
     else if ([layer isKindOfClass:[CAShapeLayer class]])

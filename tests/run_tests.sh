@@ -3268,6 +3268,56 @@ else
     echo "FAIL CALayer mask"; echo "$out"; fails=$((fails+1))
 fi
 
+"$ROOT/tools/build_app.sh" "$ROOT/tests/cagradient_test.m" \
+    "$T/cagradient_test" >/dev/null
+out="$(IOSIM_TEST_PNG="$T/cagradient.png" DYLD_ROOT_PATH="$ROOT/runtime" \
+    "$RUN" "$T/cagradient_test" 2>&1)"
+check "[grad] colors 3 locations 3" "$out" \
+    "CAGradientLayer stores colors and explicit stop locations"
+check "[grad] png written" "$out" \
+    "the gradient layer fixture captures a frame"
+if out="$(python3 - "$ROOT/tools" "$T/cagradient.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+
+def rgb(x, y):
+    c = pngpixel.px(rows, bpp, x * 3, y * 3)
+    return ((c >> 16) & 255, (c >> 8) & 255, c & 255)
+
+r, g, b = rgb(115, 130)
+if not (g > 220 and r < 40 and b < 50):
+    raise SystemExit("explicit stop at 0.25 is not green: %02x%02x%02x" % (r, g, b))
+r, g, b = rgb(45, 130)
+if not (r > 180 and 20 < g < 90 and b < 40):
+    raise SystemExit("first segment does not ease red toward green: %02x%02x%02x" % (r, g, b))
+r, g, b = rgb(315, 130)
+if not (b > 200 and g < 50 and r < 40):
+    raise SystemExit("gradient end is not blue: %02x%02x%02x" % (r, g, b))
+r, g, b = rgb(180, 255)
+if not (r > 200 and 40 < g < 140 and b < 40):
+    raise SystemExit("even-spaced top is not red-yellow: %02x%02x%02x" % (r, g, b))
+r, g, b = rgb(180, 285)
+if not (r > 230 and g > 230 and b < 40):
+    raise SystemExit("even-spaced middle is not yellow: %02x%02x%02x" % (r, g, b))
+r, g, b = rgb(180, 320)
+if not (b > 150 and r < 100):
+    raise SystemExit("even-spaced bottom is not blue: %02x%02x%02x" % (r, g, b))
+r, g, b = rgb(130, 430)
+if not (g > 220 and r < 40 and b < 40):
+    raise SystemExit("rounded gradient center is not green: %02x%02x%02x" % (r, g, b))
+r, g, b = rgb(34, 384)
+if not (r < 40 and g < 40 and b < 60):
+    raise SystemExit("rounded gradient corner is not clipped: %02x%02x%02x" % (r, g, b))
+print("ok   CAGradientLayer interpolates explicit and even-spaced stops")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL CAGradientLayer stops"; echo "$out"; fails=$((fails+1))
+fi
+
 "$ROOT/tools/build_app.sh" "$ROOT/tests/draw_rect_test.m" \
     "$T/draw_rect_test" >/dev/null
 out="$(IOSIM_TEST_PNG="$T/draw_rect.png" DYLD_ROOT_PATH="$ROOT/runtime" \

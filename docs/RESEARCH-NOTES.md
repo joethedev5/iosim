@@ -296,6 +296,19 @@ curve subdivision.
 - Fixture `tests/calayer_mask_test.m`: rect mask, oval shape mask on a view
   backing layer, and a 50 percent alpha mask that blends red to `0x85070f`.
 
+## 2026-11-20: multi-stop CAGradientLayer
+
+- `CAGradientLayer.locations` is stored; colors accept `CGColorRef` (the
+  documented API, and what `.CGColor` produces) or `UIColor` for fixture
+  convenience. Up to 32 stops feed `iosim_fb_fill_gradient_stops`; missing or
+  mismatched locations fall back to even spacing.
+- Rounded gradient layers render into an offscreen, apply
+  `iosim_fb_mask_round_rect`, and composite with `blit_affine`, reusing the
+  springboard icon path and keeping layer alpha. Non-rounded layers fill
+  directly with the absolute gradient axis.
+- Fixture `tests/cagradient_test.m` checks the 0.25 explicit stop, even
+  spacing, and a 30-point rounded layer's clipped corner.
+
 ## Open directions
 
 - `metal-cpp` + macOS SDK Metal headers make it possible to implement a

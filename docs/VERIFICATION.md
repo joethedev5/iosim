@@ -688,6 +688,12 @@ and background at `(190,170)` across the rectangle mask, blue at `(140,350)`
 and background at `(48,306)` across the oval, and `0x85070f` (a half blend of
 red over the `0x0a0f1f` background) at `(140,530)` for the partial-alpha
 mask, proving mask geometry, subtree clipping and coverage multiplication.
+`tests/cagradient_test.m` renders three `CAGradientLayer`s: an explicit
+red/green/blue gradient with locations 0/0.25/1 (green at `(115,130)`), the
+same colors with default even spacing vertically (yellow at `(180,285)`), and
+a rounded 30-point layer. The PNG is green at the rounded layer's center and
+keeps the background outside its corner, proving multi-stop interpolation,
+both location modes, `CGColorRef` entries and the offscreen rounded path.
 `tests/draw_rect_test.m` runs a real `UIApplicationMain` scene with a custom
 `DrawView`; its `drawRect:`paints four shapes, writes a PNG and exits. The suite samples the PNG at
 `(60,180)` red, `(250,190)` green, `(20,300)` blue stroke and `(90,455)`
