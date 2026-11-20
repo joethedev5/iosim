@@ -43,6 +43,7 @@ extern int  iosim_event_next(int *type, int *x, int *y);
 extern void iosim_fb_set_opacity(double opacity);
 extern double iosim_now(void);
 extern int  iosim_foundation_tick(void);
+extern int  iosim_dispatch_drain_main(void);
 extern const char *iosim_string_cstr(id string);
 extern int  strcmp(const char *a, const char *b);
 
@@ -1107,6 +1108,8 @@ int UIApplicationMain(int argc, char **argv, id principal, id delegateName)
                              (int)(2.0 * scale), (int)(5.0 * scale),
                              (int)(1.0 * scale), 0xffffff);
 
+    iosim_dispatch_drain_main();
+
     const char *path = getenv("IOSIM_SCREENSHOT_PATH");
     if (path && *path)
         iosim_fb_present(path);
@@ -1128,6 +1131,8 @@ int UIApplicationMain(int argc, char **argv, id principal, id delegateName)
                 redraw = 1;
             }
             if (iosim_foundation_tick())
+                redraw = 1;
+            if (iosim_dispatch_drain_main())
                 redraw = 1;
             if (iosim_animations_active())
                 redraw = 1;

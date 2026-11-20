@@ -4,6 +4,7 @@
 #include "objc_runtime.h"
 #include "framebuffer.h"
 #include "events.h"
+#include "services.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -20,6 +21,8 @@ void  *objc_opt_class(void *obj);
 double iosim_now(void);
 void *_Block_copy(void *block);
 void _Block_release(void *block);
+void _Block_object_assign(void *dest, const void *object, int flags);
+void _Block_object_dispose(const void *object, int flags);
 struct iosim_sincos_result { double sin_value; double cos_value; };
 struct iosim_sincos_result __sincos_stret(double x);
 
@@ -360,6 +363,8 @@ static const struct iosim_shim shims[] = {
     SHIM_DIRECT(iosim_event_next),
     SHIM_DIRECT(_Block_copy),
     SHIM_DIRECT(_Block_release),
+    SHIM_DIRECT(_Block_object_assign),
+    SHIM_DIRECT(_Block_object_dispose),
     SHIM_DIRECT(iosim_now),
     SHIM_DIRECT(malloc),
     SHIM_DIRECT(calloc),
@@ -417,7 +422,7 @@ void *iosim_lookup_shim(const char *name)
         if (strcmp(shims[i].name, name) == 0)
             return shims[i].addr;
     }
-    return NULL;
+    return iosim_services_lookup(name);
 }
 
 void *objc_opt_class(void *obj)
@@ -442,12 +447,67 @@ double iosim_now(void)
     return (double)ts.tv_sec + ts.tv_nsec / 1e9;
 }
 
+struct iosim_block_descriptor {
+    unsigned long reserved;
+    unsigned long size;
+    void (*copy)(void *dst, const void *src);
+    void (*dispose)(const void *src);
+};
+
+struct iosim_block_layout {
+    void *isa;
+    int flags;
+    int reserved;
+    void *invoke;
+    struct iosim_block_descriptor *descriptor;
+};
+
+#define IOSIM_BLOCK_IS_GLOBAL  (1 << 28)
+#define IOSIM_BLOCK_HAS_COPY_DISPOSE (1 << 25)
+#define IOSIM_BLOCK_IS_HEAP (1 << 24)
+
 void *_Block_copy(void *block)
 {
-    return block;
+    struct iosim_block_layout *b = block;
+    if (!b)
+        return NULL;
+    if (b->flags & IOSIM_BLOCK_IS_GLOBAL)
+        return block;
+    if (b->flags & IOSIM_BLOCK_IS_HEAP)
+        return block;
+    if (!b->descriptor || b->descriptor->size < sizeof(struct iosim_block_layout))
+        return block;
+    struct iosim_block_layout *copy = malloc(b->descriptor->size);
+    memcpy(copy, b, b->descriptor->size);
+    copy->flags |= IOSIM_BLOCK_IS_HEAP;
+    if ((b->flags & IOSIM_BLOCK_HAS_COPY_DISPOSE) && b->descriptor->copy)
+        b->descriptor->copy(copy, b);
+    return copy;
+}
+
+void _Block_object_assign(void *dest, const void *object, int flags)
+{
+    (void)flags;
+    if (dest)
+        *(const void **)dest = object;
+}
+
+void _Block_object_dispose(const void *object, int flags)
+{
+    (void)object; (void)flags;
 }
 
 void _Block_release(void *block)
 {
-    (void)block;
+    struct iosim_block_layout *b = block;
+    if (!b || (b->flags & IOSIM_BLOCK_IS_GLOBAL) == 0)
+    {
+        if (!b)
+            return;
+    }
+    if (!(b->flags & IOSIM_BLOCK_IS_HEAP))
+        return;
+    if ((b->flags & IOSIM_BLOCK_HAS_COPY_DISPOSE) && b->descriptor && b->descriptor->dispose)
+        b->descriptor->dispose(b);
+    free(b);
 }
