@@ -855,6 +855,10 @@ extern id NSBackgroundColorAttributeName;
 - (CGSize)sizeWithAttributes:(NSDictionary *)attributes;
 - (void)drawAtPoint:(CGPoint)point withAttributes:(NSDictionary *)attributes;
 - (void)drawInRect:(CGRect)rect withAttributes:(NSDictionary *)attributes;
+- (CGRect)boundingRectWithSize:(CGSize)size
+                       options:(unsigned long)options
+                    attributes:(NSDictionary *)attributes
+                       context:(id)context;
 @end
 
 @interface UIImageView : UIView

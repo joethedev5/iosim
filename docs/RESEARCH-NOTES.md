@@ -178,10 +178,14 @@ Measured with `zig-x86_64-linux-0.17.1` from ziglang.org:
 - Foundation's `NSURLSessionDataTask` copies the completion block and uses
   `dispatch_async_f` on the global queue; `NSHTTPURLResponse` carries the
   parsed status and headers.
-- HTTPS is deliberately rejected with an unsupported-scheme error until a
-  TLS client exists.
-- Fixture `tests/urlsession_test.m` (section 28) uses a loopback Python HTTP
-  server.
+- HTTPS now uses OpenSSL when libssl-dev is present: SNI, TLS handshake and
+  SSL_read/write on the connected socket. Certificate and hostname
+  verification use the system trust store by default; the self-signed
+  loopback fixture sets `IOSIM_TLS_INSECURE=1`. OpenSSL 3's unexpected-EOF
+  handling is relaxed so a peer close without close_notify ends the body
+  cleanly.
+- Fixture `tests/urlsession_test.m` (section 28) uses loopback Python HTTP and
+  HTTPS servers; the TLS server is `tests/tls_http_server.py`.
 
 ## 2026-11-20: scroll momentum
 
@@ -263,8 +267,9 @@ imageWithCGImage:, and CALayer contents accepts CGImage or UIImage on both
 sublayers and view backing layers. CASpringAnimation evaluates mass/stiffness/
 damping/initialVelocity and reports settlingDuration. ObjC categories are
 resolved from `__objc_catlist` by category symbol name, and NSString
-sizeWithAttributes:/drawAtPoint: renders through the CGContext text bridge.
-Still missing: color spaces, non-rect path clipping and multi-line text.
+sizeWithAttributes:/drawAtPoint: renders through the CGContext text bridge,
+and drawInRect:/boundingRectWithSize: word-wrap paragraphs. Still missing:
+color spaces, non-rect path clipping and attributed strings.
 
 ## Open directions
 

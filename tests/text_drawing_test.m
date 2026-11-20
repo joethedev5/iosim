@@ -22,6 +22,15 @@ extern void exit(int status);
     printf("[text] size %d %d\n", size.width > 10, size.height > 10);
     [@"iosim" drawAtPoint:CGPointMake(40, 200)
            withAttributes:attributes];
+    NSString *long_text = @"the quick brown fox jumps over the lazy dog";
+    CGRect bounds = [long_text boundingRectWithSize:CGSizeMake(160, 160)
+                                            options:0
+                                         attributes:attributes
+                                            context:nil];
+    printf("[text] bounds %d %d\n", bounds.size.width > 10,
+           bounds.size.height > 20);
+    [long_text drawInRect:CGRectMake(40, 280, 160, 160)
+           withAttributes:attributes];
     printf("[text] drawn\n");
     fflush(0);
     const char *path = getenv("IOSIM_TEST_PNG");

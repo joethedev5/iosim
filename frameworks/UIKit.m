@@ -2187,10 +2187,97 @@ static UIFont *drawing_font(NSDictionary *attributes)
     return [UIFont systemFontOfSize:17];
 }
 
+#define TEXT_MAX_LINES 64
+#define TEXT_LINE_CHARS 256
+
+static int text_wrap_lines(const char *text, double max_width, UIFont *font,
+                           double scale, char lines[][TEXT_LINE_CHARS],
+                           double *out_width)
+{
+    int count = 0;
+    double widest = 0;
+    const char *p = text;
+    int style = font->_bold ? IOSIM_FONT_SEMIBOLD : IOSIM_FONT_REGULAR;
+    while (*p && count < TEXT_MAX_LINES)
+    {
+        char line[TEXT_LINE_CHARS];
+        int line_len = 0;
+        double line_width = 0;
+        line[0] = 0;
+        while (*p && *p != '\n')
+        {
+            while (*p == ' ')
+                p++;
+            if (!*p || *p == '\n')
+                break;
+            const char *word = p;
+            while (*p && *p != ' ' && *p != '\n')
+                p++;
+            int word_len = (int)(p - word);
+            if (word_len > TEXT_LINE_CHARS - 2)
+                word_len = TEXT_LINE_CHARS - 2;
+            char candidate[TEXT_LINE_CHARS * 2];
+            int candidate_len = 0;
+            for (int i = 0; i < line_len && candidate_len < 500; i++)
+                candidate[candidate_len++] = line[i];
+            if (line_len > 0 && candidate_len < 500)
+                candidate[candidate_len++] = ' ';
+            for (int i = 0; i < word_len && candidate_len < 500; i++)
+                candidate[candidate_len++] = word[i];
+            candidate[candidate_len] = 0;
+            double candidate_width = iosim_fb_font_text_width(
+                candidate, style, font->_size, scale);
+            if (line_len > 0 && candidate_width > max_width)
+            {
+                if (count < TEXT_MAX_LINES)
+                {
+                    for (int i = 0; i <= line_len; i++)
+                        lines[count][i] = line[i];
+                    count++;
+                }
+                if (line_width > widest)
+                    widest = line_width;
+                line_len = 0;
+                line[0] = 0;
+                line_width = 0;
+                for (int i = 0; i < word_len; i++)
+                    line[line_len++] = word[i];
+                line[line_len] = 0;
+                line_width = iosim_fb_font_text_width(line, style,
+                                                      font->_size, scale);
+            }
+            else
+            {
+                for (int i = 0; i < candidate_len; i++)
+                    line[i] = candidate[i];
+                line_len = candidate_len;
+                line_width = candidate_width;
+            }
+        }
+        if (count < TEXT_MAX_LINES)
+        {
+            for (int i = 0; i <= line_len; i++)
+                lines[count][i] = line[i];
+            count++;
+        }
+        if (line_width > widest)
+            widest = line_width;
+        if (*p == '\n')
+            p++;
+    }
+    if (out_width)
+        *out_width = widest;
+    return count;
+}
+
 @interface NSString (UIKitDrawing)
 - (CGSize)sizeWithAttributes:(NSDictionary *)attributes;
 - (void)drawAtPoint:(CGPoint)point withAttributes:(NSDictionary *)attributes;
 - (void)drawInRect:(CGRect)rect withAttributes:(NSDictionary *)attributes;
+- (CGRect)boundingRectWithSize:(CGSize)size
+                       options:(unsigned long)options
+                    attributes:(NSDictionary *)attributes
+                       context:(id)context;
 @end
 
 @implementation NSString (UIKitDrawing)
@@ -2234,8 +2321,70 @@ static UIFont *drawing_font(NSDictionary *attributes)
 }
 - (void)drawInRect:(CGRect)rect withAttributes:(NSDictionary *)attributes
 {
-    [self drawAtPoint:CGPointMake(rect.origin.x, rect.origin.y)
-       withAttributes:attributes];
+    const char *text = iosim_string_cstr(self);
+    if (!text)
+        return;
+    UIFont *font = drawing_font(attributes);
+    UIColor *color = attributes
+        ? (UIColor *)[attributes objectForKey:NSForegroundColorAttributeName]
+        : nil;
+    double scale = [[UIScreen mainScreen] scale];
+    if (scale <= 0)
+        scale = 1.0;
+    int ascent = 0, descent = 0, lineHeight = 0;
+    int style = font->_bold ? IOSIM_FONT_SEMIBOLD : IOSIM_FONT_REGULAR;
+    iosim_fb_font_metrics(style, font->_size, scale, &ascent, &descent,
+                          &lineHeight);
+    char lines[TEXT_MAX_LINES][TEXT_LINE_CHARS];
+    int count = text_wrap_lines(text, rect.size.width, font, scale, lines, 0);
+    if (count <= 0 || lineHeight <= 0)
+        return;
+    CGContextRef context = iosim_cg_current();
+    if (context)
+    {
+        CGContextSaveGState(context);
+        CGContextClipToRect(context, rect);
+    }
+    unsigned text_color = text_color_rgb(color);
+    for (int i = 0; i < count; i++)
+    {
+        double baseline = rect.origin.y + (ascent + i * lineHeight) / scale;
+        if (baseline > rect.origin.y + rect.size.height + 1)
+            break;
+        iosim_cg_draw_text(context, lines[i], rect.origin.x, baseline,
+                           font->_size, font->_bold, text_color);
+    }
+    if (context)
+        CGContextRestoreGState(context);
+}
+- (CGRect)boundingRectWithSize:(CGSize)size
+                       options:(unsigned long)options
+                    attributes:(NSDictionary *)attributes
+                       context:(id)context
+{
+    (void)options;
+    (void)context;
+    const char *text = iosim_string_cstr(self);
+    if (!text)
+        return CGRectMake(0, 0, 0, 0);
+    UIFont *font = drawing_font(attributes);
+    double scale = [[UIScreen mainScreen] scale];
+    if (scale <= 0)
+        scale = 1.0;
+    int ascent = 0, descent = 0, lineHeight = 0;
+    int style = font->_bold ? IOSIM_FONT_SEMIBOLD : IOSIM_FONT_REGULAR;
+    iosim_fb_font_metrics(style, font->_size, scale, &ascent, &descent,
+                          &lineHeight);
+    char lines[TEXT_MAX_LINES][TEXT_LINE_CHARS];
+    double width = 0;
+    int count = text_wrap_lines(text, size.width, font, scale, lines, &width);
+    double result_width = width / scale;
+    double result_height = count * lineHeight / scale;
+    if (size.width > 0 && result_width > size.width)
+        result_width = size.width;
+    if (size.height > 0 && result_height > size.height)
+        result_height = size.height;
+    return CGRectMake(0, 0, result_width, result_height);
 }
 @end
 

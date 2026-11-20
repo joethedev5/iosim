@@ -37,8 +37,37 @@ int main(int argc, char **argv)
         usleep(10000);
     printf("[http] done %d\n", finished);
 
+    if (argc > 2)
+    {
+        int tls_port = 0;
+        const char *tls_p = argv[2];
+        while (*tls_p >= '0' && *tls_p <= '9')
+            tls_port = tls_port * 10 + (*tls_p++ - '0');
+        finished = 0;
+        NSString *tls_address = [NSString stringWithFormat:
+            @"https://127.0.0.1:%d/hello.txt", tls_port];
+        NSURL *tls_url = [NSURL URLWithString:tls_address];
+        NSURLSessionDataTask *tls_task =
+            [[NSURLSession sharedSession] dataTaskWithURL:tls_url
+                                  completionHandler:^(NSData *data,
+                                                      NSURLResponse *response,
+                                                      NSError *error) {
+            printf("[https] status %ld\n", [response statusCode]);
+            printf("[https] body %.*s", (int)[data length],
+                   (const char *)[data bytes]);
+            if (error)
+                printf("[https] error %ld %s\n", [error code],
+                       [[error localizedDescription] UTF8String]);
+            finished = 1;
+        }];
+        [tls_task resume];
+        for (int i = 0; i < 500 && !finished; i++)
+            usleep(10000);
+        printf("[https] done %d\n", finished);
+    }
+
     finished = 0;
-    NSURL *bad = [NSURL URLWithString:@"https://127.0.0.1/secret"];
+    NSURL *bad = [NSURL URLWithString:@"ftp://127.0.0.1/secret"];
     NSURLSessionDataTask *badTask =
         [[NSURLSession sharedSession] dataTaskWithURL:bad
                               completionHandler:^(NSData *data,

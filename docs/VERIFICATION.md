@@ -493,10 +493,13 @@ interpolation.
 
 `tests/text_drawing_test.m` measures `iosim` in a 32 pt bold system font
 (both width and height exceed 10 pt), draws it white at `(40,200)` inside a
-real `drawRect:` and writes a PNG. The suite scans the text's point range at
-device scale and requires at least 100 light pixels; the fixture produces
-9123, so `sizeWithAttributes:` and `drawAtPoint:withAttributes:` reach the
-font rasterizer through the CGContext text bridge.
+real `drawRect:` and writes a PNG. It also draws the 43-character pangram into
+a 160x160 rect: `boundingRectWithSize:` reports non-zero width and more than
+20 pt height (several wrapped lines). The suite scans both regions at device
+scale and requires at least 100/1000 light pixels; the fixture produces 9123
+for the single line and 36674 for the wrapped paragraph, so measurement,
+word wrapping and drawing all reach the font rasterizer through the CGContext
+text bridge.
 
 ### Graphics: UIVisualEffectView backdrop blur
 
@@ -720,14 +723,19 @@ after one tick and exactly 200 after 40 ticks, with
 
 ### Foundation: NSURLSession
 
-The suite starts `python -m http.server` on a loopback ephemeral port, then a
-guest builds `http://127.0.0.1:<port>/hello.txt` and asks the shared
-`NSURLSession` for a data task. The completion handler reports status 200,
-the body `hello over http`, and `Content-type: text/plain` from
+The suite starts `python -m http.server` on a loopback ephemeral port and a
+second Python server wrapped in TLS with a freshly generated self-signed
+certificate, then a guest builds `http://127.0.0.1:<port>/hello.txt` and asks
+the shared `NSURLSession` for a data task. The completion handler reports
+status 200, the body `hello over http`, and `Content-type: text/plain` from
 `allHeaderFields`, proving the loader's host socket client, response parsing
-and the background completion dispatch. A second task with an `https://`
-URL completes with `NSError` code -1004 (request failed / unsupported
-scheme). The test waits for both handlers and prints `done 1` for each.
+and the background completion dispatch. The same guest requests the HTTPS
+server: TLS handshake, SNI and SSL_read/write deliver status 200 and the same
+body, and both `done 1` lines print. The server uses a self-signed
+certificate, so the fixture runs with `IOSIM_TLS_INSECURE=1`; normal requests
+verify certificates and hostnames against the system trust store. A third
+task with an `ftp://` URL completes with `NSError` code -1004 (request failed
+/ unsupported scheme).
 
 ### Foundation: KVC collection operators
 

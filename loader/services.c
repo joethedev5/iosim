@@ -23,6 +23,11 @@
 #include <unistd.h>
 #include "services.h"
 
+#ifdef IOSIM_HAVE_OPENSSL
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+#endif
+
 extern void *_Block_copy(void *block);
 extern void _Block_release(void *block);
 
@@ -2668,14 +2673,27 @@ static void http_set_error(char **out_error, const char *message)
 
 static int http_split_url(const char *url, char *host, size_t host_cap,
                           char *port, size_t port_cap, char *path,
-                          size_t path_cap, char **out_error)
+                          size_t path_cap, int *out_tls, char **out_error)
 {
-    if (!url || strncmp(url, "http://", 7) != 0)
+    int tls = 0;
+    if (!url)
     {
         http_set_error(out_error, "unsupported URL scheme");
         return -1;
     }
-    const char *authority = url + 7;
+    const char *authority = NULL;
+    if (strncmp(url, "http://", 7) == 0)
+        authority = url + 7;
+    else if (strncmp(url, "https://", 8) == 0)
+    {
+        authority = url + 8;
+        tls = 1;
+    }
+    if (!authority)
+    {
+        http_set_error(out_error, "unsupported URL scheme");
+        return -1;
+    }
     const char *slash = strchr(authority, '/');
     const char *authority_end = slash ? slash : authority + strlen(authority);
     size_t authority_len = (size_t)(authority_end - authority);
@@ -2706,8 +2724,10 @@ static int http_split_url(const char *url, char *host, size_t host_cap,
     }
     else
     {
-        snprintf(port, port_cap, "80");
+        snprintf(port, port_cap, "%s", tls ? "443" : "80");
     }
+    if (out_tls)
+        *out_tls = tls;
     const char *path_start = slash ? slash : "/";
     size_t path_len = strlen(path_start);
     if (path_len == 0)
@@ -2722,10 +2742,26 @@ static int http_split_url(const char *url, char *host, size_t host_cap,
     return 0;
 }
 
-static int http_send_all(int fd, const char *data, size_t length)
+static int http_send_all(int fd, void *tls, const char *data, size_t length)
 {
     while (length)
     {
+#ifdef IOSIM_HAVE_OPENSSL
+        if (tls)
+        {
+            int n = SSL_write((SSL *)tls, data, (int)length);
+            if (n <= 0)
+            {
+                int err = SSL_get_error((SSL *)tls, n);
+                if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_WANT_WRITE)
+                    continue;
+                return -1;
+            }
+            data += n;
+            length -= (size_t)n;
+            continue;
+        }
+#endif
         ssize_t n = send(fd, data, length, 0);
         if (n < 0)
         {
@@ -2747,6 +2783,11 @@ int iosim_http_request(const char *url, const char *method,
 {
     char host[256], port[16], path[2048];
     int fd = -1, status = 0, rc = -1;
+    int tls = 0;
+#ifdef IOSIM_HAVE_OPENSSL
+    SSL_CTX *ssl_ctx = NULL;
+    SSL *ssl = NULL;
+#endif
     unsigned char *reply = NULL;
     char *headers = NULL, *error = NULL;
     if (out_data)
@@ -2760,7 +2801,7 @@ int iosim_http_request(const char *url, const char *method,
     if (out_error)
         *out_error = NULL;
     if (http_split_url(url, host, sizeof(host), port, sizeof(port), path,
-                       sizeof(path), &error) != 0)
+                       sizeof(path), &tls, &error) != 0)
         goto done;
 
     struct addrinfo hints, *addresses = NULL;
@@ -2792,6 +2833,47 @@ int iosim_http_request(const char *url, const char *method,
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
     setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
 
+    if (tls)
+    {
+#ifdef IOSIM_HAVE_OPENSSL
+        ssl_ctx = SSL_CTX_new(TLS_client_method());
+        if (!ssl_ctx)
+        {
+            http_set_error(&error, "could not create TLS context");
+            goto done;
+        }
+        const char *insecure = getenv("IOSIM_TLS_INSECURE");
+        if (insecure && insecure[0] == '1')
+        {
+            SSL_CTX_set_verify(ssl_ctx, SSL_VERIFY_NONE, NULL);
+        }
+        else
+        {
+            SSL_CTX_set_default_verify_paths(ssl_ctx);
+            SSL_CTX_set_verify(ssl_ctx, SSL_VERIFY_PEER, NULL);
+        }
+        SSL_CTX_set_options(ssl_ctx, SSL_OP_IGNORE_UNEXPECTED_EOF);
+        ssl = SSL_new(ssl_ctx);
+        if (!ssl)
+        {
+            http_set_error(&error, "could not create TLS session");
+            goto done;
+        }
+        SSL_set_fd(ssl, fd);
+        SSL_set_tlsext_host_name(ssl, host);
+        if (!(insecure && insecure[0] == '1'))
+            SSL_set1_host(ssl, host);
+        if (SSL_connect(ssl) != 1)
+        {
+            http_set_error(&error, "TLS handshake failed");
+            goto done;
+        }
+#else
+        http_set_error(&error, "HTTPS support is not built in");
+        goto done;
+#endif
+    }
+
     const char *verb = method && method[0] ? method : "GET";
     size_t extra_len = extra_headers ? strlen(extra_headers) : 0;
     size_t request_cap = strlen(verb) + strlen(path) + strlen(host) +
@@ -2813,7 +2895,13 @@ int iosim_http_request(const char *url, const char *method,
     n += snprintf(request + n, request_cap - (size_t)n, "\r\n");
     if (body_len && (size_t)n + body_len < request_cap)
         memcpy(request + n, body, body_len), n += (int)body_len;
-    int sent = http_send_all(fd, request, (size_t)n);
+    int sent = http_send_all(fd,
+#ifdef IOSIM_HAVE_OPENSSL
+                             ssl,
+#else
+                             NULL,
+#endif
+                             request, (size_t)n);
     free(request);
     if (sent != 0)
     {
@@ -2825,16 +2913,37 @@ int iosim_http_request(const char *url, const char *method,
     char chunk[8192];
     for (;;)
     {
-        ssize_t got = recv(fd, chunk, sizeof(chunk), 0);
-        if (got < 0)
+        ssize_t got = 0;
+#ifdef IOSIM_HAVE_OPENSSL
+        if (ssl)
         {
-            if (errno == EINTR)
-                continue;
-            http_set_error(&error, "could not read response");
-            goto done;
+            int n = SSL_read(ssl, chunk, (int)sizeof(chunk));
+            if (n <= 0)
+            {
+                int err = SSL_get_error(ssl, n);
+                if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_WANT_WRITE)
+                    continue;
+                if (err == SSL_ERROR_ZERO_RETURN)
+                    break;
+                http_set_error(&error, "could not read TLS response");
+                goto done;
+            }
+            got = n;
         }
-        if (got == 0)
-            break;
+        else
+#endif
+        {
+            got = recv(fd, chunk, sizeof(chunk), 0);
+            if (got < 0)
+            {
+                if (errno == EINTR)
+                    continue;
+                http_set_error(&error, "could not read response");
+                goto done;
+            }
+            if (got == 0)
+                break;
+        }
         if (length + (size_t)got + 1 > capacity)
         {
             size_t want = capacity ? capacity * 2 : 16384;
@@ -2914,6 +3023,12 @@ int iosim_http_request(const char *url, const char *method,
     rc = 0;
 
 done:
+#ifdef IOSIM_HAVE_OPENSSL
+    if (ssl)
+        SSL_free(ssl);
+    if (ssl_ctx)
+        SSL_CTX_free(ssl_ctx);
+#endif
     if (fd >= 0)
         close(fd);
     free(reply);

@@ -346,8 +346,12 @@ owns a small host HTTP/1.0 client (`iosim_http_request`) that parses the URL,
 resolves and connects to the host, streams the request body, reads until the
 peer closes and splits status line, headers and body. The task builds
 `NSData` and `NSHTTPURLResponse` with a parsed header dictionary; failures and
-cancellation arrive as `NSError` in `NSURLErrorDomain`. HTTPS is rejected
-with an unsupported-scheme error until a TLS client is wired in.
+cancellation arrive as `NSError` in `NSURLErrorDomain`. For `https://` URLs
+the same client wraps the connected socket in OpenSSL with SNI and the
+system TLS stack. Certificate and hostname verification are enabled by
+default through the system trust store; tests that use a self-signed loopback
+certificate set `IOSIM_TLS_INSECURE=1`, and a build without OpenSSL reports an
+unsupported-HTTPS error instead.
 
 `NSRegularExpression` compiles patterns through a loader-host POSIX regex
 shim: the pattern translator accepts ICU spellings for `\d`, `\w`, `\s`
@@ -1034,8 +1038,9 @@ Python for iteration speed.
   read/write/data sources. Foundation is a subset (strings, collections,
   sorting, predicates, scanner, regex, numbers, data, notifications, timers,
   dates, errors, bundles, defaults, plists, file manager, URLs, JSON and
-  HTTP-only NSURLSession); it is not the full Foundation. HTTPS is not
-  implemented; regexes are POSIX ERE with common ICU escapes translated, not
+  HTTP/HTTPS NSURLSession); it is not the full Foundation. HTTPS requires an
+  OpenSSL build and verifies certificates through the system trust store;
+  regexes are POSIX ERE with common ICU escapes translated, not
   full ICU syntax. `NSUserDefaults` persists XML property lists under
   `$HOME/Library/Preferences`; binary property lists are not parsed.
 - Auto Layout is a relaxation solver over anchors and guides, not Cassowary;

@@ -2993,8 +2993,21 @@ while [ "$i" -lt 100 ]; do
     i=$((i + 1))
     sleep 0.05
 done
-if [ -z "$HTTP_PORT" ]; then
-    echo "FAIL loopback HTTP server did not start"
+openssl req -x509 -newkey rsa:2048 -nodes -keyout "$T/tls-key.pem" \
+    -out "$T/tls-cert.pem" -days 1 -subj /CN=127.0.0.1 >/dev/null 2>&1
+python3 -u "$ROOT/tests/tls_http_server.py" "$HTTP_ROOT" \
+    "$T/tls-cert.pem" "$T/tls-key.pem" > "$T/tls.log" 2>&1 &
+TLS_PID=$!
+TLS_PORT=""
+i=0
+while [ "$i" -lt 100 ]; do
+    TLS_PORT=$(sed -n 's/.*port \([0-9][0-9]*\).*/\1/p' "$T/tls.log" | head -1)
+    [ -n "$TLS_PORT" ] && break
+    i=$((i + 1))
+    sleep 0.05
+done
+if [ -z "$HTTP_PORT" ] || [ -z "$TLS_PORT" ]; then
+    echo "FAIL loopback HTTP/TLS servers did not start"
     fails=$((fails + 1))
 else
     "$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
@@ -3004,21 +3017,28 @@ else
         -o "$T/urlsession_test" "$T/urlsession_test.o" \
         "$ROOT/runtime/System/Library/Frameworks/Foundation.framework/Foundation" \
         -undefined dynamic_lookup
-    out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/urlsession_test" \
-        "$HTTP_PORT" 2>&1)"
+    out="$(IOSIM_TLS_INSECURE=1 DYLD_ROOT_PATH="$ROOT/runtime" \
+        "$RUN" "$T/urlsession_test" \
+        "$HTTP_PORT" "$TLS_PORT" 2>&1)"
     check "[http] status 200" "$out" \
         "NSURLSessionDataTask completes with the HTTP status"
     check "[http] body hello over http" "$out" \
         "the response body is delivered as NSData"
     check "[http] header text/plain" "$out" \
         "response headers populate allHeaderFields"
+    check "[https] status 200" "$out" \
+        "NSURLSession completes an HTTPS request over TLS"
+    check "[https] body hello over http" "$out" \
+        "the HTTPS response body is delivered as NSData"
+    check "[https] done 1" "$out" \
+        "the HTTPS completion handler runs"
     check "[http] error -1004" "$out" \
         "an unsupported scheme completes with an NSError"
     check "[http] done 1" "$out" \
         "the completion handler runs on a background queue"
 fi
-kill "$HTTP_PID" 2>/dev/null || true
-wait "$HTTP_PID" 2>/dev/null || true
+kill "$HTTP_PID" "$TLS_PID" 2>/dev/null || true
+wait "$HTTP_PID" "$TLS_PID" 2>/dev/null || true
 
 # ---------- 29. UIScrollView momentum and animated offsets ----------
 "$ROOT/tools/build_app.sh" "$ROOT/tests/scroll_deceleration_test.m" \
@@ -3262,6 +3282,8 @@ out="$(IOSIM_TEST_PNG="$T/text_drawing.png" DYLD_ROOT_PATH="$ROOT/runtime" \
     "$RUN" "$T/text_drawing_test" 2>&1)"
 check "[text] size 1 1" "$out" \
     "NSString sizeWithAttributes: measures a bold system-font string"
+check "[text] bounds 1 1" "$out" \
+    "NSString boundingRectWithSize: measures a wrapped paragraph"
 check "[text] wrote png" "$out" \
     "NSString drawAtPoint: renders through the drawRect: context"
 if out="$(python3 - "$ROOT/tools" "$T/text_drawing.png" <<'PY'
@@ -3269,16 +3291,25 @@ import sys
 sys.path.insert(0, sys.argv[1])
 import pngpixel
 w, h, bpp, rows = pngpixel.load(sys.argv[2])
-count = 0
-for y in range(200 * 3, 240 * 3):
-    for x in range(40 * 3, 300 * 3):
-        c = pngpixel.px(rows, bpp, x, y)
-        r, g, b = ((c >> 16) & 255), ((c >> 8) & 255), (c & 255)
-        if r > 100 and g > 100 and b > 100:
-            count += 1
-if count < 100:
-    raise SystemExit("text pixels not visible: %d" % count)
-print("ok   NSString drawAtPoint: paints %d light text pixels:" % count)
+
+def light_pixels(x0, x1, y0, y1):
+    count = 0
+    for y in range(y0 * 3, y1 * 3):
+        for x in range(x0 * 3, x1 * 3):
+            c = pngpixel.px(rows, bpp, x, y)
+            r, g, b = ((c >> 16) & 255), ((c >> 8) & 255), (c & 255)
+            if r > 100 and g > 100 and b > 100:
+                count += 1
+    return count
+
+single = light_pixels(40, 300, 200, 240)
+wrapped = light_pixels(40, 300, 280, 440)
+if single < 100:
+    raise SystemExit("text pixels not visible: %d" % single)
+if wrapped < 1000:
+    raise SystemExit("wrapped text pixels not visible: %d" % wrapped)
+print("ok   NSString drawAtPoint:/drawInRect: paint %d/%d light pixels:"
+      % (single, wrapped))
 PY
 )"; then
     echo "$out"

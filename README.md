@@ -41,13 +41,13 @@ runners**, combined with the public Darling and Apple dyld sources.
 | `CADisplayLink`, presentation layers, multiple concurrent layer animations | ✅ |
 | `CAAnimationGroup`: grouped opacity/corner animations, group removal clears children | ✅ |
 | `CASpringAnimation`: mass/stiffness/damping/initial velocity, settling duration | ✅ |
-| `NSString` `sizeWithAttributes:`/`drawAtPoint:withAttributes:` text drawing through CGContext | ✅ (subset) |
+| `NSString` `sizeWithAttributes:`, `boundingRectWithSize:`, `drawAtPoint:`/`drawInRect:` wrapping through CGContext | ✅ (subset) |
 | ObjC categories from `__objc_catlist`, resolved by category symbol name | ✅ |
 | CoreAnimation paths, gradients, layer geometry/contents, sublayers (z-ordered), PNG images | ✅ |
 | CoreGraphics `CGContext` fills, strokes, ellipses, paths, mutable `CGPath`, `CGColor`, `CGImage`, clipping, push/pop contexts, state stack, UIView `drawRect:` and `UIGraphics` image contexts | ✅ (subset) |
 | Foundation collections, sorting, NSPredicate filtering, NSRegularExpression, NSScanner, notifications, timers | ✅ |
 | Foundation fast enumeration (`for-in`) and indexed/keyed collection subscripting | ✅ |
-| `NSURLSession` data tasks with headers, bodies, status and response headers over a host HTTP client | ✅ |
+| `NSURLSession` data tasks with headers, bodies, status and response headers over a host HTTP/1.0 client, including HTTPS via OpenSSL | ✅ |
 | Key-value coding (accessors, boxing, key paths, collection operators) and automatic KVO | ✅ |
 | NSDateFormatter parse/print round trip, NSNumberFormatter decimal/currency/percent | ✅ |
 | KDK kernel symbolication: full local+global maps, Mach trap and BSD syscall tables | ✅ |
@@ -154,7 +154,7 @@ of pixels inside a 24/255 tolerance. See
 ## Quick start
 
 ```sh
-sudo apt install clang lld cmake ninja-build libfreetype-dev
+sudo apt install clang lld cmake ninja-build libfreetype-dev libssl-dev
 cmake -S . -B build -G Ninja
 cmake --build build
 ./tools/build_runtime.sh     # builds UIKit/Foundation-lite into ./runtime
