@@ -324,7 +324,9 @@ exist: `list`, `create`, `delete`, `boot`, `bootstatus`, `shutdown`, `erase`,
   at home SpringBoard hit-tests icons, while an app receives touches, keys and
   the `home` background request. `UIApplicationMain` opens the stream before
   its first frame so events sent during scene construction are queued rather
-  than lost.
+  than lost. The stream stays open across writer gaps: a FIFO with no current
+  writer (between two `ui` commands) is idle, not closed, and only the explicit
+  `quit` record ends a reader loop.
 - `home` is a real suspension: the app runs `sceneWillResignActive:` and
   `sceneDidEnterBackground:`, closes the event stream and stops itself with
   SIGSTOP. SpringBoard's `waitpid(WUNTRACED)` sees the stop, records the PID

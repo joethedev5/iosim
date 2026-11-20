@@ -302,9 +302,14 @@ if wait_log "[touch] app ready"; then
 else
     echo "FAIL touch fixture launch"; fails=$((fails+1))
 fi
+# Idle gaps between the events prove the stream stays open while the last
+# writer (the iosimctl process) has exited.
 "$ROOT/tools/iosimctl" ui "$UDID" down 60 300 >/dev/null
+sleep 0.4
 "$ROOT/tools/iosimctl" ui "$UDID" move 120 320 >/dev/null
+sleep 0.4
 "$ROOT/tools/iosimctl" ui "$UDID" up 200 300 >/dev/null
+sleep 0.3
 "$ROOT/tools/iosimctl" ui "$UDID" down 40 525 >/dev/null
 "$ROOT/tools/iosimctl" ui "$UDID" move 360 525 >/dev/null
 "$ROOT/tools/iosimctl" ui "$UDID" up 360 525 >/dev/null

@@ -7,8 +7,20 @@
 #include <string.h>
 #include <unistd.h>
 #include <poll.h>
+#include <time.h>
+#include <errno.h>
 
 static int event_fd = -1;
+
+/* A FIFO with no current writer is not a closed event stream: the device
+ * manager opens it per event. Treat transient HUP/EOF as idle time. */
+static void event_idle(void)
+{
+    struct timespec ts;
+    ts.tv_sec = 0;
+    ts.tv_nsec = 16 * 1000 * 1000;
+    nanosleep(&ts, NULL);
+}
 
 void iosim_event_close(void)
 {
@@ -42,7 +54,19 @@ int iosim_event_next(int *type, int *x, int *y)
     if (pr == 0)
         return 2;
     if (pr < 0)
-        return 0;
+    {
+        if (errno == EINTR)
+            return 2;
+        event_idle();
+        return 2;
+    }
+    if (!(pfd.revents & POLLIN))
+    {
+        /* POLLHUP or POLLERR with no data queued: the last writer closed
+         * between events. Idle until the next writer arrives. */
+        event_idle();
+        return 2;
+    }
 
     char line[128];
     size_t len = 0;
@@ -50,8 +74,18 @@ int iosim_event_next(int *type, int *x, int *y)
     {
         char c;
         ssize_t n = read(event_fd, &c, 1);
-        if (n <= 0)
-            return 0;
+        if (n < 0)
+        {
+            if (errno == EINTR)
+                continue;
+            event_idle();
+            return 2;
+        }
+        if (n == 0)
+        {
+            event_idle();
+            return 2;
+        }
         if (c == '\n')
             break;
         line[len++] = c;
