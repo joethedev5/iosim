@@ -133,6 +133,16 @@ delegate reports `[section] select 1:1 Pea`, which also paints highlighted.
 Selection therefore shares one section/header/height computation with
 rendering.
 
+### Touch: long-press recognition
+
+`demo/LongPressApp.m` attaches a `UILongPressGestureRecognizer` (0.4 s,
+10 pt tolerance) to its root view and prints every state with the location.
+The suite first taps the view and confirms no `began` appears, then holds
+the finger down for 0.7 s: the per-frame tick fires `began 200 400` without
+another event. Moving to (220, 420) reports `changed 220 420`, and lifting
+ends the gesture at the last point. A second press that moves 120 pt before
+the duration is up never begins, so `allowableMovement` fails it.
+
 ### UIKit: collection views
 
 `demo/CollectionApp.m` puts a `UICollectionView` with a flow layout (100 pt

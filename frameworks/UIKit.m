@@ -553,6 +553,17 @@ typedef enum {
 - (long)direction;
 @end
 
+@interface UILongPressGestureRecognizer : UIGestureRecognizer {
+@public
+    double _minimumPressDuration;
+    double _allowableMovement;
+}
+- (double)minimumPressDuration;
+- (void)setMinimumPressDuration:(double)duration;
+- (double)allowableMovement;
+- (void)setAllowableMovement:(double)movement;
+@end
+
 typedef enum {
     UIViewAnimationOptionLayoutSubviews = 1 << 0,
     UIViewAnimationOptionAllowUserInteraction = 1 << 1,
@@ -1268,6 +1279,9 @@ enum {
     UIView *_touchHit;
     UIPanGestureRecognizer *_activePan;
     UITouch *_touch;
+    UIGestureRecognizer *_longPress;
+    CGPoint _pressStartPoint;
+    double _pressStartTime;
 }
 - (id)initWithWindowScene:(UIWindowScene *)scene;
 - (void)setRootViewController:(UIViewController *)controller;
@@ -1276,6 +1290,7 @@ enum {
 - (void)dispatchTouchDownX:(int)x y:(int)y;
 - (void)dispatchTouchMoveX:(int)x y:(int)y;
 - (void)dispatchTouchUpX:(int)x y:(int)y;
+- (int)tickGestureRecognizers;
 - (void)makeKeyAndVisible;
 + (UIWindow *)keyWindow;
 @end
@@ -2163,6 +2178,29 @@ static NSLayoutConstraint *make_layout_constraint(id item1, long attr1,
 @implementation UISwipeGestureRecognizer
 - (void)setDirection:(long)direction { _direction = direction; }
 - (long)direction { return _direction; }
+@end
+
+@implementation UILongPressGestureRecognizer
+- (id)initWithTarget:(id)target action:(SEL)action
+{
+    self = [super initWithTarget:target action:action];
+    if (self)
+    {
+        _minimumPressDuration = 0.5;
+        _allowableMovement = 10.0;
+    }
+    return self;
+}
+- (double)minimumPressDuration { return _minimumPressDuration; }
+- (void)setMinimumPressDuration:(double)duration
+{
+    _minimumPressDuration = duration;
+}
+- (double)allowableMovement { return _allowableMovement; }
+- (void)setAllowableMovement:(double)movement
+{
+    _allowableMovement = movement;
+}
 @end
 
 static void iosim_layout_apply(UIView *root);
@@ -4724,6 +4762,7 @@ static double clamp_scroll(double value, double low, double high)
     _dragStartContent = CGPointMake(0, 0);
     _dragScroll = nil;
     _activePan = nil;
+    _longPress = nil;
     _touchHit = [self hitTest:point];
     for (UIView *v = _touchHit; v; v = [v superview])
     {
@@ -4741,6 +4780,15 @@ static double clamp_scroll(double value, double low, double high)
                 g->_translation = CGPointMake(0, 0);
                 send_gesture_action(g, UIGestureRecognizerStateBegan);
             }
+            else if ([g isKindOfClass:[UILongPressGestureRecognizer class]] &&
+                     !_longPress)
+            {
+                _longPress = g;
+                _pressStartPoint = point;
+                _pressStartTime = iosim_now();
+                g->_state = UIGestureRecognizerStatePossible;
+                g->_location = point;
+            }
         }
     }
     if (_dragScroll)
@@ -4756,6 +4804,28 @@ static double clamp_scroll(double value, double low, double high)
     if (scale <= 0)
         scale = 1.0;
     CGPoint point = CGPointMake(x / scale, y / scale);
+    if (_longPress)
+    {
+        UILongPressGestureRecognizer *press =
+            (UILongPressGestureRecognizer *)_longPress;
+        if (press->_state == UIGestureRecognizerStatePossible)
+        {
+            double dx = point.x - _pressStartPoint.x;
+            double dy = point.y - _pressStartPoint.y;
+            if (dx * dx + dy * dy >
+                press->_allowableMovement * press->_allowableMovement)
+            {
+                press->_state = UIGestureRecognizerStateFailed;
+                _longPress = nil;
+            }
+        }
+        else if (press->_state == UIGestureRecognizerStateBegan ||
+                 press->_state == UIGestureRecognizerStateChanged)
+        {
+            press->_location = point;
+            send_gesture_action(press, UIGestureRecognizerStateChanged);
+        }
+    }
     if (_activePan)
     {
         _activePan->_location = point;
@@ -4795,6 +4865,18 @@ static double clamp_scroll(double value, double low, double high)
     if (scale <= 0)
         scale = 1.0;
     CGPoint point = CGPointMake(x / scale, y / scale);
+    if (_longPress)
+    {
+        if (_longPress->_state == UIGestureRecognizerStateBegan ||
+            _longPress->_state == UIGestureRecognizerStateChanged)
+        {
+            _longPress->_location = point;
+            send_gesture_action(_longPress, UIGestureRecognizerStateEnded);
+        }
+        else if (_longPress->_state == UIGestureRecognizerStatePossible)
+            _longPress->_state = UIGestureRecognizerStateFailed;
+        _longPress = nil;
+    }
     if (_activePan)
     {
         _activePan->_location = point;
@@ -4847,6 +4929,21 @@ static double clamp_scroll(double value, double low, double high)
     [self endTouchAtPoint:point cancelled:NO];
     _touchHit = nil;
 }
+/* Called once per run-loop frame while a touch is down: a long press whose
+ * minimum duration has elapsed becomes Began without needing another event. */
+- (int)tickGestureRecognizers
+{
+    if (!_longPress || _longPress->_state != UIGestureRecognizerStatePossible)
+        return 0;
+    UILongPressGestureRecognizer *press =
+        (UILongPressGestureRecognizer *)_longPress;
+    if (iosim_now() - _pressStartTime < press->_minimumPressDuration)
+        return 0;
+    press->_location = _pressStartPoint;
+    send_gesture_action(press, UIGestureRecognizerStateBegan);
+    return 1;
+}
+
 - (void)dispatchTapX:(int)x y:(int)y
 {
     double scale = [[UIScreen mainScreen] scale];
@@ -9479,6 +9576,8 @@ int UIApplicationMain(int argc, char **argv, id principal, id delegateName)
                 app_enter_background(sceneDelegate, scene, 1);
                 redraw = 1;
             }
+            if ([window tickGestureRecognizers])
+                redraw = 1;
             if (iosim_foundation_tick())
                 redraw = 1;
             if (iosim_dispatch_drain_main())

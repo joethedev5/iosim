@@ -215,6 +215,7 @@ enum {
 @property(nonatomic, retain) UIColor *backgroundColor;
 @property(readonly) CALayer *layer;
 - (void)addSubview:(UIView *)view;
+- (void)addGestureRecognizer:(id)recognizer;
 @property BOOL translatesAutoresizingMaskIntoConstraints;
 @property(readonly) NSLayoutAnchor *leadingAnchor;
 @property(readonly) NSLayoutAnchor *trailingAnchor;
@@ -580,6 +581,26 @@ enum {
 - (id)initWithRootViewController:(UIViewController *)root;
 - (void)pushViewController:(UIViewController *)controller animated:(BOOL)animated;
 - (UIViewController *)popViewControllerAnimated:(BOOL)animated;
+@end
+
+typedef enum {
+    UIGestureRecognizerStatePossible = 0,
+    UIGestureRecognizerStateBegan = 1,
+    UIGestureRecognizerStateChanged = 2,
+    UIGestureRecognizerStateEnded = 3,
+    UIGestureRecognizerStateCancelled = 4,
+    UIGestureRecognizerStateFailed = 5
+} UIGestureRecognizerState;
+
+@interface UIGestureRecognizer : NSObject
+- (id)initWithTarget:(id)target action:(SEL)action;
+- (long)state;
+- (CGPoint)locationInView:(UIView *)view;
+@end
+
+@interface UILongPressGestureRecognizer : UIGestureRecognizer
+@property double minimumPressDuration;
+@property double allowableMovement;
 @end
 
 #define CGRectZero CGRectMake(0, 0, 0, 0)

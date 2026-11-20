@@ -526,7 +526,11 @@ the finger moves, then sends `TouchUpInside` or `TouchUpOutside` on release.
 `UISegmentedControl` and `UIPageControl` select the segment or dot under the
 release point, and `UITextField` becomes first responder on down.
 `UIScrollView` drags update `contentOffset` with a rubber-band clamp; tap, pan
-and swipe `UIGestureRecognizer` subclasses deliver target actions. The
+and swipe `UIGestureRecognizer` subclasses deliver target actions.
+`UILongPressGestureRecognizer` records the down point and time, lets the
+window's per-frame tick fire `Began` once `minimumPressDuration` elapses,
+sends `Changed` with each move while the press is active, ends it on lift and
+fails it if the finger moves beyond `allowableMovement` first. The
 framebuffer has an intersection clip stack, used by scroll views and
 `clipsToBounds`/`masksToBounds`, so content cannot paint outside its host.
 

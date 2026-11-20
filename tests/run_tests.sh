@@ -1324,6 +1324,74 @@ fi
 "$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
 sleep 0.4
 
+# ---------- 9i. long-press gesture recognizer ----------
+"$ROOT/tools/build_app.sh" "$ROOT/demo/LongPressApp.m" "$T/LongPressApp" >/dev/null
+mkdir -p "$T/LongPressApp.app"
+cp "$T/LongPressApp" "$T/LongPressApp.app/LongPressApp"
+python3 - "$T/LongPressApp.app/Info.plist" <<'PY'
+import plistlib, sys
+with open(sys.argv[1], "wb") as f:
+    plistlib.dump({
+        "CFBundleIdentifier": "com.iosim.longpress",
+        "CFBundleExecutable": "LongPressApp",
+        "CFBundleName": "LongPress",
+        "CFBundlePackageType": "APPL",
+        "CFBundleVersion": "1",
+        "CFBundleShortVersionString": "1.0",
+    }, f)
+PY
+"$ROOT/tools/iosimctl" install "$UDID" "$T/LongPressApp.app" >/dev/null
+sleep 0.5
+# Twenty-first installed app: grid slot 27, second page row 2 column 3.
+"$ROOT/tools/iosimctl" ui "$UDID" tap 339.8333 322.5 >/dev/null
+if wait_log "[press] ready"; then
+    echo "ok   SpringBoard launches the long-press fixture"
+else
+    echo "FAIL long-press fixture launch"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" tap 200 400 >/dev/null
+sleep 0.6
+began_count="$(grep -Fc "[press] began" "$SBLOG" 2>/dev/null || true)"
+if [ "$began_count" -eq 0 ]; then
+    echo "ok   a short tap does not begin a long press"
+else
+    echo "FAIL long press on tap ($began_count)"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" down 200 400 >/dev/null
+sleep 0.7
+"$ROOT/tools/iosimctl" ui "$UDID" move 220 420 >/dev/null
+"$ROOT/tools/iosimctl" ui "$UDID" up 220 420 >/dev/null
+if wait_log "[press] began 200 400"; then
+    echo "ok   holding past minimumPressDuration begins the gesture"
+else
+    echo "FAIL long press began"; fails=$((fails+1))
+fi
+if wait_log "[press] changed 220 420"; then
+    echo "ok   moving during the press reports the changed state"
+else
+    echo "FAIL long press changed"; fails=$((fails+1))
+fi
+if wait_log "[press] ended 220 420"; then
+    echo "ok   lifting the finger ends the long press at the last point"
+else
+    echo "FAIL long press ended"; fails=$((fails+1))
+fi
+before_count="$(grep -Fc "[press] began" "$SBLOG" 2>/dev/null || true)"
+"$ROOT/tools/iosimctl" ui "$UDID" down 200 500 >/dev/null
+"$ROOT/tools/iosimctl" ui "$UDID" move 200 620 >/dev/null
+sleep 0.7
+"$ROOT/tools/iosimctl" ui "$UDID" up 200 620 >/dev/null
+sleep 0.2
+after_count="$(grep -Fc "[press] began" "$SBLOG" 2>/dev/null || true)"
+if [ "$after_count" -eq "$before_count" ]; then
+    echo "ok   moving beyond allowableMovement fails the press"
+else
+    echo "FAIL long press movement ($before_count -> $after_count)"
+    fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
+sleep 0.4
+
 # ---------- 10. cross-process Mach services ----------
 # launchd owns the bootstrap namespace; two independent guest processes find
 # each other through it and exchange a Mach message over the service port.

@@ -62,6 +62,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | Floating glass tab bar with per-item targets and content swapping | ✅ |
 | UICollectionView flow layout, reusable cells, selection and drag scrolling | ✅ |
 | UITableView sections, headers, per-row heights and section-aware selection | ✅ |
+| UILongPressGestureRecognizer duration, movement tolerance and state changes | ✅ |
 
 The test suite exercises a real Apple-toolchain-built x86_64 UIKit app, a
 Foundation app using `NSLog` with a constant `CFString`, a Foundation
