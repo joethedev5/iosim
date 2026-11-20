@@ -64,7 +64,7 @@
     vertical.spacing = 10;
     vertical.alignment = 0;
 
-    UILabel *a = [[UILabel alloc] initWithFrame:CGRectZero];
+    UILabel *a = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, 0, 0)];
     a.text = @"UIStackView lays out arranged subviews.";
     a.textColor = [UIColor colorWithRed:0.75 green:0.80 blue:0.90 alpha:1.0];
     a.font = [UIFont systemFontOfSize:15];
@@ -77,7 +77,7 @@
     horizontal.distribution = 1;
     for (int i = 0; i < 3; i++)
     {
-        UILabel *pill = [[UILabel alloc] initWithFrame:CGRectZero];
+        UILabel *pill = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, 0, 0)];
         pill.text = i == 0 ? @"One" : (i == 1 ? @"Two" : @"Three");
         pill.textAlignment = 1;
         pill.textColor = [UIColor whiteColor];
@@ -91,7 +91,7 @@
     [vertical addArrangedSubview:horizontal];
 
     UIButton *open = [UIButton buttonWithType:UIButtonTypeSystem];
-    open.frame = CGRectZero;
+    open.frame = CGRectMake(0, 0, 0, 0);
     [open setTitle:@"Open detail" forState:UIControlStateNormal];
     [open setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
     open.backgroundColor = [UIColor systemBlueColor];

@@ -55,5 +55,26 @@ int iosim_event_next(int *type, int *x, int *y)
         *y = py;
         return 1;
     }
+    if (sscanf(line, "down %d %d", &px, &py) == 2)
+    {
+        *type = 2;
+        *x = px;
+        *y = py;
+        return 1;
+    }
+    if (sscanf(line, "move %d %d", &px, &py) == 2)
+    {
+        *type = 3;
+        *x = px;
+        *y = py;
+        return 1;
+    }
+    if (sscanf(line, "up %d %d", &px, &py) == 2)
+    {
+        *type = 4;
+        *x = px;
+        *y = py;
+        return 1;
+    }
     return iosim_event_next(type, x, y);
 }

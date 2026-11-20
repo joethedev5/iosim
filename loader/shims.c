@@ -364,6 +364,8 @@ static const struct iosim_shim shims[] = {
     SHIM_DIRECT(iosim_fb_height),
     SHIM_DIRECT(iosim_png_load),
     SHIM_DIRECT(iosim_fb_set_opacity),
+    SHIM_DIRECT(iosim_fb_push_clip),
+    SHIM_DIRECT(iosim_fb_pop_clip),
     SHIM_DIRECT(__sincos_stret),
     SHIM_DIRECT(iosim_fb_text),
     SHIM_DIRECT(iosim_fb_text_width),

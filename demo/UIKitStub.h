@@ -269,6 +269,8 @@ enum {
 @property(nonatomic, retain) id dataSource;
 @property(nonatomic, retain) id delegate;
 @property double rowHeight;
+@property CGPoint contentOffset;
+@property CGSize contentSize;
 - (void)reloadData;
 - (id)dequeueReusableCellWithIdentifier:(id)identifier;
 @end

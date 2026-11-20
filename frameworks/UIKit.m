@@ -42,6 +42,8 @@ extern void iosim_fb_font_metrics(int style, double size_pt, double scale,
 extern int  iosim_fb_present(const char *path);
 extern int  iosim_event_next(int *type, int *x, int *y);
 extern void iosim_fb_set_opacity(double opacity);
+extern void iosim_fb_push_clip(int x, int y, int w, int h);
+extern void iosim_fb_pop_clip(void);
 extern double iosim_now(void);
 extern int  iosim_foundation_tick(void);
 extern int  iosim_dispatch_drain_main(void);
@@ -352,6 +354,66 @@ enum {
 - (NSLayoutDimension *)heightAnchor;
 @end
 
+@class UIGestureRecognizer;
+
+typedef enum {
+    UIGestureRecognizerStatePossible = 0,
+    UIGestureRecognizerStateBegan = 1,
+    UIGestureRecognizerStateChanged = 2,
+    UIGestureRecognizerStateEnded = 3,
+    UIGestureRecognizerStateCancelled = 4,
+    UIGestureRecognizerStateFailed = 5,
+    UIGestureRecognizerStateRecognized = 3
+} UIGestureRecognizerState;
+
+typedef enum {
+    UISwipeGestureRecognizerDirectionRight = 1 << 0,
+    UISwipeGestureRecognizerDirectionLeft = 1 << 1,
+    UISwipeGestureRecognizerDirectionUp = 1 << 2,
+    UISwipeGestureRecognizerDirectionDown = 1 << 3
+} UISwipeGestureRecognizerDirection;
+
+@interface UIGestureRecognizer : NSObject {
+@public
+    id _target;
+    SEL _action;
+    id _view;
+    long _state;
+    CGPoint _location;
+    CGPoint _translation;
+    BOOL _enabled;
+}
+- (id)initWithTarget:(id)target action:(SEL)action;
+- (void)addTarget:(id)target action:(SEL)action;
+- (long)state;
+- (id)view;
+- (CGPoint)locationInView:(UIView *)view;
+- (void)setEnabled:(BOOL)enabled;
+- (BOOL)isEnabled;
+@end
+
+@interface UITapGestureRecognizer : UIGestureRecognizer {
+@public
+    int _numberOfTapsRequired;
+}
+- (void)setNumberOfTapsRequired:(int)count;
+- (int)numberOfTapsRequired;
+@end
+
+@interface UIPanGestureRecognizer : UIGestureRecognizer
+- (CGPoint)translationInView:(UIView *)view;
+- (CGPoint)velocityInView:(UIView *)view;
+- (void)setTranslation:(CGPoint)translation inView:(UIView *)view;
+@end
+
+@interface UISwipeGestureRecognizer : UIGestureRecognizer {
+@public
+    long _direction;
+}
+- (void)setDirection:(long)direction;
+- (long)direction;
+@end
+
 @interface UIView : UIResponder {
 @public
     CGRect _frame;
@@ -374,6 +436,9 @@ enum {
     int _constraintCount;
     UILayoutGuide *_safeAreaGuide;
     BOOL _needsConstraintsUpdate;
+    id _gestureRecognizers[8];
+    int _gestureRecognizerCount;
+    BOOL _clipsToBounds;
 }
 - (id)initWithFrame:(CGRect)frame;
 - (CGRect)frame;
@@ -415,6 +480,11 @@ enum {
 - (NSLayoutDimension *)widthAnchor;
 - (NSLayoutDimension *)heightAnchor;
 - (UILayoutGuide *)safeAreaLayoutGuide;
+- (void)setClipsToBounds:(BOOL)clips;
+- (BOOL)clipsToBounds;
+- (void)addGestureRecognizer:(UIGestureRecognizer *)recognizer;
+- (void)removeGestureRecognizer:(UIGestureRecognizer *)recognizer;
+- (NSArray *)gestureRecognizers;
 - (CGSize)sizeThatFits:(CGSize)size;
 - (CGSize)intrinsicContentSize;
 + (void)animateWithDuration:(double)duration animations:(void (^)(void))animations;
@@ -665,11 +735,19 @@ enum {
 @interface UIWindow : UIView {
 @public
     UIViewController *_rootViewController;
+    UIScrollView *_dragScroll;
+    CGPoint _dragStartContent;
+    CGPoint _dragStartPoint;
+    UIView *_touchHit;
+    UIPanGestureRecognizer *_activePan;
 }
 - (id)initWithWindowScene:(UIWindowScene *)scene;
 - (void)setRootViewController:(UIViewController *)controller;
 - (UIViewController *)rootViewController;
 - (void)dispatchTapX:(int)x y:(int)y;
+- (void)dispatchTouchDownX:(int)x y:(int)y;
+- (void)dispatchTouchMoveX:(int)x y:(int)y;
+- (void)dispatchTouchUpX:(int)x y:(int)y;
 - (void)makeKeyAndVisible;
 + (UIWindow *)keyWindow;
 @end
@@ -733,6 +811,8 @@ static void animation_mark_active(double duration, double repeat);
 }
 - (double)cornerRadius { return _cornerRadius; }
 - (void)setCornerRadius:(double)radius { _cornerRadius = radius; }
+- (void)setMasksToBounds:(BOOL)masks { _masksToBounds = masks; }
+- (BOOL)masksToBounds { return _masksToBounds; }
 - (CGRect)frame { return _frame; }
 - (void)setFrame:(CGRect)frame { _frame = frame; }
 - (void)setBackgroundColor:(UIColor *)color { _backgroundColor = color; }
@@ -1125,6 +1205,59 @@ static NSLayoutConstraint *make_layout_constraint(id item1, long attr1,
 }
 @end
 
+@implementation UIGestureRecognizer
+- (id)initWithTarget:(id)target action:(SEL)action
+{
+    self = [super init];
+    if (self)
+    {
+        _target = target;
+        _action = action;
+        _state = UIGestureRecognizerStatePossible;
+        _enabled = YES;
+    }
+    return self;
+}
+- (void)addTarget:(id)target action:(SEL)action
+{
+    _target = target;
+    _action = action;
+}
+- (long)state { return _state; }
+- (id)view { return _view; }
+- (CGPoint)locationInView:(UIView *)view { (void)view; return _location; }
+- (void)setEnabled:(BOOL)enabled { _enabled = enabled; }
+- (BOOL)isEnabled { return _enabled; }
+@end
+
+@implementation UITapGestureRecognizer
+- (void)setNumberOfTapsRequired:(int)count { _numberOfTapsRequired = count; }
+- (int)numberOfTapsRequired { return _numberOfTapsRequired; }
+@end
+
+@implementation UIPanGestureRecognizer
+- (CGPoint)translationInView:(UIView *)view
+{
+    (void)view;
+    return _translation;
+}
+- (CGPoint)velocityInView:(UIView *)view
+{
+    (void)view;
+    return CGPointMake(0, 0);
+}
+- (void)setTranslation:(CGPoint)translation inView:(UIView *)view
+{
+    (void)view;
+    _translation = translation;
+}
+@end
+
+@implementation UISwipeGestureRecognizer
+- (void)setDirection:(long)direction { _direction = direction; }
+- (long)direction { return _direction; }
+@end
+
 static void iosim_layout_apply(UIView *root);
 
 #define IOSIM_MAX_WRAP_LINES 64
@@ -1254,6 +1387,8 @@ static int wrap_text_lines(const char *text, int style, double points,
 }
 - (void)setBackgroundColor:(UIColor *)color { _backgroundColor = color; }
 - (UIColor *)backgroundColor { return _backgroundColor; }
+- (void)setClipsToBounds:(BOOL)clips { _clipsToBounds = clips; }
+- (BOOL)clipsToBounds { return _clipsToBounds; }
 - (void)addSubview:(UIView *)view
 {
     if (!view)
@@ -1409,10 +1544,36 @@ static int wrap_text_lines(const char *text, int style, double points,
         _safeAreaGuide->_owningView = self;
         const char *top = getenv("IOSIM_SAFE_TOP");
         const char *bottom = getenv("IOSIM_SAFE_BOTTOM");
-        _safeAreaGuide->_topInset = top ? atof(top) : 59.0;
+        _safeAreaGuide->_topInset = top ? atof(top) : 62.0;
         _safeAreaGuide->_bottomInset = bottom ? atof(bottom) : 34.0;
     }
     return _safeAreaGuide;
+}
+- (void)addGestureRecognizer:(UIGestureRecognizer *)recognizer
+{
+    if (!recognizer)
+        return;
+    recognizer->_view = self;
+    if (_gestureRecognizerCount < 8)
+        _gestureRecognizers[_gestureRecognizerCount++] = recognizer;
+}
+- (void)removeGestureRecognizer:(UIGestureRecognizer *)recognizer
+{
+    for (int i = 0; i < _gestureRecognizerCount; i++)
+    {
+        if (_gestureRecognizers[i] == recognizer)
+        {
+            for (int j = i; j + 1 < _gestureRecognizerCount; j++)
+                _gestureRecognizers[j] = _gestureRecognizers[j + 1];
+            _gestureRecognizerCount--;
+            break;
+        }
+    }
+}
+- (NSArray *)gestureRecognizers
+{
+    return [NSArray arrayWithObjects:_gestureRecognizers
+                                count:(unsigned long)_gestureRecognizerCount];
 }
 - (CGSize)sizeThatFits:(CGSize)size
 {
@@ -2050,6 +2211,18 @@ static int wrap_text_lines(const char *text, int style, double points,
 
 
 @implementation UIScrollView
+- (id)initWithFrame:(CGRect)frame
+{
+    self = [super initWithFrame:frame];
+    if (self)
+    {
+        _clipsToBounds = YES;
+        _scrollEnabled = YES;
+        _showsVerticalScrollIndicator = YES;
+        _bounces = YES;
+    }
+    return self;
+}
 - (CGSize)contentSize { return _contentSize; }
 - (void)setContentSize:(CGSize)size { _contentSize = size; }
 - (CGPoint)contentOffset { return _contentOffset; }
@@ -2153,13 +2326,38 @@ static int wrap_text_lines(const char *text, int style, double points,
         _style = style;
     return self;
 }
-- (void)setDataSource:(id)dataSource { _dataSource = dataSource; }
+- (void)updateContentSize
+{
+    long rows = 0;
+    if (_dataSource &&
+        [_dataSource respondsToSelector:
+            @selector(tableView:numberOfRowsInSection:)])
+    {
+        SEL sel = @selector(tableView:numberOfRowsInSection:);
+        rows = ((long (*)(id, void *, id, long))objc_msgSend)(
+            _dataSource, (void *)sel, self, 0);
+    }
+    _contentSize = CGSizeMake(_frame.size.width, rows * _rowHeight);
+}
+- (void)setDataSource:(id)dataSource
+{
+    _dataSource = dataSource;
+    [self updateContentSize];
+}
 - (id)dataSource { return _dataSource; }
 - (void)setDelegate:(id)delegate { _delegate = delegate; }
 - (id)delegate { return _delegate; }
-- (void)setRowHeight:(double)height { _rowHeight = height; }
+- (void)setRowHeight:(double)height
+{
+    _rowHeight = height;
+    [self updateContentSize];
+}
 - (double)rowHeight { return _rowHeight; }
-- (void)reloadData { _needsReload = NO; }
+- (void)reloadData
+{
+    _needsReload = NO;
+    [self updateContentSize];
+}
 - (id)dequeueReusableCellWithIdentifier:(id)identifier
 {
     (void)identifier;
@@ -2189,6 +2387,25 @@ id UIApplicationDidEnterBackgroundNotification = @"UIApplicationDidEnterBackgrou
 id UIApplicationWillEnterForegroundNotification = @"UIApplicationWillEnterForegroundNotification";
 id UIApplicationDidFinishLaunchingNotification = @"UIApplicationDidFinishLaunchingNotification";
 
+static void send_gesture_action(UIGestureRecognizer *gesture, long state)
+{
+    if (!gesture || !gesture->_enabled)
+        return;
+    gesture->_state = state;
+    if (gesture->_target && gesture->_action)
+        ((void (*)(id, SEL, id))objc_msgSend)(gesture->_target,
+                                             gesture->_action, gesture);
+}
+
+static double clamp_scroll(double value, double low, double high)
+{
+    if (value < low)
+        return low;
+    if (value > high)
+        return high;
+    return value;
+}
+
 @implementation UIWindow
 - (id)initWithWindowScene:(UIWindowScene *)scene
 {
@@ -2202,6 +2419,133 @@ id UIApplicationDidFinishLaunchingNotification = @"UIApplicationDidFinishLaunchi
         [self addSubview:[controller view]];
 }
 - (UIViewController *)rootViewController { return _rootViewController; }
+- (void)dispatchTouchDownX:(int)x y:(int)y
+{
+    double scale = [[UIScreen mainScreen] scale];
+    if (scale <= 0)
+        scale = 1.0;
+    CGPoint point = CGPointMake(x / scale, y / scale);
+    _dragStartPoint = point;
+    _dragStartContent = CGPointMake(0, 0);
+    _dragScroll = nil;
+    _activePan = nil;
+    _touchHit = [self hitTest:point];
+    for (UIView *v = _touchHit; v; v = [v superview])
+    {
+        if (!_dragScroll && [v isKindOfClass:[UIScrollView class]])
+            _dragScroll = (UIScrollView *)v;
+        for (int i = 0; i < v->_gestureRecognizerCount; i++)
+        {
+            UIGestureRecognizer *g = v->_gestureRecognizers[i];
+            if (!g || !g->_enabled)
+                continue;
+            if ([g isKindOfClass:[UIPanGestureRecognizer class]] && !_activePan)
+            {
+                _activePan = (UIPanGestureRecognizer *)g;
+                g->_location = point;
+                g->_translation = CGPointMake(0, 0);
+                send_gesture_action(g, UIGestureRecognizerStateBegan);
+            }
+        }
+    }
+    if (_dragScroll)
+        _dragStartContent = _dragScroll->_contentOffset;
+    if (getenv("IOSIM_DEBUG_TOUCH"))
+        printf("[touch] down hit=%p scroll=%p pan=%p\n", _touchHit,
+               _dragScroll, _activePan);
+}
+- (void)dispatchTouchMoveX:(int)x y:(int)y
+{
+    double scale = [[UIScreen mainScreen] scale];
+    if (scale <= 0)
+        scale = 1.0;
+    CGPoint point = CGPointMake(x / scale, y / scale);
+    if (_activePan)
+    {
+        _activePan->_location = point;
+        _activePan->_translation =
+            CGPointMake(point.x - _dragStartPoint.x,
+                        point.y - _dragStartPoint.y);
+        send_gesture_action(_activePan, UIGestureRecognizerStateChanged);
+    }
+    if (_dragScroll && _dragScroll->_scrollEnabled)
+    {
+        double maxX = _dragScroll->_contentSize.width -
+                      _dragScroll->_frame.size.width;
+        double maxY = _dragScroll->_contentSize.height -
+                      _dragScroll->_frame.size.height;
+        if (maxX < 0)
+            maxX = 0;
+        if (maxY < 0)
+            maxY = 0;
+        double nx = _dragStartContent.x - (point.x - _dragStartPoint.x);
+        double ny = _dragStartContent.y - (point.y - _dragStartPoint.y);
+        _dragScroll->_contentOffset =
+            CGPointMake(clamp_scroll(nx, -30, maxX + 30),
+                        clamp_scroll(ny, -30, maxY + 30));
+        if (getenv("IOSIM_DEBUG_TOUCH"))
+            printf("[touch] move offset=%.1f,%.1f max=%.1f,%.1f\n",
+                   _dragScroll->_contentOffset.x,
+                   _dragScroll->_contentOffset.y, maxX, maxY);
+    }
+}
+- (void)dispatchTouchUpX:(int)x y:(int)y
+{
+    double scale = [[UIScreen mainScreen] scale];
+    if (scale <= 0)
+        scale = 1.0;
+    CGPoint point = CGPointMake(x / scale, y / scale);
+    if (_activePan)
+    {
+        _activePan->_location = point;
+        _activePan->_translation =
+            CGPointMake(point.x - _dragStartPoint.x,
+                        point.y - _dragStartPoint.y);
+        send_gesture_action(_activePan, UIGestureRecognizerStateEnded);
+        _activePan = nil;
+    }
+    if (_dragScroll)
+    {
+        double maxX = _dragScroll->_contentSize.width -
+                      _dragScroll->_frame.size.width;
+        double maxY = _dragScroll->_contentSize.height -
+                      _dragScroll->_frame.size.height;
+        if (maxX < 0)
+            maxX = 0;
+        if (maxY < 0)
+            maxY = 0;
+        _dragScroll->_contentOffset =
+            CGPointMake(clamp_scroll(_dragScroll->_contentOffset.x, 0, maxX),
+                        clamp_scroll(_dragScroll->_contentOffset.y, 0, maxY));
+        _dragScroll = nil;
+    }
+    double dx = point.x - _dragStartPoint.x;
+    double dy = point.y - _dragStartPoint.y;
+    long direction = 0;
+    if (__builtin_fabs(dx) > __builtin_fabs(dy))
+        direction = dx > 0 ? UISwipeGestureRecognizerDirectionRight
+                           : UISwipeGestureRecognizerDirectionLeft;
+    else if (__builtin_fabs(dy) > 0)
+        direction = dy > 0 ? UISwipeGestureRecognizerDirectionDown
+                           : UISwipeGestureRecognizerDirectionUp;
+    if (direction && (__builtin_fabs(dx) > 40 || __builtin_fabs(dy) > 40))
+    {
+        for (UIView *v = _touchHit; v; v = [v superview])
+            for (int i = 0; i < v->_gestureRecognizerCount; i++)
+            {
+                UIGestureRecognizer *g = v->_gestureRecognizers[i];
+                if (!g || !g->_enabled)
+                    continue;
+                if ([g isKindOfClass:[UISwipeGestureRecognizer class]] &&
+                    (((UISwipeGestureRecognizer *)g)->_direction & direction))
+                {
+                    g->_location = point;
+                    send_gesture_action(g, UIGestureRecognizerStateEnded);
+                }
+            }
+    }
+    _touchHit = nil;
+}
 - (void)dispatchTapX:(int)x y:(int)y
 {
     double scale = [[UIScreen mainScreen] scale];
@@ -2209,6 +2553,18 @@ id UIApplicationDidFinishLaunchingNotification = @"UIApplicationDidFinishLaunchi
         scale = 1.0;
     CGPoint point = CGPointMake(x / scale, y / scale);
     UIView *hit = [self hitTest:point];
+    for (UIView *v = hit; v; v = [v superview])
+        for (int i = 0; i < v->_gestureRecognizerCount; i++)
+        {
+            UIGestureRecognizer *g = v->_gestureRecognizers[i];
+            if (!g || !g->_enabled)
+                continue;
+            if ([g isKindOfClass:[UITapGestureRecognizer class]])
+            {
+                g->_location = point;
+                send_gesture_action(g, UIGestureRecognizerStateEnded);
+            }
+        }
     if (hit && [hit isKindOfClass:[UIControl class]])
         [(UIControl *)hit sendActionsForControlEvents:UIControlEventTouchUpInside];
     UIView *tableHit = hit;
@@ -2982,6 +3338,14 @@ static void render_view(UIView *view, double originX, double originY,
         y = (int)(cy - h / 2.0 + 0.5);
     }
 
+    int clipped = 0;
+    if ((view->_clipsToBounds || (view->_layer && view->_layer->_masksToBounds) ||
+         [view isKindOfClass:[UIScrollView class]]) && w > 0 && h > 0)
+    {
+        iosim_fb_push_clip(x, y, w, h);
+        clipped = 1;
+    }
+
     if (view->_backgroundColor && view->_backgroundColor->_a > 0.001 &&
         w > 0 && h > 0)
     {
@@ -3052,6 +3416,7 @@ static void render_view(UIView *view, double originX, double originY,
                 table->_dataSource, (void *)sel, table, 0);
         }
         double rowHeight = table->_rowHeight;
+        double tableScrollY = table->_contentOffset.y;
         for (long i = 0; i < rows; i++)
         {
             NSIndexPath *path = [NSIndexPath indexPathForRow:i inSection:0];
@@ -3063,7 +3428,7 @@ static void render_view(UIView *view, double originX, double originY,
                 rowHeight = ((double (*)(id, void *, id, id))objc_msgSend)(
                     table->_delegate, (void *)sel, table, path);
             }
-            int ry = y + (int)(i * rowHeight * scale + 0.5);
+            int ry = y + (int)((i * rowHeight - tableScrollY) * scale + 0.5);
             int rh = (int)(rowHeight * scale + 0.5);
             UITableViewCell *cell = nil;
             if (table->_dataSource &&
@@ -3076,7 +3441,7 @@ static void render_view(UIView *view, double originX, double originY,
             }
             if (cell)
             {
-                cell->_frame = CGRectMake(0, i * rowHeight,
+                cell->_frame = CGRectMake(0, i * rowHeight - tableScrollY,
                                           frame.size.width, rowHeight);
                 [cell setFrame:cell->_frame];
                 UIColor *savedBackground = cell->_backgroundColor;
@@ -3192,6 +3557,8 @@ static void render_view(UIView *view, double originX, double originY,
         render_view(sub, originX + frame.origin.x - scrollX,
                     originY + frame.origin.y - scrollY, scale, alpha);
     }
+    if (clipped)
+        iosim_fb_pop_clip();
     iosim_fb_set_opacity(1.0);
 }
 
@@ -3768,6 +4135,21 @@ int UIApplicationMain(int argc, char **argv, id principal, id delegateName)
             if (r == 1 && type == 1)
             {
                 [window dispatchTapX:x y:y];
+                redraw = 1;
+            }
+            else if (r == 1 && type == 2)
+            {
+                [window dispatchTouchDownX:x y:y];
+                redraw = 1;
+            }
+            else if (r == 1 && type == 3)
+            {
+                [window dispatchTouchMoveX:x y:y];
+                redraw = 1;
+            }
+            else if (r == 1 && type == 4)
+            {
+                [window dispatchTouchUpX:x y:y];
                 redraw = 1;
             }
             if (iosim_foundation_tick())
