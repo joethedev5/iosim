@@ -781,6 +781,23 @@ enum {
 - (UIColor *)trackTintColor;
 @end
 
+@interface UISegmentedControl : UIControl {
+@public
+    id _items[8];
+    int _itemCount;
+    long _selectedSegmentIndex;
+    UIColor *_tintColor;
+}
+- (id)initWithItems:(NSArray *)items;
+- (void)setTitle:(id)title forSegmentAtIndex:(unsigned long)index;
+- (id)titleForSegmentAtIndex:(unsigned long)index;
+- (void)setSelectedSegmentIndex:(long)index;
+- (long)selectedSegmentIndex;
+- (void)setTintColor:(UIColor *)color;
+- (UIColor *)tintColor;
+- (void)selectSegmentAtPoint:(CGPoint)point;
+@end
+
 @interface UIScrollView : UIView {
 @public
     CGSize _contentSize;
@@ -2000,6 +2017,54 @@ static UITextField *g_firstResponder;
 - (CGSize)intrinsicContentSize { return CGSizeMake(51, 31); }
 @end
 
+@implementation UISegmentedControl
+- (id)initWithItems:(NSArray *)items
+{
+    self = [super initWithFrame:CGRectMake(0, 0, 0, 32)];
+    if (self)
+    {
+        _itemCount = (int)[items count];
+        if (_itemCount > 8)
+            _itemCount = 8;
+        for (int i = 0; i < _itemCount; i++)
+            _items[i] = [items objectAtIndex:(unsigned long)i];
+        _selectedSegmentIndex = _itemCount > 0 ? 0 : -1;
+    }
+    return self;
+}
+- (void)setTitle:(id)title forSegmentAtIndex:(unsigned long)index
+{
+    if (index < (unsigned long)_itemCount)
+        _items[index] = title;
+}
+- (id)titleForSegmentAtIndex:(unsigned long)index
+{
+    return index < (unsigned long)_itemCount ? _items[index] : nil;
+}
+- (void)setSelectedSegmentIndex:(long)index
+{
+    _selectedSegmentIndex = index;
+    _needsLayout = YES;
+}
+- (long)selectedSegmentIndex { return _selectedSegmentIndex; }
+- (void)setTintColor:(UIColor *)color { _tintColor = color; }
+- (UIColor *)tintColor { return _tintColor; }
+- (void)selectSegmentAtPoint:(CGPoint)point
+{
+    if (_itemCount <= 0 || _frame.size.width <= 0)
+        return;
+    long index = (long)(point.x / (_frame.size.width / _itemCount));
+    if (index < 0) index = 0;
+    if (index >= _itemCount) index = _itemCount - 1;
+    if (index != _selectedSegmentIndex)
+    {
+        _selectedSegmentIndex = index;
+        [self sendActionsForControlEvents:UIControlEventValueChanged];
+    }
+}
+- (CGSize)intrinsicContentSize { return CGSizeMake(240, 32); }
+@end
+
 @implementation UISlider
 - (id)initWithFrame:(CGRect)frame
 {
@@ -3042,6 +3107,18 @@ static double clamp_scroll(double value, double low, double high)
             [(UITextField *)tv becomeFirstResponder];
             break;
         }
+    if (hit && [hit isKindOfClass:[UISegmentedControl class]])
+    {
+        double ox = 0, oy = 0;
+        for (UIView *a = hit; a; a = [a superview])
+        {
+            ox += a->_frame.origin.x;
+            oy += a->_frame.origin.y;
+        }
+        [(UISegmentedControl *)hit
+            selectSegmentAtPoint:CGPointMake(point.x - ox, point.y - oy)];
+        return;
+    }
     if (hit && [hit isKindOfClass:[UISlider class]])
     {
         double ox = 0, oy = 0;
@@ -4014,7 +4091,42 @@ static void render_view(UIView *view, double originX, double originY,
         iosim_fb_set_opacity(1.0);
     }
 
-    if ([view isKindOfClass:[UISwitch class]])
+    if ([view isKindOfClass:[UISegmentedControl class]])
+    {
+        UISegmentedControl *seg = (UISegmentedControl *)view;
+        unsigned base = seg->_tintColor ? color_rgb(seg->_tintColor)
+                                        : 0x2c2c2e;
+        iosim_fb_fill_round_rect(x, y, w, h, h / 2, base);
+        if (seg->_itemCount > 0)
+        {
+            int segW = w / seg->_itemCount;
+            if (seg->_selectedSegmentIndex >= 0)
+            {
+                int sx = x + (int)(seg->_selectedSegmentIndex * segW);
+                iosim_fb_fill_round_rect(sx + (int)(2 * scale),
+                                         y + (int)(2 * scale),
+                                         segW - (int)(4 * scale),
+                                         h - (int)(4 * scale),
+                                         (h - (int)(4 * scale)) / 2,
+                                         0x636366);
+            }
+            for (int i = 0; i < seg->_itemCount; i++)
+            {
+                const char *title = iosim_string_cstr(seg->_items[i]);
+                if (!title)
+                    continue;
+                int tw = iosim_fb_font_text_width(title, IOSIM_FONT_REGULAR,
+                                                  13, scale);
+                int asc = 0, desc = 0, lh = 0;
+                iosim_fb_font_metrics(IOSIM_FONT_REGULAR, 13, scale, &asc,
+                                      &desc, &lh);
+                iosim_fb_font_text(x + i * segW + (segW - tw) / 2,
+                                   y + (h - lh) / 2 + asc, title,
+                                   IOSIM_FONT_REGULAR, 13, scale, 0xffffff);
+            }
+        }
+    }
+    else if ([view isKindOfClass:[UISwitch class]])
     {
         UISwitch *sw = (UISwitch *)view;
         int radius = h / 2;

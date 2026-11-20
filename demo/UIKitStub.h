@@ -150,6 +150,10 @@ __attribute__((objc_root_class))
 @property(readonly) id navigationController;
 - (void)loadView;
 - (void)viewDidLoad;
+- (void)presentViewController:(UIViewController *)controller animated:(BOOL)animated
+                   completion:(void (^)(void))completion;
+- (void)dismissViewControllerAnimated:(BOOL)animated
+                           completion:(void (^)(void))completion;
 @end
 
 enum {
@@ -173,6 +177,29 @@ enum {
 - (void)setTitle:(id)title forState:(unsigned long)state;
 - (void)setTitleColor:(UIColor *)color forState:(unsigned long)state;
 @property(readonly) UILabel *titleLabel;
+@end
+
+@class UIAlertAction;
+
+@interface UIAlertAction : NSObject
++ (id)actionWithTitle:(id)title style:(long)style
+              handler:(void (^)(UIAlertAction *action))handler;
+@end
+
+@interface UIAlertController : UIViewController
++ (id)alertControllerWithTitle:(id)title message:(id)message
+                 preferredStyle:(long)style;
+- (void)addAction:(UIAlertAction *)action;
+@end
+
+enum { UIAlertControllerStyleActionSheet = 0, UIAlertControllerStyleAlert = 1 };
+enum { UIAlertActionStyleDefault = 0, UIAlertActionStyleCancel = 1,
+       UIAlertActionStyleDestructive = 2 };
+
+@interface UISegmentedControl : UIView
+- (id)initWithItems:(NSArray *)items;
+- (void)setSelectedSegmentIndex:(long)index;
+- (long)selectedSegmentIndex;
 @end
 
 @interface UISwitch : UIView
