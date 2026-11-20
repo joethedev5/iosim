@@ -498,6 +498,17 @@ expected Thursday and the seconds match Python's `calendar.timegm` for that
 timestamp. The current calendar also reports its
 `NSCalendarIdentifierGregorian` identifier.
 
+### Foundation: operation queues
+
+`tests/operation_test.m` adds three `addOperationWithBlock:` closures that
+print 0, 1 and 2 and increment a shared counter, plus an `NSBlockOperation`
+with two execution blocks and a completion block. It then calls
+`waitUntilAllOperationsAreFinished`. All seven lines appear, the final
+report is `blocks=3 pending=0 max=-1`, and the captured loop indexes are the
+real 0/1/2 (the blocks are copied when added, so a stack literal cannot
+observe the loop's final value). The group wait is a real join: the final
+line is printed only after every worker has returned.
+
 ### UIKit: app bundle resources
 
 `demo/ResourceApp.m` is installed as a real `.app` with a 4 x 4 red `dot.png`

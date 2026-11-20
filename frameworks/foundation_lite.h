@@ -361,6 +361,51 @@ extern id NSDefaultRunLoopMode;
 + (void)sleepForTimeInterval:(double)interval;
 @end
 
+@interface NSOperation : NSObject {
+@public
+    BOOL _cancelled;
+    BOOL _finished;
+    BOOL _dispatched;
+    id _completionBlock;
+}
+- (void)start;
+- (void)main;
+- (void)cancel;
+- (BOOL)isCancelled;
+- (BOOL)isFinished;
+- (void)setCompletionBlock:(void (^)(void))block;
+@end
+
+@interface NSBlockOperation : NSOperation {
+@public
+    id _blocks;
+}
++ (id)blockOperationWithBlock:(void (^)(void))block;
+- (void)addExecutionBlock:(void (^)(void))block;
+@end
+
+@interface NSOperationQueue : NSObject {
+@public
+    id _group;
+    id _queue;
+    id _operations;
+    long _pending;
+    long _maxConcurrent;
+    BOOL _suspended;
+}
++ (NSOperationQueue *)mainQueue;
+- (id)init;
+- (void)addOperation:(NSOperation *)operation;
+- (void)addOperationWithBlock:(void (^)(void))block;
+- (void)waitUntilAllOperationsAreFinished;
+- (long)operationCount;
+- (void)setMaxConcurrentOperationCount:(long)count;
+- (long)maxConcurrentOperationCount;
+- (void)setSuspended:(BOOL)suspended;
+- (BOOL)isSuspended;
+- (void)cancelAllOperations;
+@end
+
 @interface NSDate : NSObject {
 @public
     double _timeIntervalSince1970;

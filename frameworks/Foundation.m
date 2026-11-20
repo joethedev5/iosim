@@ -15,6 +15,8 @@ extern double iosim_now(void);
 extern double iosim_wall_time(void);
 extern int usleep(unsigned int usec);
 extern int pthread_main_np(void);
+extern void *_Block_copy(void *block);
+extern void _Block_release(void *block);
 extern void *objc_msgSend(void *self, void *sel, ...);
 extern void *objc_getClass(const char *name);
 extern char *getenv(const char *name);
@@ -3633,5 +3635,136 @@ id NSCalendarIdentifierGregorian = @"NSCalendarIdentifierGregorian";
     if (components->_nanosecond > 0)
         value += components->_nanosecond / 1e9;
     return [NSDate dateWithTimeIntervalSince1970:value];
+}
+@end
+
+/* ----------------------------------------------------------- operations */
+
+extern void *dispatch_get_global_queue(long identifier, unsigned long flags);
+extern void *dispatch_get_main_queue(void);
+extern void *dispatch_group_create(void);
+extern void dispatch_group_async(void *group, void *queue, void *block);
+extern long dispatch_group_wait(void *group, unsigned long long timeout);
+
+@implementation NSOperation
+- (void)start
+{
+    if (_cancelled || _finished)
+        return;
+    [self main];
+    _finished = YES;
+    if (_completionBlock)
+        ((void (^)(void))_completionBlock)();
+}
+- (void)main { }
+- (void)cancel { _cancelled = YES; }
+- (BOOL)isCancelled { return _cancelled; }
+- (BOOL)isFinished { return _finished; }
+- (void)setCompletionBlock:(void (^)(void))block
+{
+    _completionBlock = block ? (id)_Block_copy((void *)block) : nil;
+}
+@end
+
+@implementation NSBlockOperation
++ (id)blockOperationWithBlock:(void (^)(void))block
+{
+    NSBlockOperation *operation = [[self alloc] init];
+    operation->_blocks = [NSMutableArray array];
+    if (block)
+        [(NSMutableArray *)operation->_blocks
+            addObject:(id)_Block_copy((void *)block)];
+    return operation;
+}
+- (void)addExecutionBlock:(void (^)(void))block
+{
+    if (!_blocks)
+        _blocks = [NSMutableArray array];
+    if (block)
+        [(NSMutableArray *)_blocks addObject:(id)_Block_copy((void *)block)];
+}
+- (void)main
+{
+    if (!_blocks)
+        return;
+    for (unsigned long i = 0; i < [(NSArray *)_blocks count]; i++)
+    {
+        if (_cancelled)
+            return;
+        void (^block)(void) =
+            (void (^)(void))[(NSArray *)_blocks objectAtIndex:i];
+        block();
+    }
+}
+@end
+
+@implementation NSOperationQueue
++ (NSOperationQueue *)mainQueue
+{
+    static NSOperationQueue *queue;
+    if (!queue)
+    {
+        queue = [[self alloc] init];
+        queue->_queue = dispatch_get_main_queue();
+    }
+    return queue;
+}
+- (id)init
+{
+    self = [super init];
+    if (self)
+    {
+        _group = dispatch_group_create();
+        _queue = dispatch_get_global_queue(0, 0);
+        _operations = [NSMutableArray array];
+        _maxConcurrent = -1;
+    }
+    return self;
+}
+- (void)dispatchOperation:(NSOperation *)operation
+{
+    if (!operation || operation->_dispatched)
+        return;
+    operation->_dispatched = YES;
+    _pending++;
+    void (^run)(void) = ^{
+        [operation start];
+        _pending--;
+    };
+    dispatch_group_async(_group, _queue, (void *)run);
+}
+- (void)addOperation:(NSOperation *)operation
+{
+    if (!operation)
+        return;
+    [(NSMutableArray *)_operations addObject:operation];
+    if (!_suspended)
+        [self dispatchOperation:operation];
+}
+- (void)addOperationWithBlock:(void (^)(void))block
+{
+    [self addOperation:[NSBlockOperation blockOperationWithBlock:block]];
+}
+- (void)waitUntilAllOperationsAreFinished
+{
+    dispatch_group_wait(_group, ~0UL);
+}
+- (long)operationCount { return _pending; }
+- (void)setMaxConcurrentOperationCount:(long)count { _maxConcurrent = count; }
+- (long)maxConcurrentOperationCount { return _maxConcurrent; }
+- (void)setSuspended:(BOOL)suspended
+{
+    _suspended = suspended;
+    if (suspended)
+        return;
+    for (unsigned long i = 0; i < [(NSArray *)_operations count]; i++)
+        [self dispatchOperation:
+            (NSOperation *)[(NSArray *)_operations objectAtIndex:i]];
+}
+- (BOOL)isSuspended { return _suspended; }
+- (void)cancelAllOperations
+{
+    for (unsigned long i = 0; i < [(NSArray *)_operations count]; i++)
+        [(NSOperation *)[(NSArray *)_operations objectAtIndex:i] cancel];
 }
 @end

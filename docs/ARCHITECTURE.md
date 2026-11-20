@@ -325,6 +325,16 @@ Sunday-based weekday (plus ISO week and nanoseconds), and
 follow Foundation for an unset year/month/day, and
 `NSCalendarIdentifierGregorian` names the calendar.
 
+`NSOperationQueue` dispatches each `NSOperation` through a libdispatch
+global queue and counts it in a dispatch group, so
+`waitUntilAllOperationsAreFinished` is a real group wait; suspension defers
+the dispatch until resumed. `NSBlockOperation` copies its execution blocks
+with `_Block_copy` when they are added (a stack literal would otherwise die
+with its loop frame), runs them in order and then the completion block.
+Dispatch's group scheduling now copies the queued block, runs it on a
+worker thread and leaves the group when it returns, so group waits cover
+the execution rather than just the enqueue.
+
 Bundle resources follow the executable: when a guest image lives inside
 `Foo.app`, the loader exports `IOSIM_BUNDLE_DIR=Foo.app` (derived from the real
 executable path, so an app launched by SpringBoard does not inherit the system

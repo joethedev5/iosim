@@ -254,12 +254,52 @@ void dispatch_group_notify(void *group, void *queue, void *block)
     dispatch_group_wait(group, 0);
     dispatch_async(queue, block);
 }
+struct group_async_ctx {
+    void *group;
+    void *block;
+};
+
+static void *group_async_invoke(void *arg)
+{
+    struct group_async_ctx *ctx = arg;
+    call_block(ctx->block);
+    _Block_release(ctx->block);
+    dispatch_group_leave(ctx->group);
+    free(ctx);
+    return NULL;
+}
+
 void dispatch_group_async(void *group, void *queue, void *block)
 {
+    if (!group || !block)
+    {
+        dispatch_async(queue, block);
+        return;
+    }
+    if (queue == &main_queue || queue == NULL)
+    {
+        /* The main queue is drained by the host event loop; the block still
+         * runs there, and it is counted as scheduled for the group. */
+        dispatch_group_enter(group);
+        dispatch_async(queue, block);
+        dispatch_group_leave(group);
+        return;
+    }
     dispatch_group_enter(group);
-    mainq_push(block, 0.0);
-    dispatch_group_leave(group);
-    (void)queue;
+    struct group_async_ctx *ctx = malloc(sizeof(*ctx));
+    if (!ctx)
+    {
+        dispatch_async(queue, block);
+        dispatch_group_leave(group);
+        return;
+    }
+    ctx->group = group;
+    ctx->block = _Block_copy(block);
+    pthread_t thread;
+    if (pthread_create(&thread, NULL, group_async_invoke, ctx) == 0)
+        pthread_detach(thread);
+    else
+        group_async_invoke(ctx);
 }
 
 struct dispatch_semaphore_s {

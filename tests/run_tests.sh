@@ -333,6 +333,24 @@ check "[cal] back 2024-02-29 12:34:56 wd=5 epoch=1709210096" "$out" \
 check "[cal] id=NSCalendarIdentifierGregorian" "$out" \
     "the current calendar reports its identifier"
 
+# ---------- 4h. NSOperationQueue block operations ----------
+"$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc -fblocks \
+    -ffreestanding -O1 -I "$ROOT/frameworks" \
+    -c "$ROOT/tests/operation_test.m" -o "$T/operation.o"
+"$LD64" -arch x86_64 -platform_version $PLATFORM -e _main -o "$T/operation" \
+    "$T/operation.o" \
+    "$ROOT/runtime/System/Library/Frameworks/Foundation.framework/Foundation" \
+    -undefined dynamic_lookup
+out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/operation" 2>&1)"
+check "[op] block 0" "$out" "the first block operation ran"
+check "[op] block 1" "$out" "the second block operation ran"
+check "[op] block 2" "$out" "the third block operation ran"
+check "[op] multi one" "$out" "NSBlockOperation runs its first block"
+check "[op] multi two" "$out" "addExecutionBlock: appends a second block"
+check "[op] completion" "$out" "the operation's completion block runs"
+check "[op] blocks=3 pending=0 max=-1" "$out" \
+    "waitUntilAllOperationsAreFinished joins every operation"
+
 # ---------- 5. UIKit-lite framework dylib ----------
 cat > "$T/uikit_app.c" <<'EOF'
 extern int printf(const char *fmt, ...);

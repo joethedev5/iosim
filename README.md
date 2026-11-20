@@ -46,6 +46,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | `NSKeyedArchiver`/`NSKeyedUnarchiver` keyed archives with custom `NSCoding` classes | ✅ |
 | NSRunLoop timers and delayed performs, NSThread main-thread check and sleep | ✅ |
 | NSCalendar/NSDateComponents Gregorian decomposition and construction | ✅ |
+| NSOperationQueue/NSBlockOperation over dispatch groups | ✅ |
 | App bundle resources: `NSBundle` lookup and `UIImage imageNamed:` PNGs | ✅ |
 | libdispatch queues, groups, semaphores; main-queue drain from UIKit | ✅ |
 | Mach ports/messages, launchd bootstrap namespace, cross-process messaging | ✅ |
