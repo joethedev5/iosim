@@ -392,10 +392,18 @@ Python for iteration speed.
 
 ## 4. Known limitations
 
-- No graphics stack yet: no CoreAnimation render server, Metal, IOSurface or
-  window; `UIApplicationMain` returns immediately.
-- No Mach IPC/XPC, bootstrap namespace or launchd job management.
-- No `libdispatch`; Foundation beyond `NSLog` is not implemented.
+- Rendering is a software framebuffer. CoreAnimation is a subset: layers,
+  sublayers with zPosition, shadows, borders, gradients, shapes, opacity and
+  corner-radius animations. No render server, Metal, video or IOSurface.
+- Mach ports, bootstrap and XPC are in-process. There is no cross-process Mach
+  transport, launchd job control or multi-process app launch.
+- `libdispatch` covers main/global queues, groups, semaphores and timers.
+  Foundation is a subset (strings, collections, numbers, data, notifications,
+  timers, dates, errors, bundles, defaults); it is not the full Foundation.
+- Auto Layout is a relaxation solver over anchors and guides, not Cassowary;
+  it does not cover every UIKit layout API or content-size class.
+- Text input is a single-line `UITextField` with a QWERTY/numeric keyboard;
+  UITextView, selection handles and multitap gestures are absent.
 - Darwin syscall differences are hidden by glibc for simple calls, but
   `stat`, `pthread`, `kqueue`, `mmap` flags and Mach traps need explicit
   translation.
@@ -403,5 +411,5 @@ Python for iteration speed.
 - arm64 binaries are rejected (fat containers are accepted only for x86_64
   slices).
 - The dyld shared cache is not parsed; each dylib is loaded from disk.
-- Class method dispatch covers the common path; message forwarding, categories,
-  protocols, associated objects, ARC entry points and exceptions are pending.
+- Class method dispatch covers the common path; message forwarding, associated
+  objects, ARC entry points and exceptions are pending.
