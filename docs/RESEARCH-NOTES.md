@@ -390,6 +390,20 @@ management.
 - Fixture `tests/shape_stroke_test.m` covers a trimmed capped line, a
   half-stroked oval and a half-stroked rounded rectangle.
 
+## 2026-11-20: Mach port lifecycle
+
+- `mach_port_s` gained refs and dead flags. `mach_port_allocate` starts at
+  one right; `mach_port_insert_right` adds one; `mach_port_mod_refs` applies
+  the delta and releases the port at zero; `mach_port_deallocate` and
+  `mach_port_destroy` release unconditionally.
+- Releasing frees every queued message, closes the listening or peer socket
+  and broadcasts the port condition. A timed or blocking `mach_msg` receive
+  that wakes with no message returns `MACH_RCV_INVALID_NAME` when the port
+  died (otherwise `MACH_RCV_TIMED_OUT`), and later sends return
+  `MACH_SEND_INVALID_DEST`.
+- Fixture `tests/mach_port_lifecycle_test.c` covers refcounted survival,
+  payload delivery and both post-release error codes.
+
 ## Open directions
 
 - `metal-cpp` + macOS SDK Metal headers make it possible to implement a

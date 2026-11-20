@@ -624,6 +624,8 @@ struct mach_port_s {
     /* An XPC listener's accepted clients become peer connections instead of
      * Mach message sources. */
     int xpc_listener;
+    int refs;
+    int dead;
 };
 static struct mach_port_s ports[MAX_PORTS];
 static int port_counter = 2;
@@ -656,6 +658,8 @@ static uint32_t port_new(int peer_fd)
     ports[p].peer_fd = peer_fd;
     ports[p].service[0] = 0;
     ports[p].xpc_listener = 0;
+    ports[p].refs = 1;
+    ports[p].dead = 0;
     pthread_mutex_unlock(&ports_lock);
     return p;
 }
@@ -668,18 +672,87 @@ int mach_port_allocate(uint32_t task, uint32_t right, uint32_t *name)
         *name = p;
     return 0;
 }
-int mach_port_deallocate(uint32_t task, uint32_t name) { (void)task; (void)name; return 0; }
+
+/* Free a port name, its queued messages and any socket rights. Callers hold
+ * ports_lock. A blocked receiver wakes and reports MACH_RCV_INVALID_NAME. */
+static void port_release_locked(struct mach_port_s *p)
+{
+    pthread_mutex_lock(&p->lock);
+    p->used = 0;
+    p->dead = 1;
+    struct mach_msg_node *node = p->head;
+    while (node)
+    {
+        struct mach_msg_node *next = node->next;
+        free(node->data);
+        free(node);
+        node = next;
+    }
+    p->head = p->tail = NULL;
+    if (p->listen_fd >= 0)
+    {
+        close(p->listen_fd);
+        p->listen_fd = -1;
+    }
+    if (p->peer_fd >= 0)
+    {
+        close(p->peer_fd);
+        p->peer_fd = -1;
+    }
+    pthread_cond_broadcast(&p->cond);
+    pthread_mutex_unlock(&p->lock);
+}
+
+int mach_port_deallocate(uint32_t task, uint32_t name)
+{
+    (void)task;
+    pthread_mutex_lock(&ports_lock);
+    struct mach_port_s *p = port_get(name);
+    if (p)
+    {
+        p->refs--;
+        if (p->refs <= 0)
+            port_release_locked(p);
+    }
+    pthread_mutex_unlock(&ports_lock);
+    return 0;
+}
 int mach_port_mod_refs(uint32_t task, uint32_t name, int right, int delta)
 {
-    (void)task; (void)name; (void)right; (void)delta;
+    (void)task; (void)right;
+    pthread_mutex_lock(&ports_lock);
+    struct mach_port_s *p = port_get(name);
+    if (!p)
+    {
+        pthread_mutex_unlock(&ports_lock);
+        return 0x10000002; /* MACH_SEND_INVALID_DEST */
+    }
+    p->refs += delta;
+    if (p->refs <= 0)
+        port_release_locked(p);
+    pthread_mutex_unlock(&ports_lock);
     return 0;
 }
 int mach_port_insert_right(uint32_t task, uint32_t name, uint32_t poly, uint32_t poly_poly)
 {
-    (void)task; (void)name; (void)poly; (void)poly_poly;
+    (void)task; (void)poly; (void)poly_poly;
+    pthread_mutex_lock(&ports_lock);
+    struct mach_port_s *p = port_get(name);
+    if (p)
+        p->refs++;
+    pthread_mutex_unlock(&ports_lock);
     return 0;
 }
-int mach_port_destroy(uint32_t task, uint32_t name) { (void)task; (void)name; return 0; }
+int mach_port_destroy(uint32_t task, uint32_t name)
+{
+    (void)task;
+    pthread_mutex_lock(&ports_lock);
+    struct mach_port_s *p = port_get(name);
+    if (p)
+        port_release_locked(p);
+    pthread_mutex_unlock(&ports_lock);
+    return 0;
+}
 uint32_t mach_task_self(void) { return 1; }
 uint32_t mach_host_self(void) { return 1; }
 
@@ -742,7 +815,7 @@ int mach_msg(mach_msg_header_t *msg, uint32_t option, uint32_t send_size,
                 deadline.tv_sec += 1;
                 deadline.tv_nsec -= 1000000000L;
             }
-            while (!p->head)
+            while (!p->head && !p->dead)
             {
                 if (pthread_cond_timedwait(&p->cond, &p->lock, &deadline) ==
                     ETIMEDOUT)
@@ -750,13 +823,21 @@ int mach_msg(mach_msg_header_t *msg, uint32_t option, uint32_t send_size,
             }
             if (!p->head)
             {
+                int dead = p->dead;
                 pthread_mutex_unlock(&p->lock);
-                return 0x10004003; /* MACH_RCV_TIMED_OUT */
+                return dead ? 0x10004002 : 0x10004003;
             }
         }
         else
-            while (!p->head)
+        {
+            while (!p->head && !p->dead)
                 pthread_cond_wait(&p->cond, &p->lock);
+            if (!p->head)
+            {
+                pthread_mutex_unlock(&p->lock);
+                return 0x10004002; /* MACH_RCV_INVALID_NAME */
+            }
+        }
         struct mach_msg_node *node = p->head;
         p->head = node->next;
         if (!p->head) p->tail = NULL;

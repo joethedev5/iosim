@@ -989,6 +989,14 @@ pruned and a fresh registration succeeds; an unregistered name returns 1102.
 The transport is one `SOCK_SEQPACKET` datagram per message over a Linux
 abstract-namespace socket derived from the device UDID, so no filesystem
 rendezvous is needed and the name never collides with another device.
+`tests/mach_port_lifecycle_test.c` exercises local port rights in one
+process: an allocated receive port accepts a sent message and returns its
+payload; `mach_port_insert_right` followed by one `mach_port_mod_refs(-1)`
+keeps the port alive for a second round-trip; a further
+`mach_port_mod_refs(-1)` releases the name, after which `mach_msg_send`
+returns `MACH_SEND_INVALID_DEST` and `mach_msg_receive` returns
+`MACH_RCV_INVALID_NAME`; `mach_port_deallocate` releases a second port the
+same way (`[mach] lifecycle 1 1 1 1 1 1`).
 
 XPC rides on the same namespace. `tests/xpc_cross_test.c` is built with
 `-fblocks`; its service creates a mach-service listener

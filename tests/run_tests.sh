@@ -2013,6 +2013,12 @@ else
     echo "note: launchd log not captured at the expected path"
 fi
 
+obj "$ROOT/tests/mach_port_lifecycle_test.c" "$T/mach_port_lifecycle.o"
+exe "$T/mach_port_lifecycle" "$T/mach_port_lifecycle.o"
+out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/mach_port_lifecycle" 2>&1)"
+check "[mach] lifecycle 1 1 1 1 1 1" "$out" \
+    "mach ports refcount rights, deliver messages and fail after release"
+
 # ---------- 11. cross-process XPC ----------
 # An XPC listener registers its Mach service and receives each client as a
 # peer connection; the peer's handler gets the rebuilt dictionary and its
