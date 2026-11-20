@@ -37,6 +37,11 @@ extern void iosim_fb_blit_rgba_scaled(int x, int y, int w, int h,
                                       const unsigned char *rgba,
                                       int source_w, int source_h,
                                       int source_stride);
+extern void iosim_fb_fill_gradient_stops(int x, int y, int w, int h,
+                                         const unsigned *colors,
+                                         const double *locations, int count,
+                                         double ax, double ay, double bx,
+                                         double by);
 extern void *iosim_fb_begin_offscreen(unsigned width, unsigned height);
 extern unsigned *iosim_fb_end_offscreen(void *state, int *out_w, int *out_h);
 extern unsigned *iosim_fb_offscreen_pixels(void *state, int *out_w,
@@ -71,6 +76,13 @@ struct CGImage {
     unsigned magic;
     int w, h;
     unsigned char *rgba;
+};
+
+struct CGGradient {
+    int refs;
+    unsigned count;
+    double *components;
+    double *locations;
 };
 
 #define CG_MAX_PATH_POINTS 1024
@@ -1029,6 +1041,98 @@ void CGContextDrawImage(CGContextRef context, CGRect rect, CGImageRef imageRef)
     if (!image)
         return;
     iosim_cg_draw_image(context, image->rgba, image->w, image->h, rect);
+}
+
+CGGradientRef CGGradientCreateWithColorComponents(
+    CGColorSpaceRef space, const double *components, const double *locations,
+    unsigned long count)
+{
+    if (!space || !components || count < 2)
+        return 0;
+    struct CGGradient *gradient = calloc(1, sizeof(*gradient));
+    if (!gradient)
+        return 0;
+    gradient->components = malloc(sizeof(double) * count * 4);
+    gradient->locations = malloc(sizeof(double) * count);
+    if (!gradient->components || !gradient->locations)
+    {
+        free(gradient->components);
+        free(gradient->locations);
+        free(gradient);
+        return 0;
+    }
+    memcpy(gradient->components, components, sizeof(double) * count * 4);
+    for (unsigned long i = 0; i < count; i++)
+        gradient->locations[i] = locations
+            ? locations[i]
+            : (count > 1 ? (double)i / (double)(count - 1) : 0.0);
+    gradient->count = (unsigned)count;
+    gradient->refs = 1;
+    return (CGGradientRef)gradient;
+}
+
+CGGradientRef CGGradientRetain(CGGradientRef gradientRef)
+{
+    struct CGGradient *gradient = (struct CGGradient *)gradientRef;
+    if (gradient)
+        gradient->refs++;
+    return gradientRef;
+}
+
+void CGGradientRelease(CGGradientRef gradientRef)
+{
+    struct CGGradient *gradient = (struct CGGradient *)gradientRef;
+    if (!gradient)
+        return;
+    if (--gradient->refs > 0)
+        return;
+    free(gradient->components);
+    free(gradient->locations);
+    free(gradient);
+}
+
+void CGContextDrawLinearGradient(CGContextRef context, CGGradientRef gradientRef,
+                                 CGPoint start, CGPoint end,
+                                 unsigned options)
+{
+    (void)options;
+    struct CGGradient *gradient = (struct CGGradient *)gradientRef;
+    if (!context)
+        context = g_current_context;
+    if (!context || !gradient || gradient->count < 2)
+        return;
+    unsigned *colors = malloc(sizeof(unsigned) * gradient->count);
+    if (!colors)
+        return;
+    for (unsigned i = 0; i < gradient->count; i++)
+    {
+        const double *c = gradient->components + i * 4;
+        int r = (int)(cg_clamp(c[0]) * 255.0 + 0.5);
+        int g = (int)(cg_clamp(c[1]) * 255.0 + 0.5);
+        int b = (int)(cg_clamp(c[2]) * 255.0 + 0.5);
+        colors[i] = ((unsigned)r << 16) | ((unsigned)g << 8) | (unsigned)b;
+    }
+    double ax, ay, bx, by;
+    cg_transform(context, start.x, start.y, &ax, &ay);
+    cg_transform(context, end.x, end.y, &bx, &by);
+    iosim_fb_set_opacity(context->base_alpha * context->state.alpha);
+    iosim_fb_fill_gradient_stops(context->x, context->y, context->w,
+                                 context->h, colors, gradient->locations,
+                                 (int)gradient->count, ax, ay, bx, by);
+    iosim_fb_set_opacity(1.0);
+    free(colors);
+}
+
+void CGContextDrawRadialGradient(CGContextRef context, CGGradientRef gradientRef,
+                                 CGPoint startCenter, double startRadius,
+                                 CGPoint endCenter, double endRadius,
+                                 unsigned options)
+{
+    (void)startRadius;
+    (void)options;
+    CGContextDrawLinearGradient(
+        context, gradientRef, startCenter,
+        CGPointMake(endCenter.x + endRadius, endCenter.y), 0);
 }
 
 /* ------------------------------------------------------------------ paths */

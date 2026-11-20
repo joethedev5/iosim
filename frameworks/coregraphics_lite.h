@@ -8,6 +8,7 @@ typedef void *CGColorRef;
 typedef const void *CGPathRef;
 typedef struct CGImage *CGImageRef;
 typedef struct CGColorSpace *CGColorSpaceRef;
+typedef struct CGGradient *CGGradientRef;
 
 typedef enum CGColorSpaceModel {
     kCGColorSpaceModelUnknown = -1,
@@ -134,5 +135,17 @@ const unsigned char *iosim_cgimage_data(CGImageRef image, int *out_w,
                                         int *out_h);
 int iosim_cgimage_is_valid(const void *image);
 void CGContextDrawImage(CGContextRef context, CGRect rect, CGImageRef image);
+CGGradientRef CGGradientCreateWithColorComponents(
+    CGColorSpaceRef space, const double *components, const double *locations,
+    unsigned long count);
+CGGradientRef CGGradientRetain(CGGradientRef gradient);
+void CGGradientRelease(CGGradientRef gradient);
+void CGContextDrawLinearGradient(CGContextRef context, CGGradientRef gradient,
+                                 CGPoint start, CGPoint end,
+                                 unsigned options);
+void CGContextDrawRadialGradient(CGContextRef context, CGGradientRef gradient,
+                                 CGPoint startCenter, double startRadius,
+                                 CGPoint endCenter, double endRadius,
+                                 unsigned options);
 
 #endif

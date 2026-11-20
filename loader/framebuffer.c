@@ -2049,6 +2049,55 @@ void iosim_fb_fill_linear_gradient(int x, int y, int w, int h,
     }
 }
 
+void iosim_fb_fill_gradient_stops(int x, int y, int w, int h,
+                                  const uint32_t *colors,
+                                  const double *locations, int count,
+                                  double ax, double ay, double bx, double by)
+{
+    if (!fb_pixels || w <= 0 || h <= 0 || !colors || count <= 0)
+        return;
+    double dx = bx - ax, dy = by - ay;
+    double len2 = dx * dx + dy * dy;
+    if (len2 < 1e-9)
+    {
+        iosim_fb_fill_rect(x, y, w, h, colors[count - 1]);
+        return;
+    }
+    int x0 = x < 0 ? 0 : x, y0 = y < 0 ? 0 : y;
+    int x1 = x + w > (int)fb_width ? (int)fb_width : x + w;
+    int y1 = y + h > (int)fb_height ? (int)fb_height : y + h;
+    for (int yy = y0; yy < y1; yy++)
+    {
+        for (int xx = x0; xx < x1; xx++)
+        {
+            double t = ((xx + 0.5 - ax) * dx + (yy + 0.5 - ay) * dy) / len2;
+            if (t < 0) t = 0;
+            if (t > 1) t = 1;
+            int segment = 0;
+            while (segment + 2 < count && t > locations[segment + 1])
+                segment++;
+            double t0 = locations[segment];
+            double t1 = locations[segment + 1 < count ? segment + 1
+                                                      : segment];
+            double f = t1 > t0 ? (t - t0) / (t1 - t0) : 0;
+            if (f < 0) f = 0;
+            if (f > 1) f = 1;
+            uint32_t ca = colors[segment];
+            uint32_t cb = colors[segment + 1 < count ? segment + 1 : segment];
+            int ar = (int)((ca >> 16) & 0xFF);
+            int ag = (int)((ca >> 8) & 0xFF);
+            int ab = (int)(ca & 0xFF);
+            int br = (int)((cb >> 16) & 0xFF);
+            int bg = (int)((cb >> 8) & 0xFF);
+            int bb = (int)(cb & 0xFF);
+            unsigned r = (unsigned)(ar + (br - ar) * f + 0.5);
+            unsigned g = (unsigned)(ag + (bg - ag) * f + 0.5);
+            unsigned b = (unsigned)(ab + (bb - ab) * f + 0.5);
+            fb_blend_pixel(xx, yy, (r << 16) | (g << 8) | b, 1.0);
+        }
+    }
+}
+
 void iosim_fb_blit_rgba(int x, int y, int w, int h, const uint8_t *rgba,
                         int stride)
 {

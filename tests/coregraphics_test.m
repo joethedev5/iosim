@@ -162,5 +162,27 @@ int main(void)
     printf("[cg] clip restored %06x\n", pixel(pixels, 250, 240));
     printf("[cg] clip path inside %06x outside %06x\n",
            pixel(pixels, 60, 270), pixel(pixels, 50, 50));
+
+    CGColorSpaceRef gradient_space = CGColorSpaceCreateDeviceRGB();
+    double gradient_components[8] = { 1, 0, 0, 1, 0, 0, 1, 1 };
+    double gradient_locations[2] = { 0, 1 };
+    CGGradientRef gradient = CGGradientCreateWithColorComponents(
+        gradient_space, gradient_components, gradient_locations, 2);
+    CGContextRef gradient_context = iosim_cg_begin_image(100, 20, 1.0);
+    CGContextDrawLinearGradient(gradient_context, gradient,
+                                CGPointMake(0, 0), CGPointMake(100, 0), 0);
+    unsigned char *gradient_rgba = 0;
+    int gradient_w = 0, gradient_h = 0;
+    iosim_cg_image_data(gradient_context, &gradient_rgba, &gradient_w,
+                        &gradient_h);
+    unsigned char *left = gradient_rgba + (0 * gradient_w + 0) * 4;
+    unsigned char *middle = gradient_rgba + (0 * gradient_w + 50) * 4;
+    printf("[cg] gradient %d %d\n",
+           left[0] > 240 && left[2] < 15,
+           middle[0] > 110 && middle[0] < 145 &&
+               middle[2] > 110 && middle[2] < 145);
+    iosim_cg_end_image(gradient_context);
+    CGGradientRelease(gradient);
+    CGColorSpaceRelease(gradient_space);
     return 0;
 }

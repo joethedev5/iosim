@@ -275,8 +275,10 @@ tap, clamps programmatic selectedRange and replaces/removes selected ranges;
 the renderer paints the selection highlight. CGContextClip rasterizes path
 masks and intersects active masks; framebuffer fills, strokes, glyphs and
 image blits honor them. Quadratic/cubic CGPath and CGContext curves flatten
-into 24/32 line segments; UIBezierPath exposes the same methods. Still
-missing: color management and adaptive curve subdivision.
+into 24/32 line segments; UIBezierPath exposes the same methods. CGGradient
+stores multiple stops and CGContextDrawLinearGradient interpolates them
+per-pixel through clip and mask. Still missing: color management and adaptive
+curve subdivision.
 
 ## Open directions
 

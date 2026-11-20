@@ -3192,6 +3192,8 @@ check "[cg] curve elements 33" "$out" \
     "CGPathAddCurveToPoint flattens a cubic into 32 line elements"
 check "[cg] quad elements 25" "$out" \
     "CGPathAddQuadCurveToPoint flattens a quadratic into 24 line elements"
+check "[cg] gradient 1 1" "$out" \
+    "CGContextDrawLinearGradient interpolates color stops across a context"
 
 "$ROOT/tools/build_app.sh" "$ROOT/tests/cgimage_layer_test.m" \
     "$T/cgimage_layer_test" >/dev/null

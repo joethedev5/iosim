@@ -37,6 +37,10 @@ void iosim_fb_fill_polygon(const double *xs, const double *ys, int count,
 void iosim_fb_fill_linear_gradient(int x, int y, int w, int h,
                                    uint32_t start_color, uint32_t end_color,
                                    double sx, double sy, double ex, double ey);
+void iosim_fb_fill_gradient_stops(int x, int y, int w, int h,
+                                  const uint32_t *colors,
+                                  const double *locations, int count,
+                                  double ax, double ay, double bx, double by);
 void iosim_fb_fill_linear_gradient_round_rect(int x, int y, int w, int h,
                                               int radius,
                                               uint32_t start_color,
