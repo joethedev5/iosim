@@ -297,8 +297,9 @@ whole down/moves/up gesture in one command.
 frame, then starts `animateWithDuration:2.0 delay:0.1
 options:UIViewAnimationOptionCurveEaseInOut animations:completion:` on a blue
 box while a `CAKeyframeAnimation` pulses a layer's opacity from 1.0 to 0.25
-and back twice. The app samples `layer.presentationLayer` every fifth display
-link frame:
+and back twice and a second animation on the same layer sweeps its corner
+radius from 12 to 20 pt. The app samples `layer.presentationLayer` every fifth
+display link frame:
 
 ```
 [anim] tick 30
@@ -317,6 +318,9 @@ The test asserts:
 - a sampled presentation frame lies strictly between the box's start (300 pt)
   and end (470 pt) positions;
 - a sampled presentation opacity drops below 0.40 (the keyframe animation);
+- a sampled `[anim] tracks` line shows opacity below 0.90 and corner radius
+  above 12.4 at the same instant, and the radius track later passes 15 pt —
+  two animations advance together on one layer;
 - the mid-flight screenshot's topmost blue pixel is between 300 and 455 pt,
   while the settled screenshot's dimmed box starts at 470 pt;
 - the display-link dot is present in the lower band of the settled frame.
@@ -558,8 +562,8 @@ Backgrounded apps are suspended in place (SIGSTOP) and resumed from their icon
 or switcher card, with no memory-pressure termination policy. CoreText shaping is limited to the glyphs in SFUI;
 right-to-left and complex scripts are not shaped. `UIView.transform` applies a
 full 2D affine transform (translation, scale and rotation) through an offscreen
-composite; `CATransform3D` is not supported. Core Animation keeps one explicit
-animation slot per layer, so a layer can animate one property at a time, and
-`CADisplayLink` ignores preferred frame-rate ranges. XPC carries dictionaries
+composite; `CATransform3D` is not supported. Core Animation keeps four
+explicit animation slots per layer, and `CADisplayLink` ignores preferred
+frame-rate ranges. XPC carries dictionaries
 and value objects between processes but not connections, file descriptors or
 reply ports. Metal and video remain unimplemented.

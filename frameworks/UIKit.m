@@ -66,6 +66,7 @@ extern const char *iosim_string_cstr(id string);
 extern int  strcmp(const char *a, const char *b);
 extern unsigned long strlen(const char *s);
 extern void *memcpy(void *dst, const void *src, unsigned long n);
+extern void *memset(void *dst, int c, unsigned long n);
 extern int  snprintf(char *buf, unsigned long size, const char *fmt, ...);
 extern int  iosim_fs_mkdir(const char *path, int intermediates);
 extern int  iosim_fs_read(const char *path, unsigned char **out,
@@ -113,6 +114,27 @@ typedef void *CGColorRef;
 
 @class UIColor;
 
+/* A layer can carry several explicit animations at once, keyed the way
+ * CALayer keys them: adding with an existing key replaces that animation, and
+ * adding without a key appends a new one. The most recently added animation
+ * for a property wins when the renderer samples it. */
+#define LAYER_ANIM_SLOTS 4
+struct layer_anim {
+    int used;
+    int infinite;
+    id keyPath;
+    id fromValue;
+    id toValue;
+    id values;
+    id keyTimes;
+    id timingFunction;
+    id key;
+    double start;
+    double duration;
+    double repeatCount;
+    double seq;
+};
+
 @interface CALayer : NSObject {
 @public
     double _cornerRadius;
@@ -123,16 +145,8 @@ typedef void *CGColorRef;
     BOOL _masksToBounds;
     id _sublayers[16];
     int _sublayerCount;
-    id _animKeyPath;
-    id _animFrom;
-    id _animTo;
-    double _animStart;
-    double _animDuration;
-    double _animRepeatCount;
-    BOOL _animInfinite;
-    id _animValues;
-    id _animKeyTimes;
-    id _animTimingFunction;
+    struct layer_anim _anims[LAYER_ANIM_SLOTS];
+    double _animSeq;
     id _ownerView;
     UIColor *_shadowColor;
     double _shadowOpacity;
@@ -1218,35 +1232,64 @@ static double layer_key_value(CALayer *layer, const char *key, double base);
 - (void)removeFromSuperlayer { }
 - (void)addAnimation:(id)animation forKey:(id)key
 {
-    (void)key;
     CAAnimation *anim = (CAAnimation *)animation;
     BOOL keyframe = [anim isKindOfClass:[CAKeyframeAnimation class]];
-    _animKeyPath = anim->_keyPath;
-    _animFrom = keyframe ? nil : anim->_fromValue;
-    _animTo = keyframe ? nil : anim->_toValue;
-    _animValues = keyframe ? ((CAKeyframeAnimation *)anim)->_values : nil;
-    _animKeyTimes = keyframe ? ((CAKeyframeAnimation *)anim)->_keyTimes : nil;
-    _animTimingFunction = anim->_timingFunction;
-    _animDuration = anim->_duration;
-    _animRepeatCount = anim->_repeatCount;
-    _animStart = iosim_now();
-    _animInfinite = anim->_repeatCount < 0;
-    if (_animDuration <= 0)
-        _animDuration = 0.25;
-    animation_mark_active(_animDuration, _animRepeatCount);
+    int slot = -1;
+    if (key)
+    {
+        const char *wanted = iosim_string_cstr(key);
+        for (int i = 0; i < LAYER_ANIM_SLOTS && slot < 0; i++)
+        {
+            if (!_anims[i].used || !_anims[i].key)
+                continue;
+            const char *held = iosim_string_cstr(_anims[i].key);
+            if (held && wanted && strcmp(held, wanted) == 0)
+                slot = i;
+        }
+    }
+    for (int i = 0; i < LAYER_ANIM_SLOTS && slot < 0; i++)
+        if (!_anims[i].used)
+            slot = i;
+    if (slot < 0)
+        slot = 0; /* more animations than slots: replace the first */
+    struct layer_anim *entry = &_anims[slot];
+    if (entry->used && entry->infinite)
+        animation_unmark_infinite();
+    memset(entry, 0, sizeof(*entry));
+    entry->used = 1;
+    entry->keyPath = anim->_keyPath;
+    entry->fromValue = keyframe ? nil : anim->_fromValue;
+    entry->toValue = keyframe ? nil : anim->_toValue;
+    entry->values = keyframe ? ((CAKeyframeAnimation *)anim)->_values : nil;
+    entry->keyTimes = keyframe ? ((CAKeyframeAnimation *)anim)->_keyTimes : nil;
+    entry->timingFunction = anim->_timingFunction;
+    entry->key = key;
+    entry->duration = anim->_duration;
+    entry->repeatCount = anim->_repeatCount;
+    entry->start = iosim_now();
+    entry->seq = ++_animSeq;
+    entry->infinite = anim->_repeatCount < 0;
+    if (entry->duration <= 0)
+        entry->duration = 0.25;
+    animation_mark_active(entry->duration, entry->repeatCount);
 }
 - (void)removeAnimationForKey:(id)key
 {
-    (void)key;
-    if (_animInfinite)
+    const char *wanted = key ? iosim_string_cstr(key) : 0;
+    if (!wanted)
+        return;
+    for (int i = 0; i < LAYER_ANIM_SLOTS; i++)
     {
-        _animInfinite = NO;
-        animation_unmark_infinite();
+        struct layer_anim *entry = &_anims[i];
+        if (!entry->used || !entry->key)
+            continue;
+        const char *held = iosim_string_cstr(entry->key);
+        if (!held || strcmp(held, wanted) != 0)
+            continue;
+        if (entry->infinite)
+            animation_unmark_infinite();
+        memset(entry, 0, sizeof(*entry));
     }
-    _animKeyPath = nil;
-    _animValues = nil;
-    _animKeyTimes = nil;
-    _animTimingFunction = nil;
 }
 - (CALayer *)presentationLayer
 {
@@ -4181,11 +4224,22 @@ static double layer_keyframe_value(id values, id keyTimes, double t)
 
 static double layer_key_value(CALayer *layer, const char *key, double base)
 {
-    if (!layer->_animKeyPath ||
-        strcmp(iosim_string_cstr(layer->_animKeyPath), key) != 0)
+    struct layer_anim *anim = 0;
+    for (int i = 0; i < LAYER_ANIM_SLOTS; i++)
+    {
+        struct layer_anim *entry = &layer->_anims[i];
+        if (!entry->used || !entry->keyPath)
+            continue;
+        const char *path = iosim_string_cstr(entry->keyPath);
+        if (!path || strcmp(path, key) != 0)
+            continue;
+        if (!anim || entry->seq > anim->seq)
+            anim = entry;
+    }
+    if (!anim)
         return base;
-    double t = (iosim_now() - layer->_animStart) / layer->_animDuration;
-    double repeat = layer->_animRepeatCount;
+    double t = (iosim_now() - anim->start) / anim->duration;
+    double repeat = anim->repeatCount;
     if (t < 0)
         t = 0;
     if (repeat < 0)
@@ -4196,20 +4250,18 @@ static double layer_key_value(CALayer *layer, const char *key, double base)
         t = t - (long)t;
     else if (t >= 1.0)
     {
-        if (layer->_animValues)
-            return layer_keyframe_value(layer->_animValues,
-                                        layer->_animKeyTimes, 1.0);
-        return number_value(layer->_animTo, base);
+        if (anim->values)
+            return layer_keyframe_value(anim->values, anim->keyTimes, 1.0);
+        return number_value(anim->toValue, base);
     }
-    if (layer->_animValues)
-        return layer_keyframe_value(layer->_animValues, layer->_animKeyTimes,
-                                    t);
-    double from = number_value(layer->_animFrom, base);
-    double to = number_value(layer->_animTo, base);
+    if (anim->values)
+        return layer_keyframe_value(anim->values, anim->keyTimes, t);
+    double from = number_value(anim->fromValue, base);
+    double to = number_value(anim->toValue, base);
     double e;
-    if (layer->_animTimingFunction)
+    if (anim->timingFunction)
         e = ((double (*)(id, SEL, double))objc_msgSend)(
-            layer->_animTimingFunction, @selector(evaluate:), t);
+            anim->timingFunction, @selector(evaluate:), t);
     else
         e = curve_value(t, 3); /* Core Animation defaults to linear. */
     return from + (to - from) * e;

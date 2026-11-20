@@ -433,9 +433,13 @@ decoded with libpng in `loader/image.c`.
   layer opacity and corner radius, either from/to (`CABasicAnimation`) or
   through keyframes (`CAKeyframeAnimation` with values and keyTimes), using
   the animation's timing function or Core Animation's default linear pacing.
-  `layer.presentationLayer` returns the values at the current instant, so an
-  app can sample an animation in flight. A 2D affine transform is applied
-  around the view center through an offscreen composite.
+  A layer holds up to four explicit animations at once: adding with a key that
+  is already present replaces that animation, adding without a key appends,
+  and the most recently added animation for a property wins when it is
+  sampled. `layer.presentationLayer` returns the values at the current
+  instant, so an app can sample several animations in flight on one layer. A
+  2D affine transform is applied around the view center through an offscreen
+  composite.
 
 ### 2.11 Auto Layout, gestures and text input
 

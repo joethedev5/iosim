@@ -106,6 +106,8 @@ extern int fflush(void *stream);
     {
         CALayer *dotPresentation = [self.dot.layer presentationLayer];
         printf("[anim] dot %.2f\n", dotPresentation.opacity);
+        printf("[anim] tracks %.2f %.2f\n", dotPresentation.opacity,
+               dotPresentation.cornerRadius);
     }
     if (_ticks % 5 == 0)
         fflush(0);
@@ -126,6 +128,12 @@ extern int fflush(void *stream);
         [NSNumber numberWithDouble:0.0], [NSNumber numberWithDouble:0.5],
         [NSNumber numberWithDouble:1.0]} count:3]];
     [self.dot.layer addAnimation:pulse forKey:@"pulse"];
+    CAAnimation *corner = [CAAnimation animationWithKeyPath:@"cornerRadius"];
+    corner.fromValue = [NSNumber numberWithDouble:12.0];
+    corner.toValue = [NSNumber numberWithDouble:20.0];
+    corner.duration = 2.0;
+    corner.repeatCount = -1.0;
+    [self.dot.layer addAnimation:corner forKey:@"corner"];
     [UIView animateWithDuration:2.0 delay:0.1
         options:UIViewAnimationOptionCurveEaseInOut
         animations:^{

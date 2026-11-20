@@ -38,7 +38,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | UIAlertController alerts, actions and modal presentation | ✅ |
 | UINavigationController push/pop, UIStackView intrinsic layout, UIButton titles | ✅ |
 | UIView animations (frame, alpha), delay/curve/repeat options, completion blocks | ✅ |
-| `CADisplayLink`, presentation layers, `CAKeyframeAnimation` on layer properties | ✅ |
+| `CADisplayLink`, presentation layers, multiple concurrent layer animations | ✅ |
 | CoreAnimation paths, gradients, sublayers (z-ordered), PNG images | ✅ |
 | Foundation collections, strings, notifications, timers, NSIndexPath | ✅ |
 | `NSFileManager`, `NSData` file I/O, `NSURL`, `NSJSONSerialization` | ✅ |

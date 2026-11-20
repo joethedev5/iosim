@@ -532,6 +532,26 @@ PY
 else
     echo "FAIL presentation values"; echo "$out"; fails=$((fails+1))
 fi
+if out="$(python3 - "$SBLOG" <<'PY'
+import sys
+tracks = []
+for line in open(sys.argv[1], errors='replace'):
+    if line.startswith('[anim] tracks '):
+        parts = line.split()
+        tracks.append((float(parts[2]), float(parts[3])))
+if not tracks:
+    raise SystemExit('no concurrent track samples')
+if not any(o < 0.90 and r > 12.4 for o, r in tracks):
+    raise SystemExit('tracks never advanced together: %r' % tracks[:8])
+if not any(r > 15.0 for o, r in tracks):
+    raise SystemExit('corner radius track did not advance: %r' % tracks[:8])
+print('ok   opacity and corner radius animate on one layer at the same time')
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL multiple layer animations"; echo "$out"; fails=$((fails+1))
+fi
 if out="$(python3 - "$ROOT/tools" "$T/anim-mid.png" "$T/anim-end.png" <<'PY'
 import sys
 sys.path.insert(0, sys.argv[1])
