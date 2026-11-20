@@ -459,6 +459,18 @@ end to end rather than a path string check. Because the directory is derived
 from the executable, an app launched by SpringBoard replaces the system UI's
 inherited bundle path with its own.
 
+### Services: the system pasteboard
+
+`tests/pasteboard_test.m` links UIKit and runs as separate processes against
+one `SIMULATOR_SHARED_RESOURCES_DIRECTORY`. The writer sets the general
+pasteboard string and reports `change=1`; a second process reads
+`hello pasteboard` with `change=1` and `hasStrings=1`. The file at
+`var/run/pasteboard.plist` is parsed by `plistlib` as a real XML plist whose
+first item carries `public.utf8-plain-text`. A data write then replaces the
+contents (`len=3 change=2`), and another process reads the same three bytes
+back as `data=3/1 change=2`, so the pasteboard is a device service rather
+than per-process state.
+
 ### Services: dispatch, Mach, bootstrap and XPC
 
 `tests/services_test.m` is an Apple-clang x86_64 executable with no UI. It
@@ -694,4 +706,6 @@ composite; `CATransform3D` is not supported. Core Animation keeps four
 explicit animation slots per layer, and `CADisplayLink` ignores preferred
 frame-rate ranges. XPC carries dictionaries
 and value objects between processes but not connections, file descriptors or
-reply ports. Metal and video remain unimplemented.
+reply ports. The pasteboard shares strings and data items but has no rich
+pasteboard types, item providers or change notifications. Metal and video
+remain unimplemented.

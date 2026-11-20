@@ -434,6 +434,13 @@ transport and the bootstrap namespace are shared across the device.
   the listener's event handler with the new object. Within one process a send
   still calls the peer connection's handler directly, preserving the original
   in-process flow. Handlers are heap-copied so stack blocks stay valid.
+- **UIPasteboard** is a device-level service without a daemon: the general
+  pasteboard is an XML property list at
+  `$SIMULATOR_SHARED_RESOURCES_DIRECTORY/var/run/pasteboard.plist`, and each
+  access reloads it so any guest process sees another app's latest write.
+  Items are dictionaries keyed by pasteboard type; `string`/`setString:` use
+  `public.utf8-plain-text` and `dataForPasteboardType:`/`setData:` handle any
+  other type. Every write bumps a persisted `changeCount`.
 
 `tools/iosim-launchd` is the per-device boot anchor, state owner and bootstrap
 namespace server.

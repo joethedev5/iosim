@@ -1299,6 +1299,25 @@ enum {
 - (void)endBackgroundTask:(unsigned long)task;
 @end
 
+/* The system pasteboard lives in the device's shared resources directory so
+ * every guest process reads and writes the same contents. */
+@interface UIPasteboard : NSObject {
+@public
+    id _items;
+    long _changeCount;
+}
++ (UIPasteboard *)generalPasteboard;
+- (id)string;
+- (void)setString:(id)string;
+- (BOOL)hasStrings;
+- (id)items;
+- (void)setItems:(id)items;
+- (long)changeCount;
+- (id)dataForPasteboardType:(id)type;
+- (void)setData:(id)data forPasteboardType:(id)type;
+- (long)numberOfItems;
+@end
+
 @interface UIScene : NSObject {
 @public
     id _delegate;
@@ -4837,6 +4856,180 @@ static double clamp_scroll(double value, double low, double high)
     return 0;
 }
 - (void)endBackgroundTask:(unsigned long)task { (void)task; }
+@end
+
+static id g_pasteboard_text_type;
+static id g_pasteboard_text_type_value(void)
+{
+    if (!g_pasteboard_text_type)
+        g_pasteboard_text_type = @"public.utf8-plain-text";
+    return g_pasteboard_text_type;
+}
+
+static void pasteboard_path(char *out, unsigned long cap)
+{
+    const char *shared = getenv("SIMULATOR_SHARED_RESOURCES_DIRECTORY");
+    if (shared && *shared)
+    {
+        snprintf(out, cap, "%s/var/run/pasteboard.plist", shared);
+        return;
+    }
+    const char *home = getenv("HOME");
+    snprintf(out, cap, "%s/Library/Preferences/pasteboard.plist",
+             home && *home ? home : ".");
+}
+
+@implementation UIPasteboard
++ (UIPasteboard *)generalPasteboard
+{
+    static UIPasteboard *board;
+    if (!board)
+        board = [[self alloc] init];
+    return board;
+}
+- (void)reload
+{
+    char path[1024];
+    pasteboard_path(path, sizeof(path));
+    unsigned char *bytes = 0;
+    unsigned long length = 0;
+    if (iosim_fs_read(path, &bytes, &length) != 0)
+        return;
+    NSData *data = [[NSData alloc] initWithBytes:bytes length:length];
+    free(bytes);
+    id plist = [NSPropertyListSerialization propertyListWithData:data
+                                                         options:0
+                                                          format:0
+                                                           error:0];
+    if (!plist || ![plist isKindOfClass:[NSDictionary class]])
+        return;
+    id items = [plist objectForKey:@"items"];
+    if (items && [items isKindOfClass:[NSArray class]])
+        _items = items;
+    id change = [plist objectForKey:@"changeCount"];
+    if (change && [change respondsToSelector:@selector(integerValue)])
+        _changeCount = [change integerValue];
+}
+- (void)save
+{
+    char path[1024];
+    pasteboard_path(path, sizeof(path));
+    char dir[1024];
+    snprintf(dir, sizeof(dir), "%s", path);
+    char *slash = 0;
+    for (char *q = dir; *q; q++)
+        if (*q == '/')
+            slash = q;
+    if (slash)
+    {
+        *slash = 0;
+        iosim_fs_mkdir(dir, 1);
+    }
+    NSMutableDictionary *plist = [NSMutableDictionary dictionary];
+    if (_items)
+        [plist setObject:_items forKey:@"items"];
+    [plist setObject:[NSNumber numberWithInteger:_changeCount]
+              forKey:@"changeCount"];
+    NSData *data = [NSPropertyListSerialization
+        dataWithPropertyList:plist format:NSPropertyListXMLFormat_v1_0
+        options:0 error:0];
+    if (data)
+        [data writeToFile:[NSString stringWithUTF8String:path]
+               atomically:YES];
+}
+- (id)items
+{
+    [self reload];
+    return _items ? _items : [NSArray array];
+}
+- (void)setItems:(id)items
+{
+    NSMutableArray *copied = [NSMutableArray array];
+    if (items && [items isKindOfClass:[NSArray class]])
+    {
+        for (unsigned long i = 0; i < [items count]; i++)
+        {
+            id item = [items objectAtIndex:i];
+            if (item && [item isKindOfClass:[NSDictionary class]])
+                [copied addObject:item];
+        }
+    }
+    _items = copied;
+    _changeCount++;
+    [self save];
+}
+- (id)string
+{
+    id items = [self items];
+    id type = g_pasteboard_text_type_value();
+    for (unsigned long i = 0; i < [items count]; i++)
+    {
+        id item = [items objectAtIndex:i];
+        if (![item isKindOfClass:[NSDictionary class]])
+            continue;
+        id value = [(NSDictionary *)item objectForKey:type];
+        if (value && [value isKindOfClass:[NSString class]])
+            return value;
+    }
+    return nil;
+}
+- (void)setString:(id)string
+{
+    [self reload];
+    NSMutableArray *items = [NSMutableArray array];
+    if (string)
+    {
+        NSMutableDictionary *item = [NSMutableDictionary dictionary];
+        [item setObject:string forKey:g_pasteboard_text_type_value()];
+        [items addObject:item];
+    }
+    _items = items;
+    _changeCount++;
+    [self save];
+}
+- (BOOL)hasStrings
+{
+    return [self string] != nil;
+}
+- (long)changeCount
+{
+    [self reload];
+    return _changeCount;
+}
+- (id)dataForPasteboardType:(id)type
+{
+    if (!type)
+        return nil;
+    id items = [self items];
+    for (unsigned long i = 0; i < [items count]; i++)
+    {
+        id item = [items objectAtIndex:i];
+        if (![item isKindOfClass:[NSDictionary class]])
+            continue;
+        id value = [(NSDictionary *)item objectForKey:type];
+        if (value)
+            return value;
+    }
+    return nil;
+}
+- (void)setData:(id)data forPasteboardType:(id)type
+{
+    [self reload];
+    NSMutableArray *items = [NSMutableArray array];
+    if (data && type)
+    {
+        NSMutableDictionary *item = [NSMutableDictionary dictionary];
+        [item setObject:data forKey:type];
+        [items addObject:item];
+    }
+    _items = items;
+    _changeCount++;
+    [self save];
+}
+- (long)numberOfItems
+{
+    return (long)[[self items] count];
+}
 @end
 
 /* ---------------------------------------------------------------- scenes */

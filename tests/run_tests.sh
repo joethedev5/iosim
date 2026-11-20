@@ -275,6 +275,48 @@ check "runloop: tick 2" "$out" \
 check "runloop: sleeping=1 cancelled=0" "$out" \
     "cancelled performs do not fire and sleeping waits"
 
+# ---------- 4f. UIPasteboard crosses processes through the device ----------
+"$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
+    -ffreestanding -O1 -I "$ROOT/frameworks" \
+    -c "$ROOT/tests/pasteboard_test.m" -o "$T/pasteboard.o"
+"$LD64" -arch x86_64 -platform_version $PLATFORM -e _main \
+    -o "$T/pasteboard" "$T/pasteboard.o" \
+    "$ROOT/runtime/System/Library/Frameworks/UIKit.framework/UIKit" \
+    "$ROOT/runtime/System/Library/Frameworks/Foundation.framework/Foundation" \
+    -undefined dynamic_lookup
+PB_SHARED="$T/pasteboard-shared"
+rm -rf "$PB_SHARED"
+mkdir -p "$PB_SHARED"
+out="$(SIMULATOR_SHARED_RESOURCES_DIRECTORY="$PB_SHARED" \
+    DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/pasteboard" write 2>&1)"
+check "[paste] wrote hello pasteboard change=1" "$out" \
+    "one process writes the general pasteboard"
+out="$(SIMULATOR_SHARED_RESOURCES_DIRECTORY="$PB_SHARED" \
+    DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/pasteboard" read 2>&1)"
+check "[paste] read=hello pasteboard change=1 strings=1" "$out" \
+    "a second process reads the same pasteboard string"
+if out="$(python3 - "$PB_SHARED/var/run/pasteboard.plist" <<'PY'
+import plistlib, sys
+with open(sys.argv[1], "rb") as f:
+    d = plistlib.load(f)
+assert d["changeCount"] == 1, d
+assert d["items"][0]["public.utf8-plain-text"] == "hello pasteboard", d
+print("ok   the pasteboard is a device-level XML property list")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL pasteboard plist"; echo "$out"; fails=$((fails+1))
+fi
+out="$(SIMULATOR_SHARED_RESOURCES_DIRECTORY="$PB_SHARED" \
+    DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/pasteboard" write-data 2>&1)"
+check "[paste] wrote-data len=3 change=2" "$out" \
+    "pasteboard data replaces the contents and bumps changeCount"
+out="$(SIMULATOR_SHARED_RESOURCES_DIRECTORY="$PB_SHARED" \
+    DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/pasteboard" read-data 2>&1)"
+check "[paste] data=3/1 change=2" "$out" \
+    "a second process reads the typed pasteboard data"
+
 # ---------- 5. UIKit-lite framework dylib ----------
 cat > "$T/uikit_app.c" <<'EOF'
 extern int printf(const char *fmt, ...);

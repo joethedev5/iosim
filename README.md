@@ -49,6 +49,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | libdispatch queues, groups, semaphores; main-queue drain from UIKit | ✅ |
 | Mach ports/messages, launchd bootstrap namespace, cross-process messaging | ✅ |
 | XPC connections and dictionaries, serialized across processes | ✅ |
+| UIPasteboard general pasteboard shared across processes, with changeCount | ✅ |
 | SpringBoard system UI: measured iOS 26 home screen, installed apps, real app launching | ✅ |
 | Real app suspension: home stops the process, the icon resumes it in place | ✅ |
 | Application/scene lifecycle callbacks, notifications and UIApplication state | ✅ |

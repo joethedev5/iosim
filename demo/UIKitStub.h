@@ -403,6 +403,17 @@ enum {
 - (long)applicationState;
 @end
 
+@interface UIPasteboard : NSObject
++ (UIPasteboard *)generalPasteboard;
+@property(nonatomic, retain) id string;
+@property(readonly) long changeCount;
+- (BOOL)hasStrings;
+- (id)items;
+- (void)setItems:(id)items;
+- (id)dataForPasteboardType:(id)type;
+- (void)setData:(id)data forPasteboardType:(id)type;
+@end
+
 extern int UIApplicationMain(int argc, char **argv, id principal,
                              id delegateName);
 
