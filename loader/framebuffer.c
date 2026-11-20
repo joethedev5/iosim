@@ -312,6 +312,11 @@ int iosim_fb_present(const char *path)
     ihdr[12] = 0;  /* interlace */
     int rc = write_chunk(f, "IHDR", ihdr, sizeof(ihdr));
     if (rc == 0)
+    {
+        static const uint8_t srgb_intent = 0;
+        rc = write_chunk(f, "sRGB", &srgb_intent, 1);
+    }
+    if (rc == 0)
         rc = write_chunk(f, "IDAT", comp, (uint32_t)comp_len);
     if (rc == 0)
         rc = write_chunk(f, "IEND", NULL, 0);
@@ -499,9 +504,19 @@ static FT_Face get_face(int style, double size_pt)
             FT_Fixed *coords = calloc(mm->num_axis, sizeof(FT_Fixed));
             if (coords)
             {
-                FT_Fixed weight = style == IOSIM_FONT_BOLD ? 700 * 65536
-                                  : style == IOSIM_FONT_SEMIBOLD ? 600 * 65536
-                                                                 : 400 * 65536;
+                int bold_weight = 600;
+                int semibold_weight = 600;
+                const char *bw = getenv("IOSIM_BOLD_WEIGHT");
+                const char *sw = getenv("IOSIM_SEMIBOLD_WEIGHT");
+                if (bw)
+                    bold_weight = atoi(bw);
+                if (sw)
+                    semibold_weight = atoi(sw);
+                FT_Fixed weight = style == IOSIM_FONT_BOLD
+                                      ? bold_weight * 65536
+                                      : style == IOSIM_FONT_SEMIBOLD
+                                            ? semibold_weight * 65536
+                                            : 400 * 65536;
                 for (FT_UInt i = 0; i < mm->num_axis; i++)
                 {
                     FT_Var_Axis *axis = &mm->axis[i];
@@ -569,10 +584,21 @@ static uint32_t utf8_next(const unsigned char **pp)
 
 static double system_tracking_pt(int style, double size_pt)
 {
+    const char *env_override = NULL;
+    if (style == IOSIM_FONT_REGULAR && size_pt >= 16.5 && size_pt <= 17.5)
+        env_override = getenv("IOSIM_TRACK_REG17");
+    else if (style == IOSIM_FONT_REGULAR && size_pt >= 15.5 && size_pt <= 16.5)
+        env_override = getenv("IOSIM_TRACK_REG16");
+    else if (style == IOSIM_FONT_BOLD && size_pt >= 33 && size_pt <= 35)
+        env_override = getenv("IOSIM_TRACK_BOLD34");
+    else if (style == IOSIM_FONT_BOLD && size_pt >= 17.5 && size_pt <= 18.5)
+        env_override = getenv("IOSIM_TRACK_BOLD18");
+    if (env_override)
+        return atof(env_override);
     static const double sizes[] = { 10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 24, 28, 32, 36, 48, 64, 96 };
-    static const double regular[] = { 0.12, 0.06, 0.00, -0.12, -0.303, -0.32, -0.353, -0.487, -0.52, -0.46, -0.30, -0.20, -0.30, -0.25, -0.20, -0.15, -0.10 };
-    static const double bold[]    = { 0.16, 0.10, 0.04, -0.08, -0.30, -0.34, -0.38, -0.55, -0.762, -0.68, -0.45, -0.30, -0.22, -0.18, -0.13, -0.10, -0.08 };
-    static const double semibold[]= { 0.14, 0.08, 0.02, -0.10, -0.28, -0.30, -0.35, -0.11, -0.20, -0.18, -0.15, -0.12, -0.10, -0.09, -0.08, -0.07, -0.06 };
+    static const double regular[] = { 0.12, 0.06, 0.00, -0.12, -0.303, -0.32, -0.38, -0.54, -0.52, -0.46, -0.30, -0.20, -0.30, -0.25, -0.20, -0.15, -0.10 };
+    static const double bold[]    = { 0.20, 0.15, 0.10, 0.00, -0.20, -0.35, -0.50, -0.55, -0.571, -0.40, -0.10, 0.10, 0.22, 0.30, 0.40, 0.40, 0.40 };
+    static const double semibold[]= { 0.14, 0.08, 0.02, -0.10, -0.28, -0.30, -0.35, -0.70, -0.76, -0.50, -0.30, -0.20, -0.15, -0.12, -0.09, -0.07, -0.05 };
     const double *table = style == IOSIM_FONT_BOLD ? bold
                           : style == IOSIM_FONT_SEMIBOLD ? semibold : regular;
     int n = (int)(sizeof(sizes) / sizeof(sizes[0]));
@@ -660,6 +686,14 @@ void iosim_fb_font_text(int x, int baseline_y, const char *text, int style,
             if (FT_Get_Kerning(face, prev, glyph, FT_KERNING_UNFITTED, &kern) == 0)
                 pen += kern.x;
         }
+        int64_t rounded = (pen + 32) >> 6;
+        FT_Vector delta;
+        delta.x = (FT_Pos)(pen - (rounded << 6));
+        delta.y = 0;
+        if (getenv("IOSIM_SUBPIXEL"))
+            FT_Set_Transform(face, NULL, &delta);
+        else
+            FT_Set_Transform(face, NULL, NULL);
         if (FT_Load_Glyph(face, glyph, FT_LOAD_NO_HINTING | FT_LOAD_NO_BITMAP) != 0)
         {
             prev = glyph;
@@ -671,7 +705,7 @@ void iosim_fb_font_text(int x, int baseline_y, const char *text, int style,
             continue;
         }
         FT_GlyphSlot slot = face->glyph;
-        int gx = x + (int)((pen + 32) >> 6) + slot->bitmap_left;
+        int gx = x + (int)rounded + slot->bitmap_left;
         int gy = baseline_y - slot->bitmap_top;
         for (unsigned row = 0; row < slot->bitmap.rows; row++)
         {

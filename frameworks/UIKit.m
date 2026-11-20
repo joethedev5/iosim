@@ -532,11 +532,15 @@ int UIApplicationMain(int argc, char **argv, id principal, id delegateName)
     /* Simulated device chrome: status bar, Dynamic Island, home indicator. */
     int margin = (int)(24 * scale);
     int right = fbWidth - margin;
+    double timeSize = getenv("IOSIM_TIME_SIZE") ? atof(getenv("IOSIM_TIME_SIZE"))
+                                                : 18.0;
+    double timeBaseline = getenv("IOSIM_TIME_BASELINE")
+                              ? atof(getenv("IOSIM_TIME_BASELINE")) : 38.9;
     int timeWidth = iosim_fb_font_text_width("9:41", IOSIM_FONT_SEMIBOLD,
-                                             17.0, scale);
-    iosim_fb_font_text((int)(81 * scale) - timeWidth / 2,
-                       (int)(39.0 * scale), "9:41", IOSIM_FONT_SEMIBOLD,
-                       17.0, scale, 0xffffff);
+                                             timeSize, scale);
+    iosim_fb_font_text((int)(80.67 * scale) - timeWidth / 2,
+                       (int)(timeBaseline * scale), "9:41",
+                       IOSIM_FONT_SEMIBOLD, timeSize, scale, 0xffffff);
     /* Cellular signal placeholders, Wi-Fi and battery, measured from the
      * iPhone 18 Pro status bar. */
     for (int i = 0; i < 4; i++)

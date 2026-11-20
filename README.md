@@ -27,16 +27,24 @@ runners**, combined with the public Darling and Apple dyld sources.
 | `objc_alloc_init`, autorelease pools, `sel_*`, `class_*` basics | ✅ |
 | Reimplemented `UIKit.framework` / `Foundation.framework` in a runtime root | ✅ (lite) |
 | `simctl`-style device lifecycle, boot, install, launch, spawn | ✅ |
-| UIKit rendering / CoreAnimation / Mach IPC / XPC / libdispatch | 🚧 roadmap |
+| Scene lifecycle (`UIWindowScene`, `UISceneDelegate`) required by iOS 27 | ✅ |
+| Software framebuffer, SF font rendering, UIKit subset rendering | ✅ |
+| CoreAnimation / Mach IPC / XPC / libdispatch | 🚧 roadmap |
 
 The test suite exercises a real Apple-toolchain-built x86_64 UIKit app, a
 Foundation app using `NSLog` with a constant `CFString`, an Objective-C app
 with its own class, and a two-image dylib app.
 
+**Same-app parity:** one `HelloSimApp.m` compiled by Apple clang, run on the
+real iPhone 18 Pro simulator (arm64) and natively under iosim (x86_64). The
+full-screen screenshots differ by a mean of 0.79/255 per channel, with 99.34 %
+of pixels inside a 24/255 tolerance. See
+[`docs/VERIFICATION.md`](docs/VERIFICATION.md).
+
 ## Quick start
 
 ```sh
-sudo apt install clang lld cmake ninja-build
+sudo apt install clang lld cmake ninja-build libfreetype-dev
 cmake -S . -B build -G Ninja
 cmake --build build
 ./tools/build_runtime.sh     # builds UIKit/Foundation-lite into ./runtime
@@ -85,6 +93,8 @@ tests/             end-to-end tests
   built, and how iosim mirrors it.
 - [`docs/RECON-XCODE27.md`](docs/RECON-XCODE27.md) — measured facts from the
   Xcode 27.1 runners, including the full captured simulator environment.
+- [`docs/VERIFICATION.md`](docs/VERIFICATION.md) — same-app parity against the
+  real iOS 27 simulator, with pixel measurements.
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — path from this substrate to a usable
   simulator (graphics, events, services, frameworks).
 
