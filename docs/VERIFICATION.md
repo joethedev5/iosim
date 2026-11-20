@@ -164,9 +164,9 @@ frame:
 
 | Metric | Value |
 |---|---|
-| Mean absolute channel error | **2.21 / 255** |
-| Pixels with max-channel error > 24 | **1.99 %** |
-| App content above the keyboard | **2.11 / 255** mean, 1.84 % over 24 |
+| Mean absolute channel error | **2.01 / 255** |
+| Pixels with max-channel error > 24 | **1.86 %** |
+| App content above the keyboard | **1.93 / 255** mean, 1.65 % over 24 |
 | Key background / keyboard background | `#444448` / `#202025` (sampled) |
 
 The keyboard geometry was measured key by key against the iPhone 18 Pro

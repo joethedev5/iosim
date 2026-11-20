@@ -4396,7 +4396,7 @@ static void render_view(UIView *view, double originX, double originY,
         int ascent = 0, descent = 0, lineHeight = 0;
         iosim_fb_font_metrics(style, points, scale, &ascent, &descent,
                               &lineHeight);
-        int tx = x + (int)(12 * scale);
+        int tx = x;
         int baseline = y + (h - lineHeight) / 2 + ascent;
         unsigned color = field->_textColor ? color_rgb(field->_textColor)
                                            : 0xffffff;
@@ -4424,17 +4424,30 @@ static void render_view(UIView *view, double originX, double originY,
         }
         else if (placeholder && *placeholder)
         {
+            unsigned bg = field->_backgroundColor
+                              ? color_rgb(field->_backgroundColor)
+                              : 0x000000;
+            double a = 0.28;
+            unsigned pr = (unsigned)((((color >> 16) & 0xff) * a) +
+                                     (((bg >> 16) & 0xff) * (1 - a)));
+            unsigned pg = (unsigned)((((color >> 8) & 0xff) * a) +
+                                     (((bg >> 8) & 0xff) * (1 - a)));
+            unsigned pb = (unsigned)(((color & 0xff) * a) +
+                                     ((bg & 0xff) * (1 - a)));
             iosim_fb_font_text(tx, baseline, placeholder, style, points, scale,
-                               0x8e8e93);
+                               (pr << 16) | (pg << 8) | pb);
             textWidth = iosim_fb_font_text_width(placeholder, style, points,
                                                  scale);
         }
         if (field->_firstResponder)
         {
-            int caretX = tx + textWidth + (int)(1 * scale);
+            int caretX = (text && *text)
+                             ? tx + textWidth + (int)(1 * scale)
+                             : x;
             int caretH = (int)(22 * scale);
-            iosim_fb_fill_rect(caretX, baseline - ascent, (int)(2 * scale),
-                               caretH, 0x0a84ff);
+            iosim_fb_fill_rect(caretX,
+                               baseline - ascent - (int)(0.7 * scale + 0.5),
+                               (int)(2 * scale), caretH, 0x426bf2);
         }
     }
 
@@ -4698,13 +4711,13 @@ static void kb_shift(int x, int y, int w, int h, double scale)
 {
     int cx = x + w / 2, cy = y + h / 2;
     double pts[7][2] = {
-        {0.0, -8.0}, {-9.5, 2.7}, {-4.8, 2.7}, {-4.8, 9.0},
-        {4.8, 9.0}, {4.8, 2.7}, {9.5, 2.7}
+        {0.0, -8.0}, {-10.2, 2.7}, {-4.8, 2.7}, {-4.8, 9.0},
+        {4.8, 9.0}, {4.8, 2.7}, {10.2, 2.7}
     };
     double xs[7], ys[7];
     for (int i = 0; i < 7; i++)
     {
-        xs[i] = cx + pts[i][0] * scale;
+        xs[i] = cx - 1 + pts[i][0] * scale;
         ys[i] = cy + pts[i][1] * scale;
     }
     iosim_fb_fill_polygon(xs, ys, 7, 0xffffff);
@@ -4737,20 +4750,20 @@ static void kb_backspace(int x, int y, int w, int h, double scale)
     int cx = x + w / 2, cy = y + h / 2;
     int t = (int)(2 * scale + 0.5);
     if (t < 1) t = 1;
-    int lx = cx - (int)(10.0 * scale + 0.5);
-    int px = cx - (int)(2.3 * scale + 0.5);
-    int rx = cx + (int)(9.5 * scale + 0.5);
-    int ty = cy - (int)(7.7 * scale + 0.5);
-    int by = cy + (int)(9.0 * scale + 0.5);
+    int lx = cx + 1 - (int)(9.2 * scale + 0.5);
+    int px = cx + 1 - (int)(2.4 * scale + 0.5);
+    int rx = cx + 1 + (int)(9.0 * scale + 0.5);
+    int ty = cy - (int)(6.7 * scale + 0.5);
+    int by = cy + (int)(8.0 * scale + 0.5);
     int my = cy + (int)(1.0 * scale + 0.5);
     iosim_fb_draw_line(lx, my, px, ty, t, 0xffffff);
     iosim_fb_draw_line(px, ty, rx, ty, t, 0xffffff);
     iosim_fb_draw_line(rx, ty, rx, by, t, 0xffffff);
     iosim_fb_draw_line(rx, by, px, by, t, 0xffffff);
     iosim_fb_draw_line(px, by, lx, my, t, 0xffffff);
-    int e = (int)(2.2 * scale + 0.5);
-    int q = (int)(4.0 * scale + 0.5);
-    int ox = cx + (int)(1.8 * scale + 0.5);
+    int e = (int)(3.1 * scale + 0.5);
+    int q = (int)(3.2 * scale + 0.5);
+    int ox = cx + 1 + (int)(1.6 * scale + 0.5);
     iosim_fb_draw_line(ox - e, cy - q, ox + e, cy + q, t, 0xffffff);
     iosim_fb_draw_line(ox - e, cy + q, ox + e, cy - q, t, 0xffffff);
 }
@@ -4841,13 +4854,59 @@ static void kb_mic(int cx, int cy, double scale)
                              (int)(0.7 * scale + 0.5), 0xffffff);
 }
 
+static void kb_panel(int fbW, int fbH, double scale, int topPx,
+                     unsigned color)
+{
+    /* iOS 26 keyboard panel: 26 pt top corners, 58 pt bottom corners,
+     * flush with the bottom of the screen. */
+    enum { N = 12 };
+    double pts[4 * N + 4][2];
+    int n = 0;
+    double r1 = 26.0 * scale, r2 = 58.0 * scale;
+    double top = topPx, bot = fbH;
+    for (int i = 0; i <= N; i++)
+    {
+        double a = (180.0 + 90.0 * i / N) * 3.14159265358979323846 / 180.0;
+        pts[n][0] = r1 + r1 * __builtin_cos(a);
+        pts[n][1] = top + r1 + r1 * __builtin_sin(a);
+        n++;
+    }
+    for (int i = 0; i <= N; i++)
+    {
+        double a = (270.0 + 90.0 * i / N) * 3.14159265358979323846 / 180.0;
+        pts[n][0] = fbW - r1 + r1 * __builtin_cos(a);
+        pts[n][1] = top + r1 + r1 * __builtin_sin(a);
+        n++;
+    }
+    for (int i = 0; i <= N; i++)
+    {
+        double a = (0.0 + 90.0 * i / N) * 3.14159265358979323846 / 180.0;
+        pts[n][0] = fbW - r2 + r2 * __builtin_cos(a);
+        pts[n][1] = bot - r2 + r2 * __builtin_sin(a);
+        n++;
+    }
+    for (int i = 0; i <= N; i++)
+    {
+        double a = (90.0 + 90.0 * i / N) * 3.14159265358979323846 / 180.0;
+        pts[n][0] = r2 + r2 * __builtin_cos(a);
+        pts[n][1] = bot - r2 + r2 * __builtin_sin(a);
+        n++;
+    }
+    double xs[4 * N + 4], ys[4 * N + 4];
+    for (int i = 0; i < n; i++)
+    {
+        xs[i] = pts[i][0];
+        ys[i] = pts[i][1];
+    }
+    iosim_fb_fill_polygon(xs, ys, n, color);
+}
+
 static void draw_qwerty(int fbW, int fbH, double scale)
 {
     double W = fbW / scale, H = fbH / scale;
     double top = H - 324.0;
     int topPx = (int)(top * scale + 0.5);
-    iosim_fb_fill_round_rect(0, topPx, fbW, fbH - topPx + (int)(26 * scale),
-                             (int)(26 * scale), 0x202025);
+    kb_panel(fbW, fbH, scale, topPx, 0x202025);
     int predTop = topPx + (int)(9 * scale);
     int predH = (int)(24 * scale);
     for (int i = 1; i < 3; i++)
@@ -4928,8 +4987,7 @@ static void draw_number_pad(int fbW, int fbH, double scale)
     double kbH = hEnv ? atof(hEnv) : 326.0;
     double top = H - kbH;
     int topPx = (int)(top * scale + 0.5);
-    iosim_fb_fill_round_rect(0, topPx, fbW, fbH - topPx + (int)(26 * scale),
-                             (int)(26 * scale), 0x202025);
+    kb_panel(fbW, fbH, scale, topPx, 0x202025);
     double margin = 6, gap = 6;
     double kw = (W - 2 * margin - 2 * gap) / 3.0;
     double kh = 55;
