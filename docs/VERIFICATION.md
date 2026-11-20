@@ -873,6 +873,19 @@ lock screen screenshot with the same big-clock pixel count. Unlocking logs
 `[lockapp] foreground state=1` and `[lockapp] active state=0`: the same stopped
 process continued, and its view controller was never recreated.
 
+### UIKit: pull-to-refresh
+
+`demo/RefreshApp.m` attaches a `UIRefreshControl` to a twelve-row table. The
+suite drags from (200, 120) to (200, 300) pt, which the scroll view clamps to
+its refresh overscroll, and waits for `[refresh] pulled`: `beginRefreshing`
+snapped the offset to `-60 pt` and sent `ValueChanged`. A screenshot taken
+while the timer-delayed refresh is still running counts 1 800+ bright pixels in
+the spinner box (176–226 pt by 62–118 pt); the fixture's `endRefreshing` then
+logs `[refresh] done`, and a second screenshot counts no bright pixels in that
+box — the spinner stopped its infinite animation and the content returned to
+offset zero. The control is a real subview positioned by the scroll view, and
+its spinner shares the activity indicator's blade renderer.
+
 ### App lifecycle: delegate callbacks and application state
 
 `demo/LifecycleApp.m` prints every transition with

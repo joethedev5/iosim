@@ -2388,6 +2388,94 @@ fi
 "$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
 sleep 0.4
 
+# ---------- 16. UIRefreshControl pull-to-refresh ----------
+# A pull past the threshold over the table arms the refresh control, sends
+# ValueChanged, and the spinner stays until the app ends the refresh.
+"$ROOT/tools/build_app.sh" "$ROOT/demo/RefreshApp.m" "$T/RefreshApp" >/dev/null
+mkdir -p "$T/RefreshApp.app"
+cp "$T/RefreshApp" "$T/RefreshApp.app/RefreshApp"
+python3 - "$T/RefreshApp.app/Info.plist" <<'PY'
+import plistlib, sys
+with open(sys.argv[1], "wb") as f:
+    plistlib.dump({
+        "CFBundleIdentifier": "com.iosim.refresh",
+        "CFBundleExecutable": "RefreshApp",
+        "CFBundleName": "Refresh",
+        "CFBundlePackageType": "APPL",
+        "CFBundleVersion": "1",
+        "CFBundleShortVersionString": "1.0",
+    }, f)
+PY
+"$ROOT/tools/iosimctl" install "$UDID" "$T/RefreshApp.app" >/dev/null
+sleep 0.5
+# Thirtieth installed app: third page row 0 column 3.
+"$ROOT/tools/iosimctl" ui "$UDID" tap 339.8333 121.8333 >/dev/null
+if wait_log "[refresh] ready rows=12"; then
+    echo "ok   SpringBoard launches the refresh fixture"
+else
+    echo "FAIL refresh fixture launch"; fails=$((fails+1))
+fi
+sleep 0.3
+"$ROOT/tools/iosimctl" ui "$UDID" swipe 200 120 200 300 0.4 >/dev/null
+if wait_log "[refresh] pulled"; then
+    echo "ok   pulling the table past the threshold sends ValueChanged"
+else
+    echo "FAIL refresh pull"; fails=$((fails+1))
+fi
+sleep 0.2
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/refresh-spinner.png" >/dev/null
+if out="$(python3 - "$ROOT/tools" "$T/refresh-spinner.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+n = 0
+for y in range(62 * 3, 118 * 3):
+    for x in range(176 * 3, 226 * 3):
+        c = pngpixel.px(rows, bpp, x, y)
+        r, g, b = (c >> 16) & 255, (c >> 8) & 255, c & 255
+        if r > 60 and g > 60 and b > 60:
+            n += 1
+if n < 100:
+    raise SystemExit("refresh spinner not drawn: %d px" % n)
+print("ok   the refresh spinner is drawn while refreshing")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL refresh spinner rendering"; echo "$out"; fails=$((fails+1))
+fi
+if wait_log "[refresh] done"; then
+    echo "ok   endRefreshing ends the spinner and reports done"
+else
+    echo "FAIL refresh end"; fails=$((fails+1))
+fi
+sleep 0.3
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/refresh-after.png" >/dev/null
+if out="$(python3 - "$ROOT/tools" "$T/refresh-after.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+n = 0
+for y in range(62 * 3, 118 * 3):
+    for x in range(176 * 3, 226 * 3):
+        c = pngpixel.px(rows, bpp, x, y)
+        r, g, b = (c >> 16) & 255, (c >> 8) & 255, c & 255
+        if r > 60 and g > 60 and b > 60:
+            n += 1
+if n > 10:
+    raise SystemExit("spinner still drawn after refresh: %d px" % n)
+print("ok   the spinner clears and the table returns to the top")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL refresh clearing"; echo "$out"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
+sleep 0.4
+
 "$ROOT/tools/iosimctl" shutdown "$UDID" >/dev/null
 
 if [ "$fails" -ne 0 ]; then

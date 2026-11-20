@@ -998,6 +998,21 @@ enum {
 - (void)cancelTrackingWithEvent:(UIEvent *)event;
 @end
 
+#define REFRESH_CONTROL_HEIGHT 60.0
+
+/* Pull-to-refresh control. The scroll view owns it, positions it above the
+ * content and sends ValueChanged when a pull passes the threshold. */
+@interface UIRefreshControl : UIControl {
+@public
+    BOOL _refreshing;
+    double _pullProgress;
+    id _scrollView;
+}
+- (BOOL)isRefreshing;
+- (void)beginRefreshing;
+- (void)endRefreshing;
+@end
+
 @interface UIButton : UIControl {
 @public
     id _title;
@@ -1271,6 +1286,7 @@ enum {
     BOOL _showsVerticalScrollIndicator;
     BOOL _bounces;
     id _delegate;
+    UIRefreshControl *_refreshControl;
 }
 - (CGSize)contentSize;
 - (void)setContentSize:(CGSize)size;
@@ -1283,6 +1299,8 @@ enum {
 - (id)delegate;
 - (BOOL)showsVerticalScrollIndicator;
 - (void)setShowsVerticalScrollIndicator:(BOOL)shows;
+- (UIRefreshControl *)refreshControl;
+- (void)setRefreshControl:(UIRefreshControl *)control;
 @end
 
 @class UITableView;
@@ -5334,6 +5352,57 @@ static UIControl *nav_bar_control(UIBarButtonItem *item, CGRect frame,
 - (BOOL)showsVerticalScrollIndicator { return _showsVerticalScrollIndicator; }
 - (void)setShowsVerticalScrollIndicator:(BOOL)shows
 { _showsVerticalScrollIndicator = shows; }
+- (UIRefreshControl *)refreshControl { return _refreshControl; }
+- (void)setRefreshControl:(UIRefreshControl *)control
+{
+    if (_refreshControl == control)
+        return;
+    if (_refreshControl)
+        [(UIView *)_refreshControl removeFromSuperview];
+    _refreshControl = control;
+    if (control)
+    {
+        control->_scrollView = self;
+        control->_frame = CGRectMake(0, -REFRESH_CONTROL_HEIGHT,
+                                     _frame.size.width,
+                                     REFRESH_CONTROL_HEIGHT);
+        [self addSubview:control];
+    }
+}
+@end
+
+@implementation UIRefreshControl
+- (id)init
+{
+    /* UIView's alpha/layer defaults live in initWithFrame:, not in a plain
+     * NSObject init, so the control must start there. */
+    return [self initWithFrame:CGRectMake(0, 0, 0, REFRESH_CONTROL_HEIGHT)];
+}
+- (BOOL)isRefreshing { return _refreshing; }
+- (void)beginRefreshing
+{
+    _refreshing = YES;
+    _pullProgress = 1.0;
+    animation_mark_active(1.0, -1);
+    if (_scrollView)
+    {
+        UIScrollView *scroll = (UIScrollView *)_scrollView;
+        scroll->_contentOffset.y = -REFRESH_CONTROL_HEIGHT;
+    }
+}
+- (void)endRefreshing
+{
+    if (!_refreshing)
+        return;
+    _refreshing = NO;
+    animation_unmark_infinite();
+    if (_scrollView)
+    {
+        UIScrollView *scroll = (UIScrollView *)_scrollView;
+        if (scroll->_contentOffset.y < 0)
+            scroll->_contentOffset.y = 0;
+    }
+}
 @end
 
 /* ------------------------------------------------------------ table views */
@@ -6204,9 +6273,24 @@ static double clamp_scroll(double value, double low, double high)
             maxY = 0;
         double nx = _dragStartContent.x - (point.x - _dragStartPoint.x);
         double ny = _dragStartContent.y - (point.y - _dragStartPoint.y);
+        double minY = _dragScroll->_refreshControl
+                          ? -(REFRESH_CONTROL_HEIGHT + 30) : -30;
         _dragScroll->_contentOffset =
             CGPointMake(clamp_scroll(nx, -30, maxX + 30),
-                        clamp_scroll(ny, -30, maxY + 30));
+                        clamp_scroll(ny, minY, maxY + 30));
+        if (_dragScroll->_refreshControl)
+        {
+            UIRefreshControl *rc = _dragScroll->_refreshControl;
+            if (!rc->_refreshing)
+            {
+                double pull = -_dragScroll->_contentOffset.y;
+                rc->_pullProgress =
+                    pull <= 0 ? 0
+                              : (pull >= REFRESH_CONTROL_HEIGHT
+                                     ? 1.0
+                                     : pull / REFRESH_CONTROL_HEIGHT);
+            }
+        }
         if (_dragScroll->_delegate && [_dragScroll->_delegate respondsToSelector:
                 @selector(scrollViewDidScroll:)])
             [_dragScroll->_delegate scrollViewDidScroll:_dragScroll];
@@ -6254,9 +6338,24 @@ static double clamp_scroll(double value, double low, double high)
             maxX = 0;
         if (maxY < 0)
             maxY = 0;
-        _dragScroll->_contentOffset =
-            CGPointMake(clamp_scroll(_dragScroll->_contentOffset.x, 0, maxX),
-                        clamp_scroll(_dragScroll->_contentOffset.y, 0, maxY));
+        UIScrollView *scroll = _dragScroll;
+        double offX = clamp_scroll(scroll->_contentOffset.x, 0, maxX);
+        double offY = clamp_scroll(scroll->_contentOffset.y, 0, maxY);
+        if (scroll->_refreshControl)
+        {
+            UIRefreshControl *rc = scroll->_refreshControl;
+            if (rc->_refreshing)
+                offY = -REFRESH_CONTROL_HEIGHT;
+            else if (scroll->_contentOffset.y <=
+                     -(REFRESH_CONTROL_HEIGHT * 0.8))
+            {
+                [rc beginRefreshing];
+                [rc sendActionsForControlEvents:UIControlEventValueChanged];
+                offY = -REFRESH_CONTROL_HEIGHT;
+            }
+            rc->_pullProgress = rc->_refreshing ? 1.0 : 0.0;
+        }
+        scroll->_contentOffset = CGPointMake(offX, offY);
         _dragScroll = nil;
     }
     double dx = point.x - _dragStartPoint.x;
@@ -7722,6 +7821,40 @@ static void render_view(UIView *view, double originX, double originY,
         iosim_fb_set_opacity(1.0);
     }
 
+    if ([view isKindOfClass:[UIRefreshControl class]])
+    {
+        UIRefreshControl *rc = (UIRefreshControl *)view;
+        double progress = rc->_refreshing ? 1.0 : rc->_pullProgress;
+        if (progress > 0.02)
+        {
+            int cx = x + w / 2, cy = y + h / 2;
+            int inner = (int)(5 * scale), outer = (int)(13 * scale),
+                thick = (int)(2.5 * scale);
+            double phase = rc->_refreshing
+                               ? iosim_now() - (long)iosim_now() : 0;
+            for (int i = 0; i < 8; i++)
+            {
+                double a =
+                    (i * 45.0 - 90.0) * 3.14159265358979323846 / 180.0;
+                double fade = progress;
+                if (rc->_refreshing)
+                {
+                    double tail = i + 8 - phase * 8.0;
+                    while (tail >= 8)
+                        tail -= 8;
+                    fade = 0.18 + 0.82 * (tail / 8.0);
+                }
+                iosim_fb_set_opacity(alpha * fade);
+                iosim_fb_draw_line(cx + (int)(__builtin_cos(a) * inner),
+                                   cy + (int)(__builtin_sin(a) * inner),
+                                   cx + (int)(__builtin_cos(a) * outer),
+                                   cy + (int)(__builtin_sin(a) * outer),
+                                   thick, 0x8e8e93);
+            }
+            iosim_fb_set_opacity(alpha);
+        }
+    }
+
     if ([view isKindOfClass:[UIActivityIndicatorView class]])
     {
         UIActivityIndicatorView *spinner = (UIActivityIndicatorView *)view;
@@ -8232,6 +8365,12 @@ static void render_view(UIView *view, double originX, double originY,
         UIScrollView *scroll = (UIScrollView *)view;
         scrollX = scroll->_contentOffset.x;
         scrollY = scroll->_contentOffset.y;
+        if (scroll->_refreshControl)
+        {
+            UIView *rc = (UIView *)scroll->_refreshControl;
+            rc->_frame = CGRectMake(0, -REFRESH_CONTROL_HEIGHT,
+                                    frame.size.width, REFRESH_CONTROL_HEIGHT);
+        }
     }
     for (int i = 0; i < view->_subviewCount; i++)
     {

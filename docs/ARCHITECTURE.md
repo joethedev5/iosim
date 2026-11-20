@@ -517,6 +517,13 @@ decoded with libpng in `loader/image.c`.
   rows and draws minus controls whose taps reveal the same Delete control.
   `insertSubview:atIndex:`, `bringSubviewToFront:` and `sendSubviewToBack:`
   reorder the subview list.
+- `UIRefreshControl` is owned by the scroll view (`refreshControl`), which adds
+  it as a subview above the content at `-60 pt` and extends the drag clamp to
+  the same distance. Pulling fills the eight-blade spinner proportionally;
+  touch-up past 80 % of the height calls `beginRefreshing`, snaps the offset to
+  `-60 pt` and sends `UIControlEventValueChanged`. `endRefreshing` stops the
+  infinite animation and returns the offset to zero. The spinner reuses the
+  activity-indicator blade model with a rotating opacity tail.
 - `UICollectionViewFlowLayout` derives a column grid from the item size,
   interitem and line spacing and section insets; `UICollectionView` reloads
   cells as real subviews at those frames, so the scroll view's offset and clip

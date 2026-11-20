@@ -25,6 +25,12 @@ __attribute__((objc_root_class))
 + (NSData *)dataWithContentsOfFile:(NSString *)path;
 @end
 
+@interface NSTimer : NSObject
++ (id)scheduledTimerWithTimeInterval:(double)interval target:(id)target
+    selector:(SEL)selector userInfo:(id)userInfo repeats:(BOOL)repeats;
+- (void)invalidate;
+@end
+
 @interface NSBundle : NSObject
 + (NSBundle *)mainBundle;
 - (NSString *)pathForResource:(NSString *)name ofType:(NSString *)type;
@@ -323,6 +329,12 @@ enum {
 - (BOOL)isEnabled;
 - (void)setEnabled:(BOOL)enabled;
 - (unsigned long)state;
+@end
+
+@interface UIRefreshControl : UIControl
+- (BOOL)isRefreshing;
+- (void)beginRefreshing;
+- (void)endRefreshing;
 @end
 
 @interface UIButton : UIControl
@@ -657,6 +669,7 @@ enum {
 @property double rowHeight;
 @property CGPoint contentOffset;
 @property CGSize contentSize;
+@property(nonatomic, retain) UIRefreshControl *refreshControl;
 - (void)reloadData;
 - (id)dequeueReusableCellWithIdentifier:(id)identifier;
 - (void)setEditing:(BOOL)editing animated:(BOOL)animated;

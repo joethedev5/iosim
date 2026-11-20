@@ -75,6 +75,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | UIStepper plus/minus halves, stepping, limits and ValueChanged | ✅ |
 | UIPickerView wheels: data source components, titles, tap/drag selection with snapping | ✅ |
 | UIDatePicker date, time and combined wheels with calendar-accurate dates | ✅ |
+| UIRefreshControl pull-to-refresh with a spinning control and ValueChanged | ✅ |
 
 The test suite exercises a real Apple-toolchain-built x86_64 UIKit app, a
 Foundation app using `NSLog` with a constant `CFString`, a Foundation
