@@ -171,13 +171,13 @@ jobs:
           if [ -n "$UDID" ]; then
             xcrun simctl help status_bar > out/status-bar-help.txt 2>&1
             xcrun simctl boot "$UDID" >> out/boot.txt 2>&1
-            xcrun simctl bootstatus "$UDID" -b >> out/boot.txt 2>&1
-            xcrun simctl io "$UDID" screenshot out/springboard-real.png >> out/boot.txt 2>&1
+            timeout 300 xcrun simctl bootstatus "$UDID" -b >> out/boot.txt 2>&1
+            timeout 30 xcrun simctl io "$UDID" screenshot out/springboard-real.png >> out/boot.txt 2>&1 || echo "springboard screenshot timed out" >> out/boot.txt
             xcrun simctl install "$UDID" HelloSim.app >> out/boot.txt 2>&1
             ( xcrun simctl launch --console-pty "$UDID" com.iosim.hellosim \
                 > out/console.txt 2>&1 & echo $! > /tmp/console.pid )
             sleep 7
-            xcrun simctl io "$UDID" screenshot out/real-sim.png >> out/boot.txt 2>&1
+            timeout 30 xcrun simctl io "$UDID" screenshot out/real-sim.png >> out/boot.txt 2>&1 || echo "hello screenshot timed out" >> out/boot.txt
             if [ ! -s out/real-sim.png ]; then
               xcrun simctl io "$UDID" screenshot --display=1 out/real-sim.png >> out/boot.txt 2>&1
             fi
@@ -191,14 +191,14 @@ jobs:
             ( xcrun simctl launch --console-pty "$UDID" com.iosim.graphicsapp \
                 > out/graphics-console.txt 2>&1 & echo $! > /tmp/gconsole.pid )
             sleep 6
-            xcrun simctl io "$UDID" screenshot out/graphics-real.png >> out/boot.txt 2>&1
+            timeout 30 xcrun simctl io "$UDID" screenshot out/graphics-real.png >> out/boot.txt 2>&1 || echo "graphics screenshot timed out" >> out/boot.txt
             kill "$(cat /tmp/gconsole.pid)" 2>/dev/null || true
             xcrun simctl terminate "$UDID" com.iosim.graphicsapp >> out/boot.txt 2>&1
             xcrun simctl install "$UDID" ListApp.app >> out/boot.txt 2>&1
             ( xcrun simctl launch --console-pty "$UDID" com.iosim.listapp \
                 > out/list-console.txt 2>&1 & echo $! > /tmp/lconsole.pid )
             sleep 6
-            xcrun simctl io "$UDID" screenshot out/listapp-real.png >> out/boot.txt 2>&1
+            timeout 30 xcrun simctl io "$UDID" screenshot out/listapp-real.png >> out/boot.txt 2>&1 || echo "list screenshot timed out" >> out/boot.txt
             kill "$(cat /tmp/lconsole.pid)" 2>/dev/null || true
             xcrun simctl terminate "$UDID" com.iosim.listapp >> out/boot.txt 2>&1
             find "$HOME/Library/Logs/DiagnosticReports" -maxdepth 2 \
