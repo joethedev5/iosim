@@ -33,6 +33,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | Drag scrolling with rubber-band clamp, tap/pan/swipe gesture recognizers | ✅ |
 | Auto Layout: NSLayoutConstraint, anchors, guides, intrinsic sizing, priorities | ✅ (subset) |
 | Multiline UILabel wrapping, UITextField focus, caret and software keyboard | ✅ |
+| UISwitch, UISlider, UIProgressView with tap/value handling | ✅ |
 | UINavigationController push/pop, UIStackView intrinsic layout, UIButton titles | ✅ |
 | UIView animations (frame, alpha), CALayer backing/opacity/corner radius | ✅ |
 | CoreAnimation paths, gradients, sublayers, PNG images | ✅ |
