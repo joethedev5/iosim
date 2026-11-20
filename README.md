@@ -44,6 +44,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | Foundation collections, strings, selector/block notifications with userInfo, timers, NSIndexPath | ✅ |
 | Foundation fast enumeration (`for-in`) and indexed/keyed collection subscripting | ✅ |
 | NSDateFormatter parse/print round trip, NSNumberFormatter decimal/currency/percent | ✅ |
+| KDK kernel symbolication: full local+global maps, Mach trap and BSD syscall tables | ✅ |
 | `NSFileManager`, `NSData` file I/O, `NSFileHandle` read/write/seek/truncate, `NSURL`, `NSJSONSerialization` | ✅ |
 | `NSPropertyListSerialization` and persistent `NSUserDefaults` domains | ✅ |
 | `NSKeyedArchiver`/`NSKeyedUnarchiver` keyed archives with custom `NSCoding` classes | ✅ |
@@ -206,6 +207,8 @@ tests/             end-to-end tests
   Xcode 27.1 runners, including the full captured simulator environment.
 - [`docs/VERIFICATION.md`](docs/VERIFICATION.md) — same-app parity against the
   real iOS 27 simulator, with pixel measurements.
+- [`docs/KDK.md`](docs/KDK.md) — unpacking a Kernel Debug Kit and fully
+  symbolicating its x86_64 kernel, including the XNU trap and syscall tables.
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — path from this substrate to a usable
   simulator (graphics, events, services, frameworks).
 

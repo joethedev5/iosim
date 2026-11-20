@@ -802,6 +802,30 @@ Unlocking resumes that stopped process and waits on it again, so the app
 returns in place with `applicationWillEnterForeground:` /
 `applicationDidBecomeActive:` and its `viewDidLoad` still ran only once.
 
+### 2.13 Kernel symbolication from a KDK
+
+The services layer implements Mach and BSD entry points by name, so it needs
+the kernel's own dispatch tables as ground truth rather than a partial memory
+of them. `tools/kernel_symbols.py` parses Mach-O headers, segments, sections
+and `LC_SYMTAB` directly, merges the release image's exported symbols with the
+dSYM's local function symbols, and bounds each function by the next text
+symbol in its section. That yields a complete address-ordered map (50,898
+symbols and 99.275 % of executable bytes for the KDK 27.0.1 x86_64 kernel), and
+`--source` resolves an address through DWARF to its subprogram, file and
+line-table location.
+
+The same tool decodes `_mach_trap_table` (128 entries) and `_sysent` (558
+entries): both use 24-byte entries in this kernel, with the handler at `+8` and
+argument info at `+0` for traps, and the handler at `+0`, munge at `+8`,
+return type at `+16`, narg at `+20` and argument bytes at `+22` for syscalls.
+Layout detection scores candidate strides and field offsets by whether they
+land on real text symbols, so a different kernel generation is decoded by
+evidence rather than a version check. `_mach_call_munger64` and
+`_unix_syscall64` confirm the strides in their index computation, and the
+fixture in `tests/kernel_symbols_fixture.c` exercises the same paths without a
+KDK. `docs/KDK.md` records the DMG/pbzx unpacking steps and the measured
+tables.
+
 ## 3. Why this design
 
 **Why not run Apple's runtime?** Because the iOS 27 simulator runtime is

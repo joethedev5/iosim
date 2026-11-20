@@ -2794,6 +2794,38 @@ sleep 0.4
 
 "$ROOT/tools/iosimctl" shutdown "$UDID" >/dev/null
 
+# ---------- 20. kernel symbolication tool ----------
+"$CC" -target "$TARGET" -ffreestanding -O1 \
+    -c "$ROOT/tests/kernel_symbols_fixture.c" -o "$T/ks_fixture.o"
+"$LD64" -arch x86_64 -platform_version $PLATFORM -no_pie -e _main \
+    -o "$T/ks_fixture" "$T/ks_fixture.o"
+KS="$ROOT/tools/kernel_symbols.py"
+summary="$(python3 -I "$KS" --binary "$T/ks_fixture" --summary)"
+check "symbols       8 binary" "$summary" \
+    "the Mach-O reader inventories exported and local symbols"
+check "text coverage 100.000%" "$summary" \
+    "merged text symbols cover the executable section"
+traps="$(python3 -I "$KS" --binary "$T/ks_fixture" --mach-traps)"
+check "mach traps: 2 entries, layout stride 24" "$traps" \
+    "the mach trap table layout is detected"
+check "  0  _trap_alpha" "$traps" "trap 0 resolves to its handler"
+check "args=2" "$traps" "trap argument count comes from the info word"
+check "  1  _trap_beta" "$traps" "trap 1 resolves to its handler"
+syscalls="$(python3 -I "$KS" --binary "$T/ks_fixture" --syscalls)"
+check "syscalls: 2 entries, layout stride 24" "$syscalls" \
+    "the syscall table layout is detected"
+check "  1  _trap_beta" "$syscalls" "syscall 1 resolves to its handler"
+check "narg=2" "$syscalls" "syscall argument count is read from the entry"
+python3 -I "$KS" --binary "$T/ks_fixture" --write-map "$T/ks.symbols"
+map="$(cat "$T/ks.symbols")"
+check " T _main" "$map" "--write-map emits a complete address-ordered map"
+check " t _trap_alpha" "$map" "local text symbols are in the map"
+ADDR="$(awk '$3=="_trap_beta"{print $1; exit}' "$T/ks.symbols")"
+sym="$(python3 -I "$KS" --binary "$T/ks_fixture" \
+    --symbolize "0x$ADDR" "0x$(printf '%x' $((0x$ADDR + 8)))")"
+check "_trap_beta  [" "$sym" "an exact address prints its symbol"
+check "_trap_beta + 0x8" "$sym" "an interior address prints a relative offset"
+
 if [ "$fails" -ne 0 ]; then
     echo "$fails test(s) failed" >&2
     exit 1

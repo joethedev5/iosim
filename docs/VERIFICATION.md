@@ -971,6 +971,38 @@ callbacks. Resuming from the icon logs `foreground state=1`,
 The `UIApplicationWillResignActive`/`DidEnterBackground`/`WillEnterForeground`/
 `DidBecomeActive` notifications are posted alongside the delegate calls.
 
+### Kernel symbolication and XNU dispatch tables
+
+The suite builds `tests/kernel_symbols_fixture.c` as a non-PIE x86_64 Mach-O
+with a two-entry mach trap table (`{arg_info, handler, munge}` at 24 bytes) and
+a two-entry syscall table (`{call, munge, return type, narg, arg bytes}`).
+`tools/kernel_symbols.py` reports 8 symbols with 100.000 % executable-byte
+coverage, detects both tables at stride 24, resolves trap 0/1 to `_trap_alpha`
+and `_trap_beta` with argument counts 2 and 1, resolves syscall 1 to
+`_trap_beta` with narg 2, writes an address-ordered map containing the local
+`t` symbols, and prints `_trap_beta` for an exact address and
+`_trap_beta + 0x8` for an interior one.
+
+Run against the locally supplied Kernel Debug Kit 27.0.1 (build 26A434), the
+release kernel is x86_64 with UUID `8f0fa4f88dc23768a7eb04e58c6d1b88`.
+Merging the binary's 24,379 symbols with the dSYM's 50,898 (27,546 text)
+yields 99.275 % coverage of executable bytes (9,480,623/9,549,866); the residue
+is `__KLD,__text` boot code absent from the dSYM, not unidentified functions.
+An address inside `_mach_call_munger` prints
+`0xffffff80003e0a00  _mach_call_munger + 0x30  [__TEXT,__text]` and resolves
+through DWARF to `bsd_i386.c:506`.
+
+The decoded `_mach_trap_table` holds 128 entries: trap 0–9 are `_kern_invalid`,
+10 `__kernelrpc_mach_vm_allocate_trap` (4 arguments), 26 `_mach_reply_port`,
+31 `_mach_msg_trap` (7), 45 `_task_for_pid` (3), 100
+`_iokit_user_client_trap` (8). `_sysent` holds 558 entries: 0 `_nosys`,
+1 `_exit` (narg 1), 2 `_fork`, 3 `_read` (narg 3), 4 `_write` (narg 3),
+5 `_open` (narg 3), 6 `_sys_close`, 7 `_wait4` (narg 4), each with its
+`_munge_*` argument munger resolved. The dispatch routines agree:
+`_mach_call_munger64` indexes at `index*24` and calls `*(entry+8)`, and
+`_unix_syscall64` indexes at `index*24`, calls `*(entry+0)` and reads narg at
+`entry+0x14`. `docs/KDK.md` records the unpacking steps and full measurements.
+
 ## Limitations
 
 The framework surface is still a subset. Auto Layout supports equality and
@@ -1005,4 +1037,6 @@ frame-rate ranges. XPC carries dictionaries
 and value objects between processes but not connections, file descriptors or
 reply ports. The pasteboard shares strings and data items but has no rich
 pasteboard types, item providers or change notifications. Metal and video
-remain unimplemented.
+remain unimplemented. The kernel symbolication tool handles one Mach-O image
+and its dSYM; kext dSYMs are not merged into one address space because their
+load addresses are only known from a kernel collection.
