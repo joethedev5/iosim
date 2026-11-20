@@ -7,6 +7,13 @@ typedef struct CGContext *CGContextRef;
 typedef void *CGColorRef;
 typedef const void *CGPathRef;
 typedef struct CGImage *CGImageRef;
+typedef struct CGColorSpace *CGColorSpaceRef;
+
+typedef enum CGColorSpaceModel {
+    kCGColorSpaceModelUnknown = -1,
+    kCGColorSpaceModelMonochrome = 0,
+    kCGColorSpaceModelRGB = 1
+} CGColorSpaceModel;
 
 typedef enum CGPathElementType {
     kCGPathElementMoveToPoint,
@@ -75,6 +82,13 @@ double iosim_cg_text_width(CGContextRef context, const char *text,
                            double size_pt, int bold);
 
 CGColorRef CGColorCreateGenericRGB(double r, double g, double b, double a);
+CGColorRef CGColorCreate(CGColorSpaceRef space, const double *components);
+CGColorSpaceRef CGColorGetColorSpace(CGColorRef color);
+CGColorSpaceRef CGColorSpaceCreateDeviceRGB(void);
+CGColorSpaceRef CGColorSpaceCreateDeviceGray(void);
+CGColorSpaceRef CGColorSpaceRetain(CGColorSpaceRef space);
+void CGColorSpaceRelease(CGColorSpaceRef space);
+CGColorSpaceModel CGColorSpaceGetModel(CGColorSpaceRef space);
 CGColorRef CGColorRetain(CGColorRef color);
 void CGColorRelease(CGColorRef color);
 const double *CGColorGetComponents(CGColorRef color);
@@ -83,6 +97,9 @@ int CGColorEqualToColor(CGColorRef a, CGColorRef b);
 int iosim_cgcolor_is_valid(const void *color);
 
 CGPathRef CGPathCreateMutable(void);
+CGPathRef CGPathCreateWithRect(CGRect rect, const void *transform);
+CGPathRef CGPathCreateCopy(CGPathRef path);
+CGPathRef CGPathCreateMutableCopy(CGPathRef path);
 CGPathRef CGPathRetain(CGPathRef path);
 void CGPathRelease(CGPathRef path);
 void CGPathMoveToPoint(CGPathRef path, const void *transform, double x,
@@ -94,6 +111,9 @@ void CGPathAddEllipseInRect(CGPathRef path, const void *transform, CGRect rect);
 void CGPathCloseSubpath(CGPathRef path);
 void CGPathAddPath(CGPathRef path, const void *transform, CGPathRef other);
 void CGPathApply(CGPathRef path, void *info, CGPathApplierFunction function);
+CGRect CGPathGetBoundingBox(CGPathRef path);
+int CGPathContainsPoint(CGPathRef path, const void *transform, CGPoint point,
+                        int evenOdd);
 int iosim_cgpath_is_valid(const void *path);
 
 CGImageRef CGImageCreateWithRGBA(const unsigned char *rgba, int w, int h);

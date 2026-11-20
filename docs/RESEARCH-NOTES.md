@@ -268,8 +268,9 @@ sublayers and view backing layers. CASpringAnimation evaluates mass/stiffness/
 damping/initialVelocity and reports settlingDuration. ObjC categories are
 resolved from `__objc_catlist` by category symbol name, and NSString
 sizeWithAttributes:/drawAtPoint: renders through the CGContext text bridge,
-and drawInRect:/boundingRectWithSize: word-wrap paragraphs. Still missing:
-color spaces, non-rect path clipping and attributed strings.
+and drawInRect:/boundingRectWithSize: word-wrap paragraphs. Device RGB/gray
+color spaces, CGColorCreate, CGPath bounding boxes, containment and copies
+are covered. Still missing: non-rect path clipping and color management.
 
 ## Open directions
 

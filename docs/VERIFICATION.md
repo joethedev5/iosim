@@ -652,6 +652,11 @@ reports alpha 1.00, equality with itself and red component 0.5 through its
 full-surface green fill to a `240,10 50x40` rectangle leaves an outside red
 pixel unchanged, shows green inside the clip, and a blue fill after
 `CGContextRestoreGState` paints outside the old clip, proving clip removal.
+Device RGB reports model 1 and device gray model 0; `CGColorCreate` with
+components 0.25/0.50/0.75/1.0 returns a color whose components and alpha
+match and whose space is the same object. A rectangle `CGPath` reports
+bounding box `10,10 20x20`, contains `(15,15)`, rejects `(100,100)`, and a
+copy contains `(20,20)`.
 A 2x2 yellow `CGImage` reports its dimensions and draws scaled into a 40x40
 rectangle whose center samples `ffff00`. `UIImage CGImage` and
 `imageWithCGImage:` round-trip the 20x20 red image without changing its

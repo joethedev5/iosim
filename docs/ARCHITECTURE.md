@@ -432,8 +432,12 @@ box, and save/restore tracks the clip depth. Refcounted `CGImage` objects own
 RGBA pixels; `CGContextDrawImage` scales one into a rectangle, `UIImage
 CGImage` exposes a cached image and `imageWithCGImage:` copies one back.
 `CALayer.contents` accepts a `CGImage` or `UIImage` and the renderer blits it
-for both standalone sublayers and a view's backing layer. Color spaces,
-non-rect path clipping and text remain future work.
+for both standalone sublayers and a view's backing layer. Device RGB and gray
+color spaces are singletons; `CGColorCreate` converts gray components to RGB
+and `CGColorGetColorSpace` reports the originating space. Paths support
+bounding boxes, even-odd point containment, copies and rectangle
+constructors. Non-rect path clipping and color management remain future
+work.
 
 UIScrollView tracks recent pointer velocity while dragging instead of
 averaging the whole gesture. A release above 50 pt/s records the deceleration

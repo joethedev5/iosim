@@ -89,6 +89,35 @@ int main(void)
     CGContextFillRect(context, CGRectMake(240, 220, 40, 40));
     iosim_cg_end_view(context);
 
+    CGColorSpaceRef rgb_space = CGColorSpaceCreateDeviceRGB();
+    CGColorSpaceRef gray_space = CGColorSpaceCreateDeviceGray();
+    double components[4] = { 0.25, 0.5, 0.75, 1.0 };
+    CGColorRef space_color = CGColorCreate(rgb_space, components);
+    printf("[cg] colorspace rgb=%d gray=%d color=%d comps %.2f %.2f %.2f "
+           "alpha %.2f same=%d\n",
+           CGColorSpaceGetModel(rgb_space), CGColorSpaceGetModel(gray_space),
+           CGColorSpaceGetModel(CGColorGetColorSpace(space_color)),
+           CGColorGetComponents(space_color)[0],
+           CGColorGetComponents(space_color)[1],
+           CGColorGetComponents(space_color)[2],
+           CGColorGetAlpha(space_color),
+           CGColorGetColorSpace(space_color) == rgb_space);
+    CGColorRelease(space_color);
+    CGColorSpaceRelease(rgb_space);
+    CGColorSpaceRelease(gray_space);
+
+    CGPathRef rect_path = CGPathCreateWithRect(CGRectMake(10, 10, 20, 20), 0);
+    CGRect box = CGPathGetBoundingBox(rect_path);
+    printf("[cg] pathbox %.0f %.0f %.0f %.0f inside=%d outside=%d\n",
+           box.origin.x, box.origin.y, box.size.width, box.size.height,
+           CGPathContainsPoint(rect_path, 0, CGPointMake(15, 15), 0),
+           CGPathContainsPoint(rect_path, 0, CGPointMake(100, 100), 0));
+    CGPathRef path_copy = CGPathCreateCopy(rect_path);
+    printf("[cg] pathcopy inside=%d\n",
+           CGPathContainsPoint(path_copy, 0, CGPointMake(20, 20), 0));
+    CGPathRelease(path_copy);
+    CGPathRelease(rect_path);
+
     unsigned pixels[300 * 300];
     iosim_fb_capture(0, 0, 300, 300, pixels);
     printf("[cg] rect %06x\n", pixel(pixels, 50, 50));

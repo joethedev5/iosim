@@ -3180,6 +3180,12 @@ check "[cg] clip outside ff0000" "$out" \
     "pixels outside the clip rectangle keep their earlier color"
 check "[cg] clip restored 0000ff" "$out" \
     "restoring the graphics state removes the clip"
+check "[cg] colorspace rgb=1 gray=0 color=1 comps 0.25 0.50 0.75 alpha 1.00 same=1" \
+    "$out" "CGColorSpace models and CGColorCreate components round-trip"
+check "[cg] pathbox 10 10 20 20 inside=1 outside=0" "$out" \
+    "CGPathGetBoundingBox and CGPathContainsPoint locate a rect path"
+check "[cg] pathcopy inside=1" "$out" \
+    "CGPathCreateCopy duplicates path geometry"
 
 "$ROOT/tools/build_app.sh" "$ROOT/tests/cgimage_layer_test.m" \
     "$T/cgimage_layer_test" >/dev/null

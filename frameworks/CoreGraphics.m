@@ -49,7 +49,16 @@ struct CGColor {
     int refs;
     unsigned magic;
     double r, g, b, a;
+    struct CGColorSpace *space;
 };
+
+struct CGColorSpace {
+    int refs;
+    CGColorSpaceModel model;
+};
+
+static struct CGColorSpace g_rgb_space = { 1, kCGColorSpaceModelRGB };
+static struct CGColorSpace g_gray_space = { 1, kCGColorSpaceModelMonochrome };
 
 #define CG_COLOR_MAGIC 0x4347434fu
 #define CG_IMAGE_MAGIC 0x4347494du
@@ -741,6 +750,67 @@ double iosim_cg_text_width(CGContextRef context, const char *text,
     return context->scale > 0 ? pixels / context->scale : pixels;
 }
 
+CGColorSpaceRef CGColorSpaceCreateDeviceRGB(void)
+{
+    g_rgb_space.refs++;
+    return &g_rgb_space;
+}
+
+CGColorSpaceRef CGColorSpaceCreateDeviceGray(void)
+{
+    g_gray_space.refs++;
+    return &g_gray_space;
+}
+
+CGColorSpaceRef CGColorSpaceRetain(CGColorSpaceRef space)
+{
+    if (space)
+        space->refs++;
+    return space;
+}
+
+void CGColorSpaceRelease(CGColorSpaceRef space)
+{
+    if (space && space->refs > 1)
+        space->refs--;
+}
+
+CGColorSpaceModel CGColorSpaceGetModel(CGColorSpaceRef space)
+{
+    return space ? space->model : kCGColorSpaceModelUnknown;
+}
+
+CGColorRef CGColorCreate(CGColorSpaceRef space, const double *components)
+{
+    if (!space || !components)
+        return 0;
+    double r, g, b, a;
+    if (space->model == kCGColorSpaceModelMonochrome)
+    {
+        r = g = b = components[0];
+        a = components[1];
+    }
+    else
+    {
+        r = components[0];
+        g = components[1];
+        b = components[2];
+        a = components[3];
+    }
+    CGColorRef color = CGColorCreateGenericRGB(r, g, b, a);
+    if (color)
+        ((struct CGColor *)color)->space = space;
+    return color;
+}
+
+CGColorSpaceRef CGColorGetColorSpace(CGColorRef colorRef)
+{
+    struct CGColor *color = (struct CGColor *)colorRef;
+    if (!color)
+        return 0;
+    return color->space ? color->space : &g_rgb_space;
+}
+
 CGColorRef CGColorCreateGenericRGB(double r, double g, double b, double a)
 {
     struct CGColor *color = calloc(1, sizeof(*color));
@@ -752,6 +822,7 @@ CGColorRef CGColorCreateGenericRGB(double r, double g, double b, double a)
     color->g = g;
     color->b = b;
     color->a = a;
+    color->space = &g_rgb_space;
     return (CGColorRef)color;
 }
 
@@ -1022,6 +1093,68 @@ void CGPathAddPath(CGPathRef pathRef, const void *transform, CGPathRef otherRef)
         return;
     for (int i = 0; i < other->count; i++)
         cg_path_append(path, other->ops[i], other->xs[i], other->ys[i]);
+}
+
+CGPathRef CGPathCreateWithRect(CGRect rect, const void *transform)
+{
+    CGPathRef path = CGPathCreateMutable();
+    if (path)
+        CGPathAddRect(path, transform, rect);
+    return path;
+}
+
+CGPathRef CGPathCreateCopy(CGPathRef pathRef)
+{
+    CGPathRef copy = CGPathCreateMutable();
+    if (copy)
+        CGPathAddPath(copy, 0, pathRef);
+    return copy;
+}
+
+CGPathRef CGPathCreateMutableCopy(CGPathRef pathRef)
+{
+    return CGPathCreateCopy(pathRef);
+}
+
+CGRect CGPathGetBoundingBox(CGPathRef pathRef)
+{
+    struct CGPath *path = (struct CGPath *)pathRef;
+    if (!path || path->count <= 0)
+        return CGRectMake(0, 0, 0, 0);
+    double minx = path->xs[0], maxx = minx;
+    double miny = path->ys[0], maxy = miny;
+    for (int i = 1; i < path->count; i++)
+    {
+        if (path->ops[i] == 2)
+            continue;
+        if (path->xs[i] < minx) minx = path->xs[i];
+        if (path->xs[i] > maxx) maxx = path->xs[i];
+        if (path->ys[i] < miny) miny = path->ys[i];
+        if (path->ys[i] > maxy) maxy = path->ys[i];
+    }
+    return CGRectMake(minx, miny, maxx - minx, maxy - miny);
+}
+
+int CGPathContainsPoint(CGPathRef pathRef, const void *transform,
+                        CGPoint point, int evenOdd)
+{
+    (void)transform;
+    (void)evenOdd;
+    struct CGPath *path = (struct CGPath *)pathRef;
+    if (!path || path->count < 3)
+        return 0;
+    int inside = 0;
+    for (int i = 0, j = path->count - 1; i < path->count; j = i++)
+    {
+        if (path->ops[i] == 2 || path->ops[j] == 2)
+            continue;
+        double xi = path->xs[i], yi = path->ys[i];
+        double xj = path->xs[j], yj = path->ys[j];
+        if (((yi > point.y) != (yj > point.y)) &&
+            (point.x < (xj - xi) * (point.y - yi) / (yj - yi) + xi))
+            inside = !inside;
+    }
+    return inside;
 }
 
 void CGPathApply(CGPathRef pathRef, void *info, CGPathApplierFunction function)
