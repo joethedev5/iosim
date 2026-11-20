@@ -79,6 +79,8 @@ static NSString *roleForRow(long row)
         cell = [[UITableViewCell alloc]
             initWithStyle:UITableViewCellStyleSubtitle
           reuseIdentifier:@"person"];
+    cell.backgroundColor =
+        [UIColor colorWithRed:0.078 green:0.106 blue:0.184 alpha:1.0];
     cell.textLabel.text = nameForRow(indexPath.row);
     cell.detailTextLabel.text = roleForRow(indexPath.row);
     cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
@@ -131,7 +133,8 @@ static NSString *roleForRow(long row)
     _table = [[UITableView alloc] initWithFrame:CGRectMake(0, 4, width - 40,
                                                            8 * 58)
                                             style:UITableViewStylePlain];
-    _table.backgroundColor = [UIColor clearColor];
+    _table.backgroundColor =
+        [UIColor colorWithRed:0.078 green:0.106 blue:0.184 alpha:1.0];
     _table.rowHeight = 58;
     _table.dataSource = self;
     _table.delegate = self;
