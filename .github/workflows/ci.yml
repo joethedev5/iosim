@@ -11,7 +11,7 @@ jobs:
       - name: Install toolchain
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang lld cmake ninja-build
+          sudo apt-get install -y clang lld cmake ninja-build libfreetype-dev libpng-dev zlib1g-dev
       - name: Build loader
         run: |
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
