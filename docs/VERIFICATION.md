@@ -623,14 +623,20 @@ rendezvous is needed and the name never collides with another device.
 
 XPC rides on the same namespace. `tests/xpc_cross_test.c` is built with
 `-fblocks`; its service creates a mach-service listener
-(`XPC_CONNECTION_MACH_SERVICE_LISTENER`), installs an event handler and
-resumes, which registers `com.iosim.cross.xpc` and starts a receiver thread.
-The client process resumes a plain connection, sends a dictionary with a
-string, an int64, a bool and a 4-byte data value, and the service's handler
-receives a rebuilt object and prints
-`xpc service: received kind=ping seq=7 flag=1 blob=4`. The encoder emits a
-tagged tree; the decoder bounds depth, dictionary counts, key and value
-lengths before allocating, because the bytes cross a process boundary.
+(`XPC_CONNECTION_MACH_SERVICE_LISTENER`) and resumes it, registering
+`com.iosim.cross.xpc` and marking the service socket as an XPC endpoint. Every
+accepted client socket is delivered to the listener handler as a connection
+object (checked with `xpc_get_type(event) == xpc_type_connection`); the service
+installs a message handler on that peer and resumes it. The client sends a
+dictionary with a string, an int64, a bool and a 4-byte data value through
+`xpc_connection_send_message_with_reply`; the peer handler prints
+`xpc service: received kind=ping seq=7 flag=1 blob=4` and sends a pong
+dictionary back as the reply. The client prints
+`xpc client: reply kind=pong seq=8`, repeats the exchange through
+`xpc_connection_send_message_with_reply_sync`, and prints
+`xpc client: sync reply kind=pong seq=8`. The encoder emits a tagged tree; the
+decoder bounds depth, dictionary counts, key and value lengths before
+allocating, because the bytes cross a process boundary.
 
 ### System UI: SpringBoard, measured and real
 

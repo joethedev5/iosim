@@ -50,7 +50,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | App bundle resources: `NSBundle` lookup and `UIImage imageNamed:` PNGs | ✅ |
 | libdispatch queues, groups, semaphores; main-queue drain from UIKit | ✅ |
 | Mach ports/messages, launchd bootstrap namespace, cross-process messaging | ✅ |
-| XPC connections and dictionaries, serialized across processes | ✅ |
+| XPC peer connections, async/sync request-reply and serialized dictionaries across processes | ✅ |
 | UIPasteboard general pasteboard shared across processes, with changeCount | ✅ |
 | SpringBoard system UI: measured iOS 26 home screen, installed apps, real app launching | ✅ |
 | Real app suspension: home stops the process, the icon resumes it in place | ✅ |
@@ -87,8 +87,10 @@ whose `CADisplayLink` moves a view while a delayed UIView animation runs and
 a keyframe animation pulses a layer; and a services test that round-trips Mach
 messages, registers a bootstrap service, uses libdispatch
 queues/semaphores/groups and sends an XPC dictionary between a listener and a
-client; a cross-process fixture where one guest process registers a Mach
-service with launchd and another looks it up and delivers a message over it.
+client; a cross-process fixture where XPC clients reach a listener peer and
+receive both an async and a synchronous reply, and another where one guest
+process registers a Mach service with launchd and another looks it up and
+delivers a message over it.
 
 ```sh
 DYLD_ROOT_PATH=$PWD/runtime ./build/iosim-run build/binaries/services_test_x86_64

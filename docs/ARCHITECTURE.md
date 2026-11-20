@@ -441,17 +441,22 @@ transport and the bootstrap namespace are shared across the device.
   name, and otherwise asks launchd, connects to the service's address and
   returns a send port backed by that connection; `mach_msg` on it writes one
   datagram, which is the send right. Unknown names return 1102.
-- **XPC** dictionaries, strings, integers, bools, data and arrays are backed by
-  a small object type. A connection created with
+- **XPC** dictionaries, strings, integers, bools, data, arrays and connections
+  are backed by a small object type. A connection created with
   `xpc_connection_create_mach_service(name, queue,
-  XPC_CONNECTION_MACH_SERVICE_LISTENER)` and resumed registers its name as a
-  Mach service and starts a receiver thread; a client connection sends a
-  dictionary that is serialized as a tagged tree into one Mach datagram. The
-  receiver validates the frame, rebuilds the object graph (bounded depth,
-  counts and lengths, since the bytes come from another process) and invokes
-  the listener's event handler with the new object. Within one process a send
-  still calls the peer connection's handler directly, preserving the original
-  in-process flow. Handlers are heap-copied so stack blocks stay valid.
+  XPC_CONNECTION_MACH_SERVICE_LISTENER)` and resumed registers the name with
+  launchd and marks its service socket as an XPC endpoint. Every accepted
+  client socket becomes a peer connection: the listener's handler receives it
+  as an `XPC_CONNECTION` object (comparable through `xpc_get_type`), installs
+  a message handler on it and resumes it, and a per-connection thread reads
+  request/message frames. A send made from inside a peer handler becomes the
+  reply for the current request id; the client's reader matches reply frames
+  to slots registered by `xpc_connection_send_message_with_reply` and by its
+  synchronous variant. Frames carry the sender pid, a kind and a request id
+  around a tagged tree; the decoder bounds depth, counts and lengths because
+  the bytes cross a process boundary. Plain `xpc_connection_create`
+  connections keep an in-process shortcut for fixtures that wire both sides in
+  one process. Handlers are heap-copied so stack blocks stay valid.
 - **UIPasteboard** is a device-level service without a daemon: the general
   pasteboard is an XML property list at
   `$SIMULATOR_SHARED_RESOURCES_DIRECTORY/var/run/pasteboard.plist`, and each

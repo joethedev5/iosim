@@ -1835,8 +1835,9 @@ else
 fi
 
 # ---------- 11. cross-process XPC ----------
-# An XPC listener registers its Mach service; a client in another process
-# sends a dictionary, which arrives as a rebuilt XPC object.
+# An XPC listener registers its Mach service and receives each client as a
+# peer connection; the peer's handler gets the rebuilt dictionary and its
+# reply comes back to both the async and the synchronous client APIs.
 "$CC" -target "$TARGET" -ffreestanding -fPIC -O1 -fblocks \
     -c "$ROOT/tests/xpc_cross_test.c" -o "$T/xpc_cross.o"
 exe "$T/xpc_cross" "$T/xpc_cross.o"
@@ -1855,8 +1856,11 @@ if grep -Fq -- "xpc service: ready" "$XLOG" 2>/dev/null; then
 else
     echo "FAIL XPC listener"; cat "$XLOG"; fails=$((fails+1))
 fi
-out="$("$ROOT/tools/iosimctl" spawn "$UDID" "$T/xpc_cross" client 2>&1 | tail -1)"
-check "xpc client: sent" "$out" "an XPC client sends a dictionary by name"
+out="$("$ROOT/tools/iosimctl" spawn "$UDID" "$T/xpc_cross" client 2>&1)"
+check "xpc client: reply kind=pong seq=8" "$out" \
+    "an async XPC request receives its reply"
+check "xpc client: sync reply kind=pong seq=8" "$out" \
+    "a synchronous XPC request returns its reply"
 i=0
 while [ "$i" -lt 50 ]; do
     grep -Fq -- "xpc service: received" "$XLOG" 2>/dev/null && break

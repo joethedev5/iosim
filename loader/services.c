@@ -358,6 +358,9 @@ struct mach_port_s {
     int listen_fd;
     int peer_fd;
     char service[96];
+    /* An XPC listener's accepted clients become peer connections instead of
+     * Mach message sources. */
+    int xpc_listener;
 };
 static struct mach_port_s ports[MAX_PORTS];
 static int port_counter = 2;
@@ -389,6 +392,7 @@ static uint32_t port_new(int peer_fd)
     ports[p].listen_fd = -1;
     ports[p].peer_fd = peer_fd;
     ports[p].service[0] = 0;
+    ports[p].xpc_listener = 0;
     pthread_mutex_unlock(&ports_lock);
     return p;
 }
@@ -688,6 +692,10 @@ static void mach_port_enqueue(uint32_t name, const void *bytes, uint32_t size)
     pthread_mutex_unlock(&p->lock);
 }
 
+/* Defined with the XPC transport below; an XPC listener hands each accepted
+ * client socket to it so the connection becomes a peer connection. */
+void xpc_accept_fd(uint32_t listener_port, int fd);
+
 /* Accepts connections from senders in other processes and turns each
  * datagram into a queued Mach message on the service port. */
 static void *service_reader(void *arg)
@@ -721,6 +729,11 @@ static void *service_reader(void *arg)
                 int c = accept(p->listen_fd, NULL, NULL);
                 if (c < 0)
                     break;
+                if (p->xpc_listener)
+                {
+                    xpc_accept_fd(name, c);
+                    continue;
+                }
                 if (nclients < SVC_MAX_CLIENTS)
                 {
                     int fl = fcntl(c, F_GETFL, 0);
@@ -881,6 +894,8 @@ struct xpc_object {
     void *items[64];
     char *keys[64];
     int count;
+    /* XPC_CONNECTION objects delivered to a listener wrap a peer. */
+    void *conn;
 };
 
 static struct xpc_object *xpc_new(int type)
@@ -970,11 +985,16 @@ const char *xpc_copy_description(void *obj) { (void)obj; return "xpc-object"; }
 #define XPC_PAYLOAD_MAX 60000
 #define XPC_DEPTH_MAX 16
 
+enum { XPC_KIND_MESSAGE = 0, XPC_KIND_REQUEST = 1, XPC_KIND_REPLY = 2 };
+
 typedef struct {
     mach_msg_header_t header;
     uint32_t magic;
     uint32_t length;
     int32_t sender;
+    uint32_t kind;
+    uint32_t reserved;
+    uint64_t request_id;
     unsigned char payload[XPC_PAYLOAD_MAX];
 } xpc_frame;
 
@@ -1174,19 +1194,45 @@ struct xpc_connection {
     void *handler;
     unsigned long flags;
     uint32_t port;
+    uint32_t listener_port;
     int started;
     int listener;
+    /* xpc_connection_create() connections keep the in-process shortcut used
+     * by unit fixtures; mach-service connections speak the socket protocol. */
+    int convenience;
+    /* A peer is the listener-side object for one accepted client socket. */
+    int peer;
+    int fd;
+    int reader_started;
+    uint64_t current_request;
+    int peer_pid;
 };
 static struct xpc_connection *connections[64];
 static int connection_count;
 
-static struct xpc_connection *find_connection(const char *name)
+static void register_connection(struct xpc_connection *c)
 {
-    for (int i = 0; i < connection_count; i++)
-        if (connections[i] && strcmp(connections[i]->name, name) == 0)
-            return connections[i];
-    return NULL;
+    if (connection_count < 64)
+        connections[connection_count++] = c;
 }
+
+static struct xpc_connection *connection_from_object(void *obj)
+{
+    if (!obj)
+        return NULL;
+    struct xpc_object *o = obj;
+    if (o->type == XPC_CONNECTION && o->conn)
+        return (struct xpc_connection *)o->conn;
+    return (struct xpc_connection *)obj;
+}
+
+static void *xpc_connection_object(struct xpc_connection *c)
+{
+    struct xpc_object *o = xpc_new(XPC_CONNECTION);
+    o->conn = c;
+    return o;
+}
+
 void *xpc_connection_create_mach_service(const char *name, void *queue, unsigned long flags)
 {
     (void)queue;
@@ -1195,8 +1241,8 @@ void *xpc_connection_create_mach_service(const char *name, void *queue, unsigned
     c->flags = flags;
     /* XPC_CONNECTION_MACH_SERVICE_LISTENER = 1 */
     c->listener = (flags & 1) != 0;
-    if (connection_count < 64)
-        connections[connection_count++] = c;
+    c->fd = -1;
+    register_connection(c);
     return c;
 }
 void *xpc_connection_create(const char *name, void *queue)
@@ -1204,13 +1250,14 @@ void *xpc_connection_create(const char *name, void *queue)
     (void)queue;
     struct xpc_connection *c = calloc(1, sizeof(*c));
     c->name = strdup(name ? name : "");
-    if (connection_count < 64)
-        connections[connection_count++] = c;
+    c->convenience = 1;
+    c->fd = -1;
+    register_connection(c);
     return c;
 }
 void xpc_connection_set_event_handler(void *conn, void *handler)
 {
-    struct xpc_connection *c = conn;
+    struct xpc_connection *c = connection_from_object(conn);
     if (!c)
         return;
     /* Handlers may be stack blocks; the connection owns a heap copy. */
@@ -1218,11 +1265,112 @@ void xpc_connection_set_event_handler(void *conn, void *handler)
         _Block_release(c->handler);
     c->handler = handler ? _Block_copy(handler) : NULL;
 }
-void xpc_connection_set_target_queue(void *conn, void *queue) { (void)conn; (void)queue; }
+void xpc_connection_set_target_queue(void *conn, void *queue)
+{
+    (void)conn;
+    (void)queue;
+}
 
-/* The listener thread receives serialized messages from its bootstrap port
- * and delivers rebuilt XPC objects to the connection's event handler. */
-static void *xpc_receiver(void *arg)
+/* --------------------------------------------------- request/reply slots */
+
+struct xpc_reply_slot {
+    struct xpc_reply_slot *next;
+    uint64_t id;
+    void *handler;
+    int sync;
+    int done;
+    void *reply;
+    pthread_mutex_t lock;
+    pthread_cond_t cond;
+};
+static struct xpc_reply_slot *reply_slots;
+static pthread_mutex_t reply_lock = PTHREAD_MUTEX_INITIALIZER;
+static uint64_t request_counter = 1;
+
+static uint64_t xpc_next_request(void)
+{
+    pthread_mutex_lock(&reply_lock);
+    uint64_t id = request_counter++;
+    pthread_mutex_unlock(&reply_lock);
+    return id;
+}
+
+static struct xpc_reply_slot *xpc_register_slot(uint64_t id, void *handler,
+                                                int sync)
+{
+    struct xpc_reply_slot *slot = calloc(1, sizeof(*slot));
+    if (!slot)
+        return NULL;
+    slot->id = id;
+    slot->handler = handler ? _Block_copy(handler) : NULL;
+    slot->sync = sync;
+    pthread_mutex_init(&slot->lock, NULL);
+    pthread_cond_init(&slot->cond, NULL);
+    pthread_mutex_lock(&reply_lock);
+    slot->next = reply_slots;
+    reply_slots = slot;
+    pthread_mutex_unlock(&reply_lock);
+    return slot;
+}
+
+static void xpc_unlink_slot(struct xpc_reply_slot *slot)
+{
+    pthread_mutex_lock(&reply_lock);
+    for (struct xpc_reply_slot **link = &reply_slots; *link;
+         link = &(*link)->next)
+        if (*link == slot)
+        {
+            *link = slot->next;
+            break;
+        }
+    pthread_mutex_unlock(&reply_lock);
+}
+
+static void xpc_free_slot(struct xpc_reply_slot *slot)
+{
+    pthread_mutex_destroy(&slot->lock);
+    pthread_cond_destroy(&slot->cond);
+    if (slot->handler)
+        _Block_release(slot->handler);
+    free(slot);
+}
+
+static void xpc_deliver_reply(uint64_t id, void *event)
+{
+    struct xpc_reply_slot *slot = NULL;
+    pthread_mutex_lock(&reply_lock);
+    for (struct xpc_reply_slot **link = &reply_slots; *link;
+         link = &(*link)->next)
+        if ((*link)->id == id)
+        {
+            slot = *link;
+            *link = slot->next;
+            break;
+        }
+    pthread_mutex_unlock(&reply_lock);
+    if (!slot)
+        return;
+    if (slot->sync)
+    {
+        pthread_mutex_lock(&slot->lock);
+        slot->reply = event;
+        slot->done = 1;
+        pthread_cond_broadcast(&slot->cond);
+        pthread_mutex_unlock(&slot->lock);
+        return;
+    }
+    if (slot->handler)
+        call_block_arg(slot->handler, event);
+    xpc_free_slot(slot);
+}
+
+/* --------------------------------------------------------- socket readers */
+
+/* One thread per connection socket. On a peer, frames are requests or
+ * messages from the client and the handler's send becomes the reply. On a
+ * client, reply frames are matched to pending request slots and everything
+ * else goes to the connection's event handler. */
+static void *xpc_reader_main(void *arg)
 {
     struct xpc_connection *c = arg;
     xpc_frame *frame = calloc(1, sizeof(*frame));
@@ -1230,52 +1378,56 @@ static void *xpc_receiver(void *arg)
         return NULL;
     for (;;)
     {
-        frame->header.msgh_size = sizeof(*frame);
-        frame->header.msgh_local_port = c->port;
-        int kr =
-            mach_msg(&frame->header, MACH_RCV_MSG | MACH_RCV_TIMEOUT, 0,
-                     sizeof(*frame), c->port, 1000, 0);
-        if (kr != 0)
+        ssize_t r = recv(c->fd, frame, sizeof(*frame), 0);
+        if (r <= 0)
+            break;
+        if ((size_t)r < XPC_FRAME_HEADER)
             continue;
-        if (frame->magic != XPC_FRAME_MAGIC || frame->length > XPC_PAYLOAD_MAX)
+        if (frame->magic != XPC_FRAME_MAGIC ||
+            frame->length > XPC_PAYLOAD_MAX)
             continue;
         size_t pos = 0;
         struct xpc_object *event =
             xpc_decode(frame->payload, frame->length, &pos, 0);
         if (!event)
             continue;
-        if (c->handler)
+        if (c->peer)
+        {
+            c->peer_pid = frame->sender;
+            uint64_t saved = c->current_request;
+            c->current_request =
+                frame->kind == XPC_KIND_REQUEST ? frame->request_id : 0;
+            if (c->handler)
+                call_block_arg(c->handler, event);
+            c->current_request = saved;
+        }
+        else if (frame->kind == XPC_KIND_REPLY)
+            xpc_deliver_reply(frame->request_id, event);
+        else if (c->handler)
             call_block_arg(c->handler, event);
     }
+    free(frame);
     return NULL;
 }
 
-void xpc_connection_resume(void *conn)
+static void xpc_start_reader(struct xpc_connection *c)
 {
-    struct xpc_connection *c = conn;
-    if (!c || c->started)
+    if (c->reader_started || c->fd < 0)
         return;
-    c->started = 1;
-    if (!c->listener)
-        return;
-    uint32_t port = port_new(-1);
-    if (bootstrap_register(bootstrap_port_value, c->name, port) != 0)
-        return;
-    c->port = port;
+    c->reader_started = 1;
     pthread_t thread;
-    if (pthread_create(&thread, NULL, xpc_receiver, c) != 0)
-        return;
-    pthread_detach(thread);
+    if (pthread_create(&thread, NULL, xpc_reader_main, c) == 0)
+        pthread_detach(thread);
 }
-void xpc_connection_suspend(void *conn) { (void)conn; }
-void xpc_connection_cancel(void *conn) { (void)conn; }
 
-/* Serialize and send one message to the bootstrap service another process
- * registered for this connection name. */
-static int xpc_send_remote(struct xpc_connection *c, void *message)
+/* Resolve the bootstrap name to a connected socket, once per connection. */
+static int xpc_ensure_fd(struct xpc_connection *c)
 {
-    if (!message)
-        return -1;
+    if (c->fd >= 0)
+    {
+        xpc_start_reader(c);
+        return 0;
+    }
     if (c->port == 0)
     {
         uint32_t port = 0;
@@ -1283,6 +1435,19 @@ static int xpc_send_remote(struct xpc_connection *c, void *message)
             return -1;
         c->port = port;
     }
+    struct mach_port_s *p = port_get(c->port);
+    if (!p || p->peer_fd < 0)
+        return -1;
+    c->fd = p->peer_fd;
+    xpc_start_reader(c);
+    return 0;
+}
+
+static int xpc_write_frame(struct xpc_connection *c, uint32_t kind,
+                           uint64_t request_id, void *message)
+{
+    if (c->fd < 0 || !message)
+        return -1;
     unsigned char *payload = malloc(XPC_PAYLOAD_MAX);
     if (!payload)
         return -1;
@@ -1300,46 +1465,184 @@ static int xpc_send_remote(struct xpc_connection *c, void *message)
         free(payload);
         return -1;
     }
-    frame->header.msgh_bits = 0;
-    frame->header.msgh_size = (uint32_t)total;
-    frame->header.msgh_remote_port = c->port;
-    frame->header.msgh_id = 0x78706331;
     frame->magic = XPC_FRAME_MAGIC;
     frame->length = (uint32_t)plen;
     frame->sender = (int32_t)getpid();
+    frame->kind = kind;
+    frame->request_id = request_id;
     memcpy(frame->payload, payload, plen);
-    int kr =
-        mach_msg(&frame->header, MACH_SEND_MSG, (uint32_t)total, 0, 0, 0, 0);
+    ssize_t n = send(c->fd, frame, total, MSG_NOSIGNAL);
     free(frame);
     free(payload);
-    return kr == 0 ? 0 : -1;
+    return n == (ssize_t)total ? 0 : -1;
 }
+
+/* ------------------------------------------------------------ listener API */
+
+/* Register the listener by name and mark its receive port so that accepted
+ * client sockets become peer connections rather than Mach message sources. */
+static int xpc_register_listener(struct xpc_connection *c)
+{
+    uint32_t port = port_new(-1);
+    int launched = launchd_register_service(c->name);
+    if (launched == 1103)
+        return 1103;
+    if (launched == 0)
+    {
+        struct mach_port_s *p = port_get(port);
+        if (p)
+            p->xpc_listener = 1;
+        if (port_listen(port, c->name) != 0)
+            return -1;
+    }
+    c->port = port;
+    c->listener_port = port;
+    return 0;
+}
+
+/* Called from the service accept loop for every incoming XPC client. */
+void xpc_accept_fd(uint32_t listener_port, int fd)
+{
+    struct xpc_connection *listener = NULL;
+    for (int i = 0; i < connection_count; i++)
+    {
+        struct xpc_connection *c = connections[i];
+        if (c && c->listener && c->started && c->listener_port == listener_port)
+        {
+            listener = c;
+            break;
+        }
+    }
+    if (!listener || !listener->handler)
+    {
+        close(fd);
+        return;
+    }
+    struct xpc_connection *peer = calloc(1, sizeof(*peer));
+    if (!peer)
+    {
+        close(fd);
+        return;
+    }
+    peer->name = strdup(listener->name);
+    peer->fd = fd;
+    peer->peer = 1;
+    register_connection(peer);
+    call_block_arg(listener->handler, xpc_connection_object(peer));
+}
+
+void xpc_connection_resume(void *conn)
+{
+    struct xpc_connection *c = connection_from_object(conn);
+    if (!c || c->started)
+        return;
+    c->started = 1;
+    if (c->listener)
+    {
+        xpc_register_listener(c);
+        return;
+    }
+    if (c->peer)
+        xpc_start_reader(c);
+    /* Clients connect lazily on their first send. */
+}
+void xpc_connection_suspend(void *conn) { (void)conn; }
+void xpc_connection_cancel(void *conn) { (void)conn; }
+
+/* -------------------------------------------------------------- send side */
 
 void xpc_connection_send_message(void *conn, void *message)
 {
-    struct xpc_connection *c = conn;
-    if (!c) return;
-    for (int i = 0; i < connection_count; i++)
+    struct xpc_connection *c = connection_from_object(conn);
+    if (!c || !message)
+        return;
+    if (c->convenience)
     {
-        struct xpc_connection *peer = connections[i];
-        if (peer && peer != c && peer->handler &&
-            strcmp(peer->name, c->name) == 0)
+        /* In-process convenience connections deliver to a same-named local
+         * connection's handler, which is their only transport. */
+        for (int i = 0; i < connection_count; i++)
         {
-            call_block_arg(peer->handler, message);
-            return;
+            struct xpc_connection *peer = connections[i];
+            if (peer && peer != c && peer->handler &&
+                strcmp(peer->name, c->name) == 0)
+            {
+                call_block_arg(peer->handler, message);
+                return;
+            }
         }
     }
-    xpc_send_remote(c, message);
+    if (xpc_ensure_fd(c) != 0)
+        return;
+    if (c->current_request)
+    {
+        uint64_t request = c->current_request;
+        c->current_request = 0;
+        xpc_write_frame(c, XPC_KIND_REPLY, request, message);
+    }
+    else
+        xpc_write_frame(c, XPC_KIND_MESSAGE, 0, message);
 }
-void xpc_connection_send_message_with_reply(void *conn, void *message, void *queue, void *handler)
+
+void xpc_connection_send_message_with_reply(void *conn, void *message,
+                                            void *queue, void *handler)
 {
     (void)queue;
-    xpc_connection_send_message(conn, message);
-    if (handler)
-        call_block(handler);
+    struct xpc_connection *c = connection_from_object(conn);
+    if (!c)
+        return;
+    if (c->convenience || xpc_ensure_fd(c) != 0 || !message)
+    {
+        if (handler)
+            call_block_arg(handler, xpc_new(XPC_ERROR));
+        return;
+    }
+    uint64_t id = xpc_next_request();
+    if (!xpc_register_slot(id, handler, 0))
+    {
+        if (handler)
+            call_block_arg(handler, xpc_new(XPC_ERROR));
+        return;
+    }
+    if (xpc_write_frame(c, XPC_KIND_REQUEST, id, message) != 0 && handler)
+        call_block_arg(handler, xpc_new(XPC_ERROR));
 }
-void xpc_connection_send_barrier(void *conn, void *block) { (void)conn; call_block(block); }
-int xpc_connection_get_pid(void *conn) { (void)conn; return getpid(); }
+
+void *xpc_connection_send_message_with_reply_sync(void *conn, void *message)
+{
+    struct xpc_connection *c = connection_from_object(conn);
+    if (!c || c->convenience || xpc_ensure_fd(c) != 0 || !message)
+        return xpc_new(XPC_ERROR);
+    uint64_t id = xpc_next_request();
+    struct xpc_reply_slot *slot = xpc_register_slot(id, NULL, 1);
+    if (!slot)
+        return xpc_new(XPC_ERROR);
+    void *reply = NULL;
+    if (xpc_write_frame(c, XPC_KIND_REQUEST, id, message) == 0)
+    {
+        pthread_mutex_lock(&slot->lock);
+        while (!slot->done)
+            pthread_cond_wait(&slot->cond, &slot->lock);
+        reply = slot->reply;
+        pthread_mutex_unlock(&slot->lock);
+    }
+    else
+        xpc_unlink_slot(slot);
+    xpc_free_slot(slot);
+    return reply ? reply : xpc_new(XPC_ERROR);
+}
+
+void xpc_connection_send_barrier(void *conn, void *block)
+{
+    (void)conn;
+    call_block(block);
+}
+int xpc_connection_get_pid(void *conn)
+{
+    struct xpc_connection *c = connection_from_object(conn);
+    if (c && c->peer_pid > 0)
+        return c->peer_pid;
+    return getpid();
+}
 void xpc_main(void (*handler)(void *)) { (void)handler; }
 
 int launch_activate_socket(const char *name, int *fds, size_t *count)
@@ -1372,21 +1675,23 @@ char xpc_type_array_storage[64];
 char xpc_type_error_storage[64];
 char xpc_type_connection_storage[64];
 
-/* xpc_get_type returns the shared type constants so app comparisons work. */
+/* xpc_get_type returns the address of the exported type symbol, so an app's
+ * `xpc_get_type(event) == XPC_TYPE_CONNECTION` comparison works. */
 struct xpc_object *xpc_get_type(void *obj)
 {
     struct xpc_object *o = obj;
-    if (!o) return (struct xpc_object *)&xpc_type_error_obj;
+    if (!o) return (struct xpc_object *)xpc_type_error_storage;
     switch (o->type)
     {
-    case XPC_DICT: return (struct xpc_object *)&xpc_type_dictionary_obj;
-    case XPC_STRING: return (struct xpc_object *)&xpc_type_string_obj;
-    case XPC_INT: return (struct xpc_object *)&xpc_type_int64_obj;
-    case XPC_BOOL: return (struct xpc_object *)&xpc_type_bool_obj;
-    case XPC_DATA: return (struct xpc_object *)&xpc_type_data_obj;
-    case XPC_ARRAY: return (struct xpc_object *)&xpc_type_array_obj;
-    case XPC_CONNECTION: return (struct xpc_object *)&xpc_type_connection_obj;
-    default: return (struct xpc_object *)&xpc_type_error_obj;
+    case XPC_DICT: return (struct xpc_object *)xpc_type_dictionary_storage;
+    case XPC_STRING: return (struct xpc_object *)xpc_type_string_storage;
+    case XPC_INT: return (struct xpc_object *)xpc_type_int64_storage;
+    case XPC_BOOL: return (struct xpc_object *)xpc_type_bool_storage;
+    case XPC_DATA: return (struct xpc_object *)xpc_type_data_storage;
+    case XPC_ARRAY: return (struct xpc_object *)xpc_type_array_storage;
+    case XPC_CONNECTION:
+        return (struct xpc_object *)xpc_type_connection_storage;
+    default: return (struct xpc_object *)xpc_type_error_storage;
     }
 }
 
@@ -1422,6 +1727,7 @@ static const struct service_symbol service_symbols[] = {
     SVC(xpc_connection_set_event_handler), SVC(xpc_connection_set_target_queue),
     SVC(xpc_connection_resume), SVC(xpc_connection_suspend), SVC(xpc_connection_cancel),
     SVC(xpc_connection_send_message), SVC(xpc_connection_send_message_with_reply),
+    SVC(xpc_connection_send_message_with_reply_sync),
     SVC(xpc_connection_send_barrier), SVC(xpc_connection_get_pid), SVC(xpc_main),
     SVC(xpc_dictionary_create), SVC(xpc_dictionary_create_empty),
     SVC(xpc_dictionary_set_value), SVC(xpc_dictionary_get_value),
