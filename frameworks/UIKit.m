@@ -679,6 +679,55 @@ enum {
 @end
 
 
+@interface UISwitch : UIControl {
+@public
+    BOOL _on;
+    UIColor *_onTintColor;
+}
+- (void)setOn:(BOOL)on animated:(BOOL)animated;
+- (BOOL)isOn;
+- (void)setOnTintColor:(UIColor *)color;
+- (UIColor *)onTintColor;
+@end
+
+@interface UISlider : UIControl {
+@public
+    double _value;
+    double _minimumValue;
+    double _maximumValue;
+    UIColor *_minTrackTintColor;
+    UIColor *_maxTrackTintColor;
+    UIColor *_thumbTintColor;
+}
+- (void)setValue:(double)value animated:(BOOL)animated;
+- (double)value;
+- (void)setMinimumValue:(double)value;
+- (double)minimumValue;
+- (void)setMaximumValue:(double)value;
+- (double)maximumValue;
+- (void)setMinimumTrackTintColor:(UIColor *)color;
+- (UIColor *)minimumTrackTintColor;
+- (void)setMaximumTrackTintColor:(UIColor *)color;
+- (UIColor *)maximumTrackTintColor;
+- (void)setThumbTintColor:(UIColor *)color;
+- (UIColor *)thumbTintColor;
+- (void)setValueFromPoint:(CGPoint)point;
+@end
+
+@interface UIProgressView : UIView {
+@public
+    double _progress;
+    UIColor *_progressTintColor;
+    UIColor *_trackTintColor;
+}
+- (void)setProgress:(double)progress animated:(BOOL)animated;
+- (double)progress;
+- (void)setProgressTintColor:(UIColor *)color;
+- (UIColor *)progressTintColor;
+- (void)setTrackTintColor:(UIColor *)color;
+- (UIColor *)trackTintColor;
+@end
+
 @interface UIScrollView : UIView {
 @public
     CGSize _contentSize;
@@ -1860,6 +1909,122 @@ static UITextField *g_firstResponder;
 @end
 
 
+@implementation UISwitch
+- (id)initWithFrame:(CGRect)frame
+{
+    self = [super initWithFrame:frame];
+    if (self)
+        _onTintColor = [UIColor colorWithRed:0.20 green:0.78 blue:0.35
+                                       alpha:1.0];
+    return self;
+}
+- (void)setOn:(BOOL)on animated:(BOOL)animated
+{
+    (void)animated;
+    _on = on;
+    _needsLayout = YES;
+}
+- (BOOL)isOn { return _on; }
+- (void)setOnTintColor:(UIColor *)color { _onTintColor = color; }
+- (UIColor *)onTintColor { return _onTintColor; }
+- (void)sendActionsForControlEvents:(unsigned long)events
+{
+    if (events & 1 << 6)
+        [self setOn:!_on animated:YES];
+    [super sendActionsForControlEvents:events];
+}
+- (CGSize)intrinsicContentSize { return CGSizeMake(51, 31); }
+@end
+
+@implementation UISlider
+- (id)initWithFrame:(CGRect)frame
+{
+    self = [super initWithFrame:frame];
+    if (self)
+    {
+        _minimumValue = 0.0;
+        _maximumValue = 1.0;
+        _value = 0.0;
+        _minTrackTintColor = [UIColor colorWithRed:0.04 green:0.52 blue:1.0
+                                             alpha:1.0];
+        _maxTrackTintColor = [UIColor colorWithRed:0.24 green:0.24 blue:0.26
+                                             alpha:1.0];
+        _thumbTintColor = [UIColor whiteColor];
+    }
+    return self;
+}
+- (void)setValue:(double)value animated:(BOOL)animated
+{
+    (void)animated;
+    if (value < _minimumValue) value = _minimumValue;
+    if (value > _maximumValue) value = _maximumValue;
+    _value = value;
+    _needsLayout = YES;
+}
+- (double)value { return _value; }
+- (void)setMinimumValue:(double)value { _minimumValue = value; }
+- (double)minimumValue { return _minimumValue; }
+- (void)setMaximumValue:(double)value { _maximumValue = value; }
+- (double)maximumValue { return _maximumValue; }
+- (void)setMinimumTrackTintColor:(UIColor *)color
+{
+    _minTrackTintColor = color;
+}
+- (UIColor *)minimumTrackTintColor { return _minTrackTintColor; }
+- (void)setMaximumTrackTintColor:(UIColor *)color
+{
+    _maxTrackTintColor = color;
+}
+- (UIColor *)maximumTrackTintColor { return _maxTrackTintColor; }
+- (void)setThumbTintColor:(UIColor *)color { _thumbTintColor = color; }
+- (UIColor *)thumbTintColor { return _thumbTintColor; }
+- (void)setValueFromPoint:(CGPoint)point
+{
+    double span = _maximumValue - _minimumValue;
+    double thumb = 14.0;
+    double usable = _frame.size.width - thumb * 2;
+    if (usable <= 0)
+        return;
+    double t = (point.x - thumb) / usable;
+    if (t < 0) t = 0;
+    if (t > 1) t = 1;
+    [self setValue:_minimumValue + span * t animated:NO];
+    [self sendActionsForControlEvents:1 << 12];
+}
+- (CGSize)intrinsicContentSize
+{
+    return CGSizeMake(_frame.size.width, 31);
+}
+@end
+
+@implementation UIProgressView
+- (id)initWithFrame:(CGRect)frame
+{
+    self = [super initWithFrame:frame];
+    if (self)
+    {
+        _trackTintColor = [UIColor colorWithRed:0.24 green:0.24 blue:0.26
+                                          alpha:1.0];
+        _progressTintColor = [UIColor colorWithRed:0.04 green:0.52 blue:1.0
+                                             alpha:1.0];
+    }
+    return self;
+}
+- (void)setProgress:(double)progress animated:(BOOL)animated
+{
+    (void)animated;
+    if (progress < 0) progress = 0;
+    if (progress > 1) progress = 1;
+    _progress = progress;
+    _needsLayout = YES;
+}
+- (double)progress { return _progress; }
+- (void)setProgressTintColor:(UIColor *)color { _progressTintColor = color; }
+- (UIColor *)progressTintColor { return _progressTintColor; }
+- (void)setTrackTintColor:(UIColor *)color { _trackTintColor = color; }
+- (UIColor *)trackTintColor { return _trackTintColor; }
+@end
+
 /* ------------------------------------------------------- paths and layers */
 
 @implementation UIBezierPath
@@ -2735,6 +2900,18 @@ static double clamp_scroll(double value, double low, double high)
             [(UITextField *)tv becomeFirstResponder];
             break;
         }
+    if (hit && [hit isKindOfClass:[UISlider class]])
+    {
+        double ox = 0, oy = 0;
+        for (UIView *a = hit; a; a = [a superview])
+        {
+            ox += a->_frame.origin.x;
+            oy += a->_frame.origin.y;
+        }
+        [(UISlider *)hit setValueFromPoint:CGPointMake(point.x - ox,
+                                                       point.y - oy)];
+        return;
+    }
     if (hit && [hit isKindOfClass:[UIControl class]])
         [(UIControl *)hit sendActionsForControlEvents:UIControlEventTouchUpInside];
     UIView *tableHit = hit;
@@ -3677,6 +3854,78 @@ static void render_view(UIView *view, double originX, double originY,
             }
         }
         iosim_fb_set_opacity(1.0);
+    }
+
+    if ([view isKindOfClass:[UISwitch class]])
+    {
+        UISwitch *sw = (UISwitch *)view;
+        int radius = h / 2;
+        unsigned track = sw->_on ? (sw->_onTintColor
+                                       ? color_rgb(sw->_onTintColor)
+                                       : 0x34c759)
+                                 : 0x39393d;
+        iosim_fb_fill_round_rect(x, y, w, h, radius, track);
+        int knob = h - (int)(4 * scale);
+        int kx = sw->_on ? x + w - knob - (int)(2 * scale)
+                         : x + (int)(2 * scale);
+        int ky = y + (int)(2 * scale);
+        iosim_fb_set_opacity(alpha * 0.25);
+        iosim_fb_fill_circle(kx + knob / 2, ky + knob / 2 + (int)(2 * scale),
+                             knob / 2, 0x000000);
+        iosim_fb_set_opacity(alpha);
+        iosim_fb_fill_circle(kx + knob / 2, ky + knob / 2, knob / 2,
+                             0xffffff);
+    }
+    else if ([view isKindOfClass:[UISlider class]])
+    {
+        UISlider *slider = (UISlider *)view;
+        int trackH = (int)(4 * scale);
+        int ty = y + h / 2 - trackH / 2;
+        unsigned minColor = slider->_minTrackTintColor
+                                ? color_rgb(slider->_minTrackTintColor)
+                                : 0x0a84ff;
+        unsigned maxColor = slider->_maxTrackTintColor
+                                ? color_rgb(slider->_maxTrackTintColor)
+                                : 0x3a3a3c;
+        iosim_fb_fill_round_rect(x, ty, w, trackH, trackH / 2, maxColor);
+        double span = slider->_maximumValue - slider->_minimumValue;
+        double t = span > 0 ? (slider->_value - slider->_minimumValue) / span
+                            : 0;
+        if (t < 0) t = 0;
+        if (t > 1) t = 1;
+        int thumb = (int)(28 * scale);
+        int usable = w - thumb;
+        int fillW = (int)(usable * t + thumb / 2);
+        if (fillW > 0)
+            iosim_fb_fill_round_rect(x, ty, fillW, trackH, trackH / 2,
+                                     minColor);
+        int cx = x + thumb / 2 + (int)(usable * t);
+        iosim_fb_set_opacity(alpha * 0.25);
+        iosim_fb_fill_circle(cx, y + h / 2 + (int)(2 * scale),
+                             thumb / 2, 0x000000);
+        iosim_fb_set_opacity(alpha);
+        iosim_fb_fill_circle(cx, y + h / 2, thumb / 2,
+                             slider->_thumbTintColor
+                                 ? color_rgb(slider->_thumbTintColor)
+                                 : 0xffffff);
+    }
+    else if ([view isKindOfClass:[UIProgressView class]])
+    {
+        UIProgressView *pv = (UIProgressView *)view;
+        int trackH = (int)(4 * scale);
+        int ty = y + h / 2 - trackH / 2;
+        unsigned track = pv->_trackTintColor ? color_rgb(pv->_trackTintColor)
+                                             : 0x3a3a3c;
+        unsigned fill = pv->_progressTintColor
+                            ? color_rgb(pv->_progressTintColor)
+                            : 0x0a84ff;
+        iosim_fb_fill_round_rect(x, ty, w, trackH, trackH / 2, track);
+        double p = pv->_progress;
+        if (p < 0) p = 0;
+        if (p > 1) p = 1;
+        int fw = (int)(w * p + 0.5);
+        if (fw > 0)
+            iosim_fb_fill_round_rect(x, ty, fw, trackH, trackH / 2, fill);
     }
 
     if ([view isKindOfClass:[UITextField class]])

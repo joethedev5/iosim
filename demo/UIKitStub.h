@@ -174,6 +174,18 @@ enum {
 @property(readonly) UILabel *titleLabel;
 @end
 
+@interface UISwitch : UIView
+- (void)setOn:(BOOL)on animated:(BOOL)animated;
+@end
+
+@interface UISlider : UIView
+- (void)setValue:(double)value animated:(BOOL)animated;
+@end
+
+@interface UIProgressView : UIView
+- (void)setProgress:(double)progress animated:(BOOL)animated;
+@end
+
 @interface UIScene : NSObject
 @end
 
