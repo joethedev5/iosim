@@ -1355,6 +1355,9 @@ enum {
     long _selectedSection;
     long _style;
     BOOL _needsReload;
+    BOOL _editing;
+    long _swipeRow;
+    long _swipeSection;
 }
 - (void)setDataSource:(id)dataSource;
 - (id)dataSource;
@@ -1366,7 +1369,30 @@ enum {
 - (void)reloadData;
 - (id)dequeueReusableCellWithIdentifier:(id)identifier;
 - (void)handleTapAtPoint:(CGPoint)point;
+- (void)handleSwipeFromPoint:(CGPoint)start toPoint:(CGPoint)end;
+- (void)setEditing:(BOOL)editing;
+- (void)setEditing:(BOOL)editing animated:(BOOL)animated;
+- (BOOL)isEditing;
+- (void)deleteRowsAtIndexPaths:(NSArray *)indexPaths
+           withRowAnimation:(long)animation;
 @end
+
+enum {
+    UITableViewCellEditingStyleNone = 0,
+    UITableViewCellEditingStyleDelete = 1,
+    UITableViewCellEditingStyleInsert = 2
+};
+
+enum {
+    UITableViewRowAnimationFade = 0,
+    UITableViewRowAnimationRight = 1,
+    UITableViewRowAnimationLeft = 2,
+    UITableViewRowAnimationTop = 3,
+    UITableViewRowAnimationBottom = 4,
+    UITableViewRowAnimationNone = 5,
+    UITableViewRowAnimationMiddle = 6,
+    UITableViewRowAnimationAutomatic = 100
+};
 
 @class UICollectionView;
 @class UICollectionViewCell;
@@ -5466,6 +5492,50 @@ static double table_total_height(UITableView *table)
 }
 @end
 
+static int table_row_at_point(UITableView *table, CGPoint point,
+                              long *outSection, long *outRow)
+{
+    double cursor = 0;
+    long sections = table_sections(table);
+    for (long s = 0; s < sections; s++)
+    {
+        cursor += table_header_height(table, s);
+        long rows = table_rows(table, s);
+        for (long r = 0; r < rows; r++)
+        {
+            NSIndexPath *path = [NSIndexPath indexPathForRow:r inSection:s];
+            double height = table_row_height(table, path);
+            if (point.y >= cursor && point.y < cursor + height)
+            {
+                if (outSection)
+                    *outSection = s;
+                if (outRow)
+                    *outRow = r;
+                return 1;
+            }
+            cursor += height;
+        }
+    }
+    return 0;
+}
+
+static int table_can_edit_row(UITableView *table, long section, long row)
+{
+    if (table->_dataSource &&
+        [table->_dataSource respondsToSelector:
+            @selector(tableView:canEditRowAtIndexPath:)])
+    {
+        NSIndexPath *path = [NSIndexPath indexPathForRow:row inSection:section];
+        SEL sel = @selector(tableView:canEditRowAtIndexPath:);
+        signed char allowed = ((signed char (*)(id, void *, id, id))
+            objc_msgSend)(table->_dataSource, (void *)sel, table, path);
+        return allowed ? 1 : 0;
+    }
+    return table->_dataSource &&
+           [table->_dataSource respondsToSelector:
+               @selector(tableView:commitEditingStyle:forRowAtIndexPath:)];
+}
+
 @implementation UITableView
 - (id)initWithFrame:(CGRect)frame
 {
@@ -5475,6 +5545,8 @@ static double table_total_height(UITableView *table)
         _rowHeight = 44.0;
         _selectedRow = -1;
         _selectedSection = -1;
+        _swipeRow = -1;
+        _swipeSection = -1;
     }
     return self;
 }
@@ -5513,32 +5585,103 @@ static double table_total_height(UITableView *table)
     (void)identifier;
     return nil;
 }
+/* A horizontal drag on an editable row reveals its Delete control. The
+ * window calls this once the touch ends, with table-local coordinates. */
+- (void)handleSwipeFromPoint:(CGPoint)start toPoint:(CGPoint)end
+{
+    if (end.x - start.x > -50)
+        return;
+    long section = -1, row = -1;
+    if (!table_row_at_point(self, start, &section, &row))
+        return;
+    if (!table_can_edit_row(self, section, row))
+        return;
+    _swipeSection = section;
+    _swipeRow = row;
+    printf("[table] delete revealed %ld\n", row);
+    fflush(0);
+}
+
+- (void)deleteRowAtSwipe
+{
+    if (_swipeRow < 0)
+        return;
+    long section = _swipeSection;
+    long row = _swipeRow;
+    _swipeRow = -1;
+    _swipeSection = -1;
+    if (_dataSource &&
+        [_dataSource respondsToSelector:
+            @selector(tableView:commitEditingStyle:forRowAtIndexPath:)])
+    {
+        NSIndexPath *path = [NSIndexPath indexPathForRow:row inSection:section];
+        SEL sel = @selector(tableView:commitEditingStyle:forRowAtIndexPath:);
+        ((void (*)(id, void *, id, long, id))objc_msgSend)(
+            _dataSource, (void *)sel, self,
+            (long)UITableViewCellEditingStyleDelete, path);
+    }
+    [self reloadData];
+}
+
+- (void)setEditing:(BOOL)editing
+{
+    _editing = editing;
+    _swipeRow = -1;
+    _swipeSection = -1;
+}
+- (void)setEditing:(BOOL)editing animated:(BOOL)animated
+{
+    (void)animated;
+    [self setEditing:editing];
+}
+- (BOOL)isEditing { return _editing; }
+- (void)deleteRowsAtIndexPaths:(NSArray *)indexPaths
+           withRowAnimation:(long)animation
+{
+    (void)indexPaths;
+    (void)animation;
+    [self reloadData];
+}
+
 - (void)handleTapAtPoint:(CGPoint)point
 {
     if (point.y < 0)
         return;
-    double cursor = 0;
-    long sections = table_sections(self);
-    for (long s = 0; s < sections; s++)
+    long section = -1, row = -1;
+    if (!table_row_at_point(self, point, &section, &row))
     {
-        cursor += table_header_height(self, s);
-        long rows = table_rows(self, s);
-        for (long r = 0; r < rows; r++)
+        _swipeRow = -1;
+        _swipeSection = -1;
+        return;
+    }
+    if (_swipeRow >= 0)
+    {
+        if (section == _swipeSection && row == _swipeRow &&
+            point.x >= _frame.size.width - 80.0)
         {
-            NSIndexPath *path = [NSIndexPath indexPathForRow:r inSection:s];
-            double height = table_row_height(self, path);
-            if (point.y >= cursor && point.y < cursor + height)
-            {
-                _selectedSection = s;
-                _selectedRow = r;
-                if (_delegate &&
-                    [_delegate respondsToSelector:
-                        @selector(tableView:didSelectRowAtIndexPath:)])
-                    [_delegate tableView:self didSelectRowAtIndexPath:path];
-                return;
-            }
-            cursor += height;
+            [self deleteRowAtSwipe];
+            return;
         }
+        _swipeRow = -1;
+        _swipeSection = -1;
+    }
+    if (_editing && point.x < 44.0 &&
+        table_can_edit_row(self, section, row))
+    {
+        _swipeSection = section;
+        _swipeRow = row;
+        printf("[table] delete revealed %ld\n", row);
+        fflush(0);
+        return;
+    }
+    _selectedSection = section;
+    _selectedRow = row;
+    if (_delegate &&
+        [_delegate respondsToSelector:
+            @selector(tableView:didSelectRowAtIndexPath:)])
+    {
+        NSIndexPath *path = [NSIndexPath indexPathForRow:row inSection:section];
+        [_delegate tableView:self didSelectRowAtIndexPath:path];
     }
 }
 @end
@@ -6118,6 +6261,30 @@ static double clamp_scroll(double value, double low, double high)
     }
     double dx = point.x - _dragStartPoint.x;
     double dy = point.y - _dragStartPoint.y;
+    UIView *swipeTable = _touchHit;
+    while (swipeTable && ![swipeTable isKindOfClass:[UITableView class]])
+        swipeTable = [swipeTable superview];
+    if (swipeTable && dx < -50 && -dx > __builtin_fabs(dy) * 1.5)
+    {
+        double ox = 0, oy = 0;
+        UIView *anc = swipeTable;
+        while (anc)
+        {
+            ox += anc->_frame.origin.x;
+            oy += anc->_frame.origin.y;
+            if ([anc isKindOfClass:[UIScrollView class]])
+            {
+                UIScrollView *sc = (UIScrollView *)anc;
+                ox -= sc->_contentOffset.x;
+                oy -= sc->_contentOffset.y;
+            }
+            anc = [anc superview];
+        }
+        [(UITableView *)swipeTable
+            handleSwipeFromPoint:CGPointMake(_dragStartPoint.x - ox,
+                                             _dragStartPoint.y - oy)
+                         toPoint:CGPointMake(point.x - ox, point.y - oy)];
+    }
     long direction = 0;
     if (__builtin_fabs(dx) > __builtin_fabs(dy))
         direction = dx > 0 ? UISwipeGestureRecognizerDirectionRight
@@ -7475,10 +7642,15 @@ static void render_view(UIView *view, double originX, double originY,
                 cell = (UITableViewCell *)((id (*)(id, void *, id, id))objc_msgSend)(
                     table->_dataSource, (void *)sel, table, path);
             }
+            int swiped = section == table->_swipeSection &&
+                         i == table->_swipeRow;
             if (cell)
             {
-                cell->_frame = CGRectMake(0, cursor - tableScrollY,
-                                          frame.size.width, rowHeight);
+                double shift = swiped ? -80.0 : (table->_editing ? 32.0 : 0.0);
+                double cellWidth =
+                    frame.size.width - (shift > 0 ? shift : 0);
+                cell->_frame = CGRectMake(shift, cursor - tableScrollY,
+                                          cellWidth, rowHeight);
                 [cell setFrame:cell->_frame];
                 UIColor *savedBackground = cell->_backgroundColor;
                 if (section == table->_selectedSection &&
@@ -7489,9 +7661,38 @@ static void render_view(UIView *view, double originX, double originY,
                             originY + frame.origin.y, scale, alpha);
                 cell->_backgroundColor = savedBackground;
             }
-            iosim_fb_set_opacity(alpha);
-            iosim_fb_fill_rect(x + (int)(16 * scale), ry + rh - 1,
-                               w - (int)(16 * scale), 1, 0x38383a);
+            if (swiped)
+            {
+                int bw = (int)(80 * scale + 0.5);
+                int bx = x + w - bw;
+                iosim_fb_set_opacity(alpha);
+                iosim_fb_fill_rect(bx, ry, bw, rh, 0xff3b30);
+                int asc = 0, desc = 0, lh = 0;
+                iosim_fb_font_metrics(IOSIM_FONT_SEMIBOLD, 17, scale, &asc,
+                                      &desc, &lh);
+                const char *label = "Delete";
+                int tw = iosim_fb_font_text_width(label, IOSIM_FONT_SEMIBOLD,
+                                                  17, scale);
+                iosim_fb_font_text(bx + (bw - tw) / 2,
+                                   ry + (rh - lh) / 2 + asc, label,
+                                   IOSIM_FONT_SEMIBOLD, 17, scale, 0xffffff);
+            }
+            else if (table->_editing)
+            {
+                int cx = x + (int)(22 * scale);
+                int cy = ry + rh / 2;
+                iosim_fb_fill_circle(cx, cy, (int)(12 * scale), 0xff3b30);
+                iosim_fb_fill_rect(cx - (int)(6 * scale),
+                                   cy - (int)(1.2 * scale + 0.5),
+                                   (int)(12 * scale),
+                                   (int)(2.4 * scale + 0.5), 0xffffff);
+            }
+            if (!swiped)
+            {
+                iosim_fb_set_opacity(alpha);
+                iosim_fb_fill_rect(x + (int)(16 * scale), ry + rh - 1,
+                                   w - (int)(16 * scale), 1, 0x38383a);
+            }
             if (cell && cell->_accessoryType == 1)
             {
                 int cx = x + w - (int)(22 * scale);

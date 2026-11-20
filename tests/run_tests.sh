@@ -373,6 +373,29 @@ else
 fi
 check "notify done" "$out" "NSNotificationCenter completes the post cycle"
 
+# ---------- 4j. date parsing and number formatting ----------
+"$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc -fblocks \
+    -ffreestanding -O1 -I "$ROOT/frameworks" \
+    -c "$ROOT/tests/format_test.m" -o "$T/format_test.o"
+"$LD64" -arch x86_64 -platform_version $PLATFORM -e _main \
+    -o "$T/format_test" "$T/format_test.o" \
+    "$ROOT/runtime/System/Library/Frameworks/Foundation.framework/Foundation" \
+    -undefined dynamic_lookup
+out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/format_test" 2>&1)"
+check "parsed 1709210096" "$out" \
+    "NSDateFormatter parses yyyy-MM-dd HH:mm:ss into the right instant"
+check "roundtrip 1709210096" "$out" \
+    "a parsed date prints and re-parses to the same instant"
+check "invalid no" "$out" "unparseable date strings return nil"
+check "decimal 1,234.5" "$out" \
+    "NSNumberFormatter groups and trims fraction digits"
+check "parsed number 1234.5" "$out" \
+    "NSNumberFormatter parses grouped decimal text back to a number"
+check "currency \$99.50" "$out" \
+    "the currency style adds a symbol and two fraction digits"
+check "percent 25.6%" "$out" \
+    "the percent style scales the value and appends a sign"
+
 # ---------- 5. UIKit-lite framework dylib ----------
 cat > "$T/uikit_app.c" <<'EOF'
 extern int printf(const char *fmt, ...);
@@ -1800,6 +1823,83 @@ if wait_log "[datepicker] time 1709210100"; then
     echo "ok   the time wheels edit minutes and keep the AM/PM selection"
 else
     echo "FAIL date picker time selection"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
+sleep 0.4
+
+# ---------- 9p. UITableView swipe-to-delete ----------
+"$ROOT/tools/build_app.sh" "$ROOT/demo/TableEditApp.m" "$T/TableEditApp" >/dev/null
+mkdir -p "$T/TableEditApp.app"
+cp "$T/TableEditApp" "$T/TableEditApp.app/TableEditApp"
+python3 - "$T/TableEditApp.app/Info.plist" <<'PY'
+import plistlib, sys
+with open(sys.argv[1], "wb") as f:
+    plistlib.dump({
+        "CFBundleIdentifier": "com.iosim.tableedit",
+        "CFBundleExecutable": "TableEditApp",
+        "CFBundleName": "TableEdit",
+        "CFBundlePackageType": "APPL",
+        "CFBundleVersion": "1",
+        "CFBundleShortVersionString": "1.0",
+    }, f)
+PY
+"$ROOT/tools/iosimctl" install "$UDID" "$T/TableEditApp.app" >/dev/null
+sleep 0.5
+# Twenty-eighth installed app: third page row 0 column 2.
+"$ROOT/tools/iosimctl" ui "$UDID" tap 247.2778 121.8333 >/dev/null
+if wait_log "[edit] ready items=4"; then
+    echo "ok   SpringBoard launches the editable table fixture"
+else
+    echo "FAIL table edit launch"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" swipe 300 164 180 164 0.3 >/dev/null
+if wait_log "[table] delete revealed 1"; then
+    echo "ok   swiping a row left reveals its Delete control"
+else
+    echo "FAIL table swipe reveal"; fails=$((fails+1))
+fi
+sleep 0.2
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/table-edit.png" >/dev/null
+if out="$(python3 - "$ROOT/tools" "$T/table-edit.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+c = pngpixel.px(rows, bpp, 330 * 3, 164 * 3)
+r, g, b = (c >> 16) & 255, (c >> 8) & 255, c & 255
+if not (r > 200 and g < 120 and b < 120):
+    raise SystemExit("delete control not red: %06x" % c)
+print("ok   the revealed Delete control is drawn in row 1")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL table delete rendering"; echo "$out"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" tap 360 164 >/dev/null
+if wait_log "[edit] deleted 1 name=Green" &&
+    wait_log "[edit] items=3"; then
+    echo "ok   tapping Delete commits the edit and removes the row"
+else
+    echo "FAIL table edit commit"; fails=$((fails+1))
+fi
+sleep 0.3
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/table-edit-after.png" >/dev/null
+if out="$(python3 - "$ROOT/tools" "$T/table-edit-after.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+c = pngpixel.px(rows, bpp, 330 * 3, 164 * 3)
+r, g, b = (c >> 16) & 255, (c >> 8) & 255, c & 255
+if r > 180 and g < 130 and b < 130:
+    raise SystemExit("delete control still visible: %06x" % c)
+print("ok   the committed row is gone and the button is cleared")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL table delete clearing"; echo "$out"; fails=$((fails+1))
 fi
 "$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
 sleep 0.4

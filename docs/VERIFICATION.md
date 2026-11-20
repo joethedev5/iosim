@@ -133,6 +133,17 @@ delegate reports `[section] select 1:1 Pea`, which also paints highlighted.
 Selection therefore shares one section/header/height computation with
 rendering.
 
+### UIKit: table swipe-to-delete
+
+`demo/TableEditApp.m` shows a four-row table whose data source implements
+`canEditRowAtIndexPath:` and `commitEditingStyle:forRowAtIndexPath:`. The
+suite swipes row 1 from (300, 164) to (180, 164) pt: the table records the
+open swipe and prints `[table] delete revealed 1`; the screenshot reads the
+revealed control at (360, 164) pt as #ff3b30. Tapping that point calls the
+data source, which prints `[edit] deleted 1 name=Green` and `[edit] items=3`,
+and the next screenshot reads the same pixel as the row background, so the
+button and row really went away.
+
 ### Touch: long-press recognition
 
 `demo/LongPressApp.m` attaches a `UILongPressGestureRecognizer` (0.4 s,
@@ -560,6 +571,16 @@ observer for separate notification names, posts a notification carrying
 output is `notify selector TestNote user=v`, `notify block BlockNote user=v`,
 then `notify done`: both delivery styles see the userInfo, and the block is
 not called after its token is removed.
+
+### Foundation: date parsing and number formatting
+
+`tests/format_test.m` parses `2024-02-29 12:34:56` with
+`yyyy-MM-dd HH:mm:ss`, prints `parsed 1709210096`, formats the result with
+the same formatter and re-parses it to the identical epoch (`roundtrip
+1709210096`), and confirms a non-date string returns nil (`invalid no`). The
+number formatters print `decimal 1,234.5` (grouping, max two fraction digits
+with the trailing zero trimmed), `parsed number 1234.5` for
+`numberFromString:@"1,234.50"`, `currency $99.50` and `percent 25.6%`.
 
 ### UIKit: app bundle resources
 

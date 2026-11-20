@@ -307,6 +307,15 @@ notification object to each matching observer, and
 `postNotificationName:object:userInfo:` and `postNotification:` are both
 available.
 
+`NSDateFormatter` walks the same format tokens in both directions:
+`stringFromDate:` decomposes the epoch into civil date fields and prints
+`y/M/d/H/m/s` runs, while `dateFromString:` consumes numbers into those
+fields, matches literal separators (allowing `/`, `-`, `:`, `.` and space
+equivalents) and rebuilds the epoch with `days_from_civil`. `NSNumberFormatter`
+formats decimals with grouping and minimum/maximum fraction digits, adds a
+currency symbol or a percent suffix and scales for the style, and parses
+formatted text (sign, group separators, `$`, `%`) back to an `NSNumber`.
+
 `NSKeyedArchiver` builds the same keyed-archive structure Foundation uses: an
 XML plist with `$archiver`, `$version`, `$top` and a `$objects` table, where
 class descriptions record `$classname`/`$classes` and every object reference
@@ -501,6 +510,11 @@ decoded with libpng in `loader/image.c`.
   sections and rows (applying delegate header heights, title headers and
   per-row heights), asks its data source for each cell and draws separators
   and accessories, so a tap maps back through the same section geometry.
+  A leftward drag over an editable row records an open swipe: the row renders
+  shifted with a red Delete control, a tap in that control calls the data
+  source's `commitEditingStyle:forRowAtIndexPath:` with
+  `UITableViewCellEditingStyleDelete` and reloads, and `setEditing:` shifts
+  rows and draws minus controls whose taps reveal the same Delete control.
   `insertSubview:atIndex:`, `bringSubviewToFront:` and `sendSubviewToBack:`
   reorder the subview list.
 - `UICollectionViewFlowLayout` derives a column grid from the item size,

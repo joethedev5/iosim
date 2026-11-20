@@ -41,6 +41,7 @@ extern int   iosim_fs_list(const char *path, char *out, unsigned long cap);
 extern unsigned long strlen(const char *s);
 extern int   strcmp(const char *a, const char *b);
 extern int   strncmp(const char *a, const char *b, unsigned long n);
+extern char *strchr(const char *s, int c);
 extern void *memcpy(void *dst, const void *src, unsigned long n);
 extern void *memset(void *dst, int c, unsigned long n);
 extern int   memcmp(const void *a, const void *b, unsigned long n);
@@ -1884,6 +1885,8 @@ static void iosim_civil_from_days(long long z, int *year, int *month, int *day)
 }
 @end
 
+static long long days_from_civil(long long y, int m, int d);
+
 @implementation NSDateFormatter
 - (void)setDateFormat:(id)format { _dateFormat = format; }
 - (id)dateFormat { return _dateFormat; }
@@ -1982,6 +1985,256 @@ static void iosim_civil_from_days(long long z, int *year, int *month, int *day)
     }
     out[o] = 0;
     return [NSString stringWithUTF8String:out];
+}
+- (NSDate *)dateFromString:(id)string
+{
+    const char *fmt = iosim_string_cstr(_dateFormat);
+    const char *text = iosim_string_cstr(string);
+    if (!fmt || !text)
+        return nil;
+    int year = 1970, month = 1, day = 1;
+    int hour = 0, minute = 0, second = 0;
+    int i = 0, p = 0;
+    while (fmt[i])
+    {
+        char c = fmt[i];
+        int run = 1;
+        while (fmt[i + run] == c)
+            run++;
+        if (c == 'y' || c == 'M' || c == 'd' || c == 'H' || c == 'm' ||
+            c == 's')
+        {
+            int value = 0, digits = 0;
+            int limit = run >= 4 ? 4 : 2;
+            while (text[p] >= '0' && text[p] <= '9' && digits < limit)
+            {
+                value = value * 10 + (text[p] - '0');
+                p++;
+                digits++;
+            }
+            if (digits == 0)
+                return nil;
+            if (c == 'y')
+            {
+                if (run == 2)
+                    year = value < 69 ? 2000 + value : 1900 + value;
+                else
+                    year = value;
+            }
+            else if (c == 'M')
+                month = value;
+            else if (c == 'd')
+                day = value;
+            else if (c == 'H')
+                hour = value;
+            else if (c == 'm')
+                minute = value;
+            else
+                second = value;
+        }
+        else if (c == ' ')
+        {
+            while (text[p] == ' ')
+                p++;
+        }
+        else
+        {
+            while (text[p] == ' ')
+                p++;
+            if (text[p] == c)
+                p++;
+            else if (text[p] && strchr("/-:.", c) &&
+                     strchr("/-:.", text[p]))
+                p++;
+            else if (text[p] != 0)
+                return nil;
+        }
+        i += run;
+    }
+    if (month < 1 || month > 12 || day < 1 || day > 31 || hour > 23 ||
+        minute > 59 || second > 59)
+        return nil;
+    long long seconds = days_from_civil(year, month, day) * 86400 +
+                        (long long)hour * 3600 + minute * 60 + second;
+    return [NSDate dateWithTimeIntervalSince1970:(double)seconds];
+}
+@end
+
+static double number_formatter_pow10(int digits)
+{
+    double value = 1.0;
+    for (int i = 0; i < digits; i++)
+        value *= 10.0;
+    return value;
+}
+
+@implementation NSNumberFormatter
+- (id)init
+{
+    self = [super init];
+    if (self)
+    {
+        _numberStyle = NSNumberFormatterNoStyle;
+        _maximumFractionDigits = 3;
+        _minimumFractionDigits = 0;
+        _usesGroupingSeparator = YES;
+    }
+    return self;
+}
+- (void)setNumberStyle:(long)style { _numberStyle = style; }
+- (long)numberStyle { return _numberStyle; }
+- (void)setMaximumFractionDigits:(long)digits
+{
+    _maximumFractionDigits = digits > 0 ? digits : 0;
+}
+- (long)maximumFractionDigits { return _maximumFractionDigits; }
+- (void)setMinimumFractionDigits:(long)digits
+{
+    _minimumFractionDigits = digits > 0 ? digits : 0;
+}
+- (long)minimumFractionDigits { return _minimumFractionDigits; }
+- (void)setUsesGroupingSeparator:(BOOL)uses
+{
+    _usesGroupingSeparator = uses ? YES : NO;
+}
+- (BOOL)usesGroupingSeparator { return _usesGroupingSeparator; }
+- (void)setCurrencySymbol:(id)symbol { _currencySymbol = symbol; }
+- (id)currencySymbol { return _currencySymbol ? _currencySymbol : @"$"; }
+- (id)stringFromNumber:(NSNumber *)number
+{
+    if (!number)
+        return @"";
+    double value = [number doubleValue];
+    long maxDigits = _maximumFractionDigits;
+    long minDigits = _minimumFractionDigits;
+    if (_numberStyle == NSNumberFormatterCurrencyStyle)
+    {
+        if (maxDigits <= 0)
+            maxDigits = 2;
+        if (minDigits <= 0)
+            minDigits = 2;
+    }
+    else if (_numberStyle == NSNumberFormatterPercentStyle)
+        value *= 100.0;
+    else if (_numberStyle == NSNumberFormatterNoStyle)
+    {
+        maxDigits = 0;
+        minDigits = 0;
+    }
+    if (maxDigits > 9)
+        maxDigits = 9;
+    if (minDigits > maxDigits)
+        minDigits = maxDigits;
+    int negative = value < 0;
+    if (negative)
+        value = -value;
+    double intPart = __builtin_floor(value);
+    double frac = value - intPart;
+    long long scaled =
+        (long long)(frac * number_formatter_pow10((int)maxDigits) + 0.5);
+    if (scaled >= (long long)number_formatter_pow10((int)maxDigits))
+    {
+        intPart += 1;
+        scaled = 0;
+    }
+    unsigned long long ip = (unsigned long long)intPart;
+    char intStr[32];
+    int ilen = 0;
+    if (ip == 0)
+        intStr[ilen++] = '0';
+    while (ip && ilen < 31)
+    {
+        intStr[ilen++] = (char)('0' + (int)(ip % 10));
+        ip /= 10;
+    }
+    for (int i = 0; i < ilen / 2; i++)
+    {
+        char tmp = intStr[i];
+        intStr[i] = intStr[ilen - 1 - i];
+        intStr[ilen - 1 - i] = tmp;
+    }
+    int fracDigits = (int)maxDigits;
+    while (fracDigits > minDigits && fracDigits > 0 && scaled % 10 == 0)
+    {
+        scaled /= 10;
+        fracDigits--;
+    }
+    char out[96];
+    int o = 0;
+    if (negative)
+        out[o++] = '-';
+    if (_numberStyle == NSNumberFormatterCurrencyStyle)
+    {
+        const char *symbol = iosim_string_cstr(self.currencySymbol);
+        for (int i = 0; symbol && symbol[i] && o < 88; i++)
+            out[o++] = symbol[i];
+    }
+    for (int i = 0; i < ilen && o < 88; i++)
+    {
+        if (_usesGroupingSeparator &&
+            _numberStyle != NSNumberFormatterNoStyle && i > 0 &&
+            (ilen - i) % 3 == 0)
+            out[o++] = ',';
+        out[o++] = intStr[i];
+    }
+    if (fracDigits > 0 && o < 88)
+    {
+        char fbuf[16];
+        snprintf(fbuf, sizeof fbuf, "%0*lld", fracDigits, scaled);
+        out[o++] = '.';
+        for (int i = 0; fbuf[i] && o < 92; i++)
+            out[o++] = fbuf[i];
+    }
+    if (_numberStyle == NSNumberFormatterPercentStyle && o < 94)
+        out[o++] = '%';
+    out[o] = 0;
+    return [NSString stringWithUTF8String:out];
+}
+- (NSNumber *)numberFromString:(NSString *)string
+{
+    const char *s = iosim_string_cstr(string);
+    if (!s)
+        return nil;
+    int negative = 0;
+    int seen = 0, fracDigits = 0, inFrac = 0;
+    double value = 0;
+    const char *p = s;
+    while (*p == ' ' || *p == '$')
+        p++;
+    if (*p == '-')
+    {
+        negative = 1;
+        p++;
+    }
+    else if (*p == '+')
+        p++;
+    for (; *p; p++)
+    {
+        if (*p >= '0' && *p <= '9')
+        {
+            seen = 1;
+            value = value * 10 + (*p - '0');
+            if (inFrac)
+                fracDigits++;
+        }
+        else if (*p == '.')
+            inFrac = 1;
+        else if (*p == ',' || *p == ' ')
+            continue;
+        else if (*p == '%' || *p == '$')
+            continue;
+        else
+            return nil;
+    }
+    if (!seen)
+        return nil;
+    while (fracDigits-- > 0)
+        value /= 10.0;
+    if (_numberStyle == NSNumberFormatterPercentStyle)
+        value /= 100.0;
+    if (negative)
+        value = -value;
+    return [NSNumber numberWithDouble:value];
 }
 @end
 

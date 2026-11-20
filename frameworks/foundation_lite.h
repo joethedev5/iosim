@@ -433,6 +433,38 @@ extern id NSDefaultRunLoopMode;
 - (void)setDateFormat:(id)format;
 - (id)dateFormat;
 - (id)stringFromDate:(NSDate *)date;
+- (NSDate *)dateFromString:(id)string;
+@end
+
+enum {
+    NSNumberFormatterNoStyle = 0,
+    NSNumberFormatterDecimalStyle = 1,
+    NSNumberFormatterCurrencyStyle = 2,
+    NSNumberFormatterPercentStyle = 3
+};
+
+@interface NSNumberFormatter : NSObject {
+@public
+    long _numberStyle;
+    long _maximumFractionDigits;
+    long _minimumFractionDigits;
+    BOOL _usesGroupingSeparator;
+    id _currencySymbol;
+    id _decimalSeparator;
+    id _groupingSeparator;
+}
+- (void)setNumberStyle:(long)style;
+- (long)numberStyle;
+- (void)setMaximumFractionDigits:(long)digits;
+- (long)maximumFractionDigits;
+- (void)setMinimumFractionDigits:(long)digits;
+- (long)minimumFractionDigits;
+- (void)setUsesGroupingSeparator:(BOOL)uses;
+- (BOOL)usesGroupingSeparator;
+- (void)setCurrencySymbol:(id)symbol;
+- (id)currencySymbol;
+- (id)stringFromNumber:(NSNumber *)number;
+- (NSNumber *)numberFromString:(NSString *)string;
 @end
 
 enum {

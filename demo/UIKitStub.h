@@ -540,15 +540,34 @@ extern int UIApplicationMain(int argc, char **argv, id principal,
 - (id)objectAtIndex:(unsigned long)index;
 @end
 
+@interface NSMutableArray : NSArray
++ (id)array;
+- (void)addObject:(id)object;
+- (void)removeObjectAtIndex:(unsigned long)index;
+- (void)insertObject:(id)object atIndex:(unsigned long)index;
+@end
+
 @class UITableView, UITableViewCell, NSIndexPath;
+
+enum {
+    UITableViewCellEditingStyleNone = 0,
+    UITableViewCellEditingStyleDelete = 1,
+    UITableViewCellEditingStyleInsert = 2
+};
 
 @protocol UITableViewDataSource
 - (long)tableView:(UITableView *)tableView numberOfRowsInSection:(long)section;
 - (UITableViewCell *)tableView:(UITableView *)tableView
          cellForRowAtIndexPath:(NSIndexPath *)indexPath;
+@optional
+- (BOOL)tableView:(UITableView *)tableView
+    canEditRowAtIndexPath:(NSIndexPath *)indexPath;
+- (void)tableView:(UITableView *)tableView commitEditingStyle:(long)style
+    forRowAtIndexPath:(NSIndexPath *)indexPath;
 @end
 
 @protocol UITableViewDelegate
+@optional
 - (void)tableView:(UITableView *)tableView
     didSelectRowAtIndexPath:(NSIndexPath *)indexPath;
 @end
@@ -640,6 +659,10 @@ enum {
 @property CGSize contentSize;
 - (void)reloadData;
 - (id)dequeueReusableCellWithIdentifier:(id)identifier;
+- (void)setEditing:(BOOL)editing animated:(BOOL)animated;
+- (BOOL)isEditing;
+- (void)deleteRowsAtIndexPaths:(NSArray *)indexPaths
+           withRowAnimation:(long)animation;
 @end
 
 @interface UIImageView : UIView

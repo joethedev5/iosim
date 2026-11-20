@@ -41,6 +41,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | `CADisplayLink`, presentation layers, multiple concurrent layer animations | ✅ |
 | CoreAnimation paths, gradients, sublayers (z-ordered), PNG images | ✅ |
 | Foundation collections, strings, selector/block notifications with userInfo, timers, NSIndexPath | ✅ |
+| NSDateFormatter parse/print round trip, NSNumberFormatter decimal/currency/percent | ✅ |
 | `NSFileManager`, `NSData` file I/O, `NSURL`, `NSJSONSerialization` | ✅ |
 | `NSPropertyListSerialization` and persistent `NSUserDefaults` domains | ✅ |
 | `NSKeyedArchiver`/`NSKeyedUnarchiver` keyed archives with custom `NSCoding` classes | ✅ |
@@ -65,7 +66,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | Switch, slider, segmented, progress, page and activity controls in the iOS 26 glass design | ✅ |
 | Floating glass tab bar with per-item targets and content swapping | ✅ |
 | UICollectionView flow layout, multiple sections, reusable cells, selection, drag scrolling | ✅ |
-| UITableView sections, headers, per-row heights and section-aware selection | ✅ |
+| UITableView sections, headers, per-row heights, selection, swipe-to-delete and editing mode | ✅ |
 | UILongPressGestureRecognizer duration, movement tolerance and state changes | ✅ |
 | UIBarButtonItem/UINavigationItem, right bar buttons and automatic back button | ✅ |
 | UISearchBar with delegate edits, Return action, Cancel and keyboard focus | ✅ |
