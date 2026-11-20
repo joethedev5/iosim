@@ -130,6 +130,19 @@ controller, updates the title bar, and a second tap pops back. Both transitions
 were driven through `IOSIM_EVENT_FIFO` and captured in
 `build/nav-root.png` / `build/nav-pushed.png`.
 
+### UIKit: tab bar container
+
+`demo/TabApp.m` puts two controllers (red and green) inside a
+`UITabBarController` with titled `UITabBarItem`s. It reports
+`[tab] ready count=2 selected=0`; the floating bar is drawn 16 pt from the
+sides, 64 pt tall and 12 pt above the home indicator. Tapping the second item
+logs `[tab] selected 1` and the screenshot's content pixel at (201, 300) pt
+changes from `#d93333` to `#33cc4d`; tapping the first item logs
+`[tab] selected 0` again. The bar pixel at (201, 796) pt stays dark
+(`#25202e` / `#1b2930`) in both frames, so the bar really composites over the
+swapped content instead of the content covering it. The item controls use the
+same `UIControl` tracking path as buttons.
+
 ### UIKit layout: Auto Layout constraints and anchors
 
 `demo/AutoLayoutApp.m` positions every view with `NSLayoutAnchor` constraints:
@@ -181,6 +194,18 @@ The return key uses the measured `↵` glyph (18 pt shaft, left arrowhead, right
 riser and top hook); shift, delete, emoji and mic are drawn from measured
 glyph bounds as well. The residual is concentrated on glyph antialiasing and
 the sub-pixel key edges.
+
+### Text input: multiline UITextView and hardware keys
+
+`demo/TextViewApp.m` puts a multiline `UITextView` on screen and reports its
+text whenever it changes. The test taps the view to focus it, checks that the
+software keyboard appears (the Q key pixel at (23, 620) pt reads `#444448`),
+then drives `ui key a`, `key b`, `key return`, `key c` and sees
+`[textview] lines=2 text=ab|c`; a `ui backspace` followed by `key d` produces
+`[textview] lines=2 text=ab|d`. The line count is computed from the newline in
+the stored text, so the return key really inserted a line break; the append
+and delete operations run through the same `insertText:`/`deleteBackward:`
+methods the on-screen keyboard uses.
 
 ### Modal presentation: UIAlertController
 
@@ -584,8 +609,9 @@ and guides, but not the full Cassowary solver or every UIKit layout API.
 `NSUserDefaults` persists XML property lists under the app's
 `Library/Preferences`; binary property lists are not parsed. JSON covers
 Foundation objects without comments, streaming or fragments unless enabled.
-Text input is a single-line `UITextField` with a QWERTY keyboard; UITextView,
-multitap gestures and selection handles are not implemented. Touch input is
+Text input is `UITextField` and an append-only `UITextView` with a QWERTY
+keyboard; text selection, multitap gestures and selection handles are not
+implemented. Touch input is
 single-finger: there is no multitouch, touch prediction or pressure. Mach
 messages, the bootstrap namespace and serialized XPC dictionaries are shared
 across guest processes. SpringBoard pages in groups of 16 without a sliding

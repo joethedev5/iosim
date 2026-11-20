@@ -782,6 +782,139 @@ fi
 "$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
 sleep 0.4
 
+# ---------- 9c. UITabBarController ----------
+"$ROOT/tools/build_app.sh" "$ROOT/demo/TabApp.m" "$T/TabApp" >/dev/null
+mkdir -p "$T/TabApp.app"
+cp "$T/TabApp" "$T/TabApp.app/TabApp"
+python3 - "$T/TabApp.app/Info.plist" <<'PY'
+import plistlib, sys
+with open(sys.argv[1], "wb") as f:
+    plistlib.dump({
+        "CFBundleIdentifier": "com.iosim.tab",
+        "CFBundleExecutable": "TabApp",
+        "CFBundleName": "Tab",
+        "CFBundlePackageType": "APPL",
+        "CFBundleVersion": "1",
+        "CFBundleShortVersionString": "1.0",
+    }, f)
+PY
+"$ROOT/tools/iosimctl" install "$UDID" "$T/TabApp.app" >/dev/null
+sleep 0.5
+# Sixteenth installed app: grid slot 22, second page row 1 column 2.
+"$ROOT/tools/iosimctl" ui "$UDID" tap 247.2778 222.1667 >/dev/null
+if wait_log "[tab] ready count=2 selected=0"; then
+    echo "ok   a tab bar controller installs two view controllers"
+else
+    echo "FAIL tab controller launch"; fails=$((fails+1))
+fi
+sleep 0.4
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/tab-before.png" >/dev/null
+"$ROOT/tools/iosimctl" ui "$UDID" tap 293.5 796 >/dev/null
+if wait_log "[tab] selected 1"; then
+    echo "ok   tapping the second tab selects it"
+else
+    echo "FAIL tab selection"; fails=$((fails+1))
+fi
+sleep 0.4
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/tab-after.png" >/dev/null
+"$ROOT/tools/iosimctl" ui "$UDID" tap 108.5 796 >/dev/null
+if wait_log "[tab] selected 0"; then
+    echo "ok   tapping the first tab switches back"
+else
+    echo "FAIL tab reselection"; fails=$((fails+1))
+fi
+if out="$(python3 - "$ROOT/tools" "$T/tab-before.png" "$T/tab-after.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+
+def px(path, x, y):
+    w, h, bpp, rows = pngpixel.load(path)
+    return pngpixel.px(rows, bpp, x * 3, y * 3)
+
+for path, want in ((sys.argv[2], "red"), (sys.argv[3], "green")):
+    c = px(path, 201, 300)
+    r, g, b = (c >> 16) & 255, (c >> 8) & 255, c & 255
+    if want == "red" and not (r > 180 and g < 100 and b < 100):
+        raise SystemExit("expected red tab content, got %06x" % c)
+    if want == "green" and not (g > 170 and r < 100):
+        raise SystemExit("expected green tab content, got %06x" % c)
+    c = px(path, 201, 796)
+    if ((c >> 16) & 255) >= 80:
+        raise SystemExit("tab bar not drawn over the content: %06x" % c)
+print("ok   the selected tab's view fills the screen under the floating bar")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL tab content"; echo "$out"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
+sleep 0.4
+
+# ---------- 9d. UITextView multiline editing and hardware keys ----------
+"$ROOT/tools/build_app.sh" "$ROOT/demo/TextViewApp.m" "$T/TextViewApp" >/dev/null
+mkdir -p "$T/TextViewApp.app"
+cp "$T/TextViewApp" "$T/TextViewApp.app/TextViewApp"
+python3 - "$T/TextViewApp.app/Info.plist" <<'PY'
+import plistlib, sys
+with open(sys.argv[1], "wb") as f:
+    plistlib.dump({
+        "CFBundleIdentifier": "com.iosim.textview",
+        "CFBundleExecutable": "TextViewApp",
+        "CFBundleName": "TextView",
+        "CFBundlePackageType": "APPL",
+        "CFBundleVersion": "1",
+        "CFBundleShortVersionString": "1.0",
+    }, f)
+PY
+"$ROOT/tools/iosimctl" install "$UDID" "$T/TextViewApp.app" >/dev/null
+sleep 0.5
+# Seventeenth installed app: grid slot 23, second page row 1 column 3.
+"$ROOT/tools/iosimctl" ui "$UDID" tap 339.8333 222.1667 >/dev/null
+if wait_log "[textview] ready"; then
+    echo "ok   SpringBoard launches the text view fixture"
+else
+    echo "FAIL text view launch"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" tap 200 300 >/dev/null
+sleep 0.3
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/tv-focused.png" >/dev/null
+if out="$(python3 - "$ROOT/tools" "$T/tv-focused.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+c = pngpixel.px(rows, bpp, 23 * 3, 620 * 3)
+r, g, b = (c >> 16) & 255, (c >> 8) & 255, c & 255
+if not (50 <= r <= 100 and abs(r - g) < 12 and abs(g - b) < 12):
+    raise SystemExit("software keyboard not visible: %06x" % c)
+print("ok   focusing the text view raises the software keyboard")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL text view keyboard"; echo "$out"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" key a >/dev/null
+"$ROOT/tools/iosimctl" ui "$UDID" key b >/dev/null
+"$ROOT/tools/iosimctl" ui "$UDID" key return >/dev/null
+"$ROOT/tools/iosimctl" ui "$UDID" key c >/dev/null
+if wait_log "[textview] lines=2 text=ab|c"; then
+    echo "ok   hardware keys append and return starts a new line"
+else
+    echo "FAIL text view newline"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" backspace >/dev/null
+"$ROOT/tools/iosimctl" ui "$UDID" key d >/dev/null
+if wait_log "[textview] lines=2 text=ab|d"; then
+    echo "ok   backspace deletes and typing continues"
+else
+    echo "FAIL text view backspace"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
+sleep 0.4
+
 # ---------- 10. cross-process Mach services ----------
 # launchd owns the bootstrap namespace; two independent guest processes find
 # each other through it and exchange a Mach message over the service port.

@@ -332,7 +332,8 @@ exist: `list`, `create`, `delete`, `boot`, `bootstatus`, `shutdown`, `erase`,
   model identifier and `XPC_SERVICE_NAME=UIKitApplication:...`.
 - `SIMCTL_CHILD_*` variables are forwarded to the child, matching simctl.
 - `ui <device> tap x y | down x y | move x y | up x y | swipe x0 y0 x1 y1
-  [seconds] | home | apps` injects system UI events into the device event
+  [seconds] | key <text> | backspace | home | apps` injects system UI events
+  into the device event
   FIFO, in point coordinates scaled to pixels. `swipe` emits a down, an
   interpolated run of moves and an up. The frontmost process reads the stream:
   at home SpringBoard hit-tests icons, while an app receives touches, keys and
@@ -428,6 +429,14 @@ decoded with libpng in `loader/image.c`.
 - `UIView` renders its background, its `CALayer` sublayers, then its subviews;
   `UIScrollView` shifts child origins by `contentOffset`; `UITableView` asks its
   data source for cells per row and draws separators and accessories.
+  `insertSubview:atIndex:`, `bringSubviewToFront:` and `sendSubviewToBack:`
+  reorder the subview list.
+- `UITabBarController` is a real container: it owns up to 16 view controllers,
+  gives each a `UITabBarItem` (title and optional bundle image), and lays out a
+  floating glass bar inset 16 pt from the sides, 64 pt tall, 12 pt above the
+  home indicator. Each item is a `UIControl` with a label (and icon), so taps
+  run through the normal tracking path; selecting an item swaps the content
+  view behind the bar and retints the labels.
 - `CAShapeLayer` stores a `UIBezierPath` (via `CGPath`) and draws its fill and
   stroke; `CAGradientLayer` interpolates up to two color stops; `UIImageView`
   blits a decoded image with aspect-fit or centered content modes.
@@ -498,6 +507,16 @@ uses measured iOS 26 geometry: a 324 pt panel with 26 pt top corners, 43 pt
 key rows on an 11 pt gap, 33.2 pt letters (32.2 pt on the shift row), 44.7 pt
 shift/delete keys, a 24 pt predictive bar and measured return, shift, delete,
 emoji and mic artwork.
+
+`UITextView` shares the first-responder role. Touching an editable text view
+focuses it; `insertText:` appends at the end and `deleteBackward:` removes the
+last character. The return key inserts a newline instead of ending editing,
+which `UITextField` does. The renderer wraps the stored text preserving spaces
+(breaking at the last space that fits) and draws a caret at the insertion
+point. Hardware input reaches both views through `ui key` records, which
+`iosimctl` emits per character (`key return` for a newline, `key space` for a
+space) and `ui backspace`; the on-screen keyboard taps use the same edit
+methods.
 
 `UIAlertController` presents alert-style modals in the iOS 26 form measured
 from the reference capture: a bottom-biased 320 pt floating card with 33.7 pt
@@ -595,8 +614,8 @@ Python for iteration speed.
   parsed.
 - Auto Layout is a relaxation solver over anchors and guides, not Cassowary;
   it does not cover every UIKit layout API or content-size class.
-- Text input is a single-line `UITextField` with a QWERTY/numeric keyboard;
-  UITextView, selection handles and multitap gestures are absent.
+- Text input is `UITextField` and an append-only `UITextView`; selection
+  handles, text selection and multitap gestures are absent.
 - Darwin syscall differences are hidden by glibc for simple calls, but
   `stat`, `pthread`, `kqueue`, `mmap` flags and Mach traps need explicit
   translation.

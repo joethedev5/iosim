@@ -33,10 +33,10 @@ runners**, combined with the public Darling and Apple dyld sources.
 | `UITouch`/`UIEvent` responder delivery, continuous control tracking | ✅ |
 | Drag scrolling with rubber-band clamp, tap/pan/swipe gesture recognizers | ✅ |
 | Auto Layout: NSLayoutConstraint, anchors, guides, intrinsic sizing, priorities | ✅ (subset) |
-| Multiline UILabel wrapping, UITextField focus, caret and software keyboard | ✅ |
+| Multiline UILabel wrapping, UITextField and UITextView editing, software keyboard | ✅ |
 | UISwitch, UISlider, UISegmentedControl, UIPageControl, UIActivityIndicatorView, UIProgressView | ✅ |
 | UIAlertController alerts, actions and modal presentation | ✅ |
-| UINavigationController push/pop, UIStackView intrinsic layout, UIButton titles | ✅ |
+| UINavigationController push/pop, UITabBarController, UIStackView, UIButton titles | ✅ |
 | UIView animations (frame, alpha), delay/curve/repeat options, completion blocks | ✅ |
 | `CADisplayLink`, presentation layers, multiple concurrent layer animations | ✅ |
 | CoreAnimation paths, gradients, sublayers (z-ordered), PNG images | ✅ |
@@ -54,6 +54,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | UIView 2D affine transforms (translate/scale/rotate), layout callbacks, UIScrollView offsets | ✅ (basic) |
 | Layer clipping (`clipsToBounds`/`masksToBounds`), shadows and borders | ✅ |
 | Switch, slider, segmented, progress, page and activity controls in the iOS 26 glass design | ✅ |
+| Floating glass tab bar with per-item targets and content swapping | ✅ |
 
 The test suite exercises a real Apple-toolchain-built x86_64 UIKit app, a
 Foundation app using `NSLog` with a constant `CFString`, a Foundation
@@ -89,6 +90,8 @@ tools/iosimctl io $UDID screenshot app.png       # the app's own frame
 tools/iosimctl ui $UDID down 40 525              # finger down, in points
 tools/iosimctl ui $UDID move 360 525             # moves track the finger
 tools/iosimctl ui $UDID up 360 525               # up completes the touch
+tools/iosimctl ui $UDID key a                    # hardware key, appends to the text view
+tools/iosimctl ui $UDID backspace                # deletes backward
 tools/iosimctl ui $UDID swipe 300 700 60 200 0.25  # down/moves/up in one call
 tools/iosimctl ui $UDID home                     # scene backgrounds, home returns
 tools/iosimctl shutdown $UDID

@@ -244,6 +244,17 @@ enum {
 - (BOOL)resignFirstResponder;
 @end
 
+@interface UITextView : UIView
+@property(nonatomic, retain) id text;
+@property(nonatomic, retain) UIColor *textColor;
+@property(nonatomic, retain) UIFont *font;
+- (void)setEditable:(BOOL)editable;
+- (void)insertText:(id)text;
+- (void)deleteBackward;
+- (BOOL)becomeFirstResponder;
+- (BOOL)resignFirstResponder;
+@end
+
 @interface UILabel : UIView
 @property(nonatomic, retain) id text;
 @property(nonatomic, retain) UIColor *textColor;
@@ -257,6 +268,7 @@ enum {
 @property(nonatomic, retain) UIView *view;
 @property(nonatomic, retain) id title;
 @property(readonly) id navigationController;
+@property(nonatomic, retain) id tabBarItem;
 - (void)loadView;
 - (void)viewDidLoad;
 - (void)presentViewController:(UIViewController *)controller animated:(BOOL)animated
@@ -410,6 +422,18 @@ extern int UIApplicationMain(int argc, char **argv, id principal,
 + (UIImage *)imageNamed:(NSString *)name;
 - (int)width;
 - (int)height;
+@end
+
+@interface UITabBarItem : NSObject
+- (id)initWithTitle:(NSString *)title image:(UIImage *)image tag:(long)tag;
+@end
+
+@interface UITabBarController : UIViewController
+- (void)setViewControllers:(NSArray *)controllers;
+- (NSArray *)viewControllers;
+- (void)setSelectedIndex:(int)index;
+- (int)selectedIndex;
+- (UIViewController *)selectedViewController;
 @end
 
 @interface NSArray : NSObject

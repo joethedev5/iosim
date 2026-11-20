@@ -646,20 +646,21 @@ def cmd_ui(args):
         if not notify_ui(udid, line):
             die("no system UI is listening on the device event stream")
 
+    params = args.params
     if args.action in ("tap", "down", "move", "up"):
-        if len(args.coords) != 2:
+        if len(params) != 2:
             die(f"usage: iosimctl ui <device> {args.action} <x> <y>")
-        x, y = args.coords
+        x, y = float(params[0]), float(params[1])
         line = (f"{args.action} {int(round(x * scale))} "
                 f"{int(round(y * scale))}")
         send(line)
         print(f"sent {line}")
     elif args.action == "swipe":
-        if len(args.coords) not in (4, 5):
+        if len(params) not in (4, 5):
             die("usage: iosimctl ui <device> swipe <x0> <y0> <x1> <y1> "
                 "[seconds]")
-        x0, y0, x1, y1 = args.coords[:4]
-        seconds = args.coords[4] if len(args.coords) == 5 else 0.3
+        x0, y0, x1, y1 = (float(v) for v in params[:4])
+        seconds = float(params[4]) if len(params) == 5 else 0.3
         if seconds <= 0:
             seconds = 0.3
         steps = max(4, int(seconds / 0.02))
@@ -672,6 +673,24 @@ def cmd_ui(args):
             time.sleep(seconds / steps)
         send(f"up {int(round(x1 * scale))} {int(round(y1 * scale))}")
         print(f"sent swipe {x0} {y0} -> {x1} {y1} over {seconds}s")
+    elif args.action == "key":
+        if len(params) != 1:
+            die("usage: iosimctl ui <device> key <text> "
+                "(or key return / key space)")
+        text = params[0]
+        if text == "return":
+            text = "\n"
+        elif text == "space":
+            text = " "
+        for ch in text:
+            code = ord(ch)
+            if code < 1 or code > 255:
+                die("key supports single-byte characters")
+            send(f"key {code}")
+        print(f"sent key {params[0]!r}")
+    elif args.action == "backspace":
+        send("backspace")
+        print("sent backspace")
     elif args.action == "home":
         send("home")
         print("sent home")
@@ -778,9 +797,9 @@ def main():
     p = sub.add_parser("ui", help="inject a system UI event")
     p.add_argument("device")
     p.add_argument("action",
-                   choices=["tap", "down", "move", "up", "swipe", "home",
-                            "apps", "switcher"])
-    p.add_argument("coords", nargs="*", type=float)
+                   choices=["tap", "down", "move", "up", "swipe", "key",
+                            "backspace", "home", "apps", "switcher"])
+    p.add_argument("params", nargs="*")
     p.set_defaults(func=cmd_ui)
 
     args = ap.parse_args()

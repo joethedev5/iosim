@@ -65,6 +65,8 @@ extern int  iosim_dispatch_drain_main(void);
 extern const char *iosim_string_cstr(id string);
 extern int  strcmp(const char *a, const char *b);
 extern unsigned long strlen(const char *s);
+extern void *malloc(unsigned long size);
+extern void  free(void *ptr);
 extern void *memcpy(void *dst, const void *src, unsigned long n);
 extern void *memset(void *dst, int c, unsigned long n);
 extern int  snprintf(char *buf, unsigned long size, const char *fmt, ...);
@@ -604,6 +606,9 @@ typedef enum {
 - (void)setBackgroundColor:(UIColor *)color;
 - (UIColor *)backgroundColor;
 - (void)addSubview:(UIView *)view;
+- (void)insertSubview:(UIView *)view atIndex:(long)index;
+- (void)bringSubviewToFront:(UIView *)view;
+- (void)sendSubviewToBack:(UIView *)view;
 - (void)removeFromSuperview;
 - (CALayer *)layer;
 - (void)setHidden:(BOOL)hidden;
@@ -675,6 +680,28 @@ typedef enum {
 - (CGSize)sizeThatFits:(CGSize)size;
 @end
 
+@interface UITextView : UIView {
+@public
+    id _text;
+    UIColor *_textColor;
+    UIFont *_font;
+    BOOL _editable;
+}
+- (id)text;
+- (void)setText:(id)text;
+- (UIFont *)font;
+- (void)setFont:(UIFont *)font;
+- (UIColor *)textColor;
+- (void)setTextColor:(UIColor *)color;
+- (BOOL)isEditable;
+- (void)setEditable:(BOOL)editable;
+- (void)insertText:(id)text;
+- (void)deleteBackward;
+- (BOOL)becomeFirstResponder;
+- (BOOL)resignFirstResponder;
+- (BOOL)isFirstResponder;
+@end
+
 @interface UIImageView : UIView {
 @public
     UIImage *_image;
@@ -694,11 +721,14 @@ typedef enum {
     id _title;
     id _navigationController;
     id _presentedController;
+    id _tabBarItem;
 }
 - (id)init;
 - (id)title;
 - (void)setTitle:(id)title;
 - (id)navigationController;
+- (id)tabBarItem;
+- (void)setTabBarItem:(id)item;
 - (UIView *)view;
 - (void)setView:(UIView *)view;
 - (void)loadView;
@@ -796,6 +826,40 @@ enum {
 - (UIViewController *)popViewControllerAnimated:(BOOL)animated;
 - (void)setNavigationBarHidden:(BOOL)hidden animated:(BOOL)animated;
 - (BOOL)isNavigationBarHidden;
+@end
+
+@interface UITabBarItem : NSObject {
+@public
+    id _title;
+    id _image;
+    long _tag;
+}
+- (id)initWithTitle:(id)title image:(id)image tag:(long)tag;
+- (id)title;
+- (void)setTitle:(id)title;
+- (id)image;
+- (long)tag;
+@end
+
+/* Floating glass tab bar modeled on the iOS 26 design: the bar is inset from
+ * the screen edges, sits above the home indicator and carries one control per
+ * item, with an optional image above the title. */
+@interface UITabBarController : UIViewController {
+@public
+    id _tabControllers[16];
+    int _tabCount;
+    int _selectedIndex;
+    UIView *_tabBar;
+    UIView *_tabContent;
+    id _tabItemViews[16];
+    id _tabItemLabels[16];
+}
+- (void)setViewControllers:(NSArray *)controllers;
+- (NSArray *)viewControllers;
+- (void)setSelectedIndex:(int)index;
+- (int)selectedIndex;
+- (UIViewController *)selectedViewController;
+- (void)setSelectedViewController:(UIViewController *)controller;
 @end
 
 enum {
@@ -2110,6 +2174,48 @@ static int wrap_text_lines(const char *text, int style, double points,
     return count;
 }
 
+/* Wrapping for editable text keeps spaces and breaks at the last space that
+ * fits, so the drawn text matches what was typed rather than a label-style
+ * word list. */
+static int wrap_editable_lines(const char *text, int style, double points,
+                               double scale, int maxWidth,
+                               char lines[][256], int maxLines)
+{
+    int count = 0;
+    const char *p = text;
+    while (*p && count < maxLines)
+    {
+        int lineLen = 0;
+        int lastSpace = -1;
+        char line[256];
+        while (*p && *p != '\n')
+        {
+            if (lineLen >= 255)
+                break;
+            line[lineLen++] = *p;
+            if (*p == ' ')
+                lastSpace = lineLen - 1;
+            p++;
+            line[lineLen] = 0;
+            if (maxWidth > 0 && lineLen > 1 &&
+                iosim_fb_font_text_width(line, style, points, scale) >
+                    maxWidth &&
+                lastSpace > 0)
+            {
+                int pushed = lineLen - lastSpace - 1;
+                p -= pushed;
+                lineLen = lastSpace;
+                line[lineLen] = 0;
+                break;
+            }
+        }
+        memcpy(lines[count], line, (unsigned long)lineLen + 1);
+        count++;
+        if (*p == '\n')
+            p++;
+    }
+    return count;
+}
 
 @implementation UIView
 - (id)initWithFrame:(CGRect)frame
@@ -2164,6 +2270,51 @@ static int wrap_text_lines(const char *text, int style, double points,
     view->_superview = self;
     if (_subviewCount < 32)
         _subviews[_subviewCount++] = view;
+}
+- (void)insertSubview:(UIView *)view atIndex:(long)index
+{
+    if (!view)
+        return;
+    if (index < 0)
+        index = 0;
+    if (index >= _subviewCount || _subviewCount >= 32)
+    {
+        [self addSubview:view];
+        return;
+    }
+    for (long i = _subviewCount; i > index; i--)
+        _subviews[i] = _subviews[i - 1];
+    _subviews[index] = view;
+    _subviewCount++;
+    view->_superview = self;
+}
+- (void)bringSubviewToFront:(UIView *)view
+{
+    if (!view)
+        return;
+    for (int i = 0; i < _subviewCount; i++)
+    {
+        if (_subviews[i] != view)
+            continue;
+        for (int j = i; j + 1 < _subviewCount; j++)
+            _subviews[j] = _subviews[j + 1];
+        _subviews[_subviewCount - 1] = view;
+        return;
+    }
+}
+- (void)sendSubviewToBack:(UIView *)view
+{
+    if (!view)
+        return;
+    for (int i = 0; i < _subviewCount; i++)
+    {
+        if (_subviews[i] != view)
+            continue;
+        for (int j = i; j > 0; j--)
+            _subviews[j] = _subviews[j - 1];
+        _subviews[0] = view;
+        return;
+    }
 }
 - (void)removeFromSuperview
 {
@@ -2484,7 +2635,76 @@ static int wrap_text_lines(const char *text, int style, double points,
 }
 @end
 
-static UITextField *g_firstResponder;
+static id g_firstResponder;
+
+/* Editable multiline text view: text is appended at the end, wrapped with
+ * spaces preserved, and drawn with a caret while first responder. */
+@implementation UITextView
+- (id)initWithFrame:(CGRect)frame
+{
+    self = [super initWithFrame:frame];
+    if (self)
+    {
+        _text = [NSString stringWithUTF8String:""];
+        _font = [UIFont systemFontOfSize:17];
+        _textColor = [UIColor whiteColor];
+        _editable = YES;
+    }
+    return self;
+}
+- (id)text { return _text; }
+- (void)setText:(id)text { _text = text; }
+- (UIFont *)font { return _font; }
+- (void)setFont:(UIFont *)font { _font = font; }
+- (UIColor *)textColor { return _textColor; }
+- (void)setTextColor:(UIColor *)color { _textColor = color; }
+- (BOOL)isEditable { return _editable; }
+- (void)setEditable:(BOOL)editable { _editable = editable; }
+- (BOOL)becomeFirstResponder
+{
+    if (g_firstResponder && g_firstResponder != self)
+        [g_firstResponder resignFirstResponder];
+    g_firstResponder = self;
+    return YES;
+}
+- (BOOL)resignFirstResponder
+{
+    if (g_firstResponder == self)
+        g_firstResponder = 0;
+    return YES;
+}
+- (BOOL)isFirstResponder { return g_firstResponder == self; }
+- (void)touchesBegan:(NSSet *)touches withEvent:(UIEvent *)event
+{
+    (void)touches;
+    (void)event;
+    if (_editable)
+        [self becomeFirstResponder];
+}
+- (void)insertText:(id)text
+{
+    if (!text)
+        return;
+    if (_text)
+        _text = [_text stringByAppendingString:text];
+    else
+        _text = text;
+}
+- (void)deleteBackward
+{
+    const char *current = _text ? iosim_string_cstr(_text) : "";
+    unsigned long length = strlen(current);
+    if (length == 0)
+        return;
+    char *copy = malloc(length);
+    if (!copy)
+        return;
+    memcpy(copy, current, length - 1);
+    copy[length - 1] = 0;
+    _text = [NSString stringWithUTF8String:copy];
+    free(copy);
+}
+@end
 
 @implementation UITextField
 - (id)initWithFrame:(CGRect)frame
@@ -3045,6 +3265,14 @@ static UITextField *g_firstResponder;
         nav->_navTitleLabel->_text = title;
 }
 - (id)navigationController { return _navigationController; }
+- (id)tabBarItem
+{
+    if (!_tabBarItem)
+        _tabBarItem = [[UITabBarItem alloc] initWithTitle:_title image:nil
+                                                       tag:0];
+    return _tabBarItem;
+}
+- (void)setTabBarItem:(id)item { _tabBarItem = item; }
 - (void)loadView
 {
     _view = [[UIView alloc] initWithFrame:[[UIScreen mainScreen] bounds]];
@@ -3387,6 +3615,208 @@ static UITextField *g_firstResponder;
     }
 }
 - (BOOL)isNavigationBarHidden { return _navBarHidden; }
+@end
+
+@implementation UITabBarItem
+- (id)initWithTitle:(id)title image:(id)image tag:(long)tag
+{
+    self = [super init];
+    if (self)
+    {
+        _title = title;
+        _image = image;
+        _tag = tag;
+    }
+    return self;
+}
+- (id)title { return _title; }
+- (void)setTitle:(id)title { _title = title; }
+- (id)image { return _image; }
+- (long)tag { return _tag; }
+@end
+
+@implementation UITabBarController
+- (id)init
+{
+    self = [super init];
+    if (self)
+        _selectedIndex = 0;
+    return self;
+}
+- (void)setViewControllers:(NSArray *)controllers
+{
+    int count = controllers ? (int)[controllers count] : 0;
+    if (count > 16)
+        count = 16;
+    for (int i = 0; i < count; i++)
+        _tabControllers[i] = [controllers objectAtIndex:(unsigned long)i];
+    for (int i = count; i < _tabCount; i++)
+        _tabControllers[i] = nil;
+    _tabCount = count;
+    if (_selectedIndex >= count)
+        _selectedIndex = count > 0 ? count - 1 : 0;
+    if (_view)
+        [self buildTabBar];
+}
+- (NSArray *)viewControllers
+{
+    NSMutableArray *list = [NSMutableArray array];
+    for (int i = 0; i < _tabCount; i++)
+        [list addObject:_tabControllers[i]];
+    return list;
+}
+- (void)loadView
+{
+    _view = [[UIView alloc] initWithFrame:[[UIScreen mainScreen] bounds]];
+}
+- (void)viewDidLoad
+{
+    if (!_view)
+        return;
+    _view->_backgroundColor =
+        [UIColor colorWithRed:0.02 green:0.03 blue:0.05 alpha:1.0];
+    [self buildTabBar];
+}
+- (void)buildTabBar
+{
+    if (!_view || _tabCount <= 0)
+        return;
+    if (_tabBar)
+        [_tabBar removeFromSuperview];
+    CGRect bounds = [[UIScreen mainScreen] bounds];
+    double screenW = bounds.size.width, screenH = bounds.size.height;
+    double barHeight = 64.0;
+    double margin = 16.0;
+    double barY = screenH - 34.0 - 12.0 - barHeight;
+    _tabBar = [[UIView alloc] initWithFrame:CGRectMake(margin, barY,
+                                                       screenW - margin * 2,
+                                                       barHeight)];
+    _tabBar->_backgroundColor =
+        [UIColor colorWithRed:0.10 green:0.12 blue:0.18 alpha:0.94];
+    [_tabBar.layer setCornerRadius:barHeight / 2.0];
+    [_view addSubview:_tabBar];
+    double slot = (screenW - margin * 2) / (double)_tabCount;
+    for (int i = 0; i < _tabCount; i++)
+    {
+        UIViewController *controller = (UIViewController *)_tabControllers[i];
+        UITabBarItem *item = (UITabBarItem *)[controller tabBarItem];
+        UIControl *control = [[UIControl alloc]
+            initWithFrame:CGRectMake(slot * i, 0, slot, barHeight)];
+        [control addTarget:self action:@selector(tabItemTapped:)
+          forControlEvents:UIControlEventTouchUpInside];
+        double textY = 22.0;
+        if (item && item->_image)
+        {
+            UIImageView *icon = [[UIImageView alloc] initWithImage:item->_image];
+            icon->_frame = CGRectMake((slot - 24.0) / 2.0, 10.0, 24.0, 24.0);
+            [control addSubview:icon];
+            textY = 38.0;
+        }
+        UILabel *label =
+            [[UILabel alloc] initWithFrame:CGRectMake(0, textY, slot, 16.0)];
+        label->_text = item ? item->_title : nil;
+        label->_textAlignment = 1;
+        label->_font = [UIFont systemFontOfSize:12];
+        label->_textColor =
+            i == _selectedIndex
+                ? [UIColor whiteColor]
+                : [UIColor colorWithRed:0.55 green:0.57 blue:0.62 alpha:1.0];
+        [control addSubview:label];
+        [_tabBar addSubview:control];
+        _tabItemViews[i] = control;
+        _tabItemLabels[i] = label;
+    }
+    [self installSelectedViewController];
+    [self updateTabAppearance];
+}
+- (void)updateTabAppearance
+{
+    for (int i = 0; i < _tabCount; i++)
+    {
+        UILabel *label = (UILabel *)_tabItemLabels[i];
+        if (!label)
+            continue;
+        label->_textColor =
+            i == _selectedIndex
+                ? [UIColor whiteColor]
+                : [UIColor colorWithRed:0.55 green:0.57 blue:0.62 alpha:1.0];
+    }
+    if (_view)
+        _view->_needsLayout = YES;
+}
+- (void)installSelectedViewController
+{
+    if (!_view)
+        return;
+    UIViewController *selected = [self selectedViewController];
+    if (!selected)
+        return;
+    if (_tabContent)
+    {
+        [_tabContent removeFromSuperview];
+        _tabContent = nil;
+    }
+    CGRect bounds = [[UIScreen mainScreen] bounds];
+    UIView *content = [selected view];
+    content->_frame = CGRectMake(0, 0, bounds.size.width, bounds.size.height);
+    [_view insertSubview:content atIndex:0];
+    _tabContent = content;
+}
+- (void)tabItemTapped:(id)sender
+{
+    for (int i = 0; i < _tabCount; i++)
+    {
+        if (_tabItemViews[i] != sender)
+            continue;
+        [self setSelectedIndex:i];
+        return;
+    }
+}
+- (void)setSelectedIndex:(int)index
+{
+    if (index < 0)
+        index = 0;
+    if (index >= _tabCount)
+        index = _tabCount > 0 ? _tabCount - 1 : 0;
+    if (index == _selectedIndex && _tabContent)
+    {
+        [self updateTabAppearance];
+        return;
+    }
+    UIViewController *old = [self selectedViewController];
+    if (old)
+    {
+        [old viewWillDisappear:NO];
+        [old viewDidDisappear:NO];
+    }
+    _selectedIndex = index;
+    UIViewController *selected = [self selectedViewController];
+    if (selected)
+    {
+        [selected viewWillAppear:NO];
+        [self installSelectedViewController];
+        [selected viewDidAppear:NO];
+    }
+    printf("[tab] selected %d\n", _selectedIndex);
+    fflush(0);
+    [self updateTabAppearance];
+}
+- (int)selectedIndex { return _selectedIndex; }
+- (UIViewController *)selectedViewController
+{
+    return _tabCount > 0
+               ? (UIViewController *)_tabControllers[_selectedIndex]
+               : nil;
+}
+- (void)setSelectedViewController:(UIViewController *)controller
+{
+    for (int i = 0; i < _tabCount; i++)
+        if (_tabControllers[i] == controller)
+        {
+            [self setSelectedIndex:i];
+            return;
+        }
+}
 @end
 
 @implementation UIControl
@@ -5503,6 +5933,41 @@ static void render_view(UIView *view, double originX, double originY,
         }
     }
 
+    if ([view isKindOfClass:[UITextView class]])
+    {
+        UITextView *editor = (UITextView *)view;
+        const char *text = string_cstr(editor->_text);
+        double points = editor->_font ? editor->_font->_size : 17.0;
+        int style = editor->_font && editor->_font->_bold
+                        ? IOSIM_FONT_BOLD : IOSIM_FONT_REGULAR;
+        int ascent = 0, descent = 0, lineHeight = 0;
+        iosim_fb_font_metrics(style, points, scale, &ascent, &descent,
+                              &lineHeight);
+        unsigned color = editor->_textColor ? color_rgb(editor->_textColor)
+                                            : 0xffffff;
+        int inset = (int)(12.0 * scale + 0.5);
+        char lines[IOSIM_MAX_WRAP_LINES][256];
+        int n = wrap_editable_lines(text ? text : "", style, points, scale,
+                                    w - 2 * inset, lines,
+                                    IOSIM_MAX_WRAP_LINES);
+        int caretX = x + inset;
+        int caretBaseline = y + inset + ascent;
+        for (int i = 0; i < n; i++)
+        {
+            int tx = x + inset;
+            int baseline = y + inset + i * lineHeight + ascent;
+            iosim_fb_font_text(tx, baseline, lines[i], style, points, scale,
+                               color);
+            caretX = tx + iosim_fb_font_text_width(lines[i], style, points,
+                                                   scale);
+            caretBaseline = baseline;
+        }
+        if (g_firstResponder == editor)
+            iosim_fb_fill_rect(caretX + (int)(1 * scale),
+                               caretBaseline - ascent, (int)(2 * scale),
+                               lineHeight, 0x426bf2);
+    }
+
     double scrollX = 0, scrollY = 0;
     if ([view isKindOfClass:[UIScrollView class]])
     {
@@ -5674,9 +6139,10 @@ static int keyboard_visible(void)
 
 static int keyboard_is_number_pad(void)
 {
-    if (!g_firstResponder)
+    if (!g_firstResponder ||
+        ![g_firstResponder isKindOfClass:[UITextField class]])
         return 0;
-    int type = g_firstResponder->_keyboardType;
+    int type = ((UITextField *)g_firstResponder)->_keyboardType;
     return type == 4 || type == 5 || type == 8;
 }
 
@@ -6230,8 +6696,11 @@ static int keyboard_handle_tap(int px, int py, int fbW, int fbH,
         return 1;
     if (x > W - m4 - retW)
     {
-        [g_firstResponder
-            sendActionsForControlEvents:UIControlEventEditingDidEndOnExit];
+        if ([g_firstResponder isKindOfClass:[UITextView class]])
+            [g_firstResponder insertText:[NSString stringWithUTF8String:"\n"]];
+        else
+            [g_firstResponder
+                sendActionsForControlEvents:UIControlEventEditingDidEndOnExit];
         return 1;
     }
     if (x > m4 + numW + 6.0)
