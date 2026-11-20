@@ -19,8 +19,10 @@ jobs:
             demo/HelloSimApp.m -o HelloSim_arm64 2> out/build-arm64.err
           xcrun clang -arch x86_64 $CFLAGS -framework UIKit -framework Foundation \
             demo/HelloSimApp.m -o HelloSim_x86_64 2> out/build-x86_64.err
-          xcrun clang -arch x86_64 $CFLAGS -fblocks tests/services_test.m \
-            -o services_test_x86_64 2> out/build-services.err
+          if ! xcrun clang -arch x86_64 $CFLAGS -fblocks tests/services_test.m \
+              -o services_test_x86_64 2> out/build-services.err; then
+            echo "services test build failed:"; cat out/build-services.err; exit 1
+          fi
           file HelloSim_arm64 HelloSim_x86_64 services_test_x86_64 > out/file.txt
           otool -L services_test_x86_64 > out/services-libs.txt 2>&1
           for f in HelloSim_arm64 HelloSim_x86_64; do
