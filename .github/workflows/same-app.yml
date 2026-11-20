@@ -1,6 +1,11 @@
 name: same-app
 on:
   workflow_dispatch:
+    inputs:
+      boot_parity:
+        description: Run the full boot parity job
+        required: false
+        default: 'false'
 jobs:
   build-binaries:
     runs-on: xcode-27
@@ -137,6 +142,7 @@ jobs:
           retention-days: 7
 
   build-run:
+    if: ${{ github.event.inputs.boot_parity == 'true' }}
     runs-on: xcode-27
     timeout-minutes: 40
     steps:
