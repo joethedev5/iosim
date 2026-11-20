@@ -1,0 +1,181 @@
+name: ios-sim-recon-ios
+on:
+  workflow_dispatch:
+jobs:
+  recon:
+    runs-on: xcode-27
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Locate the iOS 27 simulator runtime
+        run: |
+          set +e
+          mkdir -p out artifact
+          xcrun simctl runtime list -j > out/runtime-list.json 2>&1
+          RT=$(python3 - <<'PY'
+          import json
+          d=json.load(open('out/runtime-list.json'))
+          cands=[]
+          for v in d.values():
+              if v.get('platformIdentifier')=='com.apple.platform.iphonesimulator' and v.get('state')=='Ready':
+                  cands.append(v)
+          cands.sort(key=lambda v: v.get('version',''))
+          print(cands[-1]['runtimeBundlePath'] if cands else '')
+          PY
+          )
+          echo "$RT" > out/ios-runtime-path.txt
+          RTROOT="$RT/Contents/Resources/RuntimeRoot"
+          echo "$RTROOT" > out/ios-runtime-root.txt
+          ls -la "$RT/Contents" > out/ios-runtime-contents.txt 2>&1
+          plutil -convert xml1 -o out/ios-runtime-info.xml "$RT/Contents/Info.plist" 2>&1
+          ls "$RTROOT" > out/ios-root-ls.txt 2>&1
+          ls "$RTROOT/System/Library/Frameworks" > out/ios-frameworks.txt 2>&1
+          ls "$RTROOT/System/Library/PrivateFrameworks" > out/ios-privateframeworks.txt 2>&1
+          ls "$RTROOT/usr/lib" > out/ios-usr-lib.txt 2>&1
+          ls "$RTROOT/System/Library/CoreServices" > out/ios-coreservices.txt 2>&1
+          find "$RTROOT" -name 'dyld_sim' -o -name 'launchd_sim' -o -name 'libSystem.B.dylib' -o -name 'liblaunch_sim.dylib' -o -name 'backboardd' -o -name 'SpringBoard' > out/ios-key-binaries.txt 2>/dev/null
+          while read -r f; do
+            echo "===== $f ====="
+            file "$f"
+            otool -hv "$f" | head -6
+            otool -l "$f" | grep -A5 -E 'LC_BUILD_VERSION' | head -10
+            otool -L "$f" | head -20
+          done < out/ios-key-binaries.txt > out/ios-key-binary-info.txt 2>&1
+          DYLD=$(grep -m1 'dyld_sim$' out/ios-key-binaries.txt)
+          if [ -n "$DYLD" ]; then
+            strings -a "$DYLD" | grep -E 'SIMULATOR|DYLD_|RuntimeRoot|ROOT_PATH' | sort -u > out/ios-dyld-strings.txt
+            cp "$DYLD" artifact/dyld_sim
+          fi
+          LAUNCHD=$(grep -m1 'launchd_sim$' out/ios-key-binaries.txt)
+          [ -n "$LAUNCHD" ] && { strings -a "$LAUNCHD" | grep -E 'SIMULATOR|DYLD_|RuntimeRoot' | sort -u > out/ios-launchd-strings.txt; cp "$LAUNCHD" artifact/launchd_sim; }
+          ls -la "$RTROOT/System/Library/Caches/com.apple.dyld" > out/ios-dyld-cache.txt 2>&1
+          find "$RTROOT/System/Library/Caches/com.apple.dyld" -maxdepth 1 -type f -exec file {} + > out/ios-dyld-cache-arch.txt 2>&1
+          ls "$RTROOT/System/Library/LaunchDaemons" > out/ios-launchdaemons.txt 2>&1
+          cat out/ios-root-ls.txt
+
+      - name: SDK architecture and framework stubs
+        run: |
+          set +e
+          SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
+          echo "$SDK" > out/sdk.txt
+          for name in UIKit Foundation libobjc libSystem SwiftUI; do
+            f=$(find "$SDK" -name "$name.tbd" | head -1)
+            echo "===== $name : $f"
+            [ -n "$f" ] && { grep -E '^(archs|platform|targets):' -A4 "$f" | head -20; }
+          done > out/sdk-tbd-targets.txt 2>&1
+          cat out/sdk-tbd-targets.txt
+          find /Applications -maxdepth 10 -name 'CoreSimulator.framework' > out/coresim-frameworks.txt 2>/dev/null
+          find /Applications -path '*CoreSimulator.framework*' -name '*.h' | head -40 >> out/coresim-frameworks.txt 2>/dev/null
+          find /Applications -name 'SimulatorTrampoline*' | head -10 >> out/coresim-frameworks.txt 2>/dev/null
+          find /Applications -maxdepth 8 -name 'CoreSimulatorService*' | head -10 >> out/coresim-frameworks.txt 2>/dev/null
+          cat out/coresim-frameworks.txt
+
+      - name: Build simulator probes
+        run: |
+          set +e
+          SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
+          cat > hello.c <<'EOF'
+          #include <stdio.h>
+          #include <unistd.h>
+          int main(void) { printf("hello ios-sim x86_64 pid=%d\n", (int)getpid()); return 0; }
+          EOF
+          cat > hello_objc.m <<'EOF'
+          #import <Foundation/Foundation.h>
+          int main(void) { @autoreleasepool { NSLog(@"hello objc x86_64"); } return 0; }
+          EOF
+          xcrun --sdk iphonesimulator clang -arch x86_64 -mios-simulator-version-min=18.0 -isysroot "$SDK" -O1 hello.c -o hello_x86_64 2> out/build-hello.err
+          xcrun --sdk iphonesimulator clang -arch x86_64 -mios-simulator-version-min=18.0 -isysroot "$SDK" -O1 -framework Foundation hello_objc.m -o hello_objc_x86_64 2> out/build-objc.err
+          xcrun --sdk iphonesimulator clang -arch x86_64 -mios-simulator-version-min=18.0 -isysroot "$SDK" -O1 -framework UIKit -x objective-c - <<'EOF' -o hello_uikit_x86_64 2> out/build-uikit.err
+          #import <UIKit/UIKit.h>
+          int main(int argc, char **argv) { return UIApplicationMain(argc, argv, nil, nil); }
+          EOF
+          xcrun --sdk iphonesimulator clang -arch arm64 -mios-simulator-version-min=18.0 -isysroot "$SDK" -O1 -framework UIKit -x objective-c - <<'EOF' -o hello_uikit_arm64 2> out/build-uikit-arm64.err
+          #import <UIKit/UIKit.h>
+          int main(int argc, char **argv) { return UIApplicationMain(argc, argv, nil, nil); }
+          EOF
+          cat > reconapp.m <<'EOF'
+          #import <Foundation/Foundation.h>
+          #include <unistd.h>
+          int main(int argc, char **argv) {
+            @autoreleasepool {
+              fprintf(stderr, "RECONAPP pid=%d argc=%d\n", (int)getpid(), argc);
+              extern char **environ;
+              for (char **e = environ; *e; ++e)
+                fprintf(stderr, "ENV %s\n", *e);
+              NSLog(@"RECONAPP Foundation processInfo=%@", [[NSProcessInfo processInfo] operatingSystemVersionString]);
+              sleep(2);
+            }
+            return 0;
+          }
+          EOF
+          xcrun --sdk iphonesimulator clang -arch arm64 -mios-simulator-version-min=18.0 -isysroot "$SDK" -O1 -framework Foundation reconapp.m -o reconapp 2> out/build-reconapp.err
+          mkdir -p ReconApp.app
+          cp reconapp ReconApp.app/
+          cat > ReconApp.app/Info.plist <<'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>CFBundleExecutable</key><string>reconapp</string>
+            <key>CFBundleIdentifier</key><string>com.iosim.recon</string>
+            <key>CFBundleName</key><string>reconapp</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>CFBundleShortVersionString</key><string>1.0</string>
+            <key>CFBundleVersion</key><string>1</string>
+            <key>MinimumOSVersion</key><string>18.0</string>
+            <key>UIDeviceFamily</key><array><integer>1</integer></array>
+            <key>LSRequiresIPhoneOS</key><true/>
+          </dict></plist>
+          EOF
+          mkdir -p artifact/binaries
+          cp hello_x86_64 hello_objc_x86_64 hello_uikit_x86_64 hello_uikit_arm64 artifact/binaries/ 2>/dev/null
+          for f in hello_x86_64 hello_objc_x86_64; do
+            [ -f "$f" ] && { echo "=== $f ==="; file "$f"; otool -l "$f" | grep -A4 LC_BUILD_VERSION; otool -L "$f"; } > "out/$f.info.txt" 2>&1
+          done
+          tar czf artifact/ReconApp.app.tgz ReconApp.app
+
+      - name: Boot iOS simulator and run recon app
+        run: |
+          set +e
+          xcrun simctl list devices available -j > out/simctl-devices.json
+          UDID=$(python3 - <<'PY'
+          import json
+          d=json.load(open('out/simctl-devices.json'))['devices']
+          for rt, devs in d.items():
+              if '.iOS-' in rt:
+                  for dev in devs:
+                      print(dev['udid']); raise SystemExit
+          print('')
+          PY
+          )
+          echo "UDID=$UDID" > out/ios-boot.txt
+          if [ -n "$UDID" ]; then
+            xcrun simctl boot "$UDID" >> out/ios-boot.txt 2>&1
+            xcrun simctl bootstatus "$UDID" -b >> out/ios-boot.txt 2>&1
+            xcrun simctl spawn "$UDID" env > out/ios-sim-env.txt 2>&1
+            xcrun simctl spawn "$UDID" uname -a >> out/ios-sim-env.txt 2>&1
+            xcrun simctl spawn "$UDID" launchctl print system > out/ios-launchctl-system.txt 2>&1
+            xcrun simctl spawn "$UDID" ps aux > out/ios-sim-ps.txt 2>&1
+            xcrun simctl spawn "$UDID" sysctl -a > out/ios-sysctl.txt 2>&1
+            xcrun simctl install "$UDID" ReconApp.app >> out/ios-boot.txt 2>&1
+            ( xcrun simctl launch --console-pty "$UDID" com.iosim.recon > out/ios-app-launch.txt 2>&1 & echo $! > /tmp/launch.pid )
+            sleep 8
+            xcrun simctl io "$UDID" screenshot out/ios-screenshot.png >> out/ios-boot.txt 2>&1
+            xcrun simctl spawn "$UDID" launchctl print system > out/ios-launchctl-system-afterapp.txt 2>&1
+            xcrun simctl terminate "$UDID" com.iosim.recon >> out/ios-boot.txt 2>&1
+            xcrun simctl shutdown "$UDID" >> out/ios-boot.txt 2>&1
+          fi
+          tail -20 out/ios-boot.txt
+
+      - name: Package
+        run: |
+          set +e
+          cp -R out artifact/out
+          tar czf recon-ios.tgz -C artifact .
+          du -sh recon-ios.tgz
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: recon-ios
+          path: recon-ios.tgz
+          retention-days: 7

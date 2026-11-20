@@ -1,0 +1,627 @@
+#!/usr/bin/env python3
+"""iosimctl - a simctl-compatible device manager for the iosim runtime.
+
+This manages simulated device sets (directory-backed), boot state, installed
+app bundles and process spawning through the native Mach-O loader. It mirrors
+the public `simctl` command surface where the underlying feature exists.
+
+It is an independent reimplementation; it does not use Apple's CoreSimulator.
+"""
+
+import argparse
+import fcntl
+import json
+import os
+import plistlib
+import shutil
+import signal
+import subprocess
+import sys
+import time
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
+
+HOME = Path(os.environ.get("IOSIM_HOME", Path.home() / ".iosim")).expanduser()
+STATE = HOME / "devices.json"
+LOCK = HOME / "state.lock"
+
+RUNTIME = {
+    "identifier": "com.iosim.SimRuntime.iOS-27-0",
+    "name": "iOS 27.0 (iosim)",
+    "version": "27.0",
+    "build": "iosim-1",
+    "platform": "iphonesimulator",
+    "architectures": ["x86_64"],
+}
+
+DEVICE_TYPES = {
+    "com.iosim.SimDeviceType.iPhone-18-Pro": "iPhone 18 Pro",
+    "com.iosim.SimDeviceType.iPhone-18-Pro-Max": "iPhone 18 Pro Max",
+    "com.iosim.SimDeviceType.iPhone-17": "iPhone 17",
+    "com.iosim.SimDeviceType.iPad-Pro-13-inch-M5": "iPad Pro 13-inch (M5)",
+    "com.iosim.SimDeviceType.iPad-Air-11-inch-M4": "iPad Air 11-inch (M4)",
+}
+
+
+def die(msg, code=1):
+    print(msg, file=sys.stderr)
+    sys.exit(code)
+
+
+def now_iso():
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def ensure_home():
+    try:
+        HOME.mkdir(parents=True, exist_ok=True)
+    except FileExistsError:
+        die(f"IOSIM_HOME exists but is not a directory: {HOME}")
+
+
+class StateLock:
+    def __enter__(self):
+        ensure_home()
+        self.f = open(LOCK, "a+")
+        fcntl.flock(self.f, fcntl.LOCK_EX)
+        return self
+
+    def __exit__(self, *exc):
+        fcntl.flock(self.f, fcntl.LOCK_UN)
+        self.f.close()
+
+
+def load_state():
+    ensure_home()
+    try:
+        with open(STATE) as f:
+            return json.load(f)
+    except (json.JSONDecodeError, FileNotFoundError):
+        return {"devices": {}}
+
+
+def save_state(state):
+    ensure_home()
+    tmp = STATE.with_suffix(".tmp")
+    with open(tmp, "w") as f:
+        json.dump(state, f, indent=2, sort_keys=True)
+    os.replace(tmp, STATE)
+
+
+def device_dir(udid):
+    return HOME / "Devices" / udid
+
+
+def runtime_root():
+    env = os.environ.get("IOSIM_RUNTIME_ROOT")
+    if env:
+        return Path(env).expanduser().resolve()
+    return HOME / "runtime"
+
+
+def make_runtime_tree():
+    root = runtime_root()
+    for sub in [
+        "System/Library/Frameworks",
+        "System/Library/PrivateFrameworks",
+        "System/Library/CoreServices",
+        "usr/lib",
+        "usr/lib/system",
+        "usr/lib/system/host",
+        "usr/libexec",
+        "sbin",
+        "bin",
+        "private/var",
+    ]:
+        (root / sub).mkdir(parents=True, exist_ok=True)
+    marker = root / "System/Library/CoreServices/SystemVersion.plist"
+    if not marker.exists():
+        with open(marker, "wb") as f:
+            plistlib.dump(
+                {
+                    "ProductName": "iPhone OS",
+                    "ProductVersion": "27.0",
+                    "ProductBuildVersion": "iosim-1",
+                },
+                f,
+            )
+
+
+def find_device(state, ident):
+    if ident in state["devices"]:
+        return ident, state["devices"][ident]
+    matches = [(u, d) for u, d in state["devices"].items() if d["name"] == ident]
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        die(f'multiple devices named "{ident}"; use a UDID')
+    die(f'invalid device: {ident}')
+
+
+def require_booted(dev):
+    if dev.get("state") != "Booted":
+        die(f'Unable to {dev["name"]}: device is not booted')
+
+
+SCREEN = {
+    "com.iosim.SimDeviceType.iPhone-18-Pro": (1206, 2622, 3.0, 460.0, "iPhone19,2", "V63"),
+    "com.iosim.SimDeviceType.iPhone-18-Pro-Max": (1320, 2868, 3.0, 460.0, "iPhone19,3", "V64"),
+    "com.iosim.SimDeviceType.iPhone-17": (1179, 2556, 3.0, 460.0, "iPhone17,1", "V57"),
+    "com.iosim.SimDeviceType.iPad-Pro-13-inch-M5": (2064, 2752, 2.0, 344.0, "iPad16,10", "V63"),
+    "com.iosim.SimDeviceType.iPad-Air-11-inch-M4": (1640, 2360, 2.0, 344.0, "iPad16,5", "V53"),
+}
+
+
+def device_environment(udid, dev, bundle_id=None, data_home=None):
+    dd = device_dir(udid)
+    root = runtime_root()
+    if data_home is None:
+        data_home = dd / "data"
+    data_home = Path(data_home)
+    (data_home / "tmp").mkdir(parents=True, exist_ok=True)
+    width, height, scale, pitch, model, product = SCREEN.get(
+        dev["deviceType"], (1206, 2622, 3.0, 460.0, "iPhone19,2", "V63")
+    )
+    env = dict(os.environ)
+    env.update(
+        {
+            "SIMULATOR_UDID": udid,
+            "SIMULATOR_DEVICE_NAME": dev["name"],
+            "SIMULATOR_RUNTIME_VERSION": RUNTIME["version"],
+            "SIMULATOR_RUNTIME_BUILD_VERSION": RUNTIME["build"],
+            "SIMULATOR_VERSION_INFO": (
+                f"iosim 1.0 - Device: {dev['name']} ({udid}) - "
+                f"Runtime: {RUNTIME['name']}"
+            ),
+            "SIMULATOR_ARCHS": "x86_64",
+            "SIMULATOR_MODEL_IDENTIFIER": model,
+            "SIMULATOR_PRODUCT_CLASS": product,
+            "SIMULATOR_MAINSCREEN_WIDTH": str(width),
+            "SIMULATOR_MAINSCREEN_HEIGHT": str(height),
+            "SIMULATOR_MAINSCREEN_SCALE": f"{scale:.6f}",
+            "SIMULATOR_MAINSCREEN_PITCH": f"{pitch:.6f}",
+            "SIMULATOR_SHARED_RESOURCES_DIRECTORY": str(dd / "data"),
+            "IPHONE_SHARED_RESOURCES_DIRECTORY": str(dd / "data"),
+            "SIMULATOR_HOST_HOME": str(Path.home()),
+            "SIMULATOR_LOG_ROOT": str(dd / "logs"),
+            "SIMULATOR_BOOT_TIME": str(int(time.time())),
+            "SIMULATOR_MEMORY_WARNINGS": str(dd / "data" / "var" / "run" / "memory_warning_simulation"),
+            "SIMULATOR_ROOT": str(root),
+            "IPHONE_SIMULATOR_ROOT": str(root),
+            "DYLD_ROOT_PATH": str(root),
+            "DYLD_FALLBACK_FRAMEWORK_PATH": str(root / "System" / "Library" / "Frameworks"),
+            "DYLD_FALLBACK_LIBRARY_PATH": str(root / "usr" / "lib"),
+            "HOME": str(data_home),
+            "CFFIXED_USER_HOME": str(data_home),
+            "TMPDIR": str(data_home / "tmp"),
+            "_DYLD_CLOSURE_HOME": str(data_home),
+            "XPC_SERVICE_NAME": (
+                f"UIKitApplication:{bundle_id}[iosim]" if bundle_id else "com.iosim.launchd-spawn"
+            ),
+        }
+    )
+    for k, v in dev.get("environment", {}).items():
+        env[k] = v
+    # simctl passes through SIMCTL_CHILD_* variables to the child.
+    for k, v in os.environ.items():
+        if k.startswith("SIMCTL_CHILD_"):
+            env[k[len("SIMCTL_CHILD_"):]] = v
+    return env
+
+
+def loader_path():
+    p = os.environ.get("IOSIM_RUN")
+    if p:
+        return str(Path(p).expanduser())
+    here = Path(__file__).resolve().parent.parent
+    cand = here / "build" / "iosim-run"
+    if cand.exists():
+        return str(cand)
+    die("cannot find iosim-run; set IOSIM_RUN or build the loader first")
+
+
+def run_child(udid, dev, argv, console=False, log_name="spawn",
+              bundle_id=None, data_home=None):
+    env = device_environment(udid, dev, bundle_id=bundle_id, data_home=data_home)
+    dd = device_dir(udid)
+    cmd = [loader_path()]
+    for p in dev.get("dylibPaths", []):
+        cmd += ["--dylib-path", p]
+    frameworks = runtime_root() / "System/Library/Frameworks"
+    cmd += ["--dylib-path", str(frameworks)]
+    cmd += argv
+    (dd / "logs").mkdir(parents=True, exist_ok=True)
+    if console:
+        return subprocess.run(cmd, env=env).returncode
+    log = open(dd / "logs" / f"{log_name}.log", "ab")
+    proc = subprocess.Popen(cmd, env=env, stdout=log, stderr=log, start_new_session=True)
+    return proc.pid
+
+
+# ---------- commands ----------
+
+
+def cmd_list(args):
+    state = load_state()
+    if args.what == "devicetypes":
+        out = [
+            {"identifier": k, "name": v, "productFamily": "iPhone" if "iPhone" in v else "iPad"}
+            for k, v in DEVICE_TYPES.items()
+        ]
+        if args.json:
+            print(json.dumps({"devicetypes": out}, indent=2))
+        else:
+            for d in out:
+                print(f"{d['identifier']} ({d['name']})")
+        return 0
+    if args.what == "runtimes":
+        if args.json:
+            print(json.dumps({"runtimes": [RUNTIME]}, indent=2))
+        else:
+            print(f"{RUNTIME['name']} - {RUNTIME['identifier']} ({RUNTIME['version']})")
+        return 0
+
+    devices = []
+    for udid, d in sorted(state["devices"].items(), key=lambda kv: kv[1]["name"]):
+        devices.append(
+            {
+                "udid": udid,
+                "name": d["name"],
+                "state": d["state"],
+                "deviceTypeIdentifier": d["deviceType"],
+                "isAvailable": True,
+                "dataPath": str(device_dir(udid) / "data"),
+                "logPath": str(device_dir(udid) / "logs"),
+                "lastBootedAt": d.get("lastBootedAt", ""),
+            }
+        )
+    if args.json:
+        print(json.dumps({"devices": {RUNTIME["identifier"]: devices}}, indent=2))
+        return 0
+    print(f"-- {RUNTIME['name']} --")
+    for d in devices:
+        print(f"    {d['name']} ({d['udid']}) ({d['state']})")
+    return 0
+
+
+def cmd_create(args):
+    if args.device_type not in DEVICE_TYPES:
+        die(f"invalid device type: {args.device_type}")
+    with StateLock():
+        state = load_state()
+        udid = str(uuid.uuid4()).upper()
+        dd = device_dir(udid)
+        (dd / "data" / "tmp").mkdir(parents=True, exist_ok=True)
+        (dd / "data" / "Containers" / "Bundle" / "Application").mkdir(parents=True, exist_ok=True)
+        (dd / "data" / "Containers" / "Data" / "Application").mkdir(parents=True, exist_ok=True)
+        (dd / "logs").mkdir(parents=True, exist_ok=True)
+        (dd / "var" / "run").mkdir(parents=True, exist_ok=True)
+        state["devices"][udid] = {
+            "name": args.name,
+            "deviceType": args.device_type,
+            "runtime": args.runtime or RUNTIME["identifier"],
+            "state": "Shutdown",
+            "created": now_iso(),
+            "apps": {},
+            "environment": {},
+        }
+        save_state(state)
+    print(udid)
+    return 0
+
+
+def cmd_delete(args):
+    with StateLock():
+        state = load_state()
+        if args.device in ("all", "booted"):
+            targets = [
+                u for u, d in state["devices"].items()
+                if args.device == "all" or d["state"] == "Booted"
+            ]
+        else:
+            targets = [find_device(state, args.device)[0]]
+        for udid in targets:
+            dev = state["devices"][udid]
+            if dev["state"] == "Booted":
+                shutdown_one(udid, dev)
+            shutil.rmtree(device_dir(udid), ignore_errors=True)
+            del state["devices"][udid]
+        save_state(state)
+    return 0
+
+
+def shutdown_one(udid, dev):
+    pid = dev.get("launchdPid")
+    if pid:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        for _ in range(20):
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.05)
+        dev.pop("launchdPid", None)
+    dev["state"] = "Shutdown"
+
+
+def cmd_boot(args):
+    with StateLock():
+        state = load_state()
+        udid, dev = find_device(state, args.device)
+        if dev["state"] == "Booted":
+            print(f"Device already booted: {udid}")
+            return 0
+        make_runtime_tree()
+        dd = device_dir(udid)
+        launchd = Path(__file__).resolve().parent / "iosim-launchd"
+        log = open(dd / "logs" / "launchd_sim.log", "ab")
+        proc = subprocess.Popen(
+            [sys.executable, str(launchd), str(dd), udid, dev["name"]],
+            stdout=log, stderr=log, start_new_session=True,
+        )
+        dev["state"] = "Booted"
+        dev["launchdPid"] = proc.pid
+        dev["lastBootedAt"] = now_iso()
+        save_state(state)
+    print(f"Booted {dev['name']} ({udid})")
+    return 0
+
+
+def cmd_bootstatus(args):
+    state = load_state()
+    udid, dev = find_device(state, args.device)
+    if dev["state"] != "Booted":
+        die("Device is not booted")
+    print(f"[{now_iso()}] Status=4, isTerminal=YES, Elapsed=0s.")
+    print("\tFinished")
+    return 0
+
+
+def cmd_shutdown(args):
+    with StateLock():
+        state = load_state()
+        udid, dev = find_device(state, args.device)
+        if dev["state"] != "Booted":
+            die("Device is not booted")
+        shutdown_one(udid, dev)
+        save_state(state)
+    print(f"Shutdown {dev['name']} ({udid})")
+    return 0
+
+
+def cmd_erase(args):
+    with StateLock():
+        state = load_state()
+        udid, dev = find_device(state, args.device)
+        if dev["state"] == "Booted":
+            die("Device must be shutdown before erasing")
+        dd = device_dir(udid)
+        for sub in ("data", "logs"):
+            shutil.rmtree(dd / sub, ignore_errors=True)
+        (dd / "data" / "tmp").mkdir(parents=True, exist_ok=True)
+        dev["apps"] = {}
+        save_state(state)
+    return 0
+
+
+def cmd_install(args):
+    src = Path(args.app).resolve()
+    if not src.exists():
+        die(f"no such app bundle: {src}")
+    info_path = src / "Info.plist"
+    if not info_path.exists():
+        die(f"bundle has no Info.plist: {src}")
+    with open(info_path, "rb") as f:
+        info = plistlib.load(f)
+    bundle_id = info.get("CFBundleIdentifier")
+    if not bundle_id:
+        die("Info.plist has no CFBundleIdentifier")
+    exe = info.get("CFBundleExecutable")
+    if not exe or not (src / exe).exists():
+        die("Info.plist CFBundleExecutable missing or not found in bundle")
+
+    with StateLock():
+        state = load_state()
+        udid, dev = find_device(state, args.device)
+        require_booted(dev)
+        dest = device_dir(udid) / "data" / "Containers" / "Bundle" / "Application" / str(uuid.uuid4()).upper() / src.name
+        if dest.exists():
+            shutil.rmtree(dest)
+        shutil.copytree(src, dest)
+        dev["apps"][bundle_id] = {"path": str(dest), "executable": exe}
+        save_state(state)
+    print(f"Installed {bundle_id} on {udid}")
+    return 0
+
+
+def cmd_uninstall(args):
+    with StateLock():
+        state = load_state()
+        udid, dev = find_device(state, args.device)
+        app = dev.get("apps", {}).pop(args.bundle_id, None)
+        if not app:
+            die(f"app not installed: {args.bundle_id}")
+        shutil.rmtree(Path(app["path"]).parent, ignore_errors=True)
+        save_state(state)
+    return 0
+
+
+def cmd_launch(args):
+    state = load_state()
+    udid, dev = find_device(state, args.device)
+    require_booted(dev)
+    app = dev.get("apps", {}).get(args.bundle_id)
+    if not app:
+        die(f'app not installed: {args.bundle_id}')
+    exe = Path(app["path"]) / app["executable"]
+    if not exe.exists():
+        die(f"missing executable: {exe}")
+    argv = [str(exe)] + args.args
+    data_home = (device_dir(udid) / "data" / "Containers" / "Data" /
+                 "Application" / args.bundle_id)
+    data_home.mkdir(parents=True, exist_ok=True)
+    if args.console:
+        return run_child(udid, dev, argv, console=True,
+                         log_name=f"launch-{args.bundle_id}",
+                         bundle_id=args.bundle_id, data_home=data_home)
+    pid = run_child(udid, dev, argv, console=False,
+                    log_name=f"launch-{args.bundle_id}",
+                    bundle_id=args.bundle_id, data_home=data_home)
+    print(f"{args.bundle_id}: {pid}")
+    return 0
+
+
+def cmd_spawn(args):
+    state = load_state()
+    udid, dev = find_device(state, args.device)
+    require_booted(dev)
+    if args.arch and args.arch != "x86_64":
+        die(f"unsupported architecture: {args.arch} (iosim is an x86_64 runtime)")
+    return run_child(udid, dev, [args.binary] + args.args, console=True, log_name="spawn")
+
+
+def cmd_getenv(args):
+    state = load_state()
+    udid, dev = find_device(state, args.device)
+    val = device_environment(udid, dev).get(args.key)
+    if val is None:
+        die(f"environment variable not set: {args.key}")
+    print(val)
+    return 0
+
+
+def cmd_setenv(args):
+    with StateLock():
+        state = load_state()
+        udid, dev = find_device(state, args.device)
+        if "=" in args.key and not args.value:
+            key, value = args.key.split("=", 1)
+        elif args.value is not None:
+            key, value = args.key, args.value
+        else:
+            dev.get("environment", {}).pop(args.key, None)
+            save_state(state)
+            return 0
+        dev.setdefault("environment", {})[key] = value
+        save_state(state)
+    return 0
+
+
+def cmd_get_app_container(args):
+    state = load_state()
+    udid, dev = find_device(state, args.device)
+    app = dev.get("apps", {}).get(args.bundle_id)
+    if not app:
+        die(f"app not installed: {args.bundle_id}")
+    if args.container == "bundle":
+        print(Path(app["path"]).parent)
+    else:
+        p = device_dir(udid) / "data" / "Containers" / "Data" / "Application" / args.bundle_id
+        p.mkdir(parents=True, exist_ok=True)
+        print(p)
+    return 0
+
+
+def cmd_listapps(args):
+    state = load_state()
+    udid, dev = find_device(state, args.device)
+    for bundle_id, app in sorted(dev.get("apps", {}).items()):
+        print(f"{bundle_id}\t{app['path']}")
+    return 0
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="iosimctl", description=__doc__)
+    sub = ap.add_subparsers(dest="cmd", required=True)
+
+    p = sub.add_parser("list", help="list devices, runtimes or device types")
+    p.add_argument("what", nargs="?", default="devices",
+                   choices=["devices", "devicetypes", "runtimes"])
+    p.add_argument("-j", "--json", action="store_true")
+    p.set_defaults(func=cmd_list)
+
+    p = sub.add_parser("create", help="create a device")
+    p.add_argument("name")
+    p.add_argument("device_type")
+    p.add_argument("runtime", nargs="?", default=None)
+    p.set_defaults(func=cmd_create)
+
+    p = sub.add_parser("delete", help="delete a device")
+    p.add_argument("device")
+    p.set_defaults(func=cmd_delete)
+
+    p = sub.add_parser("boot")
+    p.add_argument("device")
+    p.set_defaults(func=cmd_boot)
+
+    p = sub.add_parser("bootstatus")
+    p.add_argument("device")
+    p.add_argument("-b", "--block", action="store_true")
+    p.set_defaults(func=cmd_bootstatus)
+
+    p = sub.add_parser("shutdown")
+    p.add_argument("device")
+    p.set_defaults(func=cmd_shutdown)
+
+    p = sub.add_parser("erase")
+    p.add_argument("device")
+    p.set_defaults(func=cmd_erase)
+
+    p = sub.add_parser("install")
+    p.add_argument("device")
+    p.add_argument("app")
+    p.set_defaults(func=cmd_install)
+
+    p = sub.add_parser("uninstall")
+    p.add_argument("device")
+    p.add_argument("bundle_id")
+    p.set_defaults(func=cmd_uninstall)
+
+    p = sub.add_parser("launch")
+    p.add_argument("--console", "--console-pty", dest="console", action="store_true")
+    p.add_argument("-w", "--wait-for-debugger", action="store_true")
+    p.add_argument("-a", "--arch", default=None)
+    p.add_argument("--terminate-running-process", action="store_true")
+    p.add_argument("device")
+    p.add_argument("bundle_id")
+    p.add_argument("args", nargs=argparse.REMAINDER)
+    p.set_defaults(func=cmd_launch)
+
+    p = sub.add_parser("spawn")
+    p.add_argument("-a", "--arch", default=None)
+    p.add_argument("device")
+    p.add_argument("binary")
+    p.add_argument("args", nargs=argparse.REMAINDER)
+    p.set_defaults(func=cmd_spawn)
+
+    p = sub.add_parser("getenv")
+    p.add_argument("device")
+    p.add_argument("key")
+    p.set_defaults(func=cmd_getenv)
+
+    p = sub.add_parser("setenv")
+    p.add_argument("device")
+    p.add_argument("key")
+    p.add_argument("value", nargs="?", default=None)
+    p.set_defaults(func=cmd_setenv)
+
+    p = sub.add_parser("get_app_container")
+    p.add_argument("device")
+    p.add_argument("bundle_id")
+    p.add_argument("container", nargs="?", default="data", choices=["data", "bundle"])
+    p.set_defaults(func=cmd_get_app_container)
+
+    p = sub.add_parser("listapps")
+    p.add_argument("device")
+    p.set_defaults(func=cmd_listapps)
+
+    args = ap.parse_args()
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

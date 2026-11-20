@@ -1,0 +1,110 @@
+#!/usr/bin/env python3
+"""Minimal launchd_sim stand-in.
+
+Owns the per-device runtime state while a device is booted, exposes a Unix
+socket for service requests, and exits cleanly on SIGTERM (simctl shutdown).
+It does not manage Mach services or XPC yet; it is the boot anchor that the
+device lifecycle is built around.
+"""
+
+import json
+import os
+import select
+import signal
+import socket
+import sys
+import time
+
+running = True
+
+
+def on_term(signum, frame):
+    global running
+    running = False
+
+
+def main():
+    if len(sys.argv) < 4:
+        print("usage: iosim-launchd <device-dir> <udid> <name>", file=sys.stderr)
+        return 2
+    device_dir, udid, name = sys.argv[1], sys.argv[2], sys.argv[3]
+    var_run = os.path.join(device_dir, "var", "run")
+    os.makedirs(var_run, exist_ok=True)
+    sock_path = os.path.join(var_run, "launchd.sock")
+    state_path = os.path.join(var_run, "launchd.json")
+    try:
+        os.unlink(sock_path)
+    except FileNotFoundError:
+        pass
+
+    signal.signal(signal.SIGTERM, on_term)
+    signal.signal(signal.SIGINT, on_term)
+
+    srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    srv.bind(sock_path)
+    srv.listen(8)
+    srv.setblocking(False)
+    os.chmod(sock_path, 0o600)
+
+    state = {
+        "pid": os.getpid(),
+        "udid": udid,
+        "name": name,
+        "startedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "services": [],
+    }
+
+    def persist():
+        with open(state_path, "w") as f:
+            json.dump(state, f, indent=2)
+
+    persist()
+    print(f"launchd_sim: booting {name} ({udid}) pid={os.getpid()}", flush=True)
+
+    while running:
+        try:
+            ready, _, _ = select.select([srv], [], [], 0.5)
+        except InterruptedError:
+            continue
+        if not ready:
+            continue
+        try:
+            conn, _ = srv.accept()
+        except BlockingIOError:
+            continue
+        with conn:
+            conn.settimeout(1.0)
+            try:
+                data = conn.recv(65536)
+                req = json.loads(data or b"{}")
+            except Exception:
+                req = {}
+            cmd = req.get("cmd")
+            if cmd == "ping":
+                resp = {"ok": True, "pid": os.getpid()}
+            elif cmd == "status":
+                resp = {"ok": True, "state": state}
+            elif cmd == "shutdown":
+                resp = {"ok": True}
+                running = False
+            else:
+                resp = {"ok": False, "error": "unknown command"}
+            try:
+                conn.sendall((json.dumps(resp) + "\n").encode())
+            except OSError:
+                pass
+
+    try:
+        os.unlink(sock_path)
+    except FileNotFoundError:
+        pass
+    try:
+        os.unlink(state_path)
+    except FileNotFoundError:
+        pass
+    print("launchd_sim: shutting down", flush=True)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

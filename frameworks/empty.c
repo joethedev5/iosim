@@ -1,0 +1,1 @@
+int iosim_empty_dylib_anchor;

@@ -1,0 +1,28 @@
+iosim
+=====
+
+This project is an independent reimplementation of the iOS Simulator's
+runtime substrate for native x86_64 hosts.
+
+Format references
+-----------------
+The Mach-O chained-fixup structures and relocation semantics implemented in
+loader/macho.h and loader/fixups.c follow the publicly documented formats in
+Apple's open-source dyld project (APSL 2.0), in particular
+include/mach-o/fixup-chains.h and common/MachOLoaded.cpp. A copy of Apple's
+license is in LICENSES/APPLE-APSL-2.0.txt.
+
+Prior art
+---------
+Darling (https://github.com/darlinghq/darling, GPL-3.0) and ipasim
+(https://github.com/ipasimulator/ipasim) were studied for the architecture of
+Mach-O loading, Darwin syscall translation and Objective-C runtime porting.
+No source code from those projects is included here; iosim's loader, runtime
+and tools are original implementations.
+
+Apple binaries
+--------------
+No Apple runtime binaries, SDK libraries or other proprietary Apple content
+are distributed in this repository. The GitHub Actions workflows under
+recon-runner/ operate on GitHub-hosted macOS runners and upload only
+generated metadata and self-built test binaries.

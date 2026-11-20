@@ -1,0 +1,184 @@
+name: ios-sim-recon
+on:
+  workflow_dispatch:
+jobs:
+  recon:
+    runs-on: xcode-27
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: System info
+        run: |
+          set +e
+          mkdir -p out artifact
+          { sw_vers; uname -a; xcodebuild -version; xcode-select -p; sysctl -n machdep.cpu.brand_string; } > out/system.txt 2>&1 || true
+          ls /Applications > out/applications.txt 2>&1 || true
+          xcrun simctl list -j > out/simctl-list.json 2> out/simctl-list.err || true
+          xcrun simctl list runtimes > out/simctl-runtimes.txt 2>&1 || true
+          xcrun simctl list devicetypes > out/simctl-devicetypes.txt 2>&1 || true
+          xcrun simctl help > out/simctl-help.txt 2>&1 || true
+          for sub in boot shutdown spawn launch install uninstall io list runtime getenv setenv; do
+            echo "=== simctl help $sub ==="
+            xcrun simctl help "$sub" 2>&1
+          done > out/simctl-help-subcommands.txt 2>&1 || true
+          xcrun simctl runtime list -j > out/runtime-list.json 2>&1 || true
+          echo "=== system ==="; cat out/system.txt
+          xcrun simctl runtime list > out/runtime-list.txt 2>&1 || true
+
+      - name: Locate and inventory simulator runtime
+        run: |
+          set +e
+          find "$HOME/Library/Developer/CoreSimulator" -maxdepth 8 -name '*.simruntime' -print > out/runtime-paths.txt 2>/dev/null || true
+          find /Library/Developer/CoreSimulator -maxdepth 10 -name '*.simruntime' -print >> out/runtime-paths.txt 2>/dev/null || true
+          RT=$(grep -m1 '\.simruntime$' out/runtime-paths.txt || true)
+          echo "RT=$RT" >> out/runtime-paths.txt
+          if [ -n "$RT" ]; then
+            RTROOT="$RT/Contents/Resources/RuntimeRoot"
+            echo "$RTROOT" > out/runtime-root.txt
+            ls -la "$RT/Contents" > out/runtime-contents.txt 2>&1 || true
+            cat "$RT/Contents/Info.plist" > out/runtime-info.plist 2>/dev/null || true
+            find "$RTROOT" -maxdepth 2 -type d | sort | head -200 > out/runtime-root-dirs.txt
+            ls "$RTROOT" > out/runtime-root-ls.txt 2>&1 || true
+            ls "$RTROOT/System/Library/Frameworks" > out/runtime-frameworks.txt 2>&1 || true
+            ls "$RTROOT/System/Library/PrivateFrameworks" > out/runtime-privateframeworks.txt 2>&1 || true
+            ls "$RTROOT/usr/lib" > out/runtime-usr-lib.txt 2>&1 || true
+            ls "$RTROOT/System/Library/CoreServices" > out/runtime-coreservices.txt 2>&1 || true
+            find "$RTROOT" \( -name 'dyld_sim' -o -name 'launchd_sim' -o -name 'libSystem.B.dylib' -o -name 'libdyld.dylib' -o -name 'SpringBoard' -o -name 'backboardd' -o -name 'liblaunch_sim.dylib' \) > out/key-binaries.txt 2>/dev/null || true
+            while read -r f; do
+              echo "===== $f ====="
+              file "$f"
+              otool -hv "$f"
+              otool -l "$f" | grep -B1 -A6 -E 'LC_BUILD_VERSION|LC_VERSION_MIN' | head -30
+              otool -L "$f"
+            done < out/key-binaries.txt > out/key-binary-info.txt 2>&1 || true
+            DYLD=$(find "$RTROOT" -name dyld_sim | head -1)
+            echo "DYLD=$DYLD" > out/dyld-picked.txt
+            if [ -n "$DYLD" ]; then
+              strings -a "$DYLD" | grep -E 'SIMULATOR|DYLD_|dyld_|RuntimeRoot|runtime' | sort -u > out/dyld-strings.txt 2>/dev/null || true
+              nm -gU "$DYLD" 2>/dev/null | head -1000 > out/dyld-symbols.txt || true
+              otool -l "$DYLD" > out/dyld-loadcommands.txt 2>&1 || true
+              cp "$DYLD" artifact/dyld_sim 2>/dev/null || true
+            fi
+            LAUNCHD=$(find "$RTROOT" -name launchd_sim | head -1)
+            if [ -n "$LAUNCHD" ]; then
+              strings -a "$LAUNCHD" | grep -E 'SIMULATOR|DYLD_|launchd_|RuntimeRoot' | sort -u > out/launchd-sim-strings.txt 2>/dev/null || true
+              cp "$LAUNCHD" artifact/launchd_sim 2>/dev/null || true
+            fi
+            LIBXPC=$(find "$RTROOT" -name 'libxpc.dylib' | head -1)
+            [ -n "$LIBXPC" ] && cp "$LIBXPC" artifact/libxpc.dylib 2>/dev/null || true
+            LIBSYSTEM=$(find "$RTROOT" -name 'libSystem.B.dylib' | head -1)
+            [ -n "$LIBSYSTEM" ] && cp "$LIBSYSTEM" artifact/libSystem.B.dylib 2>/dev/null || true
+            # dyld shared cache presence + architecture of runtime binaries
+            ls -la "$RTROOT/System/Library/Caches/com.apple.dyld" > out/dyld-cache-listing.txt 2>&1 || true
+            file "$RTROOT/usr/lib/dyld_sim" "$RTROOT/usr/lib/libSystem.B.dylib" > out/runtime-arch.txt 2>&1 || true
+          fi
+
+      - name: Locate CoreSimulator/SimulatorKit/SimDeviceIO headers and binaries
+        run: |
+          set +e
+          XC=$(xcode-select -p)
+          find /Applications -maxdepth 6 -name 'CoreSimulator.framework' -not -path '*/Simulator*' > out/coresim-frameworks.txt 2>/dev/null || true
+          find /Applications -path '*CoreSimulator.framework*' -name '*.h' > out/coresimulator-headers.txt 2>/dev/null || true
+          find /Applications -path '*SimulatorKit.framework*' -name '*.h' >> out/coresimulator-headers.txt 2>/dev/null || true
+          find /Applications -path '*SimDeviceIO.framework*' -name '*.h' >> out/coresimulator-headers.txt 2>/dev/null || true
+          find /Applications -path '*SimulatorTrampoline*' -maxdepth 12 > out/simulator-trampoline-paths.txt 2>/dev/null || true
+          while read -r f; do echo "===== $f ====="; cat "$f"; done < out/coresimulator-headers.txt > out/coresimulator-headers.dump.txt 2>/dev/null || true
+          CS=$(find /Applications -path '*CoreSimulator.framework/Versions/A/CoreSimulator' -o -path '*CoreSimulator.framework/CoreSimulator' | head -1)
+          echo "CS=$CS" >> out/coresim-frameworks.txt
+          if [ -n "$CS" ]; then
+            file "$CS" >> out/coresim-frameworks.txt
+            otool -L "$CS" > out/coresimulator-otool-L.txt 2>&1 || true
+            strings -a "$CS" | grep -E 'com\.apple\.CoreSimulator|SimDevice|SimRuntime|SimService|XPC|simctl' | sort -u > out/coresimulator-strings.txt 2>/dev/null || true
+            nm -gU "$CS" 2>/dev/null | head -2000 > out/coresimulator-symbols.txt || true
+            cp "$CS" artifact/CoreSimulator 2>/dev/null || true
+          fi
+          SIMKIT=$(find /Applications -path '*SimulatorKit.framework/Versions/A/SimulatorKit' -o -path '*SimulatorKit.framework/SimulatorKit' | head -1)
+          if [ -n "$SIMKIT" ]; then
+            echo "SIMKIT=$SIMKIT" >> out/coresim-frameworks.txt
+            file "$SIMKIT" >> out/coresim-frameworks.txt
+            strings -a "$SIMKIT" | grep -E 'com\.apple\.|Simulator|Device|Metal|HID|IO' | sort -u > out/simulatorkit-strings.txt 2>/dev/null || true
+            otool -L "$SIMKIT" > out/simulatorkit-otool-L.txt 2>&1 || true
+          fi
+          TRAMP=$(find /Applications -name 'SimulatorTrampoline' -type f | head -1)
+          if [ -n "$TRAMP" ]; then
+            file "$TRAMP" >> out/coresim-frameworks.txt
+            strings -a "$TRAMP" | grep -E 'SIMULATOR|XPC|simulator' | sort -u > out/trampoline-strings.txt 2>/dev/null || true
+          fi
+
+      - name: Build x86_64 simulator test binaries
+        run: |
+          set +e
+          SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
+          echo "SDK=$SDK" > out/sdk.txt
+          xcrun --sdk iphonesimulator --show-sdk-version >> out/sdk.txt 2>&1 || true
+          xcrun --sdk iphonesimulator --show-sdk-platform-path >> out/sdk.txt 2>&1 || true
+          cat > hello.c <<'EOF'
+          #include <stdio.h>
+          #include <stdlib.h>
+          #include <unistd.h>
+          int main(void) {
+            printf("hello from iOS-simulator x86_64 binary pid=%d\n", (int)getpid());
+            fflush(stdout);
+            return 0;
+          }
+          EOF
+          cat > hello_objc.m <<'EOF'
+          #import <Foundation/Foundation.h>
+          int main(void) {
+            @autoreleasepool {
+              NSLog(@"hello from Foundation (x86_64 simulator)");
+              printf("NSProcessInfo=%@\n", [[NSProcessInfo processInfo] operatingSystemVersionString]);
+            }
+            return 0;
+          }
+          EOF
+          cat > hello_uikit.m <<'EOF'
+          #import <UIKit/UIKit.h>
+          int main(int argc, char **argv) {
+            @autoreleasepool { return UIApplicationMain(argc, argv, nil, nil); }
+          }
+          EOF
+          xcrun --sdk iphonesimulator clang -arch x86_64 -mios-simulator-version-min=18.0 -isysroot "$SDK" -O1 hello.c -o hello_x86_64 2> out/build-hello.err || true
+          xcrun --sdk iphonesimulator clang -arch x86_64 -mios-simulator-version-min=18.0 -isysroot "$SDK" -O1 -framework Foundation hello_objc.m -o hello_objc_x86_64 2> out/build-objc.err || true
+          xcrun --sdk iphonesimulator clang -arch x86_64 -mios-simulator-version-min=18.0 -isysroot "$SDK" -O1 -framework UIKit hello_uikit.m -o hello_uikit_x86_64 2> out/build-uikit.err || true
+          xcrun --sdk iphonesimulator clang -arch arm64 -mios-simulator-version-min=18.0 -isysroot "$SDK" -O1 hello.c -o hello_arm64 2> out/build-arm64.err || true
+          for f in hello_x86_64 hello_objc_x86_64 hello_uikit_x86_64 hello_arm64; do
+            [ -f "$f" ] || continue
+            { echo "=== $f ==="; file "$f"; otool -hv "$f"; otool -l "$f" | head -160; otool -L "$f"; nm "$f" | head -80; } > "out/$f.info.txt" 2>&1
+          done
+          mkdir -p artifact/binaries
+          cp hello_x86_64 hello_objc_x86_64 hello_uikit_x86_64 hello_arm64 artifact/binaries/ 2>/dev/null || true
+          # Public tbd stub for libSystem (text, arch-neutral) for ABI reference
+          find "$SDK" -name 'libSystem.tbd' | head -1 > out/libsystem-tbd-path.txt || true
+          TBD=$(find "$SDK" -name 'libSystem.tbd' | head -1)
+          [ -n "$TBD" ] && cp "$TBD" artifact/libSystem.tbd 2>/dev/null || true
+
+      - name: Try booting a simulator
+        continue-on-error: true
+        run: |
+          set +e
+          set -x
+          UDID=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; print(next(v[0]["udid"] for v in d.values() if v))')
+          echo "UDID=$UDID" > out/boot.txt
+          xcrun simctl boot "$UDID" >> out/boot.txt 2>&1
+          xcrun simctl bootstatus "$UDID" -b >> out/boot.txt 2>&1
+          xcrun simctl spawn "$UDID" env > out/sim-env.txt 2>&1 || true
+          xcrun simctl spawn "$UDID" launchctl print system > out/sim-launchctl-system.txt 2>&1 || true
+          xcrun simctl spawn "$UDID" ps aux > out/sim-ps.txt 2>&1 || true
+          xcrun simctl spawn "$UDID" uname -a >> out/sim-env.txt 2>&1 || true
+          xcrun simctl io "$UDID" screenshot out/sim-screenshot.png >> out/boot.txt 2>&1 || true
+          xcrun simctl shutdown "$UDID" >> out/boot.txt 2>&1 || true
+
+      - name: Package
+        run: |
+          set +e
+          cp -R out artifact/out
+          tar czf recon.tgz -C artifact .
+          du -sh recon.tgz
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: recon
+          path: recon.tgz
+          retention-days: 7
