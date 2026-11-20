@@ -441,6 +441,13 @@ decoded with libpng in `loader/image.c`.
   data source for cells per row and draws separators and accessories.
   `insertSubview:atIndex:`, `bringSubviewToFront:` and `sendSubviewToBack:`
   reorder the subview list.
+- `UICollectionViewFlowLayout` derives a column grid from the item size,
+  interitem and line spacing and section insets; `UICollectionView` reloads
+  cells as real subviews at those frames, so the scroll view's offset and clip
+  move them together, and it routes taps to the item's index path and delegate.
+  `registerClass:forCellWithReuseIdentifier:` and
+  `dequeueReusableCellWithReuseIdentifier:forIndexPath:` create cells the way a
+  data source expects.
 - `UITabBarController` is a real container: it owns up to 16 view controllers,
   gives each a `UITabBarItem` (title and optional bundle image), and lays out a
   floating glass bar inset 16 pt from the sides, 64 pt tall, 12 pt above the

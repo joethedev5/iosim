@@ -120,6 +120,18 @@ frame renders the highlight.
 | Pixels with max-channel error > 24 | **3.55 %** |
 | Text | same SFUI outlines, same per-size tracking, same cell metrics |
 
+### UIKit: collection views
+
+`demo/CollectionApp.m` puts a `UICollectionView` with a flow layout (100 pt
+items, 12 pt interitem and line spacing, 20 pt section insets) inside a 500 pt
+tall scroll view. Its data source registers `UICollectionViewCell` for a reuse
+identifier and returns twenty colored cells. The suite launches it from its
+SpringBoard icon, reads the cell at (294, 262) pt as the orange palette entry,
+taps that point, and the delegate reports `[collection] selected 5`. A
+250 pt drag then scrolls the content: the same screen point reads the blue
+fourth-row item, so the tap frame math, the cell subview frames and the scroll
+offset all agree.
+
 ### UIKit layout: navigation and stack views
 
 `demo/NavApp.m` builds a `UINavigationController` around two view controllers.

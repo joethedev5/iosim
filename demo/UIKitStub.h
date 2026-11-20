@@ -473,6 +473,56 @@ enum {
 @property(readonly) long section;
 @end
 
+@class UICollectionView, UICollectionViewCell;
+
+@protocol UICollectionViewDataSource
+- (long)collectionView:(UICollectionView *)collectionView
+    numberOfItemsInSection:(long)section;
+- (UICollectionViewCell *)collectionView:(UICollectionView *)collectionView
+            cellForItemAtIndexPath:(NSIndexPath *)indexPath;
+@end
+
+@protocol UICollectionViewDelegate
+- (void)collectionView:(UICollectionView *)collectionView
+    didSelectItemAtIndexPath:(NSIndexPath *)indexPath;
+@end
+
+enum {
+    UICollectionViewScrollDirectionVertical = 0,
+    UICollectionViewScrollDirectionHorizontal = 1
+};
+
+@interface UICollectionViewLayout : NSObject
+@end
+
+@interface UICollectionViewFlowLayout : UICollectionViewLayout
+@property CGSize itemSize;
+@property double minimumInteritemSpacing;
+@property double minimumLineSpacing;
+@property UIEdgeInsets sectionInset;
+@property long scrollDirection;
+@end
+
+@interface UICollectionViewCell : UIView
+@property(readonly) UIView *contentView;
+@property(readonly) id reuseIdentifier;
+- (void)setSelected:(BOOL)selected animated:(BOOL)animated;
+@end
+
+@interface UICollectionView : UIView
+@property(nonatomic, retain) id dataSource;
+@property(nonatomic, retain) id delegate;
+@property CGPoint contentOffset;
+@property CGSize contentSize;
+- (id)initWithFrame:(CGRect)frame
+ collectionViewLayout:(UICollectionViewLayout *)layout;
+- (void)registerClass:(Class)cellClass
+    forCellWithReuseIdentifier:(id)identifier;
+- (id)dequeueReusableCellWithReuseIdentifier:(id)identifier
+                               forIndexPath:(NSIndexPath *)indexPath;
+- (void)reloadData;
+@end
+
 @interface UITableViewCell : UIView
 - (id)initWithStyle:(long)style reuseIdentifier:(id)identifier;
 @property(readonly) UILabel *textLabel;

@@ -972,7 +972,77 @@ fi
 "$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
 sleep 0.4
 
-# ---------- 9e. Spotlight search over installed apps ----------
+# ---------- 9e. UICollectionView flow layout ----------
+"$ROOT/tools/build_app.sh" "$ROOT/demo/CollectionApp.m" "$T/CollectionApp" >/dev/null
+mkdir -p "$T/CollectionApp.app"
+cp "$T/CollectionApp" "$T/CollectionApp.app/CollectionApp"
+python3 - "$T/CollectionApp.app/Info.plist" <<'PY'
+import plistlib, sys
+with open(sys.argv[1], "wb") as f:
+    plistlib.dump({
+        "CFBundleIdentifier": "com.iosim.collection",
+        "CFBundleExecutable": "CollectionApp",
+        "CFBundleName": "Collection",
+        "CFBundlePackageType": "APPL",
+        "CFBundleVersion": "1",
+        "CFBundleShortVersionString": "1.0",
+    }, f)
+PY
+"$ROOT/tools/iosimctl" install "$UDID" "$T/CollectionApp.app" >/dev/null
+sleep 0.5
+# Eighteenth installed app: grid slot 24, second page row 2 column 0.
+"$ROOT/tools/iosimctl" ui "$UDID" tap 62.1667 322.5 >/dev/null
+if wait_log "[collection] ready"; then
+    echo "ok   SpringBoard launches the collection view fixture"
+else
+    echo "FAIL collection fixture launch"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/collection.png" >/dev/null
+if out="$(python3 - "$ROOT/tools" "$T/collection.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+c = pngpixel.px(rows, bpp, 294 * 3, 262 * 3)
+r, g, b = (c >> 16) & 255, (c >> 8) & 255, c & 255
+if not (r > 200 and 120 < g < 200 and b < 90):
+    raise SystemExit("collection cell not drawn: %06x" % c)
+print("ok   the flow layout draws cells at the computed item frames")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL collection rendering"; echo "$out"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" tap 294 262 >/dev/null
+if wait_log "[collection] selected 5"; then
+    echo "ok   tapping a collection cell reports didSelectItemAtIndexPath"
+else
+    echo "FAIL collection selection"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" swipe 200 500 200 250 0.4 >/dev/null
+sleep 0.4
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/collection-scrolled.png" >/dev/null
+if out="$(python3 - "$ROOT/tools" "$T/collection-scrolled.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+c = pngpixel.px(rows, bpp, 294 * 3, 262 * 3)
+r, g, b = (c >> 16) & 255, (c >> 8) & 255, c & 255
+if not (r < 100 and 100 < g < 190 and b > 190):
+    raise SystemExit("collection did not scroll: %06x" % c)
+print("ok   dragging scrolls the collection content by its offset")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL collection scrolling"; echo "$out"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
+sleep 0.4
+
+# ---------- 9f. Spotlight search over installed apps ----------
 "$ROOT/tools/iosimctl" ui "$UDID" tap 201 718.5 >/dev/null
 if wait_log "[SpringBoard] search opened"; then
     echo "ok   tapping the search pill opens Spotlight"

@@ -94,4 +94,22 @@ static inline CGRect CGRectZero(void)
     return CGRectMake(0, 0, 0, 0);
 }
 
+typedef struct {
+    double top;
+    double left;
+    double bottom;
+    double right;
+} UIEdgeInsets;
+
+static inline UIEdgeInsets UIEdgeInsetsMake(double top, double left,
+                                            double bottom, double right)
+{
+    UIEdgeInsets insets;
+    insets.top = top;
+    insets.left = left;
+    insets.bottom = bottom;
+    insets.right = right;
+    return insets;
+}
+
 #endif

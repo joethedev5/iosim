@@ -1176,6 +1176,88 @@ enum {
 - (void)handleTapAtPoint:(CGPoint)point;
 @end
 
+@class UICollectionView;
+@class UICollectionViewCell;
+@class UICollectionViewLayout;
+
+@protocol UICollectionViewDataSource
+@optional
+- (long)collectionView:(UICollectionView *)collectionView
+    numberOfItemsInSection:(long)section;
+- (UICollectionViewCell *)collectionView:(UICollectionView *)collectionView
+            cellForItemAtIndexPath:(NSIndexPath *)indexPath;
+@end
+
+@protocol UICollectionViewDelegate
+@optional
+- (void)collectionView:(UICollectionView *)collectionView
+    didSelectItemAtIndexPath:(NSIndexPath *)indexPath;
+@end
+
+enum {
+    UICollectionViewScrollDirectionVertical = 0,
+    UICollectionViewScrollDirectionHorizontal = 1
+};
+
+@interface UICollectionViewLayout : NSObject
+@end
+
+@interface UICollectionViewFlowLayout : UICollectionViewLayout {
+@public
+    CGSize _itemSize;
+    double _minimumInteritemSpacing;
+    double _minimumLineSpacing;
+    UIEdgeInsets _sectionInset;
+    long _scrollDirection;
+}
+- (CGSize)itemSize;
+- (void)setItemSize:(CGSize)size;
+- (double)minimumInteritemSpacing;
+- (void)setMinimumInteritemSpacing:(double)spacing;
+- (double)minimumLineSpacing;
+- (void)setMinimumLineSpacing:(double)spacing;
+- (UIEdgeInsets)sectionInset;
+- (void)setSectionInset:(UIEdgeInsets)insets;
+- (long)scrollDirection;
+- (void)setScrollDirection:(long)direction;
+@end
+
+@interface UICollectionViewCell : UIView {
+@public
+    id _contentView;
+    id _reuseIdentifier;
+    BOOL _selected;
+}
+- (UIView *)contentView;
+- (id)reuseIdentifier;
+- (void)setSelected:(BOOL)selected animated:(BOOL)animated;
+- (BOOL)isSelected;
+- (void)prepareForReuse;
+@end
+
+@interface UICollectionView : UIScrollView {
+@public
+    id _dataSource;
+    UICollectionViewLayout *_collectionLayout;
+    id _cellClasses;
+    id _cells;
+    long _selectedItem;
+}
+- (id)initWithFrame:(CGRect)frame
+ collectionViewLayout:(UICollectionViewLayout *)layout;
+- (void)setDataSource:(id)dataSource;
+- (id)dataSource;
+- (void)setDelegate:(id)delegate;
+- (id)delegate;
+- (UICollectionViewLayout *)collectionViewLayout;
+- (void)registerClass:(Class)cellClass
+    forCellWithReuseIdentifier:(id)identifier;
+- (id)dequeueReusableCellWithReuseIdentifier:(id)identifier
+                               forIndexPath:(NSIndexPath *)indexPath;
+- (void)reloadData;
+- (void)handleTapAtPoint:(CGPoint)point;
+@end
+
 @interface UIWindow : UIView {
 @public
     UIViewController *_rootViewController;
@@ -4161,6 +4243,266 @@ static id g_firstResponder;
 }
 @end
 
+/* ------------------------------------------------------ collection views */
+
+@implementation UICollectionViewLayout
+@end
+
+@implementation UICollectionViewFlowLayout
+- (id)init
+{
+    self = [super init];
+    if (self)
+    {
+        _itemSize = CGSizeMake(50, 50);
+        _minimumInteritemSpacing = 10.0;
+        _minimumLineSpacing = 10.0;
+        _sectionInset = UIEdgeInsetsMake(0, 0, 0, 0);
+        _scrollDirection = UICollectionViewScrollDirectionVertical;
+    }
+    return self;
+}
+- (CGSize)itemSize { return _itemSize; }
+- (void)setItemSize:(CGSize)size { _itemSize = size; }
+- (double)minimumInteritemSpacing { return _minimumInteritemSpacing; }
+- (void)setMinimumInteritemSpacing:(double)spacing
+{
+    _minimumInteritemSpacing = spacing;
+}
+- (double)minimumLineSpacing { return _minimumLineSpacing; }
+- (void)setMinimumLineSpacing:(double)spacing
+{
+    _minimumLineSpacing = spacing;
+}
+- (UIEdgeInsets)sectionInset { return _sectionInset; }
+- (void)setSectionInset:(UIEdgeInsets)insets { _sectionInset = insets; }
+- (long)scrollDirection { return _scrollDirection; }
+- (void)setScrollDirection:(long)direction { _scrollDirection = direction; }
+@end
+
+@implementation UICollectionViewCell
+- (id)initWithFrame:(CGRect)frame
+{
+    self = [super initWithFrame:frame];
+    if (self)
+    {
+        _contentView = [[UIView alloc] initWithFrame:
+            CGRectMake(0, 0, frame.size.width, frame.size.height)];
+        [(UIView *)_contentView setBackgroundColor:[UIColor clearColor]];
+        [self addSubview:(UIView *)_contentView];
+    }
+    return self;
+}
+- (UIView *)contentView { return (UIView *)_contentView; }
+- (id)reuseIdentifier { return _reuseIdentifier; }
+- (void)setSelected:(BOOL)selected animated:(BOOL)animated
+{
+    (void)animated;
+    _selected = selected;
+    UIView *content = (UIView *)_contentView;
+    CALayer *layer = content ? [content layer] : 0;
+    if (layer)
+    {
+        layer->_borderWidth = selected ? 3.0 : 0.0;
+        layer->_borderColor =
+            selected ? [UIColor colorWithRed:0.04 green:0.52 blue:1.0
+                                       alpha:1.0]
+                     : 0;
+    }
+}
+- (BOOL)isSelected { return _selected; }
+- (void)prepareForReuse
+{
+    _selected = NO;
+    if (_contentView)
+        [(UIView *)_contentView setBackgroundColor:[UIColor clearColor]];
+}
+- (void)setFrame:(CGRect)frame
+{
+    [super setFrame:frame];
+    if (_contentView)
+        [(UIView *)_contentView setFrame:
+            CGRectMake(0, 0, frame.size.width, frame.size.height)];
+}
+@end
+
+static long collection_count(UICollectionView *collectionView)
+{
+    if (collectionView->_dataSource &&
+        [collectionView->_dataSource respondsToSelector:
+            @selector(collectionView:numberOfItemsInSection:)])
+    {
+        SEL sel = @selector(collectionView:numberOfItemsInSection:);
+        return ((long (*)(id, void *, id, long))objc_msgSend)(
+            collectionView->_dataSource, (void *)sel, collectionView, 0);
+    }
+    return 0;
+}
+
+static void collection_metrics(UICollectionView *collectionView,
+                               double *itemW, double *itemH,
+                               double *interitem, double *line,
+                               double *left, double *right, double *top,
+                               double *bottom)
+{
+    UICollectionViewFlowLayout *flow =
+        collectionView->_collectionLayout &&
+                [collectionView->_collectionLayout isKindOfClass:
+                    [UICollectionViewFlowLayout class]]
+            ? (UICollectionViewFlowLayout *)collectionView->_collectionLayout
+            : nil;
+    *itemW = flow ? flow->_itemSize.width : 50.0;
+    *itemH = flow ? flow->_itemSize.height : 50.0;
+    if (*itemW <= 0)
+        *itemW = 50.0;
+    if (*itemH <= 0)
+        *itemH = 50.0;
+    *interitem = flow ? flow->_minimumInteritemSpacing : 10.0;
+    *line = flow ? flow->_minimumLineSpacing : 10.0;
+    *left = flow ? flow->_sectionInset.left : 0.0;
+    *right = flow ? flow->_sectionInset.right : 0.0;
+    *top = flow ? flow->_sectionInset.top : 0.0;
+    *bottom = flow ? flow->_sectionInset.bottom : 0.0;
+}
+
+static int collection_columns(double width, double itemW, double interitem,
+                              double left, double right)
+{
+    double available = width - left - right;
+    int columns = (int)((available + interitem) / (itemW + interitem));
+    if (columns < 1)
+        columns = 1;
+    return columns;
+}
+
+@implementation UICollectionView
+- (id)initWithFrame:(CGRect)frame
+ collectionViewLayout:(UICollectionViewLayout *)layout
+{
+    self = [super initWithFrame:frame];
+    if (self)
+    {
+        _collectionLayout = layout;
+        _cellClasses = [NSMutableDictionary dictionary];
+        _cells = [NSMutableArray array];
+        _selectedItem = -1;
+        [self setBackgroundColor:[UIColor clearColor]];
+    }
+    return self;
+}
+- (void)setDataSource:(id)dataSource { _dataSource = dataSource; }
+- (id)dataSource { return _dataSource; }
+- (void)setDelegate:(id)delegate { _delegate = delegate; }
+- (id)delegate { return _delegate; }
+- (UICollectionViewLayout *)collectionViewLayout { return _collectionLayout; }
+- (void)registerClass:(Class)cellClass
+    forCellWithReuseIdentifier:(id)identifier
+{
+    if (identifier && cellClass)
+        [_cellClasses setObject:cellClass forKey:identifier];
+}
+- (id)dequeueReusableCellWithReuseIdentifier:(id)identifier
+                               forIndexPath:(NSIndexPath *)indexPath
+{
+    (void)indexPath;
+    Class cls = identifier ? (Class)[_cellClasses objectForKey:identifier] : 0;
+    if (!cls)
+        cls = (Class)objc_getClass("UICollectionViewCell");
+    UICollectionViewCell *cell =
+        [[cls alloc] initWithFrame:CGRectMake(0, 0, 0, 0)];
+    cell->_reuseIdentifier = identifier;
+    return cell;
+}
+- (void)reloadData
+{
+    for (unsigned long i = 0; i < [_cells count]; i++)
+    {
+        id cell = [_cells objectAtIndex:i];
+        if ([cell isKindOfClass:[UIView class]])
+            [(UIView *)cell removeFromSuperview];
+    }
+    [_cells removeAllObjects];
+
+    long count = collection_count(self);
+    double itemW, itemH, interitem, line, left, right, top, bottom;
+    collection_metrics(self, &itemW, &itemH, &interitem, &line,
+                       &left, &right, &top, &bottom);
+    int columns = collection_columns(_frame.size.width, itemW, interitem,
+                                     left, right);
+    for (long i = 0; i < count; i++)
+    {
+        NSIndexPath *path = [NSIndexPath indexPathForRow:i inSection:0];
+        UICollectionViewCell *cell = nil;
+        if (_dataSource &&
+            [_dataSource respondsToSelector:
+                @selector(collectionView:cellForItemAtIndexPath:)])
+        {
+            SEL sel = @selector(collectionView:cellForItemAtIndexPath:);
+            cell = (UICollectionViewCell *)((id (*)(id, void *, id, id))
+                objc_msgSend)(_dataSource, (void *)sel, self, path);
+        }
+        if (cell)
+        {
+            int column = (int)(i % columns), row = (int)(i / columns);
+            double x = left + column * (itemW + interitem);
+            double y = top + row * (itemH + line);
+            [cell setFrame:CGRectMake(x, y, itemW, itemH)];
+            [cell setSelected:(i == _selectedItem) animated:NO];
+            [self addSubview:cell];
+            [_cells addObject:cell];
+        }
+        else
+            [_cells addObject:[NSNull null]];
+    }
+    long rows = (count + columns - 1) / columns;
+    double height = rows > 0 ? top + rows * itemH + (rows - 1) * line + bottom
+                             : 0;
+    _contentSize = CGSizeMake(_frame.size.width, height);
+}
+- (void)handleTapAtPoint:(CGPoint)point
+{
+    long count = collection_count(self);
+    double itemW, itemH, interitem, line, left, right, top, bottom;
+    collection_metrics(self, &itemW, &itemH, &interitem, &line,
+                       &left, &right, &top, &bottom);
+    int columns = collection_columns(_frame.size.width, itemW, interitem,
+                                     left, right);
+    for (long i = 0; i < count; i++)
+    {
+        int column = (int)(i % columns), row = (int)(i / columns);
+        double x = left + column * (itemW + interitem);
+        double y = top + row * (itemH + line);
+        if (point.x < x || point.x >= x + itemW || point.y < y ||
+            point.y >= y + itemH)
+            continue;
+        long previous = _selectedItem;
+        _selectedItem = i;
+        if (previous >= 0 && previous < (long)[_cells count])
+        {
+            id cell = [_cells objectAtIndex:(unsigned long)previous];
+            if ([cell isKindOfClass:[UICollectionViewCell class]])
+                [(UICollectionViewCell *)cell setSelected:NO animated:NO];
+        }
+        if (i < (long)[_cells count])
+        {
+            id cell = [_cells objectAtIndex:(unsigned long)i];
+            if ([cell isKindOfClass:[UICollectionViewCell class]])
+                [(UICollectionViewCell *)cell setSelected:YES animated:NO];
+        }
+        if (_delegate &&
+            [_delegate respondsToSelector:
+                @selector(collectionView:didSelectItemAtIndexPath:)])
+        {
+            NSIndexPath *path = [NSIndexPath indexPathForRow:i inSection:0];
+            SEL sel = @selector(collectionView:didSelectItemAtIndexPath:);
+            ((void (*)(id, void *, id, id))objc_msgSend)(
+                _delegate, (void *)sel, self, path);
+        }
+        return;
+    }
+}
+@end
+
 static UIWindow *g_keyWindow;
 id UIApplicationDidBecomeActiveNotification = @"UIApplicationDidBecomeActiveNotification";
 id UIApplicationWillResignActiveNotification = @"UIApplicationWillResignActiveNotification";
@@ -4428,6 +4770,29 @@ static double clamp_scroll(double value, double low, double high)
             anc = [anc superview];
         }
         [(UITableView *)tableHit
+            handleTapAtPoint:CGPointMake(point.x - ox, point.y - oy)];
+    }
+    UIView *collectionHit = hit;
+    while (collectionHit &&
+           ![collectionHit isKindOfClass:[UICollectionView class]])
+        collectionHit = [collectionHit superview];
+    if (collectionHit)
+    {
+        double ox = 0, oy = 0;
+        UIView *anc = collectionHit;
+        while (anc)
+        {
+            ox += anc->_frame.origin.x;
+            oy += anc->_frame.origin.y;
+            if ([anc isKindOfClass:[UIScrollView class]])
+            {
+                UIScrollView *sc = (UIScrollView *)anc;
+                ox -= sc->_contentOffset.x;
+                oy -= sc->_contentOffset.y;
+            }
+            anc = [anc superview];
+        }
+        [(UICollectionView *)collectionHit
             handleTapAtPoint:CGPointMake(point.x - ox, point.y - oy)];
     }
 }
