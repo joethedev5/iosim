@@ -18,6 +18,7 @@ void *iosim_objc_class_of(void *obj);
 void *iosim_objc_superclass(void *cls);
 int   iosim_objc_is_kind_of(void *obj, void *cls);
 int   iosim_objc_responds(void *obj, void *sel);
+void *iosim_objc_normalize_class(void *ptr);
 void  objc_setProperty_nonatomic(void *self, void *sel, void *value, long offset);
 void  objc_setProperty_nonatomic_copy(void *self, void *sel, void *value, long offset);
 void  objc_setProperty_atomic(void *self, void *sel, void *value, long offset);

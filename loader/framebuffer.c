@@ -114,6 +114,44 @@ void iosim_fb_fill_round_rect(int x, int y, int w, int h, int radius,
     }
 }
 
+void iosim_fb_fill_circle(int cx, int cy, int radius, uint32_t color)
+{
+    if (!fb_pixels || radius <= 0)
+        return;
+    int fg_r = (color >> 16) & 0xFF, fg_g = (color >> 8) & 0xFF,
+        fg_b = color & 0xFF;
+    int x0 = cx - radius - 1, x1 = cx + radius + 2;
+    int y0 = cy - radius - 1, y1 = cy + radius + 2;
+    if (x0 < 0) x0 = 0;
+    if (y0 < 0) y0 = 0;
+    if (x1 > (int)fb_width) x1 = (int)fb_width;
+    if (y1 > (int)fb_height) y1 = (int)fb_height;
+    for (int y = y0; y < y1; y++)
+    {
+        uint32_t *row = fb_pixels + (size_t)y * fb_width;
+        double dy = y + 0.5 - cy;
+        for (int x = x0; x < x1; x++)
+        {
+            double dx = x + 0.5 - cx;
+            double d = __builtin_sqrt(dx * dx + dy * dy) - radius;
+            double coverage = 0.5 - d;
+            if (coverage <= 0)
+                continue;
+            if (coverage >= 1)
+            {
+                row[x] = color;
+                continue;
+            }
+            unsigned a = (unsigned)(coverage * 255.0 + 0.5);
+            uint32_t dst = row[x];
+            unsigned r = (fg_r * a + ((dst >> 16) & 0xFF) * (255 - a) + 127) / 255;
+            unsigned g = (fg_g * a + ((dst >> 8) & 0xFF) * (255 - a) + 127) / 255;
+            unsigned b = (fg_b * a + (dst & 0xFF) * (255 - a) + 127) / 255;
+            row[x] = (r << 16) | (g << 8) | b;
+        }
+    }
+}
+
 void iosim_fb_text(int x, int y, int scale, uint32_t color, const char *text)
 {
     if (!fb_pixels || !text || scale < 1)
@@ -316,7 +354,7 @@ static const char *font_candidates[3][12] = {
         "SFPro-Regular.ttf", "SFPro-Regular.otf",
         "SF-Pro-Text-Regular.otf", "SF-Pro-Display-Regular.otf",
         "SFUIText-Regular.ttf", "SFUIDisplay-Regular.ttf",
-        "SFPro.ttf", "SFNS.ttf"
+        "SFUI.ttf", "SFPro.ttf", "SFNS.ttf"
     },
     {
         "SFProText-Bold.ttf", "SFProText-Bold.otf",
@@ -324,7 +362,7 @@ static const char *font_candidates[3][12] = {
         "SFPro-Bold.ttf", "SFPro-Bold.otf",
         "SF-Pro-Text-Bold.otf", "SF-Pro-Display-Bold.otf",
         "SFUIText-Bold.ttf", "SFUIDisplay-Bold.ttf",
-        "SFPro.ttf", "SFNS.ttf"
+        "SFUI.ttf", "SFPro.ttf", "SFNS.ttf"
     },
     {
         "SFProText-Semibold.ttf", "SFProText-Semibold.otf",
@@ -332,7 +370,7 @@ static const char *font_candidates[3][12] = {
         "SFPro-Semibold.ttf", "SFPro-Semibold.otf",
         "SF-Pro-Text-Semibold.otf", "SF-Pro-Display-Semibold.otf",
         "SFUIText-Semibold.ttf", "SFUIDisplay-Semibold.ttf",
-        "SFPro.ttf", "SFNS.ttf"
+        "SFUI.ttf", "SFPro.ttf", "SFNS.ttf"
     }
 };
 
@@ -408,7 +446,7 @@ static int resolve_font_path(int style, char *out, size_t out_size)
         }
         /* A variable SF Pro font can serve every style. */
         static const char *variable_names[] = {
-            "SFPro.ttf", "SFPro.otf", "SF-Pro.ttf", "SFNS.ttf",
+            "SFUI.ttf", "SFPro.ttf", "SFPro.otf", "SF-Pro.ttf", "SFNS.ttf",
             "SFProText.ttf", "SFProDisplay.ttf"
         };
         for (size_t i = 0; i < sizeof(variable_names) / sizeof(variable_names[0]); i++)
@@ -469,13 +507,13 @@ static FT_Face get_face(int style, double size_pt)
                     FT_Var_Axis *axis = &mm->axis[i];
                     FT_Fixed value = axis->def;
                     if (axis->tag == FT_MAKE_TAG('w', 'g', 'h', 't'))
-                        value = (FT_Fixed)((int64_t)weight *
-                                           (axis->maximum - axis->minimum) / (700 - 400) +
-                                           axis->minimum);
+                        value = weight;
                     else if (axis->tag == FT_MAKE_TAG('o', 'p', 's', 'z'))
                         value = (FT_Fixed)((double)size_pt * 65536.0);
-                    else
-                        value = axis->def;
+                    else if (axis->tag == FT_MAKE_TAG('w', 'd', 't', 'h'))
+                        value = (FT_Fixed)(100.0 * 65536.0);
+                    else if (axis->tag == FT_MAKE_TAG('G', 'R', 'A', 'D'))
+                        value = (FT_Fixed)(400.0 * 65536.0);
                     if (value < axis->minimum) value = axis->minimum;
                     if (value > axis->maximum) value = axis->maximum;
                     coords[i] = value;
@@ -529,6 +567,28 @@ static uint32_t utf8_next(const unsigned char **pp)
     return cp;
 }
 
+static double system_tracking_pt(int style, double size_pt)
+{
+    static const double sizes[] = { 10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 24, 28, 32, 36, 48, 64, 96 };
+    static const double regular[] = { 0.12, 0.06, 0.00, -0.12, -0.303, -0.32, -0.353, -0.487, -0.52, -0.46, -0.30, -0.20, -0.30, -0.25, -0.20, -0.15, -0.10 };
+    static const double bold[]    = { 0.16, 0.10, 0.04, -0.08, -0.30, -0.34, -0.38, -0.55, -0.762, -0.68, -0.45, -0.30, -0.22, -0.18, -0.13, -0.10, -0.08 };
+    static const double semibold[]= { 0.14, 0.08, 0.02, -0.10, -0.28, -0.30, -0.35, -0.11, -0.20, -0.18, -0.15, -0.12, -0.10, -0.09, -0.08, -0.07, -0.06 };
+    const double *table = style == IOSIM_FONT_BOLD ? bold
+                          : style == IOSIM_FONT_SEMIBOLD ? semibold : regular;
+    int n = (int)(sizeof(sizes) / sizeof(sizes[0]));
+    if (size_pt <= sizes[0])
+        return table[0];
+    for (int i = 1; i < n; i++)
+    {
+        if (size_pt <= sizes[i])
+        {
+            double t = (size_pt - sizes[i - 1]) / (sizes[i] - sizes[i - 1]);
+            return table[i - 1] + t * (table[i] - table[i - 1]);
+        }
+    }
+    return table[n - 1];
+}
+
 int iosim_fb_font_text_width(const char *text, int style, double size_pt,
                              double scale)
 {
@@ -556,6 +616,8 @@ int iosim_fb_font_text_width(const char *text, int style, double size_pt,
         }
         if (FT_Load_Glyph(face, glyph, FT_LOAD_NO_HINTING | FT_LOAD_NO_BITMAP) == 0)
             pen += face->glyph->advance.x;
+        if (prev)
+            pen += (FT_Pos)(system_tracking_pt(style, size_pt) * scale * 64.0);
         prev = glyph;
     }
     return (int)((pen + 32) >> 6);
@@ -638,6 +700,8 @@ void iosim_fb_font_text(int x, int baseline_y, const char *text, int style,
             }
         }
         pen += slot->advance.x;
+        if (prev)
+            pen += (FT_Pos)(system_tracking_pt(style, size_pt) * scale * 64.0);
         prev = glyph;
     }
 }

@@ -11,6 +11,11 @@
 #include <malloc.h>
 #include <time.h>
 #include <unistd.h>
+#include <math.h>
+
+void  *objc_opt_class(void *obj);
+struct iosim_sincos_result { double sin_value; double cos_value; };
+struct iosim_sincos_result __sincos_stret(double x);
 
 int    iosim_argc = 0;
 char **iosim_argv = NULL;
@@ -331,6 +336,8 @@ static const struct iosim_shim shims[] = {
     SHIM_DIRECT(iosim_fb_clear),
     SHIM_DIRECT(iosim_fb_fill_rect),
     SHIM_DIRECT(iosim_fb_fill_round_rect),
+    SHIM_DIRECT(iosim_fb_fill_circle),
+    SHIM_DIRECT(__sincos_stret),
     SHIM_DIRECT(iosim_fb_text),
     SHIM_DIRECT(iosim_fb_text_width),
     SHIM_DIRECT(iosim_fb_font_text_width),
@@ -345,6 +352,7 @@ static const struct iosim_shim shims[] = {
     SHIM_DIRECT(iosim_objc_superclass),
     SHIM_DIRECT(iosim_objc_is_kind_of),
     SHIM_DIRECT(iosim_objc_responds),
+    SHIM_DIRECT(objc_opt_class),
     SHIM_DIRECT(objc_setProperty_nonatomic),
     SHIM_DIRECT(objc_setProperty_nonatomic_copy),
     SHIM_DIRECT(objc_setProperty_atomic),
@@ -373,4 +381,19 @@ void *iosim_lookup_shim(const char *name)
             return shims[i].addr;
     }
     return NULL;
+}
+
+void *objc_opt_class(void *obj)
+{
+    return iosim_objc_normalize_class(obj);
+}
+
+struct iosim_sincos_result __sincos_stret(double x)
+{
+    struct iosim_sincos_result r;
+    double s, c;
+    sincos(x, &s, &c);
+    r.sin_value = s;
+    r.cos_value = c;
+    return r;
 }

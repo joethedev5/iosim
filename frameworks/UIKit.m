@@ -10,6 +10,8 @@
 #include "foundation_lite.h"
 
 extern int printf(const char *fmt, ...);
+extern int fprintf(void *stream, const char *fmt, ...);
+extern void *stderr;
 extern char *getenv(const char *name);
 extern int atoi(const char *s);
 extern double atof(const char *s);
@@ -20,6 +22,7 @@ extern int  iosim_fb_begin(unsigned width, unsigned height);
 extern void iosim_fb_fill_rect(int x, int y, int w, int h, unsigned color);
 extern void iosim_fb_fill_round_rect(int x, int y, int w, int h, int radius,
                                      unsigned color);
+extern void iosim_fb_fill_circle(int cx, int cy, int radius, unsigned color);
 extern void iosim_fb_text(int x, int y, int scale, unsigned color,
                           const char *text);
 extern int  iosim_fb_text_width(const char *text, int scale);
@@ -195,7 +198,7 @@ extern int UIApplicationMain(int argc, char **argv, id principal,
 + (UIColor *)clearColor { return [self colorWithRed:0 green:0 blue:0 alpha:0]; }
 + (UIColor *)systemBlueColor
 {
-    return [self colorWithRed:0.039 green:0.518 blue:1.0 alpha:1];
+    return [self colorWithRed:0.0 green:0.5686 blue:1.0 alpha:1];
 }
 @end
 
@@ -484,10 +487,18 @@ int UIApplicationMain(int argc, char **argv, id principal, id delegateName)
 
     Class sceneClass = configuration ? [configuration delegateClass] : nil;
     id sceneDelegate = sceneClass ? [[sceneClass alloc] init] : nil;
+    if (getenv("IOSIM_UIAPP_DEBUG"))
+        fprintf(stderr, "uiapp: config=%p sceneClass=%p expected=%p sceneDelegate=%p\n",
+                configuration, sceneClass, objc_getClass("SceneDelegate"),
+                sceneDelegate);
     UIWindowScene *scene = [[UIWindowScene alloc] init];
     if (sceneDelegate)
         [scene setDelegate:sceneDelegate];
     SEL willConnect = @selector(scene:willConnectToSession:options:);
+    if (getenv("IOSIM_UIAPP_DEBUG"))
+        fprintf(stderr, "uiapp: responds=%d sceneDelegate=%p\n",
+                sceneDelegate && [sceneDelegate respondsToSelector:willConnect],
+                sceneDelegate);
     if (sceneDelegate && [sceneDelegate respondsToSelector:willConnect])
         ((void (*)(id, SEL, id, id, id))objc_msgSend)(sceneDelegate, willConnect,
                                                       scene, session,
@@ -503,6 +514,9 @@ int UIApplicationMain(int argc, char **argv, id principal, id delegateName)
         window = ((UIWindow * (*)(id, SEL))objc_msgSend)(delegate, windowSel);
     if (!window)
         window = [[UIWindow alloc] initWithFrame:[[UIScreen mainScreen] bounds]];
+    if (getenv("IOSIM_UIAPP_DEBUG"))
+        fprintf(stderr, "uiapp: window=%p sceneDelegate=%p\n", window,
+                sceneDelegate);
 
     double scale = [[UIScreen mainScreen] scale];
     if (scale <= 0)
@@ -521,34 +535,32 @@ int UIApplicationMain(int argc, char **argv, id principal, id delegateName)
     int timeWidth = iosim_fb_font_text_width("9:41", IOSIM_FONT_SEMIBOLD,
                                              17.0, scale);
     iosim_fb_font_text((int)(81 * scale) - timeWidth / 2,
-                       (int)(38.3 * scale), "9:41", IOSIM_FONT_SEMIBOLD,
+                       (int)(39.0 * scale), "9:41", IOSIM_FONT_SEMIBOLD,
                        17.0, scale, 0xffffff);
-    int bw = (int)(25 * scale), bh = (int)(12 * scale);
-    int bx = right - bw - (int)(8 * scale);
-    int by = (int)(18 * scale);
-    iosim_fb_fill_round_rect(bx, by, bw, bh, (int)(4 * scale), 0xffffff);
-    iosim_fb_fill_round_rect(bx + (int)(2 * scale), by + (int)(2 * scale),
-                             bw - (int)(4 * scale), bh - (int)(4 * scale),
-                             (int)(3 * scale), 0x0b1020);
-    iosim_fb_fill_round_rect(bx + (int)(3 * scale), by + (int)(3 * scale),
-                             (int)(14 * scale), (int)(6 * scale),
-                             (int)(1 * scale), 0xffffff);
-    iosim_fb_fill_rect(bx + bw + (int)(2 * scale), by + (int)(5 * scale),
-                       (int)(2 * scale), (int)(4 * scale), 0xffffff);
-    iosim_fb_font_text(right - (int)(118 * scale), (int)(29 * scale), "5G",
-                       IOSIM_FONT_REGULAR, 11.0, scale, 0xffffff);
+    /* Cellular signal placeholders, Wi-Fi and battery, measured from the
+     * iPhone 18 Pro status bar. */
     for (int i = 0; i < 4; i++)
-        iosim_fb_fill_rect(right - (int)(185 * scale) + i * (int)(12 * scale),
-                           (int)(30 * scale) - i * (int)(3 * scale),
-                           (int)(8 * scale),
-                           (int)(5 * scale) + i * (int)(3 * scale), 0xffffff);
-    iosim_fb_fill_round_rect((int)(153.7 * scale), (int)(14 * scale),
-                             (int)(94.7 * scale), (int)(36.7 * scale),
-                             (int)(18.3 * scale), 0x000000);
-    iosim_fb_fill_round_rect(fbWidth / 2 - (int)(67 * scale),
-                             fbHeight - (int)(16 * scale),
-                             (int)(134 * scale), (int)(5 * scale),
-                             (int)(3 * scale), 0xb4b8c4);
+        iosim_fb_fill_circle((int)((278.83 + i * 5.667) * scale),
+                             (int)(37.83 * scale), (int)(1.85 * scale),
+                             0x484c58);
+    for (int i = 0; i < 51; i++)
+    {
+        double angle = (-140.0 + i * 2.0) * 3.14159265358979323846 / 180.0;
+        int x = (int)((315.33 + 11.08 * __builtin_cos(angle)) * scale);
+        int y = (int)((38.0 + 11.08 * __builtin_sin(angle)) * scale);
+        iosim_fb_fill_circle(x, y, (int)(1.03 * scale), 0xffffff);
+        x = (int)((315.33 + 7.08 * __builtin_cos(angle)) * scale);
+        y = (int)((38.0 + 7.08 * __builtin_sin(angle)) * scale);
+        iosim_fb_fill_circle(x, y, (int)(1.03 * scale), 0xffffff);
+    }
+    iosim_fb_fill_circle((int)(315.33 * scale), (int)(36.67 * scale),
+                         (int)(2.67 * scale), 0xffffff);
+    iosim_fb_fill_round_rect((int)(333.0 * scale), (int)(25.33 * scale),
+                             (int)(26.33 * scale), (int)(13.67 * scale),
+                             (int)(4.0 * scale), 0xffffff);
+    iosim_fb_fill_round_rect((int)(360.0 * scale), (int)(29.67 * scale),
+                             (int)(2.0 * scale), (int)(5.0 * scale),
+                             (int)(1.0 * scale), 0xffffff);
 
     const char *path = getenv("IOSIM_SCREENSHOT_PATH");
     if (path && *path)

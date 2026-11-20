@@ -19,6 +19,8 @@ jobs:
             demo/HelloSimApp.m -o HelloSim_arm64 2> out/build-arm64.err
           xcrun clang -arch x86_64 $CFLAGS -framework UIKit -framework Foundation \
             demo/HelloSimApp.m -o HelloSim_x86_64 2> out/build-x86_64.err
+          xcrun clang -arch arm64 $CFLAGS -framework UIKit -framework Foundation \
+            tools/fontprobe.m -o fontprobe 2> out/build-fontprobe.err
           file HelloSim_arm64 HelloSim_x86_64 > out/file.txt
           for f in HelloSim_arm64 HelloSim_x86_64; do
             echo "===== $f" >> out/otool.txt
@@ -101,11 +103,6 @@ jobs:
             xcrun simctl boot "$UDID" >> out/boot.txt 2>&1
             xcrun simctl bootstatus "$UDID" -b >> out/boot.txt 2>&1
             xcrun simctl install "$UDID" HelloSim.app >> out/boot.txt 2>&1
-            xcrun simctl status_bar "$UDID" override --time '9:41' \
-              --dataNetwork 5G --wifiMode active --wifiBars 3 \
-              --cellularMode active --cellularBars 4 \
-              --batteryState discharging --batteryLevel 100 \
-              > out/statusbar.txt 2>&1 || true
             ( xcrun simctl launch --console-pty "$UDID" com.iosim.hellosim \
                 > out/console.txt 2>&1 & echo $! > /tmp/console.pid )
             sleep 7
@@ -114,6 +111,7 @@ jobs:
               xcrun simctl io "$UDID" screenshot --display=1 out/real-sim.png >> out/boot.txt 2>&1
             fi
             kill "$(cat /tmp/console.pid)" 2>/dev/null || true
+            xcrun simctl spawn "$UDID" "$PWD/fontprobe" > out/fontprobe.txt 2>&1
             xcrun simctl spawn "$UDID" ps aux > out/ps.txt 2>&1
             xcrun simctl spawn "$UDID" log show --last 3m --style compact \
               --predicate 'process == "HelloSim" OR eventMessage CONTAINS "HelloSim"' \
@@ -154,7 +152,7 @@ jobs:
         run: |
           set +e
           tar czf artifact/HelloSim.app.tgz HelloSim.app
-          cp HelloSim_arm64 HelloSim_x86_64 artifact/
+          cp HelloSim_arm64 HelloSim_x86_64 fontprobe artifact/
           cp out/real-sim.png artifact/ 2>/dev/null
           cp -R out artifact/out
           tar czf same-app.tgz -C artifact .

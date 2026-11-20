@@ -344,6 +344,22 @@ static void set_property(void *self, void *value, long offset)
         *(void **)((char *)self + offset) = value;
 }
 
+void *iosim_objc_normalize_class(void *ptr)
+{
+    if (!ptr)
+        return NULL;
+    struct class_entry *entry = find_class_entry(ptr);
+    if (entry)
+        return entry->cls;
+    for (int i = 0; i < g_nclasses; i++)
+    {
+        struct objc_class_min *cls = g_classes[i].cls;
+        if (class_isa(cls) == ptr)
+            return cls;
+    }
+    return iosim_objc_class_of(ptr);
+}
+
 void objc_setProperty_nonatomic(void *self, void *sel, void *value, long offset)
 {
     (void)sel;
