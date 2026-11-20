@@ -120,6 +120,16 @@ frame renders the highlight.
 | Pixels with max-channel error > 24 | **3.55 %** |
 | Text | same SFUI outlines, same per-size tracking, same cell metrics |
 
+### UIKit layout: navigation and stack views
+
+`demo/NavApp.m` builds a `UINavigationController` around two view controllers.
+The root content is a vertical `UIStackView` containing labels, a horizontal
+equal-width stack and a button; arranged subviews resolve their frames from
+intrinsic content sizes during layout. Tapping the button pushes a detail
+controller, updates the title bar, and a second tap pops back. Both transitions
+were driven through `IOSIM_EVENT_FIFO` and captured in
+`build/nav-root.png` / `build/nav-pushed.png`.
+
 ### Services: dispatch, Mach, bootstrap and XPC
 
 `tests/services_test.m` is an Apple-clang x86_64 executable with no UI. It

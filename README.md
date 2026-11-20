@@ -30,6 +30,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | Scene lifecycle (`UIWindowScene`, `UISceneDelegate`) required by iOS 27 | ✅ |
 | Software framebuffer, SF font rendering, UIKit view rendering | ✅ |
 | Touch hit-testing, target/action, table selection, event FIFO run loop | ✅ |
+| UINavigationController push/pop, UIStackView intrinsic layout, UIButton titles | ✅ |
 | UIView animations (frame, alpha), CALayer backing/opacity/corner radius | ✅ |
 | CoreAnimation paths, gradients, sublayers, PNG images | ✅ |
 | Foundation collections, strings, notifications, timers, NSIndexPath | ✅ |
