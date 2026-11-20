@@ -13,7 +13,7 @@ if [ -z "$LD64" ] || [ ! -x "$LD64" ]; then
     exit 1
 fi
 T="$ROOT/build/test-fixtures"
-RUN="$ROOT/build/iosim-run"
+RUN="${IOSIM_RUN:-$ROOT/build/iosim-run}"
 TARGET="x86_64-apple-ios18.0-simulator"
 PLATFORM="ios-simulator 18.0 18.0"
 fails=0
@@ -2880,6 +2880,41 @@ check "[kvo] count 2 initial 2" "$out" \
     "each observer receives exactly its own notifications"
 check "[kvo] after-remove count 2 name erin" "$out" \
     "removeObserver: stops notifications but setters still work"
+
+# ---------- 23. libdispatch source timers and data ----------
+"$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
+    -ffreestanding -O1 -I "$ROOT/frameworks" \
+    -c "$ROOT/tests/dispatch_source_test.m" -o "$T/dispatch_source_test.o"
+"$LD64" -arch x86_64 -platform_version $PLATFORM -e _main \
+    -o "$T/dispatch_source_test" "$T/dispatch_source_test.o" \
+    "$ROOT/runtime/System/Library/Frameworks/Foundation.framework/Foundation" \
+    -undefined dynamic_lookup
+out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/dispatch_source_test" 2>&1)"
+check "[src] timer ok" "$out" \
+    "a repeating timer source fires on the main queue while the run loop runs"
+check "[src] canceled 1 1 1" "$out" \
+    "cancel stops the timer and runs the cancel handler exactly once"
+check "[src] context 7" "$out" \
+    "dispatch_set_context reaches a 2-argument source handler"
+check "[src] data 1 7" "$out" \
+    "two merged data-add values coalesce into one event"
+check "[src] data 2 7" "$out" \
+    "dispatch_source_get_data clears the merged value for the next event"
+
+# ---------- 24. UIScrollView insets, paging and delegate callbacks ----------
+"$ROOT/tools/build_app.sh" "$ROOT/tests/scroll_view_test.m" \
+    "$T/scroll_view_test" >/dev/null
+out="$(DYLD_ROOT_PATH="$ROOT/runtime" SIMULATOR_MAINSCREEN_WIDTH=390 \
+    SIMULATOR_MAINSCREEN_HEIGHT=844 SIMULATOR_MAINSCREEN_SCALE=1 \
+    "$RUN" "$T/scroll_view_test" 2>&1)"
+check "[scroll] target 310 0" "$out" \
+    "the delegate sees the paged target offset before the drag ends"
+check "[scroll] page 310 dragging 0" "$out" \
+    "paging snaps to the nearest page and clears the dragging state"
+check "[scroll] delegate 1 3 1 1" "$out" \
+    "begin, scroll, will-end and did-end callbacks each fire"
+check "[scroll] vertical 820 top 50" "$out" \
+    "contentInset bounds the vertical offset and reads back to the delegate"
 
 if [ "$fails" -ne 0 ]; then
     echo "$fails test(s) failed" >&2

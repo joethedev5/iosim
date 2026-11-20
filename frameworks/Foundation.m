@@ -11,6 +11,7 @@ extern void *iosim_objc_superclass(void *cls);
 extern int   iosim_objc_is_kind_of(void *obj, void *cls);
 extern int   iosim_objc_responds(void *obj, void *sel);
 extern void  iosim_nslog(const char *message);
+extern int   iosim_dispatch_drain_main(void);
 extern double iosim_now(void);
 extern double iosim_wall_time(void);
 extern int usleep(unsigned int usec);
@@ -2728,6 +2729,8 @@ id NSDefaultRunLoopMode = @"NSDefaultRunLoopMode";
                              : iosim_wall_time() + 1.0;
     while (iosim_wall_time() < limit)
     {
+        if (iosim_dispatch_drain_main() > 0)
+            return YES;
         if (iosim_foundation_tick() > 0)
             return YES;
         usleep(2000);
@@ -2740,6 +2743,7 @@ id NSDefaultRunLoopMode = @"NSDefaultRunLoopMode";
                              : iosim_wall_time();
     while (iosim_wall_time() < limit)
     {
+        iosim_dispatch_drain_main();
         iosim_foundation_tick();
         usleep(2000);
     }
@@ -2748,6 +2752,7 @@ id NSDefaultRunLoopMode = @"NSDefaultRunLoopMode";
 {
     for (;;)
     {
+        iosim_dispatch_drain_main();
         iosim_foundation_tick();
         usleep(2000);
     }

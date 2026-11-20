@@ -53,7 +53,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | NSCalendar/NSDateComponents Gregorian decomposition and construction | ✅ |
 | NSOperationQueue/NSBlockOperation over dispatch groups | ✅ |
 | App bundle resources: `NSBundle` lookup and `UIImage imageNamed:` PNGs | ✅ |
-| libdispatch queues, groups, semaphores; main-queue drain from UIKit | ✅ |
+| libdispatch queues, groups, semaphores, timer/data sources; UIKit and run-loop drain | ✅ |
 | Mach ports/messages, launchd bootstrap namespace, cross-process messaging | ✅ |
 | Mach-O initializers (`__init_offsets`, `__mod_init_func`), thread-local variables, Darwin pthread normalization | ✅ |
 | Darwin ABI translation: `stat$INODE64`, `open` flags, signals, CommonCrypto, `dispatch_data` | ✅ |
@@ -71,7 +71,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | Lock screen: date and clock, lock/unlock, apps suspend on lock and resume in place | ✅ |
 | Spotlight search: pill opens a keyboard-driven search over installed apps | ✅ |
 | Control Center: top-right drag, connectivity toggles, media, brightness/volume and utilities | ✅ |
-| UIView 2D affine transforms (translate/scale/rotate), layout callbacks, UIScrollView offsets | ✅ (basic) |
+| UIView 2D affine transforms (translate/scale/rotate), layout callbacks, UIScrollView insets/paging/delegate | ✅ |
 | Layer clipping (`clipsToBounds`/`masksToBounds`), shadows and borders | ✅ |
 | UIVisualEffectView backdrop blur: capture, box blur, tint, rounded mask, contentView | ✅ |
 | Switch, slider, segmented, progress, page and activity controls in the iOS 26 glass design | ✅ |
@@ -167,6 +167,14 @@ DYLD_ROOT_PATH=$PWD/runtime IOSIM_FONT_DIR=$PWD/build/fonts/ios \
   ./build/iosim-run build/ListApp
 ```
 
+With a Zig 0.17+ installation, the bundled clang and Mach-O linker can build
+Foundation guests without an Apple SDK:
+
+```sh
+ZIG=/path/to/zig ./tools/build_app_zig.sh tests/fastenum_test.m build/fastenum-zig
+DYLD_ROOT_PATH=$PWD/runtime ./build/iosim-run build/fastenum-zig
+```
+
 Run any binary directly:
 
 ```sh
@@ -217,6 +225,8 @@ tests/             end-to-end tests
   Apple's x86_64 Metal Shader Converter natively, from DXIL to a `.metallib`.
 - [`docs/RESEARCH-NOTES.md`](docs/RESEARCH-NOTES.md) — running notes for
   artifacts, measurements and open directions.
+- [`docs/ZIG.md`](docs/ZIG.md) — optional Zig guest toolchain and the
+  alternate Zig inline-assembly TLV getter.
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — path from this substrate to a usable
   simulator (graphics, events, services, frameworks).
 

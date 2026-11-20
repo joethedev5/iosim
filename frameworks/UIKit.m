@@ -1322,13 +1322,36 @@ enum {
 - (void)selectPageAtPoint:(CGPoint)point;
 @end
 
+@class UIScrollView;
+
+@protocol UIScrollViewDelegate
+@optional
+- (void)scrollViewDidScroll:(UIScrollView *)scrollView;
+- (void)scrollViewWillBeginDragging:(UIScrollView *)scrollView;
+- (void)scrollViewWillEndDragging:(UIScrollView *)scrollView
+                     withVelocity:(CGPoint)velocity
+              targetContentOffset:(CGPoint *)targetContentOffset;
+- (void)scrollViewDidEndDragging:(UIScrollView *)scrollView
+                  willDecelerate:(BOOL)decelerate;
+- (void)scrollViewWillBeginDecelerating:(UIScrollView *)scrollView;
+- (void)scrollViewDidEndDecelerating:(UIScrollView *)scrollView;
+@end
+
 @interface UIScrollView : UIView {
 @public
     CGSize _contentSize;
     CGPoint _contentOffset;
+    UIEdgeInsets _contentInset;
     BOOL _scrollEnabled;
     BOOL _showsVerticalScrollIndicator;
+    BOOL _showsHorizontalScrollIndicator;
     BOOL _bounces;
+    BOOL _pagingEnabled;
+    BOOL _alwaysBounceVertical;
+    BOOL _alwaysBounceHorizontal;
+    BOOL _dragging;
+    BOOL _decelerating;
+    double _decelerationRate;
     id _delegate;
     UIRefreshControl *_refreshControl;
 }
@@ -1337,12 +1360,27 @@ enum {
 - (CGPoint)contentOffset;
 - (void)setContentOffset:(CGPoint)offset;
 - (void)setContentOffset:(CGPoint)offset animated:(BOOL)animated;
+- (UIEdgeInsets)contentInset;
+- (void)setContentInset:(UIEdgeInsets)insets;
 - (BOOL)isScrollEnabled;
 - (void)setScrollEnabled:(BOOL)enabled;
+- (BOOL)isPagingEnabled;
+- (void)setPagingEnabled:(BOOL)enabled;
+- (BOOL)isDragging;
+- (BOOL)isDecelerating;
+- (BOOL)isTracking;
+- (BOOL)alwaysBounceVertical;
+- (void)setAlwaysBounceVertical:(BOOL)value;
+- (BOOL)alwaysBounceHorizontal;
+- (void)setAlwaysBounceHorizontal:(BOOL)value;
+- (double)decelerationRate;
+- (void)setDecelerationRate:(double)rate;
 - (void)setDelegate:(id)delegate;
 - (id)delegate;
 - (BOOL)showsVerticalScrollIndicator;
 - (void)setShowsVerticalScrollIndicator:(BOOL)shows;
+- (BOOL)showsHorizontalScrollIndicator;
+- (void)setShowsHorizontalScrollIndicator:(BOOL)shows;
 - (UIRefreshControl *)refreshControl;
 - (void)setRefreshControl:(UIRefreshControl *)control;
 @end
@@ -1545,6 +1583,7 @@ enum {
     UIScrollView *_dragScroll;
     CGPoint _dragStartContent;
     CGPoint _dragStartPoint;
+    double _dragStartTime;
     UIView *_touchHit;
     UIPanGestureRecognizer *_activePan;
     UITouch *_touch;
@@ -5450,11 +5489,27 @@ static UIControl *nav_bar_control(UIBarButtonItem *item, CGRect frame,
     (void)animated;
     _contentOffset = offset;
 }
+- (UIEdgeInsets)contentInset { return _contentInset; }
+- (void)setContentInset:(UIEdgeInsets)insets { _contentInset = insets; }
 - (BOOL)isScrollEnabled { return _scrollEnabled; }
 - (void)setScrollEnabled:(BOOL)enabled { _scrollEnabled = enabled; }
+- (BOOL)isPagingEnabled { return _pagingEnabled; }
+- (void)setPagingEnabled:(BOOL)enabled { _pagingEnabled = enabled; }
+- (BOOL)isDragging { return _dragging; }
+- (BOOL)isDecelerating { return _decelerating; }
+- (BOOL)isTracking { return _dragging; }
+- (BOOL)alwaysBounceVertical { return _alwaysBounceVertical; }
+- (void)setAlwaysBounceVertical:(BOOL)value { _alwaysBounceVertical = value; }
+- (BOOL)alwaysBounceHorizontal { return _alwaysBounceHorizontal; }
+- (void)setAlwaysBounceHorizontal:(BOOL)value { _alwaysBounceHorizontal = value; }
+- (double)decelerationRate { return _decelerationRate; }
+- (void)setDecelerationRate:(double)rate { _decelerationRate = rate; }
 - (BOOL)showsVerticalScrollIndicator { return _showsVerticalScrollIndicator; }
 - (void)setShowsVerticalScrollIndicator:(BOOL)shows
 { _showsVerticalScrollIndicator = shows; }
+- (BOOL)showsHorizontalScrollIndicator { return _showsHorizontalScrollIndicator; }
+- (void)setShowsHorizontalScrollIndicator:(BOOL)shows
+{ _showsHorizontalScrollIndicator = shows; }
 - (UIRefreshControl *)refreshControl { return _refreshControl; }
 - (void)setRefreshControl:(UIRefreshControl *)control
 {
@@ -6217,6 +6272,28 @@ static double clamp_scroll(double value, double low, double high)
     return value;
 }
 
+/* Exact scrollable bounds after contentInset. Refresh controls add their own
+ * pull area below the top bound. */
+static void scroll_bounds(UIScrollView *scroll,
+                          double *minX, double *maxX,
+                          double *minY, double *maxY)
+{
+    double lowX = -scroll->_contentInset.left;
+    double lowY = -scroll->_contentInset.top;
+    double highX = scroll->_contentSize.width - scroll->_frame.size.width +
+                   scroll->_contentInset.right;
+    double highY = scroll->_contentSize.height - scroll->_frame.size.height +
+                   scroll->_contentInset.bottom;
+    if (highX < lowX)
+        highX = lowX;
+    if (highY < lowY)
+        highY = lowY;
+    *minX = lowX;
+    *maxX = highX;
+    *minY = lowY;
+    *maxY = highY;
+}
+
 @implementation UIWindow
 - (id)initWithWindowScene:(UIWindowScene *)scene
 {
@@ -6289,6 +6366,7 @@ static double clamp_scroll(double value, double low, double high)
         scale = 1.0;
     CGPoint point = CGPointMake(x / scale, y / scale);
     _dragStartPoint = point;
+    _dragStartTime = iosim_now();
     _dragStartContent = CGPointMake(0, 0);
     _dragScroll = nil;
     _activePan = nil;
@@ -6366,21 +6444,31 @@ static double clamp_scroll(double value, double low, double high)
     }
     if (_dragScroll && _dragScroll->_scrollEnabled)
     {
-        double maxX = _dragScroll->_contentSize.width -
-                      _dragScroll->_frame.size.width;
-        double maxY = _dragScroll->_contentSize.height -
-                      _dragScroll->_frame.size.height;
-        if (maxX < 0)
-            maxX = 0;
-        if (maxY < 0)
-            maxY = 0;
+        UIScrollView *scroll = _dragScroll;
+        if (!scroll->_dragging)
+        {
+            scroll->_dragging = YES;
+            if (scroll->_delegate && [scroll->_delegate respondsToSelector:
+                    @selector(scrollViewWillBeginDragging:)])
+                [scroll->_delegate scrollViewWillBeginDragging:scroll];
+        }
+        double minX, maxX, minY, maxY;
+        scroll_bounds(scroll, &minX, &maxX, &minY, &maxY);
+        double bounceX = (scroll->_bounces || scroll->_alwaysBounceHorizontal)
+                             ? 30 : 0;
+        double bounceY = (scroll->_bounces || scroll->_alwaysBounceVertical)
+                             ? 30 : 0;
+        minX -= bounceX;
+        maxX += bounceX;
+        minY -= bounceY;
+        maxY += bounceY;
+        if (scroll->_refreshControl)
+            minY -= REFRESH_CONTROL_HEIGHT;
         double nx = _dragStartContent.x - (point.x - _dragStartPoint.x);
         double ny = _dragStartContent.y - (point.y - _dragStartPoint.y);
-        double minY = _dragScroll->_refreshControl
-                          ? -(REFRESH_CONTROL_HEIGHT + 30) : -30;
         _dragScroll->_contentOffset =
-            CGPointMake(clamp_scroll(nx, -30, maxX + 30),
-                        clamp_scroll(ny, minY, maxY + 30));
+            CGPointMake(clamp_scroll(nx, minX, maxX),
+                        clamp_scroll(ny, minY, maxY));
         if (_dragScroll->_refreshControl)
         {
             UIRefreshControl *rc = _dragScroll->_refreshControl;
@@ -6433,32 +6521,84 @@ static double clamp_scroll(double value, double low, double high)
     }
     if (_dragScroll)
     {
-        double maxX = _dragScroll->_contentSize.width -
-                      _dragScroll->_frame.size.width;
-        double maxY = _dragScroll->_contentSize.height -
-                      _dragScroll->_frame.size.height;
-        if (maxX < 0)
-            maxX = 0;
-        if (maxY < 0)
-            maxY = 0;
         UIScrollView *scroll = _dragScroll;
-        double offX = clamp_scroll(scroll->_contentOffset.x, 0, maxX);
-        double offY = clamp_scroll(scroll->_contentOffset.y, 0, maxY);
+        double minX, maxX, minY, maxY;
+        scroll_bounds(scroll, &minX, &maxX, &minY, &maxY);
+        double offX = clamp_scroll(scroll->_contentOffset.x, minX, maxX);
+        double offY = clamp_scroll(scroll->_contentOffset.y, minY, maxY);
+        double elapsed = iosim_now() - _dragStartTime;
+        CGPoint velocity = CGPointMake(0, 0);
+        if (elapsed > 0.01)
+            velocity = CGPointMake(-(point.x - _dragStartPoint.x) / elapsed,
+                                   -(point.y - _dragStartPoint.y) / elapsed);
+
+        if (scroll->_pagingEnabled)
+        {
+            if (scroll->_contentSize.width > scroll->_frame.size.width + 0.5 &&
+                scroll->_frame.size.width > 0)
+            {
+                double page = __builtin_floor(
+                    (offX - scroll->_contentInset.left) /
+                        scroll->_frame.size.width + 0.5);
+                offX = scroll->_contentInset.left +
+                       page * scroll->_frame.size.width;
+                offX = clamp_scroll(offX, minX, maxX);
+            }
+            else if (scroll->_contentSize.height >
+                         scroll->_frame.size.height + 0.5 &&
+                     scroll->_frame.size.height > 0)
+            {
+                double page = __builtin_floor(
+                    (offY - scroll->_contentInset.top) /
+                        scroll->_frame.size.height + 0.5);
+                offY = scroll->_contentInset.top +
+                       page * scroll->_frame.size.height;
+                offY = clamp_scroll(offY, minY, maxY);
+            }
+        }
+
+        CGPoint target = CGPointMake(offX, offY);
+        if (scroll->_delegate && [scroll->_delegate respondsToSelector:
+                @selector(scrollViewWillEndDragging:withVelocity:
+                          targetContentOffset:)])
+            ((void (*)(id, SEL, id, CGPoint, CGPoint *))objc_msgSend)(
+                scroll->_delegate,
+                @selector(scrollViewWillEndDragging:withVelocity:
+                          targetContentOffset:),
+                scroll, velocity, &target);
+        target.x = clamp_scroll(target.x, minX, maxX);
+        target.y = clamp_scroll(target.y, minY, maxY);
+
         if (scroll->_refreshControl)
         {
             UIRefreshControl *rc = scroll->_refreshControl;
             if (rc->_refreshing)
-                offY = -REFRESH_CONTROL_HEIGHT;
+                target.y = -REFRESH_CONTROL_HEIGHT;
             else if (scroll->_contentOffset.y <=
                      -(REFRESH_CONTROL_HEIGHT * 0.8))
             {
                 [rc beginRefreshing];
                 [rc sendActionsForControlEvents:UIControlEventValueChanged];
-                offY = -REFRESH_CONTROL_HEIGHT;
+                target.y = -REFRESH_CONTROL_HEIGHT;
             }
             rc->_pullProgress = rc->_refreshing ? 1.0 : 0.0;
         }
-        scroll->_contentOffset = CGPointMake(offX, offY);
+
+        BOOL moved = target.x != scroll->_contentOffset.x ||
+                     target.y != scroll->_contentOffset.y;
+        scroll->_contentOffset = target;
+        if (moved && scroll->_delegate && [scroll->_delegate respondsToSelector:
+                @selector(scrollViewDidScroll:)])
+            [scroll->_delegate scrollViewDidScroll:scroll];
+        if (scroll->_dragging)
+        {
+            scroll->_dragging = NO;
+            scroll->_decelerating = NO;
+            if (scroll->_delegate && [scroll->_delegate respondsToSelector:
+                    @selector(scrollViewDidEndDragging:willDecelerate:)])
+                [scroll->_delegate scrollViewDidEndDragging:scroll
+                                             willDecelerate:NO];
+        }
         _dragScroll = nil;
     }
     double dx = point.x - _dragStartPoint.x;

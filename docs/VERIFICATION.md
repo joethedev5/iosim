@@ -495,6 +495,23 @@ top-left corner is still `#000000` (the unblurred stripe), proving the rounded
 mask, and more than 3 000 near-white pixels in the label band show the
 "Vibrancy" label drawn on the contentView above the glass.
 
+### UIKit: scroll-view insets, paging and delegate callbacks
+
+`tests/scroll_view_test.m` builds a real `UIWindow` and a `UIScrollView`
+(300×200 points, 900-point content) with 10-point insets, paging enabled and a
+delegate. Synthesized touches are delivered through the window's touch path:
+down at x=250, moves to 180 and 50, then up. The delegate's
+`scrollViewWillEndDragging:withVelocity:targetContentOffset:` sees the paged
+target `310 0`; after the snap the offset is 310 and `isDragging` is false.
+The begin, did-scroll, will-end and did-end counts are `1 3 1 1` (two moves
+plus the final snap each produce a scroll callback).
+
+A second, unpaged scroll view has 50-point top and 20-point bottom insets and
+1000 points of content in a 200-point frame. Dragging far past the end clamps
+to 820 (1000 − 200 + 20), and `contentInset.top` reads back as 50. The test
+runs directly under `iosim-run` with a 1× main screen, so it exercises the
+same window hit-testing and clamping code as SpringBoard-driven apps.
+
 ### Foundation: files, URLs and JSON
 
 `tests/foundation_io_test.m` is a Foundation-only executable. It creates
@@ -572,6 +589,25 @@ after a direct `setAge:42` (no Old option was requested, so old is absent).
 Counts are exactly `2` and `2`; after `removeObserver:` the next
 `setName:@"erin"` produces no notification while the getter returns `erin`.
 The suite asserts all ten lines.
+
+### libdispatch: timer and data sources
+
+`tests/dispatch_source_test.m` creates a main-queue timer with a 10 ms start
+and a 20 ms interval, resumes it and lets `NSRunLoop` run for 120 ms. The
+fixture reports `[src] timer ok 6` (the check accepts 3–7 fires, since host
+scheduling can move the edges). `dispatch_source_cancel` then reports
+`[src] canceled 1 1 1`: the source is cancelled, its count has not grown after
+another 50 ms of draining, and the cancel handler ran exactly once. The
+handler is installed with the real two-argument `dispatch_function_t` ABI and
+reads its `dispatch_set_context` value, reporting `[src] context 7`.
+
+A data source on the same queue receives two `dispatch_source_merge_data`
+calls, 3 and 4, before the loop runs. Its handler reports one event with
+`dispatch_source_get_data` equal to 7, proving coalescing; a second pair of
+merges (5 and 2) produces one more event that again reads 7, proving
+`get_data` cleared the previous value. The run loop drains the main queue
+because `NSRunLoop` now calls the same `iosim_dispatch_drain_main` entry as
+UIKit.
 
 ### Foundation: persistent defaults and property lists
 
@@ -1044,6 +1080,25 @@ each subsystem:
 - `[lrt] stat 0 1 3`: `open` with Darwin `O_CREAT|O_RDWR|O_TRUNC` creates the
   file, `fstat` fills the 144-byte Darwin `struct stat`, the mode reads back as
   a regular file and the size as the three written bytes.
+
+### Optional Zig toolchain and inline-assembly getter
+
+With Zig 0.17.1, `zig cc -target x86_64-ios-simulator` emits Mach-O objects
+whose `LC_BUILD_VERSION` names `iossimulator` with minimum iOS 18.0. The
+optional `tools/build_app_zig.sh` links Foundation and produces a PIE
+executable without an Apple SDK; `tests/fastenum_test.m` and
+`tests/kvc_kvo_test.m` both build and reproduce their full output under
+`iosim-run`. The executable carries the normal Foundation and libSystem
+dependencies.
+
+`loader/tlv.zig` is an instruction-for-instruction inline-assembly version of
+the TLV getter, selected by `-DIOSIM_USE_ZIG_ASM=ON`. It preserves the padding
+`rax` slot, the caller-saved GPRs and all sixteen XMM registers around the C
+slow path, discards the saved `rax`, and returns the address in `rax`.
+Building with the option and running `tests/run_tests.sh` through
+`IOSIM_RUN=build-zig/iosim-run` keeps the `[lrt] ctor 1 tls 42` thread-local
+check green, so the two spellings are behaviorally equivalent for the fixture.
+The default build remains C plus GNU assembly.
 
 ### Running Apple's Metal Shader Converter natively
 

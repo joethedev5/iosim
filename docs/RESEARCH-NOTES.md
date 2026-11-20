@@ -108,6 +108,39 @@ Measured with `zig-x86_64-linux-0.17.1` from ziglang.org:
   generate variants at comptime. The bigger win is Zig as an
   SDK-independent guest toolchain; keep it optional so the default build has
   no Zig dependency.
+- Adopted as options: `tools/build_app_zig.sh` (guest build) and
+  `loader/tlv.zig` with `-DIOSIM_USE_ZIG_ASM=ON` (instruction-identical TLV
+  getter). `tests/run_tests.sh` now honors `IOSIM_RUN` so the suite can be
+  pointed at a Zig-built loader. The full suite passed against
+  `build-zig/iosim-run` (through the KVC/KVO section), and the dispatch-source
+  section was added afterward. Defaults unchanged. See `docs/ZIG.md`.
+
+## 2026-11-20: libdispatch sources
+
+- `dispatch_source_create` supports timer, data add/or/replace and read/write
+  types. Sources start suspended. A single scheduler thread owns timer
+  deadlines on `CLOCK_MONOTONIC`; read/write sources use a poll thread.
+- Event delivery is coalesced through a `pending` flag and `dispatch_async_f`,
+  which was previously a no-op. `dispatch_after` on non-main queues now
+  really delays instead of dispatching immediately.
+- `NSRunLoop` drains the main dispatch queue, so plain Foundation processes
+  can test main-queue sources (previously only UIKit did).
+- Fixture `tests/dispatch_source_test.m` (section 23): six timer fires in
+  120 ms, cancel with a once-only cancel handler, and 3+4/5+2 data merges
+  both observed as one event with value 7.
+
+## 2026-11-20: UIScrollView insets, paging and delegate
+
+- `contentInset`, `pagingEnabled`, always-bounce flags, dragging/tracking
+  state and the six drag delegate callbacks are implemented.
+- Paging snaps before `scrollViewWillEndDragging...`, and the delegate can
+  adjust the target pointer; the runtime clamps the result to inset bounds.
+- `demo/UIKitStub.h` now declares `UIScrollView` and, importantly, gives
+  `NSObject` its `isa` ivar. Without that, clang hard-coded custom ivars at
+  offset 0, so a delegate's first BOOL/int write corrupted the object's isa.
+  Any future stub-only guest class with ivars depends on this.
+- Fixture `tests/scroll_view_test.m` (section 24) drives a real UIWindow:
+  page 310, delegate counts 1/3/1/1, vertical clamp 820 with top inset 50.
 
 ## Open directions
 

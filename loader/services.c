@@ -63,16 +63,31 @@ static double now_seconds(void)
 #define MAINQ_CAP 512
 struct mainq_item {
     void *block;
+    void (*function)(void *);
+    void *context;
     double when;
 };
 static struct mainq_item mainq[MAINQ_CAP];
 static int mainq_head, mainq_tail;
 static pthread_mutex_t mainq_lock = PTHREAD_MUTEX_INITIALIZER;
 
+#define DISPATCH_OBJECT_MAGIC 0x4453504fU
+enum { DISPATCH_KIND_QUEUE = 1, DISPATCH_KIND_SOURCE = 2 };
+struct dispatch_object_header {
+    unsigned magic;
+    int kind;
+    void *context;
+};
 struct dispatch_queue_s {
+    struct dispatch_object_header hdr;
     int is_main;
 };
-struct dispatch_queue_s main_queue = { 1 }, global_queue = { 0 };
+struct dispatch_queue_s main_queue = {
+    { DISPATCH_OBJECT_MAGIC, DISPATCH_KIND_QUEUE, NULL }, 1
+};
+struct dispatch_queue_s global_queue = {
+    { DISPATCH_OBJECT_MAGIC, DISPATCH_KIND_QUEUE, NULL }, 0
+};
 char dispatch_main_q_storage[64];
 
 void *dispatch_get_main_queue(void) { return &main_queue; }
@@ -84,25 +99,39 @@ void *dispatch_get_global_queue(long identifier, unsigned long flags)
 void *dispatch_queue_create(const char *label, void *attr)
 {
     (void)label; (void)attr;
-    return calloc(1, sizeof(struct dispatch_queue_s));
+    struct dispatch_queue_s *queue = calloc(1, sizeof(*queue));
+    if (queue)
+    {
+        queue->hdr.magic = DISPATCH_OBJECT_MAGIC;
+        queue->hdr.kind = DISPATCH_KIND_QUEUE;
+    }
+    return queue;
 }
 void dispatch_release(void *queue) { (void)queue; }
 void dispatch_retain(void *queue) { (void)queue; }
 
-static void mainq_push(void *block, double when)
+static void mainq_push_item(void *block, void (*function)(void *),
+                            void *context, double when)
 {
     if (getenv("IOSIM_DEBUG_DISPATCH"))
-        fprintf(stderr, "[dispatch] enqueue %p when %.3f now %.3f\n", block,
-                when, now_seconds());
+        fprintf(stderr, "[dispatch] enqueue %p/%p when %.3f now %.3f\n",
+                block, (void *)function, when, now_seconds());
     pthread_mutex_lock(&mainq_lock);
     int next = (mainq_tail + 1) % MAINQ_CAP;
     if (next != mainq_head)
     {
         mainq[mainq_tail].block = block;
+        mainq[mainq_tail].function = function;
+        mainq[mainq_tail].context = context;
         mainq[mainq_tail].when = when;
         mainq_tail = next;
     }
     pthread_mutex_unlock(&mainq_lock);
+}
+
+static void mainq_push(void *block, double when)
+{
+    mainq_push_item(block, NULL, NULL, when);
 }
 
 static void global_invoke(void *arg)
@@ -131,9 +160,72 @@ void dispatch_async(void *queue, void *block)
     }
 }
 
+struct fn_call {
+    void (*function)(void *);
+    void *context;
+};
+
+static void *fn_invoke(void *arg)
+{
+    struct fn_call *call = arg;
+    if (call->function)
+        call->function(call->context);
+    free(call);
+    return NULL;
+}
+
+struct delayed_call {
+    struct fn_call call;
+    double when;
+};
+
+static void delay_until(double when)
+{
+    double delta = when - now_seconds();
+    if (delta <= 0)
+        return;
+    struct timespec ts;
+    ts.tv_sec = (time_t)delta;
+    ts.tv_nsec = (long)((delta - (double)ts.tv_sec) * 1e9);
+    while (nanosleep(&ts, &ts) != 0 && errno == EINTR)
+        ;
+}
+
+static void *delayed_invoke(void *arg)
+{
+    struct delayed_call *call = arg;
+    delay_until(call->when);
+    if (call->call.function)
+        call->call.function(call->call.context);
+    free(call);
+    return NULL;
+}
+
 void dispatch_async_f(void *queue, void *context, void (*function)(void *))
 {
-    (void)queue; (void)context; (void)function;
+    if (!function)
+        return;
+    if (queue == &main_queue || queue == NULL)
+    {
+        mainq_push_item(NULL, function, context, 0.0);
+        return;
+    }
+    struct fn_call *call = malloc(sizeof(*call));
+    if (!call)
+    {
+        function(context);
+        return;
+    }
+    call->function = function;
+    call->context = context;
+    pthread_t thread;
+    if (pthread_create(&thread, NULL, fn_invoke, call) == 0)
+        pthread_detach(thread);
+    else
+    {
+        function(context);
+        free(call);
+    }
 }
 
 void dispatch_sync(void *queue, void *block)
@@ -143,7 +235,9 @@ void dispatch_sync(void *queue, void *block)
 }
 void dispatch_sync_f(void *queue, void *context, void (*function)(void *))
 {
-    (void)queue; (void)function; (void)context;
+    (void)queue;
+    if (function)
+        function(context);
 }
 
 typedef uint64_t dispatch_time_t;
@@ -152,48 +246,117 @@ dispatch_time_t dispatch_time(dispatch_time_t base, int64_t delta)
     (void)base;
     return (dispatch_time_t)(now_seconds() * 1e9 + delta);
 }
+
+struct delayed_block {
+    void *block;
+    double when;
+};
+
+static void *delayed_block_invoke(void *arg)
+{
+    struct delayed_block *call = arg;
+    delay_until(call->when);
+    call_block(call->block);
+    _Block_release(call->block);
+    free(call);
+    return NULL;
+}
+
 void dispatch_after(dispatch_time_t when, void *queue, void *block)
 {
     double t = (double)when / 1e9;
     if (!block)
         return;
     if (queue == &main_queue || queue == NULL)
+    {
         mainq_push(_Block_copy(block), t);
+        return;
+    }
+    struct delayed_block *call = malloc(sizeof(*call));
+    if (!call)
+    {
+        call_block(block);
+        return;
+    }
+    call->block = _Block_copy(block);
+    call->when = t;
+    pthread_t thread;
+    if (pthread_create(&thread, NULL, delayed_block_invoke, call) == 0)
+        pthread_detach(thread);
     else
-        dispatch_async(queue, block);
+    {
+        call_block(call->block);
+        _Block_release(call->block);
+        free(call);
+    }
 }
 void dispatch_after_f(dispatch_time_t when, void *queue, void *context,
                       void (*function)(void *))
 {
-    (void)when; (void)queue; (void)context; (void)function;
+    if (!function)
+        return;
+    double t = (double)when / 1e9;
+    if (queue == &main_queue || queue == NULL)
+    {
+        mainq_push_item(NULL, function, context, t);
+        return;
+    }
+    struct delayed_call *call = malloc(sizeof(*call));
+    if (!call)
+    {
+        function(context);
+        return;
+    }
+    call->call.function = function;
+    call->call.context = context;
+    call->when = t;
+    pthread_t thread;
+    if (pthread_create(&thread, NULL, delayed_invoke, call) == 0)
+        pthread_detach(thread);
+    else
+    {
+        function(context);
+        free(call);
+    }
 }
 void dispatch_after_f_np(dispatch_time_t when, void *queue, void *context,
                          void (*function)(void *))
 {
-    (void)when; (void)queue; (void)context; (void)function;
+    dispatch_after_f(when, queue, context, function);
 }
 
 int iosim_dispatch_drain_main(void)
 {
     int ran = 0;
-    double now = now_seconds();
     for (;;)
     {
         void *block = NULL;
+        void (*function)(void *) = NULL;
+        void *context = NULL;
+        double now = now_seconds();
         pthread_mutex_lock(&mainq_lock);
         if (mainq_head != mainq_tail && mainq[mainq_head].when <= now)
         {
             block = mainq[mainq_head].block;
+            function = mainq[mainq_head].function;
+            context = mainq[mainq_head].context;
             mainq_head = (mainq_head + 1) % MAINQ_CAP;
         }
         pthread_mutex_unlock(&mainq_lock);
-        if (!block)
+        if (!block && !function)
             break;
         if (getenv("IOSIM_DEBUG_DISPATCH"))
-            fprintf(stderr, "[dispatch] run %p at %.3f\n", block,
-                    now_seconds());
-        call_block(block);
-        _Block_release(block);
+            fprintf(stderr, "[dispatch] run %p/%p at %.3f\n", block,
+                    (void *)function, now_seconds());
+        if (block)
+        {
+            call_block(block);
+            _Block_release(block);
+        }
+        else
+        {
+            function(context);
+        }
         ran++;
     }
     return ran;
@@ -211,16 +374,29 @@ void dispatch_main(void)
     }
 }
 void *dispatch_get_current_queue(void) { return &main_queue; }
-const char *dispatch_queue_get_label(void *queue) { return queue == &main_queue ? "com.apple.main-thread" : "iosim.queue"; }
-void dispatch_queue_set_specific(void *queue, const void *key, void *context, void (*destructor)(void *))
-{ (void)queue; (void)key; (void)context; (void)destructor; }
+const char *dispatch_queue_get_label(void *queue)
+{
+    return queue == &main_queue ? "com.apple.main-thread" : "iosim.queue";
+}
+void dispatch_queue_set_specific(void *queue, const void *key, void *context,
+                                 void (*destructor)(void *))
+{
+    (void)queue; (void)key; (void)context; (void)destructor;
+}
 void *dispatch_get_specific(const void *key) { (void)key; return NULL; }
-void dispatch_barrier_async(void *queue, void *block) { dispatch_async(queue, block); }
-void dispatch_barrier_sync(void *queue, void *block) { dispatch_sync(queue, block); }
+void dispatch_barrier_async(void *queue, void *block)
+{
+    dispatch_async(queue, block);
+}
+void dispatch_barrier_sync(void *queue, void *block)
+{
+    dispatch_sync(queue, block);
+}
 void dispatch_apply(long iterations, void *queue, void *block)
 {
     (void)queue;
-    if (!block) return;
+    if (!block)
+        return;
     for (long i = 0; i < iterations; i++)
         ((void (*)(void *, long))((struct block_layout *)block)->invoke)(block, i);
 }
@@ -1922,6 +2098,560 @@ static int shim_pthread_mutexattr_gettype(const void *attr, int *type)
     return 0;
 }
 
+
+/* ------------------------------------------------------- dispatch sources */
+
+enum {
+    DS_TIMER = 1,
+    DS_DATA_ADD,
+    DS_DATA_OR,
+    DS_DATA_REPLACE,
+    DS_READ,
+    DS_WRITE
+};
+
+/* Apple's headers declare these as structs and take their address:
+ * DISPATCH_SOURCE_TYPE_TIMER expands to (&_dispatch_source_type_timer).
+ * The loader's symbol resolver strips one Mach-O underscore, so the C names
+ * below appear as _dispatch_source_type_timer in the service table. The
+ * unadorned pointer aliases keep the fixture header convenient. */
+struct dispatch_source_type_s { int kind; };
+const struct dispatch_source_type_s _dispatch_source_type_timer = { DS_TIMER };
+const struct dispatch_source_type_s _dispatch_source_type_data_add = { DS_DATA_ADD };
+const struct dispatch_source_type_s _dispatch_source_type_data_or = { DS_DATA_OR };
+const struct dispatch_source_type_s _dispatch_source_type_data_replace = { DS_DATA_REPLACE };
+const struct dispatch_source_type_s _dispatch_source_type_read = { DS_READ };
+const struct dispatch_source_type_s _dispatch_source_type_write = { DS_WRITE };
+
+static char ds_type_timer_storage;
+static char ds_type_data_add_storage;
+static char ds_type_data_or_storage;
+static char ds_type_data_replace_storage;
+static char ds_type_read_storage;
+static char ds_type_write_storage;
+void *dispatch_source_type_timer = &ds_type_timer_storage;
+void *dispatch_source_type_data_add = &ds_type_data_add_storage;
+void *dispatch_source_type_data_or = &ds_type_data_or_storage;
+void *dispatch_source_type_data_replace = &ds_type_data_replace_storage;
+void *dispatch_source_type_read = &ds_type_read_storage;
+void *dispatch_source_type_write = &ds_type_write_storage;
+
+struct dispatch_source_s {
+    struct dispatch_object_header hdr;
+    int type;
+    uintptr_t handle;
+    unsigned long mask;
+    void *queue;
+    void *event_block;
+    void (*event_fn)(void *);
+    void *event_ctx;
+    void *cancel_block;
+    void (*cancel_fn)(void *);
+    void *cancel_ctx;
+    void *registration_block;
+    void (*registration_fn)(void *);
+    void *registration_ctx;
+    void *context;
+    int canceled;
+    int suspend_count;
+    int pending;
+    int scheduled;
+    int registered;
+    int poll_started;
+    double next_fire;
+    uint64_t timer_start_ns;
+    uint64_t timer_interval_ns;
+    uint64_t timer_leeway_ns;
+    unsigned long data;
+    struct dispatch_source_s *next;
+};
+
+static pthread_mutex_t ds_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t ds_cond;
+static pthread_once_t ds_once = PTHREAD_ONCE_INIT;
+static struct dispatch_source_s *ds_list;
+
+static void ds_wake(void)
+{
+    pthread_cond_broadcast(&ds_cond);
+}
+
+static void ds_deliver(void *ctx)
+{
+    struct dispatch_source_s *s = ctx;
+    void *block;
+    void (*fn)(void *);
+    void *fn_ctx;
+    pthread_mutex_lock(&ds_lock);
+    s->pending = 0;
+    if (s->canceled)
+    {
+        pthread_mutex_unlock(&ds_lock);
+        return;
+    }
+    block = s->event_block;
+    fn = s->event_fn;
+    fn_ctx = s->event_ctx;
+    pthread_mutex_unlock(&ds_lock);
+    if (block)
+        call_block(block);
+    else if (fn)
+        fn(fn_ctx);
+}
+
+static void ds_cancel_deliver(void *ctx)
+{
+    struct dispatch_source_s *s = ctx;
+    void *block;
+    void (*fn)(void *);
+    void *fn_ctx;
+    pthread_mutex_lock(&ds_lock);
+    block = s->cancel_block;
+    fn = s->cancel_fn;
+    fn_ctx = s->cancel_ctx;
+    pthread_mutex_unlock(&ds_lock);
+    if (block)
+        call_block(block);
+    else if (fn)
+        fn(fn_ctx);
+}
+
+static void ds_trigger(struct dispatch_source_s *s)
+{
+    int fire = 0;
+    pthread_mutex_lock(&ds_lock);
+    if (!s->canceled && s->suspend_count == 0 && !s->pending)
+    {
+        s->pending = 1;
+        fire = 1;
+    }
+    pthread_mutex_unlock(&ds_lock);
+    if (fire)
+        dispatch_async_f(s->queue, s, ds_deliver);
+}
+
+static void *ds_poll_thread(void *arg)
+{
+    struct dispatch_source_s *s = arg;
+    short events = s->type == DS_READ ? POLLIN : POLLOUT;
+    for (;;)
+    {
+        struct pollfd pfd;
+        pfd.fd = (int)s->handle;
+        pfd.events = events;
+        pfd.revents = 0;
+        int ready = poll(&pfd, 1, 50);
+        pthread_mutex_lock(&ds_lock);
+        int stop = s->canceled;
+        int suspended = s->suspend_count > 0;
+        pthread_mutex_unlock(&ds_lock);
+        if (stop)
+            break;
+        if (ready > 0 && !suspended)
+            ds_trigger(s);
+    }
+    return NULL;
+}
+
+static void ds_scheduler(void)
+{
+    for (;;)
+    {
+        struct dispatch_source_s *due[64];
+        int ndue = 0;
+        int have_next = 0;
+        double next = 0;
+        double now = now_seconds();
+
+        pthread_mutex_lock(&ds_lock);
+        for (struct dispatch_source_s *s = ds_list; s; s = s->next)
+        {
+            if (s->type != DS_TIMER || s->canceled ||
+                s->suspend_count > 0 || !s->scheduled)
+                continue;
+            if (s->next_fire <= now)
+            {
+                if (s->pending)
+                {
+                    if (s->timer_interval_ns)
+                        s->next_fire = now +
+                            (double)s->timer_interval_ns / 1e9;
+                    else
+                        s->scheduled = 0;
+                    continue;
+                }
+                s->pending = 1;
+                if (s->timer_interval_ns)
+                {
+                    double interval = (double)s->timer_interval_ns / 1e9;
+                    s->next_fire += interval;
+                    if (s->next_fire < now)
+                        s->next_fire = now + interval;
+                }
+                else
+                    s->scheduled = 0;
+                if (ndue < (int)(sizeof(due) / sizeof(due[0])))
+                    due[ndue++] = s;
+            }
+            else if (!have_next || s->next_fire < next)
+            {
+                next = s->next_fire;
+                have_next = 1;
+            }
+        }
+        if (ndue == 0)
+        {
+            if (have_next)
+            {
+                struct timespec ts;
+                double wait = next - now;
+                if (wait < 0)
+                    wait = 0;
+                (void)wait;
+                /* ds_cond uses CLOCK_MONOTONIC, so the deadline is the
+                 * absolute monotonic second count of the next fire. */
+                ts.tv_sec = (time_t)next;
+                ts.tv_nsec = (long)((next - (double)ts.tv_sec) * 1e9);
+                pthread_cond_timedwait(&ds_cond, &ds_lock, &ts);
+            }
+            else
+                pthread_cond_wait(&ds_cond, &ds_lock);
+        }
+        pthread_mutex_unlock(&ds_lock);
+        for (int i = 0; i < ndue; i++)
+            dispatch_async_f(due[i]->queue, due[i], ds_deliver);
+    }
+}
+
+static void ds_initialize(void)
+{
+    pthread_condattr_t attr;
+    pthread_condattr_init(&attr);
+    pthread_condattr_setclock(&attr, CLOCK_MONOTONIC);
+    pthread_cond_init(&ds_cond, &attr);
+    pthread_condattr_destroy(&attr);
+    pthread_t thread;
+    if (pthread_create(&thread, NULL, (void *(*)(void *))ds_scheduler, NULL) == 0)
+        pthread_detach(thread);
+}
+
+static int ds_type_from_pointer(void *type)
+{
+    if (type == &_dispatch_source_type_timer ||
+        type == &ds_type_timer_storage) return DS_TIMER;
+    if (type == &_dispatch_source_type_data_add ||
+        type == &ds_type_data_add_storage) return DS_DATA_ADD;
+    if (type == &_dispatch_source_type_data_or ||
+        type == &ds_type_data_or_storage) return DS_DATA_OR;
+    if (type == &_dispatch_source_type_data_replace ||
+        type == &ds_type_data_replace_storage) return DS_DATA_REPLACE;
+    if (type == &_dispatch_source_type_read ||
+        type == &ds_type_read_storage) return DS_READ;
+    if (type == &_dispatch_source_type_write ||
+        type == &ds_type_write_storage) return DS_WRITE;
+    return 0;
+}
+
+void *dispatch_source_create(void *type, uintptr_t handle,
+                             unsigned long mask, void *queue)
+{
+    int kind = ds_type_from_pointer(type);
+    if (!kind)
+        return NULL;
+    struct dispatch_source_s *s = calloc(1, sizeof(*s));
+    if (!s)
+        return NULL;
+    s->hdr.magic = DISPATCH_OBJECT_MAGIC;
+    s->hdr.kind = DISPATCH_KIND_SOURCE;
+    s->type = kind;
+    s->handle = handle;
+    s->mask = mask;
+    s->queue = queue ? queue : &main_queue;
+    s->suspend_count = 1; /* libdispatch sources start suspended */
+    pthread_once(&ds_once, ds_initialize);
+    pthread_mutex_lock(&ds_lock);
+    s->next = ds_list;
+    ds_list = s;
+    pthread_mutex_unlock(&ds_lock);
+    return s;
+}
+
+void dispatch_source_set_event_handler(void *source, void *block)
+{
+    struct dispatch_source_s *s = source;
+    if (!s)
+        return;
+    void *copy = block ? _Block_copy(block) : NULL;
+    pthread_mutex_lock(&ds_lock);
+    void *old = s->event_block;
+    s->event_block = copy;
+    s->event_fn = NULL;
+    s->event_ctx = NULL;
+    pthread_mutex_unlock(&ds_lock);
+    if (old)
+        _Block_release(old);
+}
+
+void dispatch_source_set_event_handler_f(void *source,
+                                         void (*function)(void *))
+{
+    struct dispatch_source_s *s = source;
+    if (!s)
+        return;
+    pthread_mutex_lock(&ds_lock);
+    s->event_block = NULL;
+    s->event_fn = function;
+    s->event_ctx = s->hdr.context;
+    pthread_mutex_unlock(&ds_lock);
+}
+
+void dispatch_source_set_cancel_handler(void *source, void *block)
+{
+    struct dispatch_source_s *s = source;
+    if (!s)
+        return;
+    void *copy = block ? _Block_copy(block) : NULL;
+    pthread_mutex_lock(&ds_lock);
+    void *old = s->cancel_block;
+    s->cancel_block = copy;
+    s->cancel_fn = NULL;
+    s->cancel_ctx = NULL;
+    pthread_mutex_unlock(&ds_lock);
+    if (old)
+        _Block_release(old);
+}
+
+void dispatch_source_set_cancel_handler_f(void *source,
+                                          void (*function)(void *))
+{
+    struct dispatch_source_s *s = source;
+    if (!s)
+        return;
+    pthread_mutex_lock(&ds_lock);
+    s->cancel_block = NULL;
+    s->cancel_fn = function;
+    s->cancel_ctx = s->hdr.context;
+    pthread_mutex_unlock(&ds_lock);
+}
+
+void dispatch_source_set_registration_handler(void *source, void *block)
+{
+    struct dispatch_source_s *s = source;
+    if (!s)
+        return;
+    s->registration_block = block ? _Block_copy(block) : NULL;
+    s->registration_fn = NULL;
+    s->registration_ctx = NULL;
+}
+
+void dispatch_source_set_registration_handler_f(void *source,
+                                                void (*function)(void *))
+{
+    struct dispatch_source_s *s = source;
+    if (!s)
+        return;
+    s->registration_block = NULL;
+    s->registration_fn = function;
+    s->registration_ctx = s->hdr.context;
+}
+
+void dispatch_set_context(void *object, void *context)
+{
+    struct dispatch_object_header *hdr = object;
+    if (hdr && hdr->magic == DISPATCH_OBJECT_MAGIC)
+        hdr->context = context;
+}
+
+void *dispatch_get_context(void *object)
+{
+    struct dispatch_object_header *hdr = object;
+    return hdr && hdr->magic == DISPATCH_OBJECT_MAGIC ? hdr->context : NULL;
+}
+
+void dispatch_source_set_timer(void *source, uint64_t start,
+                               uint64_t interval, uint64_t leeway)
+{
+    struct dispatch_source_s *s = source;
+    if (!s || s->type != DS_TIMER)
+        return;
+    pthread_mutex_lock(&ds_lock);
+    s->timer_start_ns = start;
+    s->timer_interval_ns = interval;
+    s->timer_leeway_ns = leeway;
+    if (!s->canceled && s->suspend_count == 0)
+    {
+        double fire = start ? (double)start / 1e9 : now_seconds();
+        if (fire < now_seconds() && interval)
+            fire = now_seconds();
+        s->next_fire = fire;
+        s->scheduled = 1;
+    }
+    ds_wake();
+    pthread_mutex_unlock(&ds_lock);
+}
+
+void dispatch_source_set_target_queue(void *source, void *queue)
+{
+    struct dispatch_source_s *s = source;
+    if (!s || !queue)
+        return;
+    pthread_mutex_lock(&ds_lock);
+    if (!s->scheduled && !s->pending)
+        s->queue = queue;
+    pthread_mutex_unlock(&ds_lock);
+}
+
+void dispatch_resume(void *object)
+{
+    struct dispatch_source_s *s = object;
+    if (!s || s->hdr.magic != DISPATCH_OBJECT_MAGIC ||
+        s->hdr.kind != DISPATCH_KIND_SOURCE)
+        return;
+    int start_poll = 0;
+    int trigger = 0;
+    void *registration_block = NULL;
+    void (*registration_fn)(void *) = NULL;
+    void *registration_ctx = NULL;
+    pthread_mutex_lock(&ds_lock);
+    if (s->suspend_count > 0)
+        s->suspend_count--;
+    if (s->suspend_count == 0 && !s->canceled)
+    {
+        if (s->type == DS_TIMER)
+        {
+            double fire = s->timer_start_ns
+                              ? (double)s->timer_start_ns / 1e9
+                              : now_seconds();
+            if (fire < now_seconds() && s->timer_interval_ns)
+                fire = now_seconds();
+            s->next_fire = fire;
+            s->scheduled = 1;
+        }
+        else if (s->type == DS_DATA_ADD || s->type == DS_DATA_OR ||
+                 s->type == DS_DATA_REPLACE)
+        {
+            trigger = s->data != 0;
+        }
+        else if ((s->type == DS_READ || s->type == DS_WRITE) &&
+                 !s->poll_started)
+        {
+            s->poll_started = 1;
+            start_poll = 1;
+        }
+        if (!s->registered)
+        {
+            s->registered = 1;
+            registration_block = s->registration_block;
+            registration_fn = s->registration_fn;
+            registration_ctx = s->registration_ctx;
+        }
+    }
+    ds_wake();
+    pthread_mutex_unlock(&ds_lock);
+    if (registration_block)
+        call_block(registration_block);
+    else if (registration_fn)
+        registration_fn(registration_ctx);
+    if (start_poll)
+    {
+        pthread_t thread;
+        if (pthread_create(&thread, NULL, ds_poll_thread, s) == 0)
+            pthread_detach(thread);
+    }
+    if (trigger)
+        ds_trigger(s);
+}
+
+void dispatch_suspend(void *object)
+{
+    struct dispatch_source_s *s = object;
+    if (!s || s->hdr.magic != DISPATCH_OBJECT_MAGIC ||
+        s->hdr.kind != DISPATCH_KIND_SOURCE)
+        return;
+    pthread_mutex_lock(&ds_lock);
+    s->suspend_count++;
+    pthread_mutex_unlock(&ds_lock);
+}
+
+void dispatch_activate(void *object)
+{
+    dispatch_resume(object);
+}
+
+void dispatch_source_cancel(void *source)
+{
+    struct dispatch_source_s *s = source;
+    if (!s)
+        return;
+    int notify = 0;
+    pthread_mutex_lock(&ds_lock);
+    if (!s->canceled)
+    {
+        s->canceled = 1;
+        s->scheduled = 0;
+        notify = s->cancel_block || s->cancel_fn;
+    }
+    ds_wake();
+    pthread_mutex_unlock(&ds_lock);
+    if (notify)
+        dispatch_async_f(s->queue, s, ds_cancel_deliver);
+}
+
+int dispatch_source_testcancel(void *source)
+{
+    struct dispatch_source_s *s = source;
+    if (!s)
+        return 0;
+    return s->canceled;
+}
+
+uintptr_t dispatch_source_get_handle(void *source)
+{
+    struct dispatch_source_s *s = source;
+    return s ? s->handle : 0;
+}
+
+unsigned long dispatch_source_get_mask(void *source)
+{
+    struct dispatch_source_s *s = source;
+    return s ? s->mask : 0;
+}
+
+unsigned long dispatch_source_get_data(void *source)
+{
+    struct dispatch_source_s *s = source;
+    if (!s)
+        return 0;
+    pthread_mutex_lock(&ds_lock);
+    unsigned long value = s->data;
+    s->data = 0;
+    pthread_mutex_unlock(&ds_lock);
+    return value;
+}
+
+void dispatch_source_merge_data(void *source, unsigned long value)
+{
+    struct dispatch_source_s *s = source;
+    if (!s)
+        return;
+    pthread_mutex_lock(&ds_lock);
+    switch (s->type)
+    {
+    case DS_DATA_ADD:
+        s->data += value;
+        break;
+    case DS_DATA_OR:
+        s->data |= value;
+        break;
+    case DS_DATA_REPLACE:
+    default:
+        s->data = value;
+        break;
+    }
+    pthread_mutex_unlock(&ds_lock);
+    ds_trigger(s);
+}
+
 struct service_symbol { const char *name; void *addr; };
 
 #define SVC(fn) { #fn, (void *)(uintptr_t)&fn }
@@ -1942,6 +2672,18 @@ static const struct service_symbol service_symbols[] = {
     SVC(dispatch_data_create), SVC(dispatch_data_get_size),
     SVC(dispatch_data_apply), SVC(dispatch_data_create_concat),
     SVC(dispatch_data_create_subrange), SVC(dispatch_data_create_map),
+    SVC(dispatch_source_create), SVC(dispatch_source_set_event_handler),
+    SVC(dispatch_source_set_event_handler_f),
+    SVC(dispatch_source_set_cancel_handler),
+    SVC(dispatch_source_set_cancel_handler_f),
+    SVC(dispatch_source_set_registration_handler),
+    SVC(dispatch_source_set_registration_handler_f),
+    SVC(dispatch_source_set_timer), SVC(dispatch_source_set_target_queue),
+    SVC(dispatch_source_cancel), SVC(dispatch_source_testcancel),
+    SVC(dispatch_source_get_handle), SVC(dispatch_source_get_mask),
+    SVC(dispatch_source_get_data), SVC(dispatch_source_merge_data),
+    SVC(dispatch_set_context), SVC(dispatch_get_context),
+    SVC(dispatch_resume), SVC(dispatch_suspend), SVC(dispatch_activate),
     SVC(mach_port_allocate), SVC(mach_port_deallocate), SVC(mach_port_mod_refs),
     SVC(mach_port_insert_right), SVC(mach_port_destroy), SVC(mach_task_self),
     SVC(mach_host_self), SVC(mach_msg), SVC(mach_msg_send), SVC(mach_msg_receive),
@@ -1965,6 +2707,18 @@ static const struct service_symbol service_symbols[] = {
     SVCD("bootstrap_port", bootstrap_port_value),
     SVCD("mach_task_self_", mach_task_self_value),
     SVCD("dispatch_main_q", dispatch_main_q_storage),
+    SVCD("dispatch_source_type_timer", dispatch_source_type_timer),
+    SVCD("dispatch_source_type_data_add", dispatch_source_type_data_add),
+    SVCD("dispatch_source_type_data_or", dispatch_source_type_data_or),
+    SVCD("dispatch_source_type_data_replace", dispatch_source_type_data_replace),
+    SVCD("dispatch_source_type_read", dispatch_source_type_read),
+    SVCD("dispatch_source_type_write", dispatch_source_type_write),
+    SVCD("_dispatch_source_type_timer", _dispatch_source_type_timer),
+    SVCD("_dispatch_source_type_data_add", _dispatch_source_type_data_add),
+    SVCD("_dispatch_source_type_data_or", _dispatch_source_type_data_or),
+    SVCD("_dispatch_source_type_data_replace", _dispatch_source_type_data_replace),
+    SVCD("_dispatch_source_type_read", _dispatch_source_type_read),
+    SVCD("_dispatch_source_type_write", _dispatch_source_type_write),
     SVCD("xpc_type_dictionary", xpc_type_dictionary_storage),
     SVCD("xpc_type_string", xpc_type_string_storage),
     SVCD("xpc_type_int64", xpc_type_int64_storage),

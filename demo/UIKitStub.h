@@ -4,9 +4,12 @@
 #include "../frameworks/objc_lite.h"
 
 __attribute__((objc_root_class))
-@interface NSObject
+@interface NSObject {
+    Class isa;
+}
 + (id)alloc;
 + (Class)class;
+- (Class)class;
 - (id)init;
 - (id)retain;
 - (void)release;
@@ -192,6 +195,7 @@ typedef enum {
 @interface UIScreen : NSObject
 + (UIScreen *)mainScreen;
 - (CGRect)bounds;
+- (double)scale;
 @end
 
 @class NSArray;
@@ -521,6 +525,22 @@ enum {
 @end
 
 extern id UIWindowSceneSessionRoleApplication;
+
+@interface UIScrollView : UIView
+@property(nonatomic) CGSize contentSize;
+@property(nonatomic) CGPoint contentOffset;
+@property(nonatomic) UIEdgeInsets contentInset;
+@property(nonatomic) BOOL pagingEnabled;
+@property(nonatomic, getter=isScrollEnabled) BOOL scrollEnabled;
+@property(nonatomic, readonly, getter=isDragging) BOOL dragging;
+@property(nonatomic, readonly, getter=isDecelerating) BOOL decelerating;
+@property(nonatomic, readonly, getter=isTracking) BOOL tracking;
+@property(nonatomic) BOOL alwaysBounceVertical;
+@property(nonatomic) BOOL alwaysBounceHorizontal;
+@property(nonatomic) double decelerationRate;
+@property(nonatomic, assign) id delegate;
+- (void)setContentOffset:(CGPoint)offset animated:(BOOL)animated;
+@end
 
 @interface UIWindow : UIView
 @property(nonatomic, retain) UIViewController *rootViewController;

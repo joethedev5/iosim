@@ -509,11 +509,20 @@ The service substrate lives in `loader/services.c` and is exported through the
 same shim table as libSystem. Dispatch is process-local; Mach message
 transport and the bootstrap namespace are shared across the device.
 
-- **libdispatch** has a main queue drained from UIKit's run loop
-  (`iosim_dispatch_drain_main`), global queues backed by detached pthreads,
-  groups, semaphores, `dispatch_once`, `dispatch_after`, and a `dispatch_main`
-  that honours Darwin's `noreturn` contract. Blocks are heap-copied when queued,
-  so stack blocks stay valid after their frame returns.
+- **libdispatch** has a main queue drained from UIKit's run loop and from
+  `NSRunLoop` (`iosim_dispatch_drain_main`), global queues backed by detached
+  pthreads, groups, semaphores, `dispatch_once`, `dispatch_after` and its
+  function variants, and a `dispatch_main` that honours Darwin's `noreturn`
+  contract. Blocks are heap-copied when queued, so stack blocks stay valid
+  after their frame returns.
+  Dispatch sources start suspended, as on Darwin. Timer sources run from a
+  monotonic-clock scheduler that coalesces a pending event and advances the
+  next fire by the interval; data sources accumulate `ADD`, `OR` or
+  `REPLACE` values until the handler's `dispatch_source_get_data` consumes
+  them; read/write sources poll their descriptor on a dedicated thread.
+  Cancelling stops scheduling, drops a queued event at delivery time and
+  enqueues the cancel handler once. Event, cancel and registration handlers
+  have both block and `_f` forms.
 - **Mach** ports are table entries with a mutex, condition variable and message
   list. `mach_msg` supports send, receive or both, and receive honours
   `MACH_RCV_TIMEOUT` with a real `pthread_cond_timedwait` deadline.
@@ -585,7 +594,8 @@ decoded with libpng in `loader/image.c`.
 `frameworks/UIKit.m` maps the object model onto those primitives:
 
 - `UIView` renders its background, its `CALayer` sublayers, then its subviews;
-  `UIScrollView` shifts child origins by `contentOffset`; `UITableView` walks
+  `UIScrollView` shifts child origins by `contentOffset` after applying
+  `contentInset`-based bounds; `UITableView` walks
   sections and rows (applying delegate header heights, title headers and
   per-row heights), asks its data source for each cell and draws separators
   and accessories, so a tap maps back through the same section geometry.
@@ -708,8 +718,14 @@ the finger moves, then sends `TouchUpInside` or `TouchUpOutside` on release.
 `UISlider` maps every down/move/up to its track, `UISwitch` toggles on release,
 `UISegmentedControl` and `UIPageControl` select the segment or dot under the
 release point, and `UITextField` becomes first responder on down.
-`UIScrollView` drags update `contentOffset` with a rubber-band clamp; tap, pan
-and swipe `UIGestureRecognizer` subclasses deliver target actions.
+`UIScrollView` drags update `contentOffset` with a rubber-band clamp derived
+from `contentInset` (and the always-bounce flags); the same bounds feed
+`setContentOffset:` and the touch-up snap. With `pagingEnabled`, release snaps
+to the nearest page on the scrollable axis before the delegate's
+`scrollViewWillEndDragging:withVelocity:targetContentOffset:` sees the target.
+The drag delegate also receives begin, scroll and end callbacks, and
+`isDragging`/`isDecelerating`/`isTracking` report state. Tap, pan and swipe
+`UIGestureRecognizer` subclasses deliver target actions.
 `UILongPressGestureRecognizer` records the down point and time, lets the
 window's per-frame tick fire `Began` once `minimumPressDuration` elapses,
 sends `Changed` with each move while the press is active, ends it on lift and
