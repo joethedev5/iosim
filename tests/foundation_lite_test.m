@@ -25,6 +25,19 @@ int main(void)
               [d objectForKey:[NSString stringWithUTF8String:"string"]],
               [d count]);
 
+        NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+        [defaults setObject:[NSString stringWithUTF8String:"hello"]
+                     forKey:[NSString stringWithUTF8String:"string"]];
+        [defaults setObject:[NSNumber numberWithInt:9]
+                     forKey:[NSString stringWithUTF8String:"number"]];
+        NSLog(@"defaults string=%@ number=%ld",
+              [defaults stringForKey:[NSString stringWithUTF8String:"string"]],
+              [defaults integerForKey:[NSString stringWithUTF8String:"number"]]);
+        NSBundle *bundle = [NSBundle mainBundle];
+        NSLog(@"bundle resource=%@",
+              [bundle pathForResource:[NSString stringWithUTF8String:"badge"]
+                               ofType:[NSString stringWithUTF8String:"png"]]);
+
         NSArray *parts = [[NSString stringWithUTF8String:"a,b,c"]
             componentsSeparatedByString:[NSString stringWithUTF8String:","]];
         NSLog(@"parts=%@ count=%lu", parts, [parts count]);
