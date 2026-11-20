@@ -9585,6 +9585,11 @@ static double g_sb_down_x, g_sb_down_y;
 static int g_search;
 static char g_search_query[64];
 static UITextField *g_search_field;
+static int g_control_center;
+/* airplane, cellular, wifi, bluetooth */
+static int g_cc_toggles[4] = {0, 1, 1, 0};
+static double g_cc_brightness = 0.62;
+static double g_cc_volume = 0.45;
 
 static void shell_repaint(int fbWidth, int fbHeight, double scale,
                           const char *path, int switcher);
@@ -9947,6 +9952,316 @@ static void shell_close_search(int fbWidth, int fbHeight, double scale,
         iosim_fb_present(path);
 }
 
+/* ------------------------------------------------------- Control Center */
+
+static void shell_cc_arc(int cx, int cy, int radius, double a0, double a1,
+                         int thickness, unsigned color)
+{
+    double lx = 0, ly = 0;
+    for (int i = 0; i <= 24; i++)
+    {
+        double a = a0 + (a1 - a0) * i / 24.0;
+        double px = cx + radius * __builtin_cos(a);
+        double py = cy + radius * __builtin_sin(a);
+        if (i)
+            iosim_fb_draw_line((int)lx, (int)ly, (int)px, (int)py, thickness,
+                               color);
+        lx = px;
+        ly = py;
+    }
+}
+
+static void shell_cc_airplane_icon(int cx, int cy, double scale,
+                                   unsigned color)
+{
+    static const double xs[16] = {
+        0, -2, -12, -12, -3, -2, -5, -5, 0, 5, 5, 2, 3, 12, 12, 2
+    };
+    static const double ys[16] = {
+        -13, -6, -1, 2, 4, 7, 10, 12, 10, 12, 10, 7, 4, 2, -1, -6
+    };
+    double px[16], py[16];
+    for (int i = 0; i < 16; i++)
+    {
+        px[i] = cx + xs[i] * scale;
+        py[i] = cy + ys[i] * scale;
+    }
+    iosim_fb_fill_polygon(px, py, 16, color);
+}
+
+static void shell_cc_cellular_icon(int cx, int cy, double scale,
+                                   unsigned color)
+{
+    int barW = (int)(4 * scale + 0.5);
+    int gap = (int)(2 * scale + 0.5);
+    int base = cy + (int)(11 * scale + 0.5);
+    int start = cx - (4 * barW + 3 * gap) / 2;
+    for (int i = 0; i < 4; i++)
+    {
+        int h = (int)((5 + i * 4) * scale + 0.5);
+        iosim_fb_fill_rect(start + i * (barW + gap), base - h, barW, h,
+                           color);
+    }
+}
+
+static void shell_cc_wifi_icon(int cx, int cy, double scale, unsigned color)
+{
+    int t = (int)(2.2 * scale + 0.5);
+    if (t < 1)
+        t = 1;
+    int by = cy + (int)(9 * scale + 0.5);
+    iosim_fb_fill_circle(cx, by, (int)(2.4 * scale), color);
+    shell_cc_arc(cx, by, (int)(8 * scale), -2.75, -0.39, t, color);
+    shell_cc_arc(cx, by, (int)(14 * scale), -2.75, -0.39, t, color);
+    shell_cc_arc(cx, by, (int)(20 * scale), -2.75, -0.39, t, color);
+}
+
+static void shell_cc_bluetooth_icon(int cx, int cy, double scale,
+                                    unsigned color)
+{
+    int t = (int)(2 * scale + 0.5);
+    if (t < 1)
+        t = 1;
+    int w = (int)(6 * scale + 0.5);
+    int top = cy - (int)(12 * scale + 0.5);
+    int bottom = cy + (int)(12 * scale + 0.5);
+    int h = (int)(10 * scale + 0.5);
+    int h4 = (int)(4 * scale + 0.5);
+    int h2 = (int)(2 * scale + 0.5);
+    iosim_fb_draw_line(cx, top, cx, bottom, t, color);
+    iosim_fb_draw_line(cx - w, cy - h, cx + w, cy - h4, t, color);
+    iosim_fb_draw_line(cx + w, cy - h4, cx - w, cy + h2, t, color);
+    iosim_fb_draw_line(cx - w, cy - h2, cx + w, cy + h4, t, color);
+    iosim_fb_draw_line(cx + w, cy + h4, cx - w, cy + h, t, color);
+}
+
+static void shell_cc_sun_icon(int cx, int cy, double scale, unsigned color)
+{
+    int t = (int)(2 * scale + 0.5);
+    if (t < 1)
+        t = 1;
+    iosim_fb_stroke_circle(cx, cy, (int)(6 * scale + 0.5), t, color);
+    for (int i = 0; i < 8; i++)
+    {
+        double a = i * 0.7853981634;
+        int r0 = (int)(10 * scale), r1 = (int)(14 * scale);
+        iosim_fb_draw_line(cx + (int)(__builtin_cos(a) * r0),
+                           cy + (int)(__builtin_sin(a) * r0),
+                           cx + (int)(__builtin_cos(a) * r1),
+                           cy + (int)(__builtin_sin(a) * r1), t, color);
+    }
+}
+
+static void shell_cc_speaker_icon(int cx, int cy, double scale,
+                                  unsigned color)
+{
+    double xs[5] = {-10, -4, 1, 1, -4};
+    double ys[5] = {2, 2, -5, 9, 2};
+    double px[5], py[5];
+    for (int i = 0; i < 5; i++)
+    {
+        px[i] = cx + xs[i] * scale;
+        py[i] = cy + ys[i] * scale;
+    }
+    iosim_fb_fill_polygon(px, py, 5, color);
+    int t = (int)(2 * scale + 0.5);
+    if (t < 1)
+        t = 1;
+    shell_cc_arc(cx + (int)(1 * scale), cy + (int)(2 * scale),
+                 (int)(6 * scale), -0.8, 0.8, t, color);
+    shell_cc_arc(cx + (int)(1 * scale), cy + (int)(2 * scale),
+                 (int)(11 * scale), -0.8, 0.8, t, color);
+}
+
+static void shell_cc_toggle_center(int index, double *outX, double *outY)
+{
+    static const double xs[4] = {60, 148, 60, 148};
+    static const double ys[4] = {148, 148, 232, 232};
+    *outX = xs[index];
+    *outY = ys[index];
+}
+
+static int shell_cc_toggle_at(double px, double py)
+{
+    for (int i = 0; i < 4; i++)
+    {
+        double cx, cy;
+        shell_cc_toggle_center(i, &cx, &cy);
+        double dx = px - cx, dy = py - cy;
+        if (dx * dx + dy * dy <= 30 * 30)
+            return i;
+    }
+    return -1;
+}
+
+#define CC_PX(v) ((int)((v) * scale + 0.5))
+
+static void shell_draw_control_center(int fbWidth, int fbHeight,
+                                      double scale, const char *path)
+{
+    shell_wallpaper_build(fbWidth, fbHeight);
+    if (g_shell_wallpaper)
+        iosim_fb_paste_xrgb(g_shell_wallpaper);
+    else
+    {
+        iosim_fb_set_opacity(1.0);
+        iosim_fb_fill_rect(0, 0, fbWidth, fbHeight, 0x0b1020);
+    }
+    iosim_fb_set_opacity(0.42);
+    iosim_fb_fill_rect(0, 0, fbWidth, fbHeight, 0x000000);
+    iosim_fb_set_opacity(1.0);
+
+    /* Glass tiles: connectivity, media, brightness, volume. */
+    iosim_fb_set_opacity(0.86);
+    iosim_fb_fill_round_rect(CC_PX(16), CC_PX(100), CC_PX(184), CC_PX(184),
+                             CC_PX(32), 0x1c1c1e);
+    iosim_fb_fill_round_rect(CC_PX(208), CC_PX(100), CC_PX(178), CC_PX(184),
+                             CC_PX(32), 0x1c1c1e);
+    iosim_fb_fill_round_rect(CC_PX(16), CC_PX(300), CC_PX(88), CC_PX(210),
+                             CC_PX(32), 0x1c1c1e);
+    iosim_fb_fill_round_rect(CC_PX(112), CC_PX(300), CC_PX(88), CC_PX(210),
+                             CC_PX(32), 0x1c1c1e);
+    for (int i = 0; i < 4; i++)
+        iosim_fb_fill_circle(CC_PX(54 + i * 98), CC_PX(560), CC_PX(27),
+                             0x1c1c1e);
+    iosim_fb_set_opacity(1.0);
+
+    for (int i = 0; i < 4; i++)
+    {
+        double cxpt, cypt;
+        shell_cc_toggle_center(i, &cxpt, &cypt);
+        int cx = CC_PX(cxpt), cy = CC_PX(cypt);
+        int on = g_cc_toggles[i];
+        unsigned fill = on ? (i == 1 ? 0x30d158 : 0x0a84ff) : 0x3a3a3c;
+        unsigned fg = on ? 0xffffff : 0xd8d5e0;
+        iosim_fb_fill_circle(cx, cy, CC_PX(26), fill);
+        if (i == 0)
+            shell_cc_airplane_icon(cx, cy, scale, fg);
+        else if (i == 1)
+            shell_cc_cellular_icon(cx, cy, scale, fg);
+        else if (i == 2)
+            shell_cc_wifi_icon(cx, cy, scale, fg);
+        else
+            shell_cc_bluetooth_icon(cx, cy, scale, fg);
+    }
+
+    /* Media module. */
+    int mx = CC_PX(208), my = CC_PX(100);
+    int dcx = mx + CC_PX(38), dcy = my + CC_PX(42);
+    iosim_fb_fill_circle(dcx, dcy, CC_PX(25), 0x3a3a3c);
+    iosim_fb_draw_line(dcx, dcy - CC_PX(11), dcx, dcy + CC_PX(8),
+                       CC_PX(2), 0xffffff);
+    iosim_fb_fill_circle(dcx - CC_PX(4), dcy + CC_PX(9), CC_PX(4),
+                         0xffffff);
+    iosim_fb_draw_line(dcx, dcy - CC_PX(11), dcx + CC_PX(8), dcy - CC_PX(15),
+                       CC_PX(2), 0xffffff);
+    iosim_fb_font_text(mx + CC_PX(16), my + CC_PX(126), "Not Playing",
+                       IOSIM_FONT_SEMIBOLD, 16, scale, 0xffffff);
+    iosim_fb_font_text(mx + CC_PX(16), my + CC_PX(150), "Music",
+                       IOSIM_FONT_REGULAR, 13, scale, 0x9a9aa0);
+
+    /* Brightness and volume sliders. */
+    double levels[2] = {g_cc_brightness, g_cc_volume};
+    for (int i = 0; i < 2; i++)
+    {
+        int sx = CC_PX(16 + i * 96), sy = CC_PX(300);
+        int trackX = sx + CC_PX(34), trackY = sy + CC_PX(22);
+        int trackW = CC_PX(20), trackH = CC_PX(136);
+        iosim_fb_fill_round_rect(trackX, trackY, trackW, trackH,
+                                 CC_PX(10), 0x3a3a3c);
+        int fillH = (int)(trackH * levels[i]);
+        if (fillH > 0)
+            iosim_fb_fill_round_rect(trackX, trackY + trackH - fillH,
+                                     trackW, fillH, CC_PX(10), 0xffffff);
+        if (i == 0)
+            shell_cc_sun_icon(sx + CC_PX(44), sy + CC_PX(186), scale,
+                              0xd8d5e0);
+        else
+            shell_cc_speaker_icon(sx + CC_PX(44), sy + CC_PX(186), scale,
+                                  0xd8d5e0);
+    }
+
+    /* Utility row: flashlight, timer, calculator, camera. */
+    for (int i = 0; i < 4; i++)
+    {
+        int cx = CC_PX(54 + i * 98), cy = CC_PX(560);
+        unsigned fg = 0xffffff;
+        if (i == 0)
+        {
+            static const double bx[7] = {1, -5, 0, -2, 5, 2, 6};
+            static const double by[7] = {-11, -1, -1, 11, 1, 1, -11};
+            double px[7], py[7];
+            for (int k = 0; k < 7; k++)
+            {
+                px[k] = cx + bx[k] * scale;
+                py[k] = cy + by[k] * scale;
+            }
+            iosim_fb_fill_polygon(px, py, 7, fg);
+        }
+        else if (i == 1)
+        {
+            iosim_fb_stroke_circle(cx, cy, CC_PX(10), CC_PX(2), fg);
+            iosim_fb_draw_line(cx, cy - CC_PX(7), cx, cy, CC_PX(2), fg);
+            iosim_fb_draw_line(cx, cy, cx + CC_PX(6), cy + CC_PX(3),
+                               CC_PX(2), fg);
+        }
+        else if (i == 2)
+        {
+            for (int r = 0; r < 3; r++)
+                for (int c = 0; c < 3; c++)
+                    iosim_fb_fill_circle(cx + (c - 1) * CC_PX(9),
+                                         cy + (r - 1) * CC_PX(9),
+                                         CC_PX(2), fg);
+        }
+        else
+        {
+            iosim_fb_fill_round_rect(cx - CC_PX(12), cy - CC_PX(9),
+                                     CC_PX(24), CC_PX(18), CC_PX(4), fg);
+            iosim_fb_fill_circle(cx, cy, CC_PX(6), 0x1c1c1e);
+            iosim_fb_fill_circle(cx, cy, CC_PX(3), fg);
+        }
+    }
+
+    draw_device_chrome(fbWidth, scale);
+    if (path && *path)
+        iosim_fb_present(path);
+}
+
+#undef CC_PX
+
+static void shell_open_control_center(int fbWidth, int fbHeight,
+                                      double scale, const char *path)
+{
+    g_control_center = 1;
+    printf("[SpringBoard] control center opened\n");
+    fflush(0);
+    shell_draw_control_center(fbWidth, fbHeight, scale, path);
+}
+
+static void shell_close_control_center(int fbWidth, int fbHeight,
+                                       double scale, const char *path)
+{
+    g_control_center = 0;
+    printf("[SpringBoard] control center closed\n");
+    fflush(0);
+    shell_draw(fbWidth, fbHeight, scale);
+    if (path && *path)
+        iosim_fb_present(path);
+}
+
+/* Toggling a connectivity control redraws the panel and reports the state. */
+static void shell_cc_toggle(int index, int fbWidth, int fbHeight,
+                            double scale, const char *path)
+{
+    static const char *names[4] = {"airplane", "cellular", "wifi",
+                                   "bluetooth"};
+    g_cc_toggles[index] = !g_cc_toggles[index];
+    printf("[SpringBoard] control center %s %s\n", names[index],
+           g_cc_toggles[index] ? "on" : "off");
+    fflush(0);
+    shell_draw_control_center(fbWidth, fbHeight, scale, path);
+}
+
 static int shell_switcher_hit(int xpx, int ypx, int fbWidth, int fbHeight,
                               double scale)
 {
@@ -10118,6 +10433,11 @@ static int run_springboard(void)
                 g_home_page = shell_page_count() - 1;
             if (g_home_page < 0)
                 g_home_page = 0;
+            if (g_control_center)
+            {
+                shell_draw_control_center(fbWidth, fbHeight, scale, path);
+                continue;
+            }
             if (g_search)
             {
                 shell_draw_search(fbWidth, fbHeight, scale, path);
@@ -10130,6 +10450,11 @@ static int run_springboard(void)
         }
         if (r == 1 && type == 9)
         {
+            if (g_control_center)
+            {
+                shell_close_control_center(fbWidth, fbHeight, scale, path);
+                continue;
+            }
             if (g_search)
             {
                 g_search = 0;
@@ -10165,6 +10490,21 @@ static int run_springboard(void)
             g_sb_down = 0;
             if (!down)
                 continue;
+            if (g_control_center)
+            {
+                if (dy < -90)
+                    shell_close_control_center(fbWidth, fbHeight, scale,
+                                               path);
+                continue;
+            }
+            if (!g_switcher && !g_search && g_sb_down_y < 60 &&
+                g_sb_down_x > fbWidth / scale - 120 && dy > 90)
+            {
+                /* A downward drag from the top-right corner opens the
+                 * Control Center, like the real system gesture. */
+                shell_open_control_center(fbWidth, fbHeight, scale, path);
+                continue;
+            }
             if (g_search)
             {
                 if (g_sb_down_y > fbHeight / scale - 45 && dy < -100)
@@ -10251,6 +10591,11 @@ static int run_springboard(void)
         }
         if (r == 1 && type == 7)
         {
+            if (g_control_center)
+            {
+                shell_close_control_center(fbWidth, fbHeight, scale, path);
+                continue;
+            }
             if (g_search)
             {
                 shell_close_search(fbWidth, fbHeight, scale, path);
@@ -10266,6 +10611,15 @@ static int run_springboard(void)
         if (r != 1 || type != 1)
             continue;
         double px = x / scale, py = y / scale;
+        if (g_control_center)
+        {
+            int toggle = shell_cc_toggle_at(px, py);
+            if (toggle >= 0)
+                shell_cc_toggle(toggle, fbWidth, fbHeight, scale, path);
+            else if (py > 620.0)
+                shell_close_control_center(fbWidth, fbHeight, scale, path);
+            continue;
+        }
         if (g_switcher)
         {
             int ordinal = shell_switcher_hit(x, y, fbWidth, fbHeight, scale);

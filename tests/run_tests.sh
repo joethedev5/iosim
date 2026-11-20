@@ -351,6 +351,28 @@ check "[op] completion" "$out" "the operation's completion block runs"
 check "[op] blocks=3 pending=0 max=-1" "$out" \
     "waitUntilAllOperationsAreFinished joins every operation"
 
+# ---------- 4i. NSNotification userInfo and block observers ----------
+"$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc -fblocks \
+    -ffreestanding -O1 -I "$ROOT/frameworks" \
+    -c "$ROOT/tests/notification_test.m" -o "$T/notification.o"
+"$LD64" -arch x86_64 -platform_version $PLATFORM -e _main \
+    -o "$T/notification" "$T/notification.o" \
+    "$ROOT/runtime/System/Library/Frameworks/Foundation.framework/Foundation" \
+    -undefined dynamic_lookup
+out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/notification" 2>&1)"
+check "notify selector TestNote user=v" "$out" \
+    "selector observers receive a notification with userInfo"
+check "notify block BlockNote user=v" "$out" \
+    "block observers receive a notification with userInfo"
+block_deliveries="$(printf '%s' "$out" | grep -c 'notify block BlockNote')"
+if [ "$block_deliveries" -eq 1 ]; then
+    echo "ok   removing the block observer token stops deliveries"
+else
+    echo "FAIL block observer removal (deliveries=$block_deliveries)"
+    fails=$((fails+1))
+fi
+check "notify done" "$out" "NSNotificationCenter completes the post cycle"
+
 # ---------- 5. UIKit-lite framework dylib ----------
 cat > "$T/uikit_app.c" <<'EOF'
 extern int printf(const char *fmt, ...);
@@ -1946,6 +1968,70 @@ out="$("$ROOT/tools/iosimctl" spawn "$UDID" "$T/launchd_job" client \
     com.iosim.launchd.run 2>&1)"
 check "launchd client: reply kind=pong seq=42" "$out" \
     "the RunAtLoad job's Mach service answers a client"
+
+# ---------- 13. Control Center ----------
+# A downward drag from the top-right corner opens the glass panel over the
+# home screen; connectivity controls toggle on tap; a swipe up closes it.
+"$ROOT/tools/iosimctl" ui "$UDID" swipe 350 20 350 240 0.3 >/dev/null
+if wait_log "[SpringBoard] control center opened"; then
+    echo "ok   a top-right downward drag opens Control Center"
+else
+    echo "FAIL control center open"; fails=$((fails+1))
+fi
+sleep 0.3
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/control-center.png" >/dev/null
+if out="$(python3 - "$ROOT/tools" "$T/control-center.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+c = pngpixel.px(rows, bpp, 60 * 3, 210 * 3)
+r, g, b = (c >> 16) & 255, (c >> 8) & 255, c & 255
+if not (r < 70 and 100 < g < 180 and b > 200):
+    raise SystemExit("wifi toggle not blue: %06x" % c)
+print("ok   the connectivity controls render in their on state")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL control center rendering"; echo "$out"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" tap 60 232 >/dev/null
+if wait_log "[SpringBoard] control center wifi off"; then
+    echo "ok   tapping the wifi control toggles it off"
+else
+    echo "FAIL control center wifi toggle"; fails=$((fails+1))
+fi
+sleep 0.3
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/control-center-off.png" >/dev/null
+if out="$(python3 - "$ROOT/tools" "$T/control-center-off.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+c = pngpixel.px(rows, bpp, 60 * 3, 210 * 3)
+r, g, b = (c >> 16) & 255, (c >> 8) & 255, c & 255
+if not (35 <= r <= 85 and abs(r - g) < 14 and 40 <= b <= 95):
+    raise SystemExit("wifi toggle did not turn gray: %06x" % c)
+print("ok   the toggled control redraws in its off state")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL control center off rendering"; echo "$out"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" tap 148 232 >/dev/null
+if wait_log "[SpringBoard] control center bluetooth on"; then
+    echo "ok   the bluetooth control toggles on"
+else
+    echo "FAIL control center bluetooth toggle"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" swipe 200 830 200 600 0.3 >/dev/null
+if wait_log "[SpringBoard] control center closed"; then
+    echo "ok   a swipe up dismisses Control Center"
+else
+    echo "FAIL control center close"; fails=$((fails+1))
+fi
 
 "$ROOT/tools/iosimctl" shutdown "$UDID" >/dev/null
 

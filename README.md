@@ -40,7 +40,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | UIView animations (frame, alpha), delay/curve/repeat options, completion blocks | ✅ |
 | `CADisplayLink`, presentation layers, multiple concurrent layer animations | ✅ |
 | CoreAnimation paths, gradients, sublayers (z-ordered), PNG images | ✅ |
-| Foundation collections, strings, notifications, timers, NSIndexPath | ✅ |
+| Foundation collections, strings, selector/block notifications with userInfo, timers, NSIndexPath | ✅ |
 | `NSFileManager`, `NSData` file I/O, `NSURL`, `NSJSONSerialization` | ✅ |
 | `NSPropertyListSerialization` and persistent `NSUserDefaults` domains | ✅ |
 | `NSKeyedArchiver`/`NSKeyedUnarchiver` keyed archives with custom `NSCoding` classes | ✅ |
@@ -59,6 +59,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | App switcher: bottom-edge gestures, cached frames, resume, swipe-up kill | ✅ |
 | Multi-page home screen: 16-slot pages, page dots, horizontal swipe paging | ✅ |
 | Spotlight search: pill opens a keyboard-driven search over installed apps | ✅ |
+| Control Center: top-right drag, connectivity toggles, media, brightness/volume and utilities | ✅ |
 | UIView 2D affine transforms (translate/scale/rotate), layout callbacks, UIScrollView offsets | ✅ (basic) |
 | Layer clipping (`clipsToBounds`/`masksToBounds`), shadows and borders | ✅ |
 | Switch, slider, segmented, progress, page and activity controls in the iOS 26 glass design | ✅ |

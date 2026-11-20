@@ -302,10 +302,13 @@ enum {
 @public
     id _name;
     id _object;
+    id _userInfo;
 }
 + (id)notificationWithName:(id)name object:(id)object;
++ (id)notificationWithName:(id)name object:(id)object userInfo:(id)userInfo;
 - (id)name;
 - (id)object;
+- (id)userInfo;
 @end
 
 @interface NSNotificationCenter : NSObject {
@@ -319,8 +322,13 @@ enum {
 + (id)defaultCenter;
 - (void)addObserver:(id)observer selector:(SEL)selector
                name:(id)name object:(id)object;
+- (id)addObserverForName:(id)name object:(id)object queue:(id)queue
+              usingBlock:(void (^)(NSNotification *note))block;
 - (void)removeObserver:(id)observer;
+- (void)removeObserver:(id)observer name:(id)name object:(id)object;
+- (void)postNotification:(NSNotification *)notification;
 - (void)postNotificationName:(id)name object:(id)object;
+- (void)postNotificationName:(id)name object:(id)object userInfo:(id)userInfo;
 @end
 
 @interface NSTimer : NSObject {

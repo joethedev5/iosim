@@ -1568,16 +1568,33 @@ static void defaults_path(char *out, unsigned long cap)
 
 /* ------------------------------------------------------- Notifications */
 
+/* A block observer is stored in the center's table with a nil selector; the
+ * token keeps the heap-copied block and doubles as the removal handle. */
+@interface NSNotificationBlockToken : NSObject {
+@public
+    void *_block;
+}
+@end
+
+@implementation NSNotificationBlockToken
+@end
+
 @implementation NSNotification
 + (id)notificationWithName:(id)name object:(id)object
+{
+    return [self notificationWithName:name object:object userInfo:nil];
+}
++ (id)notificationWithName:(id)name object:(id)object userInfo:(id)userInfo
 {
     NSNotification *n = [[self alloc] init];
     n->_name = name;
     n->_object = object;
+    n->_userInfo = userInfo;
     return n;
 }
 - (id)name { return _name; }
 - (id)object { return _object; }
+- (id)userInfo { return _userInfo; }
 @end
 
 @implementation NSNotificationCenter
@@ -1599,36 +1616,89 @@ static void defaults_path(char *out, unsigned long cap)
     _objects[_count] = object;
     _count++;
 }
+- (id)addObserverForName:(id)name object:(id)object queue:(id)queue
+              usingBlock:(void (^)(NSNotification *note))block
+{
+    (void)queue;
+    if (_count >= 64 || !block)
+        return nil;
+    NSNotificationBlockToken *token =
+        [[NSNotificationBlockToken alloc] init];
+    token->_block = _Block_copy((void *)block);
+    _observers[_count] = token;
+    _selectors[_count] = (SEL)0;
+    _names[_count] = name;
+    _objects[_count] = object;
+    _count++;
+    return token;
+}
+static void notification_center_remove(NSNotificationCenter *center, int i)
+{
+    for (int j = i; j + 1 < center->_count; j++)
+    {
+        center->_observers[j] = center->_observers[j + 1];
+        center->_selectors[j] = center->_selectors[j + 1];
+        center->_names[j] = center->_names[j + 1];
+        center->_objects[j] = center->_objects[j + 1];
+    }
+    center->_count--;
+}
 - (void)removeObserver:(id)observer
 {
     for (int i = 0; i < _count; i++)
-    {
         if (_observers[i] == observer)
         {
-            for (int j = i; j + 1 < _count; j++)
-            {
-                _observers[j] = _observers[j + 1];
-                _selectors[j] = _selectors[j + 1];
-                _names[j] = _names[j + 1];
-                _objects[j] = _objects[j + 1];
-            }
-            _count--;
+            notification_center_remove(self, i);
             i--;
         }
+}
+- (void)removeObserver:(id)observer name:(id)name object:(id)object
+{
+    for (int i = 0; i < _count; i++)
+    {
+        if (observer && _observers[i] != observer)
+            continue;
+        if (name && !(_names[i] && objects_equal(_names[i], name)))
+            continue;
+        if (object && _objects[i] != object)
+            continue;
+        notification_center_remove(self, i);
+        i--;
     }
 }
-- (void)postNotificationName:(id)name object:(id)object
+- (void)postNotification:(NSNotification *)note
 {
-    NSNotification *note = [NSNotification notificationWithName:name object:object];
+    if (!note)
+        return;
+    id name = note->_name, object = note->_object;
     for (int i = 0; i < _count; i++)
     {
         if (_names[i] && !objects_equal(_names[i], name))
             continue;
         if (_objects[i] && _objects[i] != object)
             continue;
-        void (*imp)(id, SEL, id) = (void (*)(id, SEL, id))objc_msgSend;
-        imp(_observers[i], _selectors[i], note);
+        if (_selectors[i])
+        {
+            void (*imp)(id, SEL, id) = (void (*)(id, SEL, id))objc_msgSend;
+            imp(_observers[i], _selectors[i], note);
+        }
+        else
+        {
+            NSNotificationBlockToken *token = _observers[i];
+            if (token && token->_block)
+                ((void (^)(id))token->_block)(note);
+        }
     }
+}
+- (void)postNotificationName:(id)name object:(id)object
+{
+    [self postNotificationName:name object:object userInfo:nil];
+}
+- (void)postNotificationName:(id)name object:(id)object userInfo:(id)userInfo
+{
+    [self postNotification:
+        [NSNotification notificationWithName:name object:object
+                                    userInfo:userInfo]];
 }
 @end
 

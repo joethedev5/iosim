@@ -299,6 +299,14 @@ this runtime) and the parser rejects truncated or malformed input.
 `NSUserDefaults` persists a domain to
 `$HOME/Library/Preferences/<bundle-id>.plist`.
 
+`NSNotificationCenter` keeps selector observers and block observers in one
+table; the block API copies its closure and returns a token that
+`removeObserver:` accepts. Notifications carry `name`, `object` and
+`userInfo`, posting filters by name and object before delivering the same
+notification object to each matching observer, and
+`postNotificationName:object:userInfo:` and `postNotification:` are both
+available.
+
 `NSKeyedArchiver` builds the same keyed-archive structure Foundation uses: an
 XML plist with `$archiver`, `$version`, `$top` and a `$objects` table, where
 class descriptions record `$classname`/`$classes` and every object reference
@@ -699,6 +707,16 @@ stock apps. Tapping a row launches or resumes that app, and `home` closes the
 overlay. Each keystroke logs the result count, which is what the tests assert
 alongside the drawn row and keyboard pixels.
 
+A downward drag that starts in the top-right corner opens the Control Center:
+the sampled wallpaper dimmed under translucent modules, a 2 × 2 connectivity
+tile (airplane, cellular, Wi-Fi, Bluetooth) with vector icons, a media tile,
+brightness and volume sliders, and a utility row. Tapping a connectivity circle
+toggles it — blue, or green for cellular, with a white glyph when on and a gray
+fill with a dimmed glyph when off — redraws the panel and logs the state. A
+swipe up from the bottom edge or the home event closes it. Test screenshots
+sample the Wi-Fi circle before and after the tap, so the panel and its state
+colors are real pixels, not a static overlay.
+
 ## 3. Why this design
 
 **Why not run Apple's runtime?** Because the iOS 27 simulator runtime is
@@ -726,7 +744,8 @@ Python for iteration speed.
 - Mach messages, the bootstrap namespace and serialized XPC dictionaries cross
   guest processes through launchd-owned names and abstract Unix sockets.
   Mach port rights are per-service send sockets rather than general port right
-  transfer, and launchd does not start service jobs on demand.
+  transfer; launchd starts LaunchDaemon plists with boolean RunAtLoad and
+  KeepAlive but does not implement socket activation or job throttling.
 - `libdispatch` covers main/global queues, groups, semaphores and timers.
   Foundation is a subset (strings, collections, numbers, data, notifications,
   timers, dates, errors, bundles, defaults, plists, file manager, URLs and

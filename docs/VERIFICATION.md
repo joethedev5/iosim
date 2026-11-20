@@ -552,6 +552,15 @@ real 0/1/2 (the blocks are copied when added, so a stack literal cannot
 observe the loop's final value). The group wait is a real join: the final
 line is printed only after every worker has returned.
 
+### Foundation: notifications with userInfo and blocks
+
+`tests/notification_test.m` registers a selector observer and a block
+observer for separate notification names, posts a notification carrying
+`userInfo = {k: v}` to each, removes the block token, and posts again. The
+output is `notify selector TestNote user=v`, `notify block BlockNote user=v`,
+then `notify done`: both delivery styles see the userInfo, and the block is
+not called after its token is removed.
+
 ### UIKit: app bundle resources
 
 `demo/ResourceApp.m` is installed as a real `.app` with a 4 x 4 red `dot.png`
@@ -779,6 +788,15 @@ behavior. The resume only succeeds because the suite installs TextViewApp
 after Tab was suspended and the manifest reload keeps Tab's pid; without that
 the search result would start a second process instead of continuing the
 stopped one.
+
+Control Center is another real surface over the same event stream. The suite
+drags down from (350, 20) to (350, 240) pt and reads
+`[SpringBoard] control center opened`; the screenshot's Wi-Fi toggle pixel at
+(78, 232) pt is the blue on state. Tapping the toggle at (60, 232) pt logs
+`control center wifi off`, and a second screenshot reads the same pixel as the
+gray off state. Tapping Bluetooth logs `control center bluetooth on`, so
+independent controls keep independent state, and a swipe up from the bottom
+logs `control center closed`.
 
 The home grid pages in groups of 16 once seven stock apps and nine
 installed apps are present. The test installs ten extra page fixtures (21 grid apps in
