@@ -29,15 +29,17 @@ Verified results:
 - `tests/fastenum_test.m` builds and runs all eleven `[fe]` lines.
 - `tests/kvc_kvo_test.m` builds and runs the full KVC/KVO output, including
   automatic `NSKVONotifying_` setters.
+- `tests/scroll_view_test.m` builds against both Foundation and UIKit and
+  reproduces the paging/inset/delegate output.
 - The linked executable depends on
   `/System/Library/Frameworks/Foundation.framework/Foundation` and
   `/usr/lib/libSystem.B.dylib`; the runtime provides both.
 - Objective-C is still compiled by clang's front end inside `zig cc`. Zig
   does not add an Objective-C compiler of its own.
 
-The wrapper always links Foundation. UIKit guests also need UIKit passed as
-an input (with a `.dylib` symlink); the default `tools/build_app.sh` remains
-the simpler path for app fixtures.
+The wrapper links both Foundation and UIKit, so it builds Foundation tests
+and UIKit app fixtures alike; the default `tools/build_app.sh` remains the
+clang + `ld64.lld` path.
 
 ## Inline assembly
 

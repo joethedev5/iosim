@@ -2916,6 +2916,35 @@ check "[scroll] delegate 1 3 1 1" "$out" \
 check "[scroll] vertical 820 top 50" "$out" \
     "contentInset bounds the vertical offset and reads back to the delegate"
 
+# ---------- 25. UITextField delegates and UIView geometry ----------
+"$ROOT/tools/build_app.sh" "$ROOT/tests/textfield_delegate_test.m" \
+    "$T/textfield_delegate_test" >/dev/null
+out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/textfield_delegate_test" 2>&1)"
+check "[tf] text [a] began 1 ended 1 changes 4 returns 1" "$out" \
+    "text field begin/end and change veto callbacks drive editing and Return"
+
+"$ROOT/tools/build_app.sh" "$ROOT/tests/uiview_geometry_test.m" \
+    "$T/uiview_geometry_test" >/dev/null
+out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/uiview_geometry_test" 2>&1)"
+check "[geo] center 60 45" "$out" \
+    "UIView center derives from the frame"
+check "[geo] centered 50 75" "$out" \
+    "setCenter moves the frame origin"
+check "[geo] bounds 50 75 120 60 center 110 105" "$out" \
+    "setBounds changes the size while keeping the origin"
+check "[geo] to parent 55 80" "$out" \
+    "convertPoint:toView: crosses one superview"
+check "[geo] to root 75 110" "$out" \
+    "convertPoint:toView: crosses two superviews"
+check "[geo] from root -35 -50" "$out" \
+    "convertPoint:fromView: is the inverse translation"
+check "[geo] rect 75 110 100 50" "$out" \
+    "convertRect:toView: converts the origin and keeps the size"
+check "[geo] scroll -4 -13" "$out" \
+    "conversion subtracts a scroll ancestor contentOffset"
+check "[geo] scroll root -4 87" "$out" \
+    "conversion composes scroll offset and frame origins"
+
 if [ "$fails" -ne 0 ]; then
     echo "$fails test(s) failed" >&2
     exit 1

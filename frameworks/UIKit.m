@@ -629,6 +629,13 @@ typedef enum {
 - (CGRect)frame;
 - (void)setFrame:(CGRect)frame;
 - (CGRect)bounds;
+- (void)setBounds:(CGRect)bounds;
+- (CGPoint)center;
+- (void)setCenter:(CGPoint)center;
+- (CGPoint)convertPoint:(CGPoint)point toView:(UIView *)view;
+- (CGPoint)convertPoint:(CGPoint)point fromView:(UIView *)view;
+- (CGRect)convertRect:(CGRect)rect toView:(UIView *)view;
+- (CGRect)convertRect:(CGRect)rect fromView:(UIView *)view;
 - (void)setBackgroundColor:(UIColor *)color;
 - (UIColor *)backgroundColor;
 - (void)addSubview:(UIView *)view;
@@ -1069,6 +1076,20 @@ enum {
 @end
 
 
+@class UITextField;
+
+@protocol UITextFieldDelegate
+@optional
+- (BOOL)textFieldShouldBeginEditing:(UITextField *)textField;
+- (void)textFieldDidBeginEditing:(UITextField *)textField;
+- (BOOL)textFieldShouldEndEditing:(UITextField *)textField;
+- (void)textFieldDidEndEditing:(UITextField *)textField;
+- (BOOL)textField:(UITextField *)textField
+    shouldChangeCharactersInRange:(NSRange)range
+                replacementString:(NSString *)string;
+- (BOOL)textFieldShouldReturn:(UITextField *)textField;
+@end
+
 @interface UITextField : UIControl {
 @public
     id _text;
@@ -1107,6 +1128,7 @@ enum {
 - (BOOL)hasText;
 - (void)insertText:(id)text;
 - (void)deleteBackward;
+- (void)handleReturnKey;
 - (CGSize)intrinsicContentSize;
 @end
 
@@ -2750,6 +2772,75 @@ static int wrap_editable_lines(const char *text, int style, double points,
 {
     return CGRectMake(0, 0, _frame.size.width, _frame.size.height);
 }
+- (void)setBounds:(CGRect)bounds
+{
+    _frame.size = bounds.size;
+    if (_layer)
+        _layer->_frame = CGRectMake(0, 0, bounds.size.width,
+                                    bounds.size.height);
+}
+- (CGPoint)center
+{
+    return CGPointMake(_frame.origin.x + _frame.size.width / 2.0,
+                       _frame.origin.y + _frame.size.height / 2.0);
+}
+- (void)setCenter:(CGPoint)center
+{
+    _frame.origin.x = center.x - _frame.size.width / 2.0;
+    _frame.origin.y = center.y - _frame.size.height / 2.0;
+    if (_layer)
+        _layer->_frame = CGRectMake(0, 0, _frame.size.width,
+                                    _frame.size.height);
+}
+
+/* Coordinate conversion walks the superview chain, adding each frame origin
+ * and subtracting a scroll ancestor's contentOffset, exactly as hit-testing
+ * does. These are translations; view transforms are not folded in. */
+static CGPoint window_point_for_view(UIView *view, CGPoint point)
+{
+    CGPoint result = point;
+    for (UIView *v = view; v; v = [v superview])
+    {
+        result.x += v->_frame.origin.x;
+        result.y += v->_frame.origin.y;
+        UIView *parent = [v superview];
+        if (parent && [parent isKindOfClass:[UIScrollView class]])
+        {
+            UIScrollView *scroll = (UIScrollView *)parent;
+            result.x -= scroll->_contentOffset.x;
+            result.y -= scroll->_contentOffset.y;
+        }
+    }
+    return result;
+}
+
+- (CGPoint)convertPoint:(CGPoint)point toView:(UIView *)view
+{
+    CGPoint window = window_point_for_view(self, point);
+    if (!view)
+        return window;
+    CGPoint target = window_point_for_view(view, CGPointMake(0, 0));
+    return CGPointMake(window.x - target.x, window.y - target.y);
+}
+
+- (CGPoint)convertPoint:(CGPoint)point fromView:(UIView *)view
+{
+    CGPoint window = view ? window_point_for_view(view, point) : point;
+    CGPoint self_origin = window_point_for_view(self, CGPointMake(0, 0));
+    return CGPointMake(window.x - self_origin.x, window.y - self_origin.y);
+}
+
+- (CGRect)convertRect:(CGRect)rect toView:(UIView *)view
+{
+    CGPoint origin = [self convertPoint:rect.origin toView:view];
+    return CGRectMake(origin.x, origin.y, rect.size.width, rect.size.height);
+}
+
+- (CGRect)convertRect:(CGRect)rect fromView:(UIView *)view
+{
+    CGPoint origin = [self convertPoint:rect.origin fromView:view];
+    return CGRectMake(origin.x, origin.y, rect.size.width, rect.size.height);
+}
 - (void)setBackgroundColor:(UIColor *)color { _backgroundColor = color; }
 - (UIColor *)backgroundColor { return _backgroundColor; }
 - (void)setClipsToBounds:(BOOL)clips { _clipsToBounds = clips; }
@@ -3230,19 +3321,45 @@ static id g_firstResponder;
 - (id)delegate { return _delegate; }
 - (BOOL)becomeFirstResponder
 {
+    if (_delegate && [_delegate respondsToSelector:
+            @selector(textFieldShouldBeginEditing:)])
+    {
+        if (!((BOOL (*)(id, SEL, id))objc_msgSend)(
+                _delegate, @selector(textFieldShouldBeginEditing:), self))
+            return NO;
+    }
     if (g_firstResponder && g_firstResponder != self)
         [g_firstResponder resignFirstResponder];
     g_firstResponder = self;
     _firstResponder = YES;
     _needsLayout = YES;
+    [self sendActionsForControlEvents:UIControlEventEditingDidBegin];
+    if (_delegate && [_delegate respondsToSelector:
+            @selector(textFieldDidBeginEditing:)])
+        [(_delegate) textFieldDidBeginEditing:self];
     return YES;
 }
 - (BOOL)resignFirstResponder
 {
+    if (_delegate && [_delegate respondsToSelector:
+            @selector(textFieldShouldEndEditing:)])
+    {
+        if (!((BOOL (*)(id, SEL, id))objc_msgSend)(
+                _delegate, @selector(textFieldShouldEndEditing:), self))
+            return NO;
+    }
+    int was = _firstResponder;
     if (g_firstResponder == self)
         g_firstResponder = 0;
     _firstResponder = NO;
     _needsLayout = YES;
+    if (was)
+    {
+        [self sendActionsForControlEvents:UIControlEventEditingDidEnd];
+        if (_delegate && [_delegate respondsToSelector:
+                @selector(textFieldDidEndEditing:)])
+            [(_delegate) textFieldDidEndEditing:self];
+    }
     return YES;
 }
 - (BOOL)isFirstResponder { return _firstResponder; }
@@ -3263,8 +3380,28 @@ static id g_firstResponder;
     const char *add = iosim_string_cstr(text);
     if (!add)
         return;
-    char buf[512];
+    if (add[0] == '\n' && add[1] == 0)
+    {
+        [self handleReturnKey];
+        return;
+    }
     const char *cur = iosim_string_cstr(_text);
+    NSRange range;
+    range.location = cur ? strlen(cur) : 0;
+    range.length = 0;
+    if (_delegate && [_delegate respondsToSelector:
+            @selector(textField:shouldChangeCharactersInRange:
+                      replacementString:)])
+    {
+        BOOL allow = ((BOOL (*)(id, SEL, id, NSRange, id))objc_msgSend)(
+            _delegate,
+            @selector(textField:shouldChangeCharactersInRange:
+                      replacementString:),
+            self, range, text);
+        if (!allow)
+            return;
+    }
+    char buf[512];
     if (cur)
         snprintf(buf, sizeof(buf), "%s%s", cur, add);
     else
@@ -3278,11 +3415,27 @@ static id g_firstResponder;
     const char *cur = iosim_string_cstr(_text);
     if (!cur || !*cur)
         return;
-    unsigned long n = strlen(cur);
+    unsigned long end = strlen(cur);
+    unsigned long n = end;
     while (n > 0 && ((unsigned char)cur[n - 1] & 0xc0) == 0x80)
         n--;
     if (n > 0)
         n--;
+    NSRange range;
+    range.location = n;
+    range.length = end - n;
+    if (_delegate && [_delegate respondsToSelector:
+            @selector(textField:shouldChangeCharactersInRange:
+                      replacementString:)])
+    {
+        BOOL allow = ((BOOL (*)(id, SEL, id, NSRange, id))objc_msgSend)(
+            _delegate,
+            @selector(textField:shouldChangeCharactersInRange:
+                      replacementString:),
+            self, range, [NSString stringWithUTF8String:""]);
+        if (!allow)
+            return;
+    }
     char buf[512];
     if (n >= sizeof(buf))
         n = sizeof(buf) - 1;
@@ -3291,6 +3444,16 @@ static id g_firstResponder;
     _text = [NSString stringWithUTF8String:buf];
     [self sendActionsForControlEvents:UIControlEventEditingChanged];
     _needsLayout = YES;
+}
+- (void)handleReturnKey
+{
+    BOOL allow = YES;
+    if (_delegate && [_delegate respondsToSelector:
+            @selector(textFieldShouldReturn:)])
+        allow = ((BOOL (*)(id, SEL, id))objc_msgSend)(
+            _delegate, @selector(textFieldShouldReturn:), self);
+    if (allow)
+        [self sendActionsForControlEvents:UIControlEventEditingDidEndOnExit];
 }
 - (CGSize)intrinsicContentSize
 {
@@ -3318,6 +3481,11 @@ static id g_firstResponder;
         return;
     }
     [super insertText:text];
+}
+- (void)handleReturnKey
+{
+    if (_bar)
+        [(UISearchBar *)_bar searchButtonClicked];
 }
 @end
 
@@ -9515,6 +9683,9 @@ static int keyboard_handle_tap(int px, int py, int fbW, int fbH,
     {
         if ([g_firstResponder isKindOfClass:[UITextView class]])
             [g_firstResponder insertText:[NSString stringWithUTF8String:"\n"]];
+        else if ([g_firstResponder respondsToSelector:
+                     @selector(handleReturnKey)])
+            [g_firstResponder handleReturnKey];
         else
             [g_firstResponder
                 sendActionsForControlEvents:UIControlEventEditingDidEndOnExit];

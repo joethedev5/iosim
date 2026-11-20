@@ -512,6 +512,25 @@ to 820 (1000 − 200 + 20), and `contentInset.top` reads back as 50. The test
 runs directly under `iosim-run` with a 1× main screen, so it exercises the
 same window hit-testing and clamping code as SpringBoard-driven apps.
 
+### UIKit: text-field delegate and view geometry
+
+`tests/textfield_delegate_test.m` installs a `UITextFieldDelegate`, focuses a
+field, inserts `a` and `b`, offers `x` (vetoed by
+`textField:shouldChangeCharactersInRange:replacementString:`), deletes the
+last character and sends Return. It reports
+`[tf] text [a] began 1 ended 1 changes 4 returns 1`: the veto kept `x` out,
+the delete removed `b`, Return called the delegate and did not append a
+newline, and begin/end fired once each.
+
+`tests/uiview_geometry_test.m` checks the view coordinate system. A child at
+(10,20,100,50) reports center (60,45); `setCenter:(100,100)` moves its origin
+to (50,75); `setBounds:` with 120×60 keeps that origin and moves the center to
+(110,105). Converted points are 55,80 in the parent and 75,110 in the root;
+the inverse from root (35,55) is −35,−50; a 100×50 rect keeps its size. A
+child inside a scroll view with contentOffset (10,20) maps its point (1,1) to
+−4,−13 in the scroll and −4,87 in the root, proving the offset is applied in
+the same direction as hit-testing.
+
 ### Foundation: files, URLs and JSON
 
 `tests/foundation_io_test.m` is a Foundation-only executable. It creates

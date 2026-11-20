@@ -3,6 +3,11 @@
 
 #include "../frameworks/objc_lite.h"
 
+typedef struct {
+    unsigned long location;
+    unsigned long length;
+} NSRange;
+
 __attribute__((objc_root_class))
 @interface NSObject {
     Class isa;
@@ -253,7 +258,13 @@ enum {
 @interface UIView : UIResponder
 - (id)initWithFrame:(CGRect)frame;
 - (CGRect)bounds;
+- (void)setBounds:(CGRect)bounds;
 @property CGRect frame;
+@property CGPoint center;
+- (CGPoint)convertPoint:(CGPoint)point toView:(UIView *)view;
+- (CGPoint)convertPoint:(CGPoint)point fromView:(UIView *)view;
+- (CGRect)convertRect:(CGRect)rect toView:(UIView *)view;
+- (CGRect)convertRect:(CGRect)rect fromView:(UIView *)view;
 @property double alpha;
 @property CGAffineTransform transform;
 @property(nonatomic, retain) UIColor *backgroundColor;
@@ -279,14 +290,32 @@ enum {
                  completion:(void (^)(BOOL finished))completion;
 @end
 
+@class UITextField;
+
+@protocol UITextFieldDelegate
+@optional
+- (BOOL)textFieldShouldBeginEditing:(UITextField *)textField;
+- (void)textFieldDidBeginEditing:(UITextField *)textField;
+- (BOOL)textFieldShouldEndEditing:(UITextField *)textField;
+- (void)textFieldDidEndEditing:(UITextField *)textField;
+- (BOOL)textField:(UITextField *)textField
+    shouldChangeCharactersInRange:(NSRange)range
+                replacementString:(NSString *)string;
+- (BOOL)textFieldShouldReturn:(UITextField *)textField;
+@end
+
 @interface UITextField : UIView
 @property(nonatomic, retain) id text;
 @property(nonatomic, retain) id placeholder;
 @property(nonatomic, retain) UIColor *textColor;
 @property(nonatomic, retain) UIFont *font;
 @property int keyboardType;
+@property(nonatomic, assign) id delegate;
 - (BOOL)becomeFirstResponder;
 - (BOOL)resignFirstResponder;
+- (void)insertText:(id)text;
+- (void)deleteBackward;
+- (void)handleReturnKey;
 @end
 
 @interface UITextView : UIView

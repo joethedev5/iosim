@@ -593,7 +593,11 @@ decoded with libpng in `loader/image.c`.
 
 `frameworks/UIKit.m` maps the object model onto those primitives:
 
-- `UIView` renders its background, its `CALayer` sublayers, then its subviews;
+- `UIView` renders its background, its `CALayer` sublayers, then its subviews.
+  `center` is derived from the frame, `setCenter:` moves the origin,
+  `setBounds:` changes the size, and `convertPoint:/convertRect:` walk the
+  superview chain adding frame origins and subtracting a scroll ancestor's
+  content offset in both directions;
   `UIScrollView` shifts child origins by `contentOffset` after applying
   `contentInset`-based bounds; `UITableView` walks
   sections and rows (applying delegate header heights, title headers and
@@ -741,7 +745,11 @@ link keeps the loop rendering at 60 Hz until it is paused or invalidated.
 
 `UITextField` participates in the responder chain. A focused field draws its
 placeholder or text, secure bullets and a caret, and `UITextField` edits from
-keyboard taps or `key`/`backspace` FIFO records. When a field is first
+keyboard taps or `key`/`backspace` FIFO records. `UITextFieldDelegate`
+receives should-begin/did-begin, should-end/did-end and
+`textField:shouldChangeCharactersInRange:replacementString:` around every
+mutation, and Return asks `textFieldShouldReturn:` before sending
+`EditingDidEndOnExit` instead of inserting a newline. When a field is first
 responder, `UIApplicationMain` paints a QWERTY keyboard over the app frame
 with the same framebuffer primitives used for everything else. The keyboard
 uses measured iOS 26 geometry: a 324 pt panel with 26 pt top corners, 43 pt

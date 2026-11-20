@@ -23,19 +23,23 @@ OUT="$2"
 shift 2
 
 FOUNDATION="$ROOT/runtime/System/Library/Frameworks/Foundation.framework/Foundation"
-if [ ! -f "$FOUNDATION" ]; then
+UIKIT="$ROOT/runtime/System/Library/Frameworks/UIKit.framework/UIKit"
+if [ ! -f "$FOUNDATION" ] || [ ! -f "$UIKIT" ]; then
     echo "build_app_zig: build the runtime first with tools/build_runtime.sh" >&2
     exit 1
 fi
 
 # Zig's linker decides input format by extension; the runtime's canonical
-# simulator path has none, so hand it a .dylib symlink.
+# simulator path has none, so hand it .dylib symlinks.
 STAGE="$ROOT/build/zig"
 mkdir -p "$STAGE"
 ln -sf "$FOUNDATION" "$STAGE/Foundation.dylib"
+ln -sf "$UIKIT" "$STAGE/UIKit.dylib"
 
 mkdir -p "$(dirname "$OUT")"
 exec "$ZIG" cc -target x86_64-ios-simulator \
     -fobjc-runtime=ios-18.0 -fno-objc-arc -ffreestanding -O1 \
-    -I "$ROOT/frameworks" "$SRC" "$STAGE/Foundation.dylib" \
-    -o "$OUT" -undefined dynamic_lookup -Wl,-e,_main "$@"
+    -I "$ROOT/frameworks" -I "$ROOT/demo" "$SRC" \
+    "$STAGE/Foundation.dylib" \
+    "$STAGE/UIKit.dylib" -o "$OUT" -undefined dynamic_lookup \
+    -Wl,-e,_main "$@"

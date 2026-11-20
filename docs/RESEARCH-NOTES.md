@@ -142,6 +142,17 @@ Measured with `zig-x86_64-linux-0.17.1` from ziglang.org:
 - Fixture `tests/scroll_view_test.m` (section 24) drives a real UIWindow:
   page 310, delegate counts 1/3/1/1, vertical clamp 820 with top inset 50.
 
+## 2026-11-20: UITextFieldDelegate and UIView geometry
+
+- `UITextField` now calls should-begin/did-begin, should-end/did-end,
+  should-change-characters and should-return; software and hardware Return
+  share `handleReturnKey`, and `UISearchBarField` overrides it to run search.
+- `UIView` has center, setCenter:, setBounds: (size) and point/rect conversion.
+  Conversion is translation-only and composes ancestor frames plus scroll
+  `contentOffset`; view transforms are still not folded in.
+- Fixtures `tests/textfield_delegate_test.m` and
+  `tests/uiview_geometry_test.m` (section 25).
+
 ## Open directions
 
 - `metal-cpp` + macOS SDK Metal headers make it possible to implement a

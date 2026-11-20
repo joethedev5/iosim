@@ -33,7 +33,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | `UITouch`/`UIEvent` responder delivery, continuous control tracking | ✅ |
 | Drag scrolling with rubber-band clamp, tap/pan/swipe gesture recognizers | ✅ |
 | Auto Layout: NSLayoutConstraint, anchors, guides, intrinsic sizing, priorities | ✅ (subset) |
-| Multiline UILabel wrapping, UITextField and UITextView editing, software keyboard | ✅ |
+| Multiline UILabel wrapping, UITextField/UITextView editing and delegates, software keyboard | ✅ |
 | UISwitch, UISlider, UISegmentedControl, UIPageControl, UIActivityIndicatorView, UIProgressView | ✅ |
 | UIAlertController alerts, actions and modal presentation | ✅ |
 | UINavigationController push/pop, UITabBarController, UIStackView, UIButton titles | ✅ |
@@ -71,7 +71,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | Lock screen: date and clock, lock/unlock, apps suspend on lock and resume in place | ✅ |
 | Spotlight search: pill opens a keyboard-driven search over installed apps | ✅ |
 | Control Center: top-right drag, connectivity toggles, media, brightness/volume and utilities | ✅ |
-| UIView 2D affine transforms (translate/scale/rotate), layout callbacks, UIScrollView insets/paging/delegate | ✅ |
+| UIView 2D transforms, center/bounds/point conversion, UIScrollView insets/paging/delegate | ✅ |
 | Layer clipping (`clipsToBounds`/`masksToBounds`), shadows and borders | ✅ |
 | UIVisualEffectView backdrop blur: capture, box blur, tint, rounded mask, contentView | ✅ |
 | Switch, slider, segmented, progress, page and activity controls in the iOS 26 glass design | ✅ |
