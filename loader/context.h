@@ -28,6 +28,18 @@ struct iosim_image *iosim_context_load(struct iosim_context *ctx,
 int iosim_context_apply_fixups(struct iosim_context *ctx,
                                char *err, size_t errlen);
 
+/* Runs Mach-O initializer pointers (__DATA,__mod_init_func), dependencies
+ * first, the way dyld runs image initializers before main. C++ tools rely on
+ * these constructors to register command-line options, locales and globals. */
+void iosim_context_run_initializers(struct iosim_context *ctx);
+
+/* Rewrites Darwin pthread static initializers in writable data to host
+ * pthread layouts. Must run before initializers and main. */
+void iosim_normalize_pthread_objects(struct iosim_context *ctx);
+
+/* Installs per-image thread-local thunks and lazy initial content. */
+void iosim_tlv_setup_image(struct iosim_image *img);
+
 /* Resolver implementation that sees all loaded images. */
 void *iosim_context_resolve(struct iosim_resolver *r, struct iosim_image *img,
                             const char *name, int lib_ordinal, int weak);

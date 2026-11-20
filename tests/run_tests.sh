@@ -2826,6 +2826,61 @@ sym="$(python3 -I "$KS" --binary "$T/ks_fixture" \
 check "_trap_beta  [" "$sym" "an exact address prints its symbol"
 check "_trap_beta + 0x8" "$sym" "an interior address prints a relative offset"
 
+# ---------- 21. loader runtime: initializers, TLV, pthread, crypto, signals ----------
+"$CC" -target "$TARGET" -ffreestanding -fblocks -O1 \
+    -c "$ROOT/tests/loader_runtime_test.c" -o "$T/loader_runtime.o"
+"$LD64" -arch x86_64 -platform_version $PLATFORM -e _main \
+    -o "$T/loader_runtime" "$T/loader_runtime.o" -undefined dynamic_lookup
+rm -f "$T/loader-stat-file"
+out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/loader_runtime" \
+    "$T/loader-stat-file" 2>&1)"
+check "[lrt] ctor 1 tls 42" "$out" \
+    "__init_offsets constructors run and __thread_data is copied per thread"
+check "[lrt] mutex normalized" "$out" \
+    "a Darwin PTHREAD_MUTEX_INITIALIZER is host-normalized at load"
+check "[lrt] lock 0 0" "$out" \
+    "the normalized static mutex locks and unlocks through the guest API"
+check "[lrt] sha256 ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad" \
+    "$out" "CommonCrypto SHA-256 matches the abc vector"
+check "[lrt] md5 900150983cd24fb0d6963f7d28e17f72" "$out" \
+    "CommonCrypto MD5 matches the abc vector"
+check "[lrt] data 13 1 13" "$out" \
+    "dispatch_data size and block application report the payload"
+check "[lrt] sigmask 0 old 0" "$out" \
+    "Darwin SIG_SETMASK value is translated for pthread_sigmask"
+check "[lrt] stat 0 1 3" "$out" \
+    'Darwin stat$INODE64 layout reports mode and size of a written file'
+
+# ---------- 22. key-value coding and automatic key-value observing ----------
+"$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
+    -ffreestanding -O1 -I "$ROOT/frameworks" \
+    -c "$ROOT/tests/kvc_kvo_test.m" -o "$T/kvc_kvo_test.o"
+"$LD64" -arch x86_64 -platform_version $PLATFORM -e _main \
+    -o "$T/kvc_kvo_test" "$T/kvc_kvo_test.o" \
+    "$ROOT/runtime/System/Library/Frameworks/Foundation.framework/Foundation" \
+    -undefined dynamic_lookup
+out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/kvc_kvo_test" 2>&1)"
+check "[kvc] get alice 30" "$out" \
+    "valueForKey: finds getters and boxes scalar returns"
+check "[kvc] set bob 41" "$out" \
+    "setValue:forKey: finds setters and unboxes NSNumber arguments"
+check "[kvc] path Main" "$out" \
+    "key paths traverse object properties"
+check "[kvc] dict bob 41" "$out" \
+    "dictionaryWithValuesForKeys: returns one value per key"
+check "[kvo] name old=bob new=carol" "$out" \
+    "automatic KVO wraps an object setter and reports old and new"
+check "[kvo] name old=carol new=dave" "$out" \
+    "KVC writes go through the KVO setter as well"
+check "[kvo] age old=unset new=41" "$out" \
+    "initial observations fire with the current scalar value"
+check "[kvo] age old=unset new=42" "$out" \
+    "automatic KVO wraps an int setter"
+check "[kvo] count 2 initial 2" "$out" \
+    "each observer receives exactly its own notifications"
+check "[kvo] after-remove count 2 name erin" "$out" \
+    "removeObserver: stops notifications but setters still work"
+
 if [ "$fails" -ne 0 ]; then
     echo "$fails test(s) failed" >&2
     exit 1

@@ -172,13 +172,27 @@ bind streams processed eagerly. Threaded binds are accepted as a no-op for
 x86_64 images.
 
 Import resolution order is: the dylib named by the ordinal, the image itself,
-every other loaded image, the built-in Darwin shim table, then `dlsym` in the
-Linux process. Unresolved non-weak imports get a generated trampoline that
-reports the missing symbol name instead of crashing anonymously.
+every other loaded image, the built-in Darwin shim table, then the service
+layer. When `IOSIM_HOST_SYMBOLS` is set (an opt-in path for running unmodified
+host-platform Darwin tools), the loader also `dlopen`s the colon-separated
+`IOSIM_HOST_LIBS` and falls back to `dlsym` in its own process; ordinary
+simulator guests never reach that fallback, so Darwin `open` flags and `stat`
+layouts cannot accidentally meet a glibc function. Unresolved non-weak imports
+get a generated trampoline that reports the missing symbol name instead of
+crashing anonymously.
 
-### 2.3 Entry
+### 2.3 Entry and image initialization
 
-`LC_MAIN` gives a file offset relative to `__TEXT`; it is converted to an
+After fixups and before entry, every image's initializers run in reverse load
+order (dependencies before dependents, main last), matching dyld:
+
+- `__DATA,__mod_init_func` is an array of 64-bit constructor pointers.
+- `__TEXT,__init_offsets` is an array of 32-bit offsets relative to
+  `preferred_base + slide`; modern linked executables use this form (the Metal
+  Shader Converter has 242 such constructors). Without them, C++ command-line
+  tools run with no static objects registered.
+
+`LC_MAIN` then gives a file offset relative to `__TEXT`; it is converted to an
 unslid vmaddr, then a runtime address. Two entry conventions exist:
 
 - Apple's `crt1.o` `start` routine reads `argc/argv/envp/apple` from the initial
@@ -192,6 +206,24 @@ unslid vmaddr, then a runtime address. Two entry conventions exist:
 `argc`, `argv`, `environ`, the executable path and the `apple` vector are also
 published to `_NSGetArgc`, `_NSGetArgv`, `_NSGetEnviron`,
 `_NSGetExecutablePath` and `getprogname`.
+
+Two more pieces of image state are prepared before constructors:
+
+- **Thread-local variables.** Each 24-byte thunk in `__DATA,__thread_vars`
+  carries the variable's offset into the image's combined `__thread_data` +
+  `__thread_bss` content. The loader keeps one pthread key per image, copies
+  that initial content once per thread on first access, and replaces the thunk
+  getter with a register-preserving assembly stub (all general registers and
+  xmm0–15 restored, only `rax` changed), as Darwin's TLV calling convention
+  requires.
+- **Darwin pthread static initializers.** Darwin's opaque pthread objects embed
+  signatures (`PTHREAD_MUTEX_INITIALIZER` begins with `0x32AAABA7`, conds with
+  `0x3CB0B1BB`, and so on). glibc reads the signature as a locked futex and
+  deadlocks host libc++. The loader scans writable data sections for those
+  signatures with zeroed opaque tails and re-initializes the objects in place
+  with the host pthread library, mapping recursive and error-checking mutex
+  variants. Guest-facing pthread calls in the service layer also translate a
+  signature on first use and use host mutexes rather than spinlocks.
 
 ### 2.4 Multi-image loading
 
@@ -313,6 +345,28 @@ primitive accessors: `array[i]` is `objectAtIndexedSubscript:`,
 `i == count`), `dict[key]` is `objectForKeyedSubscript:`, and
 `dict[key] = obj` is `setObject:forKeyedSubscript:`, where a nil value removes
 the key.
+
+Key-value coding looks accessors up the way Foundation does: `get<Key>`,
+`<Key>` and `is<Key>` for reads, `set<Key>:` and `_set<Key>:` for writes.
+The runtime hands out each method's type encoding, so scalar getters are
+boxed (`NSNumber` for integers, floats and booleans) and `setValue:forKey:`
+unboxes `NSNumber` arguments before calling the setter; object values pass
+through directly. Key paths split on `.` and recurse, and `@count` applied to
+a collection returns an `NSNumber`.
+
+Automatic key-value observing uses the same isa-swizzling design as objc4.
+The loader runtime now creates classes at run time
+(`objc_allocateClassPair`, `class_addMethod`, `object_setClass`); the first
+observation of a class builds `NSKVONotifying_<Class>`, overrides `-class` to
+return the original class and wraps each observed key's setter with a
+type-correct C trampoline (object, integer, boolean, float, double and the
+CG geometry structs). The trampoline calls `willChangeValueForKey:`, the
+original setter and `didChangeValueForKey:`; the pending-change stack keeps
+the pre-change value so `NSKeyValueChangeOldKey` is real even for scalar
+properties. `willChangeValueForKey:` alone supports manual notifications.
+Options `New`, `Old`, `Initial` and `Prior` are honored; `removeObserver:`
+stops delivery while leaving the wrapped setter in place.
+
 `NSPropertyListSerialization` writes and reads XML property lists, and
 `NSUserDefaults` persists a domain to
 `$HOME/Library/Preferences/<bundle-id>.plist`.

@@ -80,6 +80,28 @@ static struct class_entry g_classes[MAX_CLASSES];
 static int g_nclasses;
 static int g_registered_images;
 
+/* Classes created at runtime (KVO notifying subclasses, NSKVONotifying_Foo
+ * and friends). The class and metaclass are allocated here; method lists are
+ * fixed-size and grow until the class is registered. */
+#define MAX_DYNAMIC_CLASSES 128
+#define DYNAMIC_METHODS 32
+struct dynamic_methods {
+    uint32_t entsizeAndFlags;
+    uint32_t count;
+    struct method_min methods[DYNAMIC_METHODS];
+};
+struct dynamic_class {
+    struct objc_class_min cls;
+    struct objc_class_min meta;
+    struct class_ro_min ro;
+    struct class_ro_min meta_ro;
+    struct dynamic_methods methods;
+    char name[160];
+    int registered;
+};
+static struct dynamic_class *g_dynamic[MAX_DYNAMIC_CLASSES];
+static int g_ndynamic;
+
 /* A zeroed cache object used for newly formed classes. */
 char _objc_empty_cache[32];
 
@@ -211,7 +233,8 @@ static uint32_t class_instance_size(struct objc_class_min *cls)
     return size;
 }
 
-static void *lookup_in_methods(const void *list_ptr, const char *sel)
+static const struct method_min *lookup_method_entry(const void *list_ptr,
+                                                    const char *sel)
 {
     if (!list_ptr)
         return NULL;
@@ -232,9 +255,15 @@ static void *lookup_in_methods(const void *list_ptr, const char *sel)
         const struct method_min *m =
             (const struct method_min *)(base + (size_t)i * entsize);
         if (m->name && strcmp((const char *)m->name, sel) == 0)
-            return m->imp;
+            return m;
     }
     return NULL;
+}
+
+static void *lookup_in_methods(const void *list_ptr, const char *sel)
+{
+    const struct method_min *m = lookup_method_entry(list_ptr, sel);
+    return m ? m->imp : NULL;
 }
 
 static struct class_ro_min *metaclass_ro(struct objc_class_min *cls)
@@ -538,6 +567,160 @@ void objc_autoreleasePoolPop(void *pool)
 void *objc_retain(void *obj) { return obj; }
 void objc_release(void *obj) { (void)obj; }
 
+/* --------------------------------------------------- dynamic class creation */
+
+static struct dynamic_class *find_dynamic_class(void *cls)
+{
+    for (int i = 0; i < g_ndynamic; i++)
+        if (&g_dynamic[i]->cls == cls)
+            return g_dynamic[i];
+    return NULL;
+}
+
+void *objc_allocateClassPair(void *superclass, const char *name,
+                             unsigned long extraBytes)
+{
+    (void)extraBytes;
+    if (!superclass || !name || g_ndynamic >= MAX_DYNAMIC_CLASSES)
+        return NULL;
+    struct dynamic_class *dc = calloc(1, sizeof(*dc));
+    if (!dc)
+        return NULL;
+    snprintf(dc->name, sizeof(dc->name), "%s", name);
+    dc->ro.flags = 0;
+    dc->ro.name = dc->name;
+    dc->ro.baseMethods = &dc->methods;
+    dc->meta_ro.flags = 1; /* RO_META */
+    dc->meta_ro.name = dc->name;
+
+    struct objc_class_min *meta = (struct objc_class_min *)superclass;
+    dc->cls.isa = &dc->meta;
+    dc->cls.superclass = superclass;
+    dc->cls.bits = (uintptr_t)&dc->ro;
+    dc->meta.isa = &dc->meta;
+    dc->meta.superclass = meta->isa;
+    dc->meta.bits = (uintptr_t)&dc->meta_ro;
+    dc->methods.entsizeAndFlags = (uint32_t)sizeof(struct method_min);
+
+    g_dynamic[g_ndynamic++] = dc;
+    if (getenv("IOSIM_OBJC_DEBUG"))
+        fprintf(stderr, "objc: allocated class %s super=%s at %p\n",
+                dc->name, class_getName(superclass), (void *)&dc->cls);
+    return &dc->cls;
+}
+
+void objc_registerClassPair(void *cls)
+{
+    struct dynamic_class *dc = find_dynamic_class(cls);
+    if (!dc || dc->registered)
+        return;
+    dc->registered = 1;
+    register_class((struct objc_class_min *)cls, dc->name);
+}
+
+int class_addMethod(void *cls, void *sel, void *imp, const char *types)
+{
+    struct dynamic_class *dc = find_dynamic_class(cls);
+    if (!dc || !sel || !imp)
+        return 0;
+    const char *name = (const char *)sel;
+    for (uint32_t i = 0; i < dc->methods.count; i++)
+        if (dc->methods.methods[i].name &&
+            strcmp((const char *)dc->methods.methods[i].name, name) == 0)
+            return 0;
+    if (dc->methods.count >= DYNAMIC_METHODS)
+        return 0;
+    char *types_copy = NULL;
+    if (types)
+    {
+        size_t n = strlen(types) + 1;
+        types_copy = malloc(n);
+        if (types_copy)
+            memcpy(types_copy, types, n);
+    }
+    struct method_min *m = &dc->methods.methods[dc->methods.count++];
+    m->name = sel;
+    m->types = types_copy;
+    m->imp = imp;
+    if (getenv("IOSIM_OBJC_DEBUG"))
+        fprintf(stderr, "objc: class_addMethod %s %s imp=%p\n",
+                dc->name, name, imp);
+    return 1;
+}
+
+void *class_getInstanceMethod(void *cls, void *sel)
+{
+    if (!cls || !sel)
+        return NULL;
+    const char *name = (const char *)sel;
+    for (int depth = 0; cls && depth < 64; depth++)
+    {
+        struct objc_class_min *c = cls;
+        struct class_ro_min *ro = class_ro(c);
+        const struct method_min *m =
+            lookup_method_entry(ro ? ro->baseMethods : NULL, name);
+        if (m)
+            return (void *)m;
+        cls = c->superclass;
+    }
+    return NULL;
+}
+
+void *class_getMethodImplementation(void *cls, void *sel)
+{
+    return lookup_instance_method((struct objc_class_min *)cls,
+                                  (const char *)sel);
+}
+
+const char *method_getTypeEncoding(void *method)
+{
+    return method ? ((const struct method_min *)method)->types : NULL;
+}
+
+void *method_getImplementation(void *method)
+{
+    return method ? ((const struct method_min *)method)->imp : NULL;
+}
+
+void *method_setImplementation(void *method, void *imp)
+{
+    if (!method)
+        return NULL;
+    struct method_min *m = method;
+    void *old = m->imp;
+    m->imp = imp;
+    return old;
+}
+
+void *class_getSuperclass(void *cls)
+{
+    return cls ? ((struct objc_class_min *)cls)->superclass : NULL;
+}
+
+unsigned long class_getInstanceSize(void *cls)
+{
+    return class_instance_size((struct objc_class_min *)cls);
+}
+
+void *object_getClass(void *obj)
+{
+    return iosim_objc_class_of(obj);
+}
+
+void *object_setClass(void *obj, void *cls)
+{
+    if (!obj)
+        return NULL;
+    void *old = *(void **)obj;
+    *(void **)obj = cls;
+    return old;
+}
+
+void *sel_getUid(const char *name)
+{
+    return sel_registerName(name);
+}
+
 void *objc_getClass(const char *name)
 {
     for (int i = 0; i < g_nclasses; i++)
@@ -564,9 +747,28 @@ const char *object_getClassName(void *obj)
     return class_getName(*(void **)obj);
 }
 
+#define MAX_SELECTORS 8192
+static char *g_selectors[MAX_SELECTORS];
+static int g_nselectors;
+
+/* Selector names are interned in process memory. Apple's runtime hashes them;
+ * the string itself is the selector here, so callers may pass stack buffers
+ * and still get a stable selector back. */
 void *sel_registerName(const char *name)
 {
-    return (void *)name;
+    if (!name)
+        return NULL;
+    for (int i = 0; i < g_nselectors; i++)
+        if (strcmp(g_selectors[i], name) == 0)
+            return g_selectors[i];
+    size_t n = strlen(name) + 1;
+    char *copy = malloc(n);
+    if (!copy)
+        return NULL;
+    memcpy(copy, name, n);
+    if (g_nselectors < MAX_SELECTORS)
+        g_selectors[g_nselectors++] = copy;
+    return copy;
 }
 
 const char *sel_getName(void *sel)

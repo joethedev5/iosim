@@ -554,6 +554,25 @@ keys) and confirms a missing keyed subscript returns nil. The fixture links
 `objc_enumerationMutation` through ordinary for-in codegen, so the loader's
 exported no-op is part of what the test proves.
 
+### Foundation: key-value coding and automatic KVO
+
+`tests/kvc_kvo_test.m` defines `Person` (`NSString *name`, `int age`,
+`Address *address`) and reads through `valueForKey:`, which returns the name
+and the boxed integer 30. `setValue:forKey:` writes `bob` and 41, and the
+test confirms the ordinary getters observe both writes. A key path sets and
+reads `address.street` as `Main`, and `dictionaryWithValuesForKeys:` returns
+`bob` and `41` for its two keys.
+
+For observation, a `Recorder` registers for `name` with `New|Old`; direct
+`setName:@"carol"` reports `old=bob new=carol`, and a KVC
+`setValue:@"dave"` reports `old=carol new=dave`, proving both entry points
+reach the wrapped setter. A second recorder observes `age` with `Initial|New`:
+it receives the current value 41 immediately and then `old=unset new=42`
+after a direct `setAge:42` (no Old option was requested, so old is absent).
+Counts are exactly `2` and `2`; after `removeObserver:` the next
+`setName:@"erin"` produces no notification while the getter returns `erin`.
+The suite asserts all ten lines.
+
 ### Foundation: persistent defaults and property lists
 
 `tests/defaults_test.m` writes a domain with `NSUserDefaults` in one process
@@ -1003,6 +1022,57 @@ The decoded `_mach_trap_table` holds 128 entries: trap 0–9 are `_kern_invalid`
 `_unix_syscall64` indexes at `index*24`, calls `*(entry+0)` and reads narg at
 `entry+0x14`. `docs/KDK.md` records the unpacking steps and full measurements.
 
+### Loader: initializers, thread-locals, pthread objects and Darwin ABI shims
+
+`tests/loader_runtime_test.c` is an x86_64 Mach-O linked with
+`__TEXT,__init_offsets`, `__thread_vars` and a nonzero `__thread_data`. Its
+constructor increments a `__thread int` initialized to 41, records whether a
+static `PTHREAD_MUTEX_INITIALIZER` was normalized, and the program then proves
+each subsystem:
+
+- `[lrt] ctor 1 tls 42`: the image-base-relative constructor ran before
+  `main`, and the thread-local copy carried the 41 from `__thread_data`.
+- `[lrt] mutex normalized`: the load-time scan replaced the Darwin signature
+  `0x32AAABA7` with a host mutex before the constructor observed it;
+  `[lrt] lock 0 0` locks and unlocks through the guest pthread symbols.
+- `[lrt] sha256 ba7816bf…` and `[lrt] md5 90015098…`: the loader's CommonCrypto
+  implementation matches the standard `abc` vectors.
+- `[lrt] data 13 1 13`: `dispatch_data_create` reports the payload size, the
+  applier block runs once and receives all 13 bytes.
+- `[lrt] sigmask 0 old 0`: Darwin's `SIG_SETMASK` value 3 is translated to the
+  host mask operation and the 32-bit Darwin sigset round-trips.
+- `[lrt] stat 0 1 3`: `open` with Darwin `O_CREAT|O_RDWR|O_TRUNC` creates the
+  file, `fstat` fills the 144-byte Darwin `struct stat`, the mode reads back as
+  a regular file and the size as the three written bytes.
+
+### Running Apple's Metal Shader Converter natively
+
+Unpacked locally (not redistributed), the macOS x86_64
+`metal-shaderconverter` 4.0.3 runs under `iosim-run` through the opt-in host
+symbol bridge. `--version` prints `metal-irconverter version: 4.0.3` and
+`Default triple: air64-apple-macosx15.0.0`; `--help` lists the full option
+table only after the loader executes the binary's 242 `__init_offsets`
+constructors (before that, only LLVM's generic options exist).
+
+A DXIL pixel shader compiled by Microsoft's Linux `dxc` (`ps_6_0`, entry
+`main`) converts end to end:
+
+```
+tools/host-run.sh …/metal-shaderconverter shader.dxil -o=shader.metallib
+→ exit 0, shader.metallib 4512 bytes
+```
+
+The output starts with `MTLB` and its container strings include `NAME`,
+`main`, `TYPE`, `HASH`, `VERS`, `UUID` and `ENDTRLST`. Getting there required
+Darwin pthread static-initializer normalization (the initial attempt deadlocked
+in `DXIL2AIR::assemble` on the global assemble mutex), thread-local thunk
+support (`llvm::ThisThreadsStreamIDToken` and the TimeTrace profiler),
+CommonCrypto, `dispatch_data`, and Darwin signal/stat/open translation.
+`docs/METAL-SHADER-CONVERTER.md` records the unpacking and run steps; the
+converter itself is a DXIL→Metal IR tool and does not compile Metal source or
+render anything, so this proves the loader/ABI path rather than a Metal
+framework.
+
 ## Limitations
 
 The framework surface is still a subset. Auto Layout supports equality and
@@ -1039,4 +1109,9 @@ reply ports. The pasteboard shares strings and data items but has no rich
 pasteboard types, item providers or change notifications. Metal and video
 remain unimplemented. The kernel symbolication tool handles one Mach-O image
 and its dSYM; kext dSYMs are not merged into one address space because their
-load addresses are only known from a kernel collection.
+load addresses are only known from a kernel collection. Running macOS
+command-line tools relies on the opt-in `IOSIM_HOST_SYMBOLS` bridge and on
+host libc++/libarchive/libbz2 being installed; guest processes under the
+normal simulator path do not use it. There is no Metal framework or Metal
+shader compiler: the Metal Shader Converter accepts DXIL and emits Metal IR,
+but the runtime cannot yet execute that IR.

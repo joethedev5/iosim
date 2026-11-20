@@ -20,6 +20,17 @@ extern void _Block_release(void *block);
 extern void *objc_msgSend(void *self, void *sel, ...);
 extern void *objc_getClass(const char *name);
 extern char *getenv(const char *name);
+extern void *object_getClass(void *obj);
+extern void *object_setClass(void *obj, void *cls);
+extern void *objc_allocateClassPair(void *superclass, const char *name,
+                                    unsigned long extraBytes);
+extern void objc_registerClassPair(void *cls);
+extern int class_addMethod(void *cls, void *sel, void *imp, const char *types);
+extern void *class_getInstanceMethod(void *cls, void *sel);
+extern void *class_getMethodImplementation(void *cls, void *sel);
+extern const char *method_getTypeEncoding(void *method);
+extern void *class_getSuperclass(void *cls);
+extern void *sel_registerName(const char *name);
 
 extern void *malloc(unsigned long size);
 extern void *calloc(unsigned long n, unsigned long size);
@@ -49,6 +60,7 @@ extern unsigned long strlen(const char *s);
 extern int   strcmp(const char *a, const char *b);
 extern int   strncmp(const char *a, const char *b, unsigned long n);
 extern char *strchr(const char *s, int c);
+extern char *strrchr(const char *s, int c);
 extern void *memcpy(void *dst, const void *src, unsigned long n);
 extern void *memset(void *dst, int c, unsigned long n);
 extern int   memcmp(const void *a, const void *b, unsigned long n);
@@ -168,6 +180,488 @@ static int objects_equal(id a, id b)
     return [a isEqual:b] ? 1 : 0;
 }
 
+
+/* ---------------------------------------------------- key-value coding/observing */
+
+id NSKeyValueChangeKindKey = @"NSKeyValueChangeKindKey";
+id NSKeyValueChangeNewKey = @"NSKeyValueChangeNewKey";
+id NSKeyValueChangeOldKey = @"NSKeyValueChangeOldKey";
+id NSKeyValueChangeIndexesKey = @"NSKeyValueChangeIndexesKey";
+id NSKeyValueChangeNotificationIsPriorKey = @"NSKeyValueChangeNotificationIsPriorKey";
+
+#define KVC_KEY_MAX 192
+
+static void kvc_capitalize(const char *key, char *out, unsigned long cap)
+{
+    unsigned long i = 0;
+    if (!cap)
+        return;
+    for (; key && key[i] && i + 1 < cap; i++)
+    {
+        char c = key[i];
+        if (i == 0 && c >= 'a' && c <= 'z')
+            c = (char)(c - 'a' + 'A');
+        out[i] = c;
+    }
+    out[i] = 0;
+}
+
+static id kvc_getter_value(id obj, SEL sel, const char *types)
+{
+    if (!types || !*types)
+        return ((id (*)(id, SEL))objc_msgSend)(obj, sel);
+    switch (types[0])
+    {
+    case '@':
+    case '#':
+        return ((id (*)(id, SEL))objc_msgSend)(obj, sel);
+    case 'B':
+        return [NSNumber numberWithBool:
+            ((BOOL (*)(id, SEL))objc_msgSend)(obj, sel)];
+    case 'c':
+        return [NSNumber numberWithInt:
+            ((signed char (*)(id, SEL))objc_msgSend)(obj, sel)];
+    case 'C':
+        return [NSNumber numberWithInt:
+            ((unsigned char (*)(id, SEL))objc_msgSend)(obj, sel)];
+    case 's':
+        return [NSNumber numberWithInt:
+            ((short (*)(id, SEL))objc_msgSend)(obj, sel)];
+    case 'S':
+        return [NSNumber numberWithInt:
+            ((unsigned short (*)(id, SEL))objc_msgSend)(obj, sel)];
+    case 'i':
+        return [NSNumber numberWithInt:
+            ((int (*)(id, SEL))objc_msgSend)(obj, sel)];
+    case 'I':
+        return [NSNumber numberWithLongLong:
+            ((unsigned int (*)(id, SEL))objc_msgSend)(obj, sel)];
+    case 'l':
+    case 'q':
+        return [NSNumber numberWithLongLong:
+            ((long long (*)(id, SEL))objc_msgSend)(obj, sel)];
+    case 'L':
+    case 'Q':
+        return [NSNumber numberWithLongLong:
+            ((unsigned long long (*)(id, SEL))objc_msgSend)(obj, sel)];
+    case 'f':
+        return [NSNumber numberWithFloat:
+            ((float (*)(id, SEL))objc_msgSend)(obj, sel)];
+    case 'd':
+        return [NSNumber numberWithDouble:
+            ((double (*)(id, SEL))objc_msgSend)(obj, sel)];
+    default:
+        return nil;
+    }
+}
+
+static SEL kvc_getter_sel(id obj, const char *key)
+{
+    char cap[KVC_KEY_MAX], buf[KVC_KEY_MAX + 16];
+    kvc_capitalize(key, cap, sizeof(cap));
+    snprintf(buf, sizeof(buf), "get%s", cap);
+    if (iosim_objc_responds(obj, sel_registerName(buf)))
+        return sel_registerName(buf);
+    snprintf(buf, sizeof(buf), "%s", key);
+    if (iosim_objc_responds(obj, sel_registerName(buf)))
+        return sel_registerName(buf);
+    snprintf(buf, sizeof(buf), "is%s", cap);
+    if (iosim_objc_responds(obj, sel_registerName(buf)))
+        return sel_registerName(buf);
+    return 0;
+}
+
+static SEL kvc_setter_sel(id obj, const char *key)
+{
+    char cap[KVC_KEY_MAX], buf[KVC_KEY_MAX + 16];
+    kvc_capitalize(key, cap, sizeof(cap));
+    snprintf(buf, sizeof(buf), "set%s:", cap);
+    if (iosim_objc_responds(obj, sel_registerName(buf)))
+        return sel_registerName(buf);
+    snprintf(buf, sizeof(buf), "_set%s:", cap);
+    if (iosim_objc_responds(obj, sel_registerName(buf)))
+        return sel_registerName(buf);
+    return 0;
+}
+
+static const char *method_arg_type(const char *types)
+{
+    if (!types)
+        return 0;
+    const char *arg = strrchr(types, ':');
+    if (!arg)
+        return types;
+    arg++;
+    while (*arg >= '0' && *arg <= '9')
+        arg++;
+    return arg;
+}
+
+static void kvc_apply_setter(id obj, SEL sel, const char *types, id value)
+{
+    const char *arg = method_arg_type(types);
+    char t = arg && *arg ? *arg : '@';
+    if (t == '@' || t == '#')
+    {
+        ((void (*)(id, SEL, id))objc_msgSend)(obj, sel, value);
+        return;
+    }
+    if (!value)
+        return;
+    switch (t)
+    {
+    case 'B':
+        ((void (*)(id, SEL, BOOL))objc_msgSend)(obj, sel, [value boolValue]);
+        break;
+    case 'c':
+    case 'C':
+    case 's':
+    case 'S':
+    case 'i':
+        ((void (*)(id, SEL, int))objc_msgSend)(obj, sel, [value intValue]);
+        break;
+    case 'I':
+        ((void (*)(id, SEL, unsigned int))objc_msgSend)(obj, sel,
+            (unsigned int)[value longLongValue]);
+        break;
+    case 'l':
+    case 'q':
+        ((void (*)(id, SEL, long long))objc_msgSend)(obj, sel,
+            [value longLongValue]);
+        break;
+    case 'L':
+    case 'Q':
+        ((void (*)(id, SEL, unsigned long long))objc_msgSend)(obj, sel,
+            (unsigned long long)[value longLongValue]);
+        break;
+    case 'f':
+        ((void (*)(id, SEL, float))objc_msgSend)(obj, sel,
+            [value floatValue]);
+        break;
+    case 'd':
+        ((void (*)(id, SEL, double))objc_msgSend)(obj, sel,
+            [value doubleValue]);
+        break;
+    default:
+        break;
+    }
+}
+
+/* KVO notification bookkeeping. Guest objects are not reference counted in
+ * this runtime, so observation records are process-lifetime like the
+ * associated objects Foundation installs. */
+#define MAX_KVO_OBSERVATIONS 256
+#define MAX_KVO_PENDING 64
+#define MAX_KVO_SUBCLASSES 64
+#define MAX_KVO_SETTERS 256
+
+struct kvo_observation {
+    void *object;
+    void *observer;
+    NSString *keyPath;
+    NSString *key;
+    void *context;
+    unsigned long options;
+    int active;
+};
+static struct kvo_observation g_kvo_observations[MAX_KVO_OBSERVATIONS];
+static int g_kvo_nobservations;
+
+struct kvo_pending {
+    void *object;
+    char key[KVC_KEY_MAX];
+    id oldValue;
+    int active;
+};
+static struct kvo_pending g_kvo_pending[MAX_KVO_PENDING];
+
+struct kvo_subclass {
+    void *original;
+    void *subclass;
+};
+static struct kvo_subclass g_kvo_subclasses[MAX_KVO_SUBCLASSES];
+static int g_kvo_nsubclasses;
+
+struct kvo_setter {
+    void *subclass;
+    const char *selector;
+    NSString *key;
+};
+static struct kvo_setter g_kvo_setters[MAX_KVO_SETTERS];
+static int g_kvo_nsetters;
+
+static struct kvo_pending *kvo_pending_find(void *object, const char *key)
+{
+    for (int i = MAX_KVO_PENDING - 1; i >= 0; i--)
+    {
+        struct kvo_pending *p = &g_kvo_pending[i];
+        if (p->active && p->object == object && strcmp(p->key, key) == 0)
+            return p;
+    }
+    return 0;
+}
+
+static struct kvo_pending *kvo_pending_push(void *object, const char *key,
+                                            id oldValue)
+{
+    struct kvo_pending *p = kvo_pending_find(object, key);
+    if (p)
+        return p;
+    for (int i = 0; i < MAX_KVO_PENDING; i++)
+    {
+        p = &g_kvo_pending[i];
+        if (p->active)
+            continue;
+        p->active = 1;
+        p->object = object;
+        p->oldValue = oldValue;
+        snprintf(p->key, sizeof(p->key), "%s", key);
+        return p;
+    }
+    return 0;
+}
+
+static NSString *kvo_key_for_selector(void *subclass, void *sel)
+{
+    const char *name = (const char *)sel;
+    for (int i = 0; i < g_kvo_nsetters; i++)
+        if (g_kvo_setters[i].subclass == subclass &&
+            strcmp(g_kvo_setters[i].selector, name) == 0)
+            return g_kvo_setters[i].key;
+    return nil;
+}
+
+static void kvo_remember_setter(void *subclass, void *sel, NSString *key)
+{
+    const char *name = (const char *)sel;
+    for (int i = 0; i < g_kvo_nsetters; i++)
+        if (g_kvo_setters[i].subclass == subclass &&
+            strcmp(g_kvo_setters[i].selector, name) == 0)
+            return;
+    if (g_kvo_nsetters >= MAX_KVO_SETTERS)
+        return;
+    g_kvo_setters[g_kvo_nsetters].subclass = subclass;
+    g_kvo_setters[g_kvo_nsetters].selector = name;
+    g_kvo_setters[g_kvo_nsetters].key = key;
+    g_kvo_nsetters++;
+}
+
+static void kvo_notify(void *object, NSString *key, id oldValue, id newValue,
+                       int prior)
+{
+    const char *key_c = [key UTF8String];
+    if (!key_c)
+        return;
+    for (int i = 0; i < g_kvo_nobservations; i++)
+    {
+        struct kvo_observation *o = &g_kvo_observations[i];
+        if (!o->active || o->object != object)
+            continue;
+        if (prior && !(o->options & NSKeyValueObservingOptionPrior))
+            continue;
+        const char *kp = [o->keyPath UTF8String];
+        if (!kp)
+            continue;
+        unsigned long n = 0;
+        while (kp[n] && kp[n] != '.')
+            n++;
+        if (strlen(key_c) != n || strncmp(kp, key_c, n) != 0)
+            continue;
+
+        NSMutableDictionary *change = [NSMutableDictionary dictionary];
+        [change setObject:[NSNumber numberWithInt:NSKeyValueChangeSetting]
+                  forKey:NSKeyValueChangeKindKey];
+        if (prior)
+        {
+            [change setObject:[NSNumber numberWithBool:YES]
+                      forKey:NSKeyValueChangeNotificationIsPriorKey];
+            if (o->options & NSKeyValueObservingOptionOld)
+                [change setObject:(oldValue ? oldValue : (id)[NSNull null])
+                          forKey:NSKeyValueChangeOldKey];
+        }
+        else
+        {
+            if (o->options & NSKeyValueObservingOptionNew)
+                [change setObject:(newValue ? newValue : (id)[NSNull null])
+                          forKey:NSKeyValueChangeNewKey];
+            if (o->options & NSKeyValueObservingOptionOld)
+                [change setObject:(oldValue ? oldValue : (id)[NSNull null])
+                          forKey:NSKeyValueChangeOldKey];
+        }
+        void *observeSel =
+            sel_registerName("observeValueForKeyPath:ofObject:change:context:");
+        if (!iosim_objc_responds(o->observer, observeSel))
+            continue;
+        ((void (*)(id, SEL, id, id, id, void *))objc_msgSend)(
+            o->observer, observeSel, o->keyPath, object, change, o->context);
+    }
+}
+
+static void *kvo_class_imp(void *self, void *sel)
+{
+    (void)sel;
+    return iosim_objc_superclass(iosim_objc_class_of(self));
+}
+
+static void *kvo_subclass_for(void *original)
+{
+    for (int i = 0; i < g_kvo_nsubclasses; i++)
+        if (g_kvo_subclasses[i].original == original)
+            return g_kvo_subclasses[i].subclass;
+    if (g_kvo_nsubclasses >= MAX_KVO_SUBCLASSES)
+        return original;
+    char name[KVC_KEY_MAX];
+    snprintf(name, sizeof(name), "NSKVONotifying_%s", class_getName(original));
+    void *sub = objc_allocateClassPair(original, name, 0);
+    if (!sub)
+        return original;
+    class_addMethod(sub, sel_registerName("class"), (void *)kvo_class_imp, "#@:");
+    objc_registerClassPair(sub);
+    g_kvo_subclasses[g_kvo_nsubclasses].original = original;
+    g_kvo_subclasses[g_kvo_nsubclasses].subclass = sub;
+    g_kvo_nsubclasses++;
+    return sub;
+}
+
+#define KVO_SETTER_PROLOGUE(self_, cmd_)                                      \
+    NSString *kvo_key_ = kvo_key_for_selector(iosim_objc_class_of(self_),     \
+                                              cmd_);                          \
+    ((void (*)(id, SEL, id))objc_msgSend)(self_,                              \
+        sel_registerName("willChangeValueForKey:"), kvo_key_)
+
+#define KVO_SETTER_EPILOGUE(self_, cmd_)                                      \
+    ((void (*)(id, SEL, id))objc_msgSend)(self_,                              \
+        sel_registerName("didChangeValueForKey:"), kvo_key_)
+
+static void *kvo_original_setter(id self, SEL _cmd)
+{
+    return class_getMethodImplementation(
+        iosim_objc_superclass(iosim_objc_class_of(self)), _cmd);
+}
+
+static void kvo_set_object(id self, SEL _cmd, id value)
+{
+    KVO_SETTER_PROLOGUE(self, _cmd);
+    void *imp = kvo_original_setter(self, _cmd);
+    ((void (*)(id, SEL, id))imp)(self, _cmd, value);
+    KVO_SETTER_EPILOGUE(self, _cmd);
+}
+
+static void kvo_set_int(id self, SEL _cmd, int value)
+{
+    KVO_SETTER_PROLOGUE(self, _cmd);
+    void *imp = kvo_original_setter(self, _cmd);
+    ((void (*)(id, SEL, int))imp)(self, _cmd, value);
+    KVO_SETTER_EPILOGUE(self, _cmd);
+}
+
+static void kvo_set_longlong(id self, SEL _cmd, long long value)
+{
+    KVO_SETTER_PROLOGUE(self, _cmd);
+    void *imp = kvo_original_setter(self, _cmd);
+    ((void (*)(id, SEL, long long))imp)(self, _cmd, value);
+    KVO_SETTER_EPILOGUE(self, _cmd);
+}
+
+static void kvo_set_bool(id self, SEL _cmd, BOOL value)
+{
+    KVO_SETTER_PROLOGUE(self, _cmd);
+    void *imp = kvo_original_setter(self, _cmd);
+    ((void (*)(id, SEL, BOOL))imp)(self, _cmd, value);
+    KVO_SETTER_EPILOGUE(self, _cmd);
+}
+
+static void kvo_set_float(id self, SEL _cmd, float value)
+{
+    KVO_SETTER_PROLOGUE(self, _cmd);
+    void *imp = kvo_original_setter(self, _cmd);
+    ((void (*)(id, SEL, float))imp)(self, _cmd, value);
+    KVO_SETTER_EPILOGUE(self, _cmd);
+}
+
+static void kvo_set_double(id self, SEL _cmd, double value)
+{
+    KVO_SETTER_PROLOGUE(self, _cmd);
+    void *imp = kvo_original_setter(self, _cmd);
+    ((void (*)(id, SEL, double))imp)(self, _cmd, value);
+    KVO_SETTER_EPILOGUE(self, _cmd);
+}
+
+static void kvo_set_point(id self, SEL _cmd, CGPoint value)
+{
+    KVO_SETTER_PROLOGUE(self, _cmd);
+    void *imp = kvo_original_setter(self, _cmd);
+    ((void (*)(id, SEL, CGPoint))imp)(self, _cmd, value);
+    KVO_SETTER_EPILOGUE(self, _cmd);
+}
+
+static void kvo_set_size(id self, SEL _cmd, CGSize value)
+{
+    KVO_SETTER_PROLOGUE(self, _cmd);
+    void *imp = kvo_original_setter(self, _cmd);
+    ((void (*)(id, SEL, CGSize))imp)(self, _cmd, value);
+    KVO_SETTER_EPILOGUE(self, _cmd);
+}
+
+static void kvo_set_rect(id self, SEL _cmd, CGRect value)
+{
+    KVO_SETTER_PROLOGUE(self, _cmd);
+    void *imp = kvo_original_setter(self, _cmd);
+    ((void (*)(id, SEL, CGRect))imp)(self, _cmd, value);
+    KVO_SETTER_EPILOGUE(self, _cmd);
+}
+
+static void *kvo_wrapper_for_types(const char *types)
+{
+    const char *arg = method_arg_type(types);
+    char t = arg && *arg ? *arg : '@';
+    switch (t)
+    {
+    case '@':
+    case '#':
+        return (void *)kvo_set_object;
+    case 'B':
+    case 'c':
+        return (void *)kvo_set_bool;
+    case 'C':
+    case 's':
+    case 'S':
+    case 'i':
+    case 'I':
+        return (void *)kvo_set_int;
+    case 'l':
+    case 'q':
+    case 'L':
+    case 'Q':
+        return (void *)kvo_set_longlong;
+    case 'f':
+        return (void *)kvo_set_float;
+    case 'd':
+        return (void *)kvo_set_double;
+    case '{':
+        if (strncmp(arg, "{CGPoint", 8) == 0)
+            return (void *)kvo_set_point;
+        if (strncmp(arg, "{CGSize", 7) == 0)
+            return (void *)kvo_set_size;
+        if (strncmp(arg, "{CGRect", 7) == 0)
+            return (void *)kvo_set_rect;
+        return (void *)kvo_set_object;
+    default:
+        return (void *)kvo_set_object;
+    }
+}
+
+static void kvo_install_setter(void *subclass, void *original, SEL setter,
+                                NSString *key)
+{
+    void *method = class_getInstanceMethod(original, setter);
+    if (!method)
+        return;
+    const char *types = method_getTypeEncoding(method);
+    class_addMethod(subclass, setter, kvo_wrapper_for_types(types), types);
+    kvo_remember_setter(subclass, setter, key);
+}
+
 /* ------------------------------------------------------------- NSObject */
 
 @implementation NSObject
@@ -229,6 +723,227 @@ static int objects_equal(id a, id b)
     [self cancelPreviousPerformRequestsWithTarget:target
                                          selector:0
                                            object:0];
+}
+
+- (id)valueForKey:(NSString *)key
+{
+    const char *k = [key UTF8String];
+    if (!k)
+        return nil;
+    if (strcmp(k, "self") == 0)
+        return self;
+    SEL getter = kvc_getter_sel(self, k);
+    if (!getter)
+        return nil;
+    void *method = class_getInstanceMethod(iosim_objc_class_of(self), getter);
+    const char *types = method ? method_getTypeEncoding(method) : 0;
+    return kvc_getter_value(self, getter, types);
+}
+
+- (void)setValue:(id)value forKey:(NSString *)key
+{
+    const char *k = [key UTF8String];
+    if (!k)
+        return;
+    SEL setter = kvc_setter_sel(self, k);
+    if (!setter)
+        return;
+    void *method = class_getInstanceMethod(iosim_objc_class_of(self), setter);
+    const char *types = method ? method_getTypeEncoding(method) : 0;
+    kvc_apply_setter(self, setter, types, value);
+}
+
+- (id)valueForKeyPath:(NSString *)keyPath
+{
+    const char *p = [keyPath UTF8String];
+    if (!p)
+        return nil;
+    if (p[0] == '@')
+    {
+        if (strcmp(p, "@count") == 0)
+        {
+            SEL countSel = sel_registerName("count");
+            if (iosim_objc_responds(self, countSel))
+                return [NSNumber numberWithLongLong:
+                    ((unsigned long (*)(id, SEL))objc_msgSend)(self, countSel)];
+            return [NSNumber numberWithInt:0];
+        }
+        return nil;
+    }
+    const char *dot = strchr(p, '.');
+    if (!dot)
+        return [self valueForKey:keyPath];
+    unsigned long n = (unsigned long)(dot - p);
+    if (n >= KVC_KEY_MAX)
+        return nil;
+    char first[KVC_KEY_MAX];
+    memcpy(first, p, n);
+    first[n] = 0;
+    id value = [self valueForKey:[NSString stringWithUTF8String:first]];
+    if (!value)
+        return nil;
+    return [value valueForKeyPath:[NSString stringWithUTF8String:dot + 1]];
+}
+
+- (void)setValue:(id)value forKeyPath:(NSString *)keyPath
+{
+    const char *p = [keyPath UTF8String];
+    if (!p)
+        return;
+    const char *dot = strchr(p, '.');
+    if (!dot)
+    {
+        [self setValue:value forKey:keyPath];
+        return;
+    }
+    unsigned long n = (unsigned long)(dot - p);
+    if (n >= KVC_KEY_MAX)
+        return;
+    char first[KVC_KEY_MAX];
+    memcpy(first, p, n);
+    first[n] = 0;
+    id target = [self valueForKey:[NSString stringWithUTF8String:first]];
+    if (!target)
+        return;
+    [target setValue:value
+          forKeyPath:[NSString stringWithUTF8String:dot + 1]];
+}
+
+- (id)dictionaryWithValuesForKeys:(NSArray *)keys
+{
+    NSMutableDictionary *result = [NSMutableDictionary dictionary];
+    for (id key in keys)
+    {
+        id value = [self valueForKey:key];
+        [result setObject:(value ? value : (id)[NSNull null]) forKey:key];
+    }
+    return result;
+}
+
+- (void)setValuesForKeysWithDictionary:(NSDictionary *)keyedValues
+{
+    for (id key in keyedValues)
+        [self setValue:[keyedValues objectForKey:key] forKey:key];
+}
+
+- (void)addObserver:(NSObject *)observer forKeyPath:(NSString *)keyPath
+            options:(NSKeyValueObservingOptions)options context:(void *)context
+{
+    if (!observer || !keyPath)
+        return;
+    const char *p = [keyPath UTF8String];
+    if (!p)
+        return;
+    unsigned long n = 0;
+    while (p[n] && p[n] != '.')
+        n++;
+    if (n >= KVC_KEY_MAX)
+        return;
+    char root[KVC_KEY_MAX];
+    memcpy(root, p, n);
+    root[n] = 0;
+    NSString *key = [NSString stringWithUTF8String:root];
+
+    void *cls = iosim_objc_class_of(self);
+    if (strncmp(class_getName(cls), "NSKVONotifying_", 15) == 0)
+        cls = iosim_objc_superclass(cls);
+    void *sub = kvo_subclass_for(cls);
+    if (iosim_objc_class_of(self) != sub)
+        object_setClass(self, sub);
+    SEL setter = kvc_setter_sel(self, root);
+    if (setter)
+        kvo_install_setter(sub, cls, setter, key);
+
+    struct kvo_observation *o = 0;
+    for (int i = 0; i < MAX_KVO_OBSERVATIONS; i++)
+    {
+        if (!g_kvo_observations[i].active)
+        {
+            o = &g_kvo_observations[i];
+            break;
+        }
+    }
+    if (!o)
+        return;
+    o->object = self;
+    o->observer = observer;
+    o->keyPath = keyPath;
+    o->key = key;
+    o->context = context;
+    o->options = options;
+    o->active = 1;
+    if (g_kvo_nobservations < MAX_KVO_OBSERVATIONS)
+        g_kvo_nobservations++;
+
+    if (options & NSKeyValueObservingOptionInitial)
+        kvo_notify(self, key, nil, [self valueForKey:key], 0);
+}
+
+- (void)removeObserver:(NSObject *)observer forKeyPath:(NSString *)keyPath
+{
+    for (int i = 0; i < g_kvo_nobservations; i++)
+    {
+        struct kvo_observation *o = &g_kvo_observations[i];
+        if (o->active && o->object == self && o->observer == observer &&
+            [o->keyPath isEqual:keyPath])
+            o->active = 0;
+    }
+}
+
+- (void)removeObserver:(NSObject *)observer forKeyPath:(NSString *)keyPath
+               context:(void *)context
+{
+    for (int i = 0; i < g_kvo_nobservations; i++)
+    {
+        struct kvo_observation *o = &g_kvo_observations[i];
+        if (o->active && o->object == self && o->observer == observer &&
+            o->context == context && [o->keyPath isEqual:keyPath])
+            o->active = 0;
+    }
+}
+
+- (void)willChangeValueForKey:(NSString *)key
+{
+    const char *k = [key UTF8String];
+    if (!k)
+        return;
+    struct kvo_pending *p = kvo_pending_find(self, k);
+    if (!p)
+        p = kvo_pending_push(self, k, [self valueForKey:key]);
+    if (p)
+        kvo_notify(self, key, p->oldValue, nil, 1);
+}
+
+- (void)didChangeValueForKey:(NSString *)key
+{
+    const char *k = [key UTF8String];
+    if (!k)
+        return;
+    struct kvo_pending *p = kvo_pending_find(self, k);
+    if (!p)
+    {
+        id current = [self valueForKey:key];
+        kvo_notify(self, key, current, current, 0);
+        return;
+    }
+    id newValue = [self valueForKey:key];
+    p->active = 0;
+    kvo_notify(self, key, p->oldValue, newValue, 0);
+}
+
+- (void)observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object
+                        change:(NSDictionary *)change context:(void *)context
+{
+    (void)keyPath;
+    (void)object;
+    (void)change;
+    (void)context;
+}
+
++ (BOOL)automaticallyNotifiesObserversForKey:(NSString *)key
+{
+    (void)key;
+    return YES;
 }
 @end
 

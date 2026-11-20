@@ -61,6 +61,21 @@ do
     -dylib -install_name "$install" -o "$OUT$out" "$B/empty.o" -undefined dynamic_lookup
 done
 
+# Canonical versioned paths and host-tool anchors: macOS binaries reference
+# CoreFoundation through Versions/A and versioned libSystem dylibs. The loader
+# resolves their imports through its shim namespace, so empty images suffice
+# for dependency lookup and keep every canonical path present.
+mkdir -p "$OUT/System/Library/Frameworks/CoreFoundation.framework/Versions/A"
+ln -sf ../../CoreFoundation \
+  "$OUT/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation"
+"$CC" -target x86_64-apple-macos27.0 -ffreestanding -fPIC \
+  -c "$ROOT/frameworks/empty.c" -o "$B/empty-macos.o"
+for lib in libc++.1 libarchive.2 libbz2.1.0; do
+  "$LD64" -arch x86_64 -platform_version macos 27.0 27.0 \
+    -dylib -install_name "/usr/lib/$lib.dylib" \
+    -o "$OUT/usr/lib/$lib.dylib" "$B/empty-macos.o" -undefined dynamic_lookup
+done
+
 # SpringBoard: the system UI executable, booted by launchd.
 SB_DIR="$OUT/System/Library/CoreServices/SpringBoard.app"
 mkdir -p "$SB_DIR"

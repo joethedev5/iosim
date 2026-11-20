@@ -43,6 +43,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | CoreAnimation paths, gradients, sublayers (z-ordered), PNG images | ✅ |
 | Foundation collections, strings, selector/block notifications with userInfo, timers, NSIndexPath | ✅ |
 | Foundation fast enumeration (`for-in`) and indexed/keyed collection subscripting | ✅ |
+| Key-value coding (accessor lookup, scalar boxing, key paths) and automatic KVO | ✅ |
 | NSDateFormatter parse/print round trip, NSNumberFormatter decimal/currency/percent | ✅ |
 | KDK kernel symbolication: full local+global maps, Mach trap and BSD syscall tables | ✅ |
 | `NSFileManager`, `NSData` file I/O, `NSFileHandle` read/write/seek/truncate, `NSURL`, `NSJSONSerialization` | ✅ |
@@ -54,6 +55,9 @@ runners**, combined with the public Darling and Apple dyld sources.
 | App bundle resources: `NSBundle` lookup and `UIImage imageNamed:` PNGs | ✅ |
 | libdispatch queues, groups, semaphores; main-queue drain from UIKit | ✅ |
 | Mach ports/messages, launchd bootstrap namespace, cross-process messaging | ✅ |
+| Mach-O initializers (`__init_offsets`, `__mod_init_func`), thread-local variables, Darwin pthread normalization | ✅ |
+| Darwin ABI translation: `stat$INODE64`, `open` flags, signals, CommonCrypto, `dispatch_data` | ✅ |
+| Unmodified macOS x86_64 CLIs: Apple Metal Shader Converter DXIL→metallib, end to end | ✅ |
 | XPC peer connections, async/sync request-reply and serialized dictionaries across processes | ✅ |
 | launchd_sim LaunchDaemon plists: RunAtLoad, on-demand MachServices jobs, KeepAlive | ✅ |
 | launchd socket activation: `Sockets` listeners, `launch_activate_socket`, on-demand restart | ✅ |
@@ -209,6 +213,10 @@ tests/             end-to-end tests
   real iOS 27 simulator, with pixel measurements.
 - [`docs/KDK.md`](docs/KDK.md) — unpacking a Kernel Debug Kit and fully
   symbolicating its x86_64 kernel, including the XNU trap and syscall tables.
+- [`docs/METAL-SHADER-CONVERTER.md`](docs/METAL-SHADER-CONVERTER.md) — running
+  Apple's x86_64 Metal Shader Converter natively, from DXIL to a `.metallib`.
+- [`docs/RESEARCH-NOTES.md`](docs/RESEARCH-NOTES.md) — running notes for
+  artifacts, measurements and open directions.
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — path from this substrate to a usable
   simulator (graphics, events, services, frameworks).
 

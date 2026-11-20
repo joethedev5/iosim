@@ -286,3 +286,58 @@ int iosim_context_apply_fixups(struct iosim_context *ctx,
     }
     return 0;
 }
+
+void iosim_context_run_initializers(struct iosim_context *ctx)
+{    if (getenv("IOSIM_SKIP_INITIALIZERS"))
+        return;
+
+    /* Images are loaded depth-first with the main executable at index 0 and
+     * its dependencies appended afterwards, so reverse order initializes
+     * leaves of the dependency graph before their dependents and main last. */
+    for (int i = ctx->nimages - 1; i >= 0; i--)
+    {
+        struct iosim_image *img = ctx->images[i];
+        for (int s = 0; s < img->nsects; s++)
+        {
+            struct iosim_section *sec = &img->sects[s];
+            if (strcmp(sec->sectname, "__init_offsets") == 0)
+            {
+                /* Modern linked images store 32-bit initializer offsets
+                 * relative to the image's preferred base instead of pointer
+                 * arrays. */
+                uint64_t count = sec->size / sizeof(int32_t);
+                int32_t *offsets =
+                    (int32_t *)(uintptr_t)(sec->addr + img->slide);
+                for (uint64_t n = 0; n < count; n++)
+                {
+                    int32_t off = offsets[n];
+                    if (!off)
+                        continue;
+                    void (*fn)(void) = (void (*)(void))(uintptr_t)
+                        ((int64_t)img->preferred_base + img->slide + off);
+                    if (img->verbose)
+                        fprintf(stderr, "iosim: init offset %s[%llu] = %p\n",
+                                img->path, (unsigned long long)n, fn);
+                    fn();
+                }
+                continue;
+            }
+            if (strcmp(sec->sectname, "__mod_init_func") != 0)
+                continue;
+            uint64_t count = sec->size / sizeof(void *);
+            void **entries =
+                (void **)(uintptr_t)(sec->addr + img->slide);
+            for (uint64_t n = 0; n < count; n++)
+            {
+                if (entries[n])
+                {
+                    if (img->verbose)
+                        fprintf(stderr, "iosim: init %s[%llu] = %p\n",
+                                img->path, (unsigned long long)n,
+                                entries[n]);
+                    ((void (*)(void))entries[n])();
+                }
+            }
+        }
+    }
+}

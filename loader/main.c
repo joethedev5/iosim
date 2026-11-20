@@ -219,6 +219,17 @@ int main(int argc, char **argv)
     if (verbose)
         iosim_objc_dump();
 
+    /* Prepare language-runtime data before any constructor runs: thread-local
+     * thunks get their getter and per-image metadata, and Darwin pthread
+     * static initializers are translated to the host library's layout. */
+    for (int i = 0; i < ctx.nimages; i++)
+        iosim_tlv_setup_image(ctx.images[i]);
+    iosim_normalize_pthread_objects(&ctx);
+
+    /* dyld runs each image's initializer functions after fixups and before
+     * entry; C++ executables depend on this for static constructors. */
+    iosim_context_run_initializers(&ctx);
+
     int guest_argc = argc - first_arg + 1;
     char **guest_argv = calloc((size_t)guest_argc + 1, sizeof(char *));
     if (!guest_argv)

@@ -19,9 +19,11 @@
 #include <time.h>
 #include <stdarg.h>
 #include <limits.h>
+#include <dlfcn.h>
 #include <sys/wait.h>
 #include <sys/stat.h>
 #include <dirent.h>
+#include <fcntl.h>
 #include <signal.h>
 
 /* ---------- guest file-system helpers ----------
@@ -37,6 +39,141 @@ int iosim_fs_is_dir(const char *path)
 {
     struct stat st;
     return path && stat(path, &st) == 0 && S_ISDIR(st.st_mode);
+}
+
+/* ---------- Darwin ABI stat/open ----------
+ * Guests compiled for x86_64 Darwin pass a 144-byte struct stat whose field
+ * order differs from glibc's, and open(2) flag bits differ as well. These
+ * shims translate at the boundary so real macOS binaries can call them. */
+
+struct darwin_timespec {
+    long tv_sec;
+    long tv_nsec;
+};
+
+struct darwin_stat {
+    int32_t st_dev;
+    uint16_t st_mode;
+    uint16_t st_nlink;
+    uint64_t st_ino;
+    uint32_t st_uid;
+    uint32_t st_gid;
+    int32_t st_rdev;
+    struct darwin_timespec st_atimespec;
+    struct darwin_timespec st_mtimespec;
+    struct darwin_timespec st_ctimespec;
+    struct darwin_timespec st_birthtimespec;
+    int64_t st_size;
+    int64_t st_blocks;
+    int32_t st_blksize;
+    uint32_t st_flags;
+    uint32_t st_gen;
+    int32_t st_lspare;
+    int64_t st_qspare[2];
+};
+
+_Static_assert(sizeof(struct darwin_stat) == 144, "Darwin stat layout");
+
+static void darwin_fill_stat(struct darwin_stat *out, const struct stat *st)
+{
+    memset(out, 0, sizeof(*out));
+    out->st_dev = (int32_t)st->st_dev;
+    out->st_mode = (uint16_t)st->st_mode;
+    out->st_nlink = (uint16_t)st->st_nlink;
+    out->st_ino = (uint64_t)st->st_ino;
+    out->st_uid = (uint32_t)st->st_uid;
+    out->st_gid = (uint32_t)st->st_gid;
+    out->st_rdev = (int32_t)st->st_rdev;
+    out->st_atimespec.tv_sec = st->st_atim.tv_sec;
+    out->st_atimespec.tv_nsec = st->st_atim.tv_nsec;
+    out->st_mtimespec.tv_sec = st->st_mtim.tv_sec;
+    out->st_mtimespec.tv_nsec = st->st_mtim.tv_nsec;
+    out->st_ctimespec.tv_sec = st->st_ctim.tv_sec;
+    out->st_ctimespec.tv_nsec = st->st_ctim.tv_nsec;
+    out->st_birthtimespec = out->st_ctimespec;
+    out->st_size = (int64_t)st->st_size;
+    out->st_blocks = (int64_t)st->st_blocks;
+    out->st_blksize = (int32_t)st->st_blksize;
+}
+
+static int shim_stat_ino64(const char *path, struct darwin_stat *out)
+{
+    struct stat st;
+    if (!path || !out || stat(path, &st) != 0)
+        return -1;
+    darwin_fill_stat(out, &st);
+    return 0;
+}
+
+static int shim_lstat_ino64(const char *path, struct darwin_stat *out)
+{
+    struct stat st;
+    if (!path || !out || lstat(path, &st) != 0)
+        return -1;
+    darwin_fill_stat(out, &st);
+    return 0;
+}
+
+static int shim_fstat_ino64(int fd, struct darwin_stat *out)
+{
+    struct stat st;
+    if (!out || fstat(fd, &st) != 0)
+        return -1;
+    darwin_fill_stat(out, &st);
+    return 0;
+}
+
+static int shim_fstatat_ino64(int fd, const char *path,
+                              struct darwin_stat *out, int flags)
+{
+    struct stat st;
+    if (!path || !out || fstatat(fd, path, &st, flags) != 0)
+        return -1;
+    darwin_fill_stat(out, &st);
+    return 0;
+}
+
+static int darwin_to_host_open_flags(int flags)
+{
+    int host = flags & 3;
+    if (flags & 0x4)       host |= O_NONBLOCK;
+    if (flags & 0x8)       host |= O_APPEND;
+    if (flags & 0x40)      host |= O_ASYNC;
+    if (flags & 0x80)      host |= O_SYNC;
+    if (flags & 0x100)     host |= O_NOFOLLOW;
+    if (flags & 0x200)     host |= O_CREAT;
+    if (flags & 0x400)     host |= O_TRUNC;
+    if (flags & 0x800)     host |= O_EXCL;
+    if (flags & 0x20000)   host |= O_NOCTTY;
+    if (flags & 0x100000)  host |= O_DIRECTORY;
+    if (flags & 0x1000000) host |= O_CLOEXEC;
+    return host;
+}
+
+static int shim_open(const char *path, int flags, ...)
+{
+    int mode = 0;
+    if (flags & 0x200)
+    {
+        va_list ap;
+        va_start(ap, flags);
+        mode = va_arg(ap, int);
+        va_end(ap);
+    }
+    return open(path, darwin_to_host_open_flags(flags), mode);
+}
+
+static int shim_openat(int dirfd, const char *path, int flags, ...)
+{
+    int mode = 0;
+    if (flags & 0x200)
+    {
+        va_list ap;
+        va_start(ap, flags);
+        mode = va_arg(ap, int);
+        va_end(ap);
+    }
+    return openat(dirfd, path, darwin_to_host_open_flags(flags), mode);
 }
 
 long iosim_fs_size(const char *path)
@@ -155,6 +292,15 @@ int iosim_fs_list(const char *path, char *out, unsigned long cap)
     closedir(dir);
     return count;
 }
+
+/* ---------- CommonCrypto (implemented in ccrypto.c) ---------- */
+
+int iosim_CC_MD5_Init(void *ctx);
+int iosim_CC_MD5_Update(void *ctx, const void *data, uint32_t len);
+int iosim_CC_MD5_Final(unsigned char *digest, void *ctx);
+int iosim_CC_SHA256_Init(void *ctx);
+int iosim_CC_SHA256_Update(void *ctx, const void *data, uint32_t len);
+int iosim_CC_SHA256_Final(unsigned char *digest, void *ctx);
 
 /* ---------- launching apps from the system UI ---------- */
 
@@ -290,6 +436,8 @@ int iosim_request_lock(void)
 
 void  *objc_opt_class(void *obj);
 void   objc_enumerationMutation(void *obj);
+void  *iosim_tlv_bootstrap(void *thunk);
+static void *shim_tlv_bootstrap(void *thunk) { return iosim_tlv_bootstrap(thunk); }
 double iosim_now(void);
 void *_Block_copy(void *block);
 void _Block_release(void *block);
@@ -376,6 +524,10 @@ static void shim_malloc_zone_free(void *zone, void *p)
 }
 
 static void shim_malloc_zone_destroy(void *zone) { (void)zone; }
+
+/* Darwin's stack-probe helper: host-generated code does not need the probes
+ * when a real kernel grows the stack, and guest frames are ordinary sizes. */
+static void shim_chkstk_darwin(void) { }
 
 /* ---------- mach time ---------- */
 
@@ -540,9 +692,39 @@ static int shim_sysctlbyname(const char *name, void *oldp, size_t *oldlenp,
     }
     else if (strcmp(name, "kern.osversion") == 0)
     {
-        snprintf(osversion, sizeof(osversion), "iosim 1.0");
+        snprintf(osversion, sizeof(osversion), "26A434");
         src = osversion;
         srclen = strlen(osversion) + 1;
+    }
+    else if (strcmp(name, "kern.osproductversion") == 0)
+    {
+        snprintf(osversion, sizeof(osversion), "27.0.1");
+        src = osversion;
+        srclen = strlen(osversion) + 1;
+    }
+    else if (strcmp(name, "kern.ostype") == 0)
+    {
+        static const char ostype[] = "Darwin";
+        src = ostype;
+        srclen = sizeof(ostype);
+    }
+    else if (strcmp(name, "kern.osrelease") == 0)
+    {
+        snprintf(osversion, sizeof(osversion), "27.0.0");
+        src = osversion;
+        srclen = strlen(osversion) + 1;
+    }
+    else if (strcmp(name, "hw.pagesize") == 0)
+    {
+        static uint32_t pagesize = 4096;
+        src = &pagesize;
+        srclen = sizeof(pagesize);
+    }
+    else if (strcmp(name, "hw.cpu64bit_capable") == 0)
+    {
+        static uint32_t capable = 1;
+        src = &capable;
+        srclen = sizeof(capable);
     }
     else if (strcmp(name, "hw.model") == 0)
     {
@@ -582,6 +764,158 @@ double iosim_wall_time(void)
     return (double)ts.tv_sec + ts.tv_nsec / 1e9;
 }
 
+/* ---------- Darwin signals ----------
+ * Signal numbers, sigset_t (a 32-bit mask on Darwin) and struct sigaction
+ * (16 bytes) differ from glibc's. Translate at the boundary. */
+
+static const int darwin_signal_map[32] = {
+    0, SIGHUP, SIGINT, SIGQUIT, SIGILL, SIGTRAP, SIGABRT, SIGSYS,
+    SIGFPE, SIGKILL, SIGBUS, SIGSEGV, SIGSYS, SIGPIPE, SIGALRM,
+    SIGTERM, SIGURG, SIGSTOP, SIGTSTP, SIGCONT, SIGCHLD, SIGTTIN,
+    SIGTTOU, SIGIO, SIGXCPU, SIGXFSZ, SIGVTALRM, SIGPROF,
+    SIGWINCH, SIGPWR, SIGUSR1, SIGUSR2,
+};
+
+static int darwin_to_host_signal(int sig)
+{
+    if (sig > 0 && sig < 32)
+        return darwin_signal_map[sig];
+    return sig;
+}
+
+static void darwin_set_to_host(const uint32_t *set, sigset_t *host)
+{
+    sigemptyset(host);
+    if (!set)
+        return;
+    for (int s = 1; s < 32; s++)
+        if (*set & (1u << (s - 1)))
+            sigaddset(host, darwin_to_host_signal(s));
+}
+
+static void host_set_to_darwin(const sigset_t *host, uint32_t *set)
+{
+    uint32_t mask = 0;
+    for (int s = 1; s < 32; s++)
+        if (sigismember(host, darwin_to_host_signal(s)) == 1)
+            mask |= 1u << (s - 1);
+    *set = mask;
+}
+
+static int shim_sigprocmask(int how, const uint32_t *set, uint32_t *oldset)
+{
+    if (how == 1)
+        how = SIG_BLOCK;
+    else if (how == 2)
+        how = SIG_UNBLOCK;
+    else if (how == 3)
+        how = SIG_SETMASK;
+    else
+    {
+        errno = EINVAL;
+        return -1;
+    }
+    sigset_t host_set, host_old;
+    darwin_set_to_host(set, &host_set);
+    int r = pthread_sigmask(how, set ? &host_set : NULL,
+                            oldset ? &host_old : NULL);
+    if (r != 0)
+    {
+        errno = r;
+        return -1;
+    }
+    if (oldset)
+        host_set_to_darwin(&host_old, oldset);
+    return 0;
+}
+
+static int shim_pthread_sigmask(int how, const uint32_t *set, uint32_t *oldset)
+{
+    return shim_sigprocmask(how, set, oldset);
+}
+
+struct darwin_sigaction {
+    union {
+        void (*handler)(int);
+        void (*sigaction_fn)(int, void *, void *);
+    } u;
+    uint32_t sa_mask;
+    int sa_flags;
+};
+
+static int darwin_to_host_sa_flags(int flags)
+{
+    int host = 0;
+    if (flags & 0x0001) host |= SA_ONSTACK;
+    if (flags & 0x0002) host |= SA_RESTART;
+    if (flags & 0x0004) host |= SA_RESETHAND;
+    if (flags & 0x0008) host |= SA_NOCLDSTOP;
+    if (flags & 0x0010) host |= SA_NODEFER;
+    if (flags & 0x0020) host |= SA_NOCLDWAIT;
+    if (flags & 0x0040) host |= SA_SIGINFO;
+    return host;
+}
+
+static int host_to_darwin_sa_flags(int flags)
+{
+    int darwin = 0;
+    if (flags & SA_ONSTACK) darwin |= 0x0001;
+    if (flags & SA_RESTART) darwin |= 0x0002;
+    if (flags & SA_RESETHAND) darwin |= 0x0004;
+    if (flags & SA_NOCLDSTOP) darwin |= 0x0008;
+    if (flags & SA_NODEFER) darwin |= 0x0010;
+    if (flags & SA_NOCLDWAIT) darwin |= 0x0020;
+    if (flags & SA_SIGINFO) darwin |= 0x0040;
+    return darwin;
+}
+
+static int shim_sigaction(int sig, const struct darwin_sigaction *act,
+                          struct darwin_sigaction *oldact)
+{
+    struct sigaction host_act, host_old;
+    struct sigaction *host_act_p = NULL;
+    if (act)
+    {
+        memset(&host_act, 0, sizeof(host_act));
+        host_act.sa_handler = act->u.handler;
+        darwin_set_to_host(&act->sa_mask, &host_act.sa_mask);
+        host_act.sa_flags = darwin_to_host_sa_flags(act->sa_flags);
+        host_act_p = &host_act;
+    }
+    int r = sigaction(darwin_to_host_signal(sig), host_act_p,
+                      oldact ? &host_old : NULL);
+    if (r != 0)
+        return -1;
+    if (oldact)
+    {
+        memset(oldact, 0, sizeof(*oldact));
+        oldact->u.handler = host_old.sa_handler;
+        host_set_to_darwin(&host_old.sa_mask, &oldact->sa_mask);
+        oldact->sa_flags = host_to_darwin_sa_flags(host_old.sa_flags);
+    }
+    return 0;
+}
+
+static void (*shim_signal(int sig, void (*handler)(int)))(int)
+{
+    struct darwin_sigaction act, old;
+    memset(&act, 0, sizeof(act));
+    act.u.handler = handler;
+    if (shim_sigaction(sig, &act, &old) != 0)
+        return (void (*)(int))-1;
+    return old.u.handler;
+}
+
+static int shim_raise(int sig)
+{
+    return raise(darwin_to_host_signal(sig));
+}
+
+static int shim_kill(int pid, int sig)
+{
+    return kill(pid, darwin_to_host_signal(sig));
+}
+
 /* ---------- table ---------- */
 
 int shim_pthread_main_np(void);
@@ -589,6 +923,7 @@ int shim_pthread_main_np(void);
 #define SHIM(fn) { #fn, (void *)(uintptr_t)&shim_##fn }
 #define SHIM_ALIAS(nm, fn) { nm, (void *)(uintptr_t)&shim_##fn }
 #define SHIM_DIRECT(nm) { #nm, (void *)(uintptr_t)&nm }
+#define SHIM_EXPORT(nm, fn) { nm, (void *)(uintptr_t)&iosim_##fn }
 
 static const struct iosim_shim shims[] = {
     SHIM(dyld_stub_binder),
@@ -602,6 +937,40 @@ static const struct iosim_shim shims[] = {
     SHIM_ALIAS("__error", __error),
     SHIM_ALIAS("malloc_size", malloc_size),
     SHIM_ALIAS("malloc_default_zone", malloc_default_zone),
+    SHIM_ALIAS("___chkstk_darwin", chkstk_darwin),
+    SHIM_ALIAS("stat$INODE64", stat_ino64),
+    SHIM_ALIAS("lstat$INODE64", lstat_ino64),
+    SHIM_ALIAS("fstat$INODE64", fstat_ino64),
+    SHIM_ALIAS("fstatat$INODE64", fstatat_ino64),
+    SHIM_ALIAS("stat", stat_ino64),
+    SHIM_ALIAS("lstat", lstat_ino64),
+    SHIM_ALIAS("fstat", fstat_ino64),
+    SHIM_ALIAS("fstatat", fstatat_ino64),
+    SHIM_ALIAS("open", open),
+    SHIM_ALIAS("openat", openat),
+    SHIM_DIRECT(read),
+    SHIM_DIRECT(write),
+    SHIM_DIRECT(close),
+    SHIM_DIRECT(lseek),
+    SHIM_DIRECT(pread),
+    SHIM_DIRECT(pwrite),
+    SHIM_DIRECT(fsync),
+    SHIM_DIRECT(ftruncate),
+    SHIM_ALIAS("sigprocmask", sigprocmask),
+    SHIM_ALIAS("pthread_sigmask", pthread_sigmask),
+    SHIM_ALIAS("sigaction", sigaction),
+    SHIM_ALIAS("signal", signal),
+    SHIM_ALIAS("raise", raise),
+    SHIM_ALIAS("kill", kill),
+    SHIM_ALIAS("_tlv_bootstrap", tlv_bootstrap),
+    SHIM_ALIAS("__tlv_bootstrap", tlv_bootstrap),
+    SHIM_ALIAS("___tlv_bootstrap", tlv_bootstrap),
+    SHIM_EXPORT("CC_MD5_Init", CC_MD5_Init),
+    SHIM_EXPORT("CC_MD5_Update", CC_MD5_Update),
+    SHIM_EXPORT("CC_MD5_Final", CC_MD5_Final),
+    SHIM_EXPORT("CC_SHA256_Init", CC_SHA256_Init),
+    SHIM_EXPORT("CC_SHA256_Update", CC_SHA256_Update),
+    SHIM_EXPORT("CC_SHA256_Final", CC_SHA256_Final),
     SHIM_ALIAS("malloc_create_zone", malloc_create_zone),
     SHIM_ALIAS("malloc_zone_malloc", malloc_zone_malloc),
     SHIM_ALIAS("malloc_zone_calloc", malloc_zone_calloc),
@@ -744,8 +1113,46 @@ static const struct iosim_shim shims[] = {
     SHIM_DIRECT(object_getClassName),
     SHIM_DIRECT(sel_registerName),
     SHIM_DIRECT(sel_getName),
+    SHIM_DIRECT(sel_getUid),
+    SHIM_DIRECT(objc_allocateClassPair),
+    SHIM_DIRECT(objc_registerClassPair),
+    SHIM_DIRECT(class_addMethod),
+    SHIM_DIRECT(class_getInstanceMethod),
+    SHIM_DIRECT(class_getMethodImplementation),
+    SHIM_DIRECT(method_getTypeEncoding),
+    SHIM_DIRECT(method_getImplementation),
+    SHIM_DIRECT(method_setImplementation),
+    SHIM_DIRECT(class_getSuperclass),
+    SHIM_DIRECT(class_getInstanceSize),
+    SHIM_DIRECT(object_getClass),
+    SHIM_DIRECT(object_setClass),
     SHIM_DIRECT(_objc_empty_cache),
 };
+
+/* Optional bridge for running unmodified host-platform Darwin tools: when
+ * IOSIM_HOST_SYMBOLS is set, symbols the shim table does not provide are
+ * looked up in the loader's own process after dlopen'ing the colon-separated
+ * IOSIM_HOST_LIBS list. Guest binaries otherwise keep the closed shim
+ * namespace, so Darwin open(2) flags never reach a glibc function by accident. */
+static void *host_symbol(const char *name)
+{
+    static int loaded;
+    if (!loaded)
+    {
+        loaded = 1;
+        const char *libs = getenv("IOSIM_HOST_LIBS");
+        if (libs && *libs)
+        {
+            char buf[1024];
+            snprintf(buf, sizeof(buf), "%s", libs);
+            char *save = NULL;
+            for (char *lib = strtok_r(buf, ":", &save); lib;
+                 lib = strtok_r(NULL, ":", &save))
+                dlopen(lib, RTLD_NOW | RTLD_GLOBAL);
+        }
+    }
+    return dlsym(RTLD_DEFAULT, name);
+}
 
 void *iosim_lookup_shim(const char *name)
 {
@@ -756,7 +1163,12 @@ void *iosim_lookup_shim(const char *name)
         if (strcmp(shims[i].name, name) == 0)
             return shims[i].addr;
     }
-    return iosim_services_lookup(name);
+    void *found = iosim_services_lookup(name);
+    if (found)
+        return found;
+    if (getenv("IOSIM_HOST_SYMBOLS"))
+        return host_symbol(name);
+    return NULL;
 }
 
 void *objc_opt_class(void *obj)

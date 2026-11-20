@@ -232,6 +232,84 @@ void dispatch_once(dispatch_once_t *predicate, void *block)
         call_block(block);
 }
 
+/* ------------------------------------------------------- dispatch_data */
+
+struct dispatch_data_s {
+    const void *buffer;
+    size_t size;
+};
+
+void *dispatch_data_create(const void *buffer, size_t size, void *queue,
+                           void *destructor)
+{
+    (void)queue;
+    (void)destructor; /* data outlives the guest's buffers in this runtime */
+    struct dispatch_data_s *data = calloc(1, sizeof(*data));
+    if (!data)
+        return NULL;
+    data->buffer = buffer;
+    data->size = size;
+    return data;
+}
+
+size_t dispatch_data_get_size(void *data)
+{
+    return data ? ((struct dispatch_data_s *)data)->size : 0;
+}
+
+int dispatch_data_apply(void *data, void *applier)
+{
+    struct dispatch_data_s *d = data;
+    if (!d || !applier)
+        return 0;
+    struct block_layout *b = applier;
+    if (!b->invoke)
+        return 0;
+    return ((int (*)(void *, void *, size_t, const void *, size_t))b->invoke)(
+               applier, data, 0, d->buffer, d->size) != 0;
+}
+
+void *dispatch_data_create_concat(void *first, void *second)
+{
+    struct dispatch_data_s *a = first, *b = second;
+    size_t as = a ? a->size : 0, bs = b ? b->size : 0;
+    unsigned char *buf = malloc(as + bs ? as + bs : 1);
+    if (!buf)
+        return NULL;
+    if (as)
+        memcpy(buf, a->buffer, as);
+    if (bs)
+        memcpy(buf + as, b->buffer, bs);
+    return dispatch_data_create(buf, as + bs, NULL, NULL);
+}
+
+void *dispatch_data_create_subrange(void *data, size_t offset, size_t length)
+{
+    struct dispatch_data_s *d = data;
+    if (!d || offset > d->size)
+        return NULL;
+    if (length > d->size - offset)
+        length = d->size - offset;
+    unsigned char *buf = malloc(length ? length : 1);
+    if (!buf)
+        return NULL;
+    memcpy(buf, (const unsigned char *)d->buffer + offset, length);
+    return dispatch_data_create(buf, length, NULL, NULL);
+}
+
+void *dispatch_data_create_map(void *data, const void **buffer_ptr,
+                               size_t *size_ptr)
+{
+    struct dispatch_data_s *d = data;
+    if (!d)
+        return NULL;
+    if (buffer_ptr)
+        *buffer_ptr = d->buffer;
+    if (size_ptr)
+        *size_ptr = d->size;
+    return data;
+}
+
 struct dispatch_group_s { long count; };
 void *dispatch_group_create(void) { return calloc(1, sizeof(struct dispatch_group_s)); }
 void dispatch_group_enter(void *group)
@@ -1758,12 +1836,91 @@ struct xpc_object *xpc_get_type(void *obj)
     }
 }
 
-static int shim_pthread_mutex_init(void *m, const void *attr) { (void)attr; *(int *)m = 0; return 0; }
-static int shim_pthread_mutex_lock(void *m) { while (__sync_lock_test_and_set((int *)m, 1)) usleep(50); return 0; }
-static int shim_pthread_mutex_unlock(void *m) { __sync_lock_release((int *)m); return 0; }
-static int shim_pthread_mutex_destroy(void *m) { (void)m; return 0; }
+static int shim_pthread_mutex_init(void *m, const void *attr)
+{
+    int type = 0;
+    if (attr && *(const int *)attr >= 0 && *(const int *)attr <= 3)
+        type = *(const int *)attr;
+    pthread_mutexattr_t a;
+    pthread_mutexattr_init(&a);
+    if (type)
+        pthread_mutexattr_settype(&a, type);
+    pthread_mutex_init((pthread_mutex_t *)m, &a);
+    pthread_mutexattr_destroy(&a);
+    return 0;
+}
+
+/* Darwin static mutex initializers embed a signature; translate one on first
+ * use for objects that were not in a load-time data section. */
+static int darwin_mutex_type(unsigned long sig)
+{
+    switch (sig)
+    {
+    case 0x32AAABA7UL: return 0;
+    case 0x32AAABA1UL: return PTHREAD_MUTEX_ERRORCHECK;
+    case 0x32AAABA2UL: return PTHREAD_MUTEX_RECURSIVE;
+    case 0x32AAABA3UL: return 0;
+    default: return -1;
+    }
+}
+
+static void shim_pthread_mutex_ensure(void *m)
+{
+    unsigned long sig = *(volatile unsigned long *)m;
+    int type = darwin_mutex_type(sig);
+    if (type >= 0)
+        shim_pthread_mutex_init(m, &type);
+}
+
+static int shim_pthread_mutex_lock(void *m)
+{
+    shim_pthread_mutex_ensure(m);
+    return pthread_mutex_lock((pthread_mutex_t *)m);
+}
+static int shim_pthread_mutex_unlock(void *m)
+{
+    return pthread_mutex_unlock((pthread_mutex_t *)m);
+}
+static int shim_pthread_mutex_destroy(void *m)
+{
+    return pthread_mutex_destroy((pthread_mutex_t *)m);
+}
 static void shim_os_unfair_lock_lock(void *l) { (void)l; }
 static void shim_os_unfair_lock_unlock(void *l) { (void)l; }
+
+static int shim_pthread_mutexattr_init(void *attr)
+{
+    *(int *)attr = 0;
+    return 0;
+}
+static int shim_pthread_mutexattr_destroy(void *attr) { (void)attr; return 0; }
+static int shim_pthread_mutexattr_settype(void *attr, int type)
+{
+    int host = PTHREAD_MUTEX_NORMAL;
+    switch (type)
+    {
+    case 0: host = PTHREAD_MUTEX_NORMAL; break;
+    case 1: host = PTHREAD_MUTEX_ERRORCHECK; break;
+    case 2: host = PTHREAD_MUTEX_RECURSIVE; break;
+    case 3: host = PTHREAD_MUTEX_DEFAULT; break;
+    }
+    *(int *)attr = host;
+    return 0;
+}
+static int shim_pthread_mutexattr_gettype(const void *attr, int *type)
+{
+    int host = *(const int *)attr;
+    if (type)
+    {
+        if (host == PTHREAD_MUTEX_ERRORCHECK)
+            *type = 1;
+        else if (host == PTHREAD_MUTEX_RECURSIVE)
+            *type = 2;
+        else
+            *type = 0;
+    }
+    return 0;
+}
 
 struct service_symbol { const char *name; void *addr; };
 
@@ -1782,6 +1939,9 @@ static const struct service_symbol service_symbols[] = {
     SVC(dispatch_group_create), SVC(dispatch_group_enter), SVC(dispatch_group_leave),
     SVC(dispatch_group_wait), SVC(dispatch_group_notify), SVC(dispatch_group_async),
     SVC(dispatch_semaphore_create), SVC(dispatch_semaphore_wait), SVC(dispatch_semaphore_signal),
+    SVC(dispatch_data_create), SVC(dispatch_data_get_size),
+    SVC(dispatch_data_apply), SVC(dispatch_data_create_concat),
+    SVC(dispatch_data_create_subrange), SVC(dispatch_data_create_map),
     SVC(mach_port_allocate), SVC(mach_port_deallocate), SVC(mach_port_mod_refs),
     SVC(mach_port_insert_right), SVC(mach_port_destroy), SVC(mach_task_self),
     SVC(mach_host_self), SVC(mach_msg), SVC(mach_msg_send), SVC(mach_msg_receive),
@@ -1817,6 +1977,10 @@ static const struct service_symbol service_symbols[] = {
     { "pthread_mutex_lock", (void *)(uintptr_t)&shim_pthread_mutex_lock },
     { "pthread_mutex_unlock", (void *)(uintptr_t)&shim_pthread_mutex_unlock },
     { "pthread_mutex_destroy", (void *)(uintptr_t)&shim_pthread_mutex_destroy },
+    { "pthread_mutexattr_init", (void *)(uintptr_t)&shim_pthread_mutexattr_init },
+    { "pthread_mutexattr_destroy", (void *)(uintptr_t)&shim_pthread_mutexattr_destroy },
+    { "pthread_mutexattr_settype", (void *)(uintptr_t)&shim_pthread_mutexattr_settype },
+    { "pthread_mutexattr_gettype", (void *)(uintptr_t)&shim_pthread_mutexattr_gettype },
     { "os_unfair_lock_lock", (void *)(uintptr_t)&shim_os_unfair_lock_lock },
     { "os_unfair_lock_unlock", (void *)(uintptr_t)&shim_os_unfair_lock_unlock },
 };

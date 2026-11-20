@@ -22,6 +22,10 @@ add_executable(iosim-run
   loader/events.c
   loader/services.c
   loader/image.c
+  loader/pthread_compat.c
+  loader/tlv.c
+  loader/tlv.S
+  loader/ccrypto.c
   loader/start.S
 )
 target_include_directories(iosim-run PRIVATE loader)

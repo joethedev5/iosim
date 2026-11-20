@@ -21,6 +21,32 @@ typedef struct {
                                        count:(unsigned long)len;
 @end
 
+@class NSString;
+@class NSArray;
+@class NSDictionary;
+
+typedef unsigned long NSKeyValueObservingOptions;
+enum {
+    NSKeyValueObservingOptionNew     = 0x01,
+    NSKeyValueObservingOptionOld     = 0x02,
+    NSKeyValueObservingOptionInitial = 0x04,
+    NSKeyValueObservingOptionPrior   = 0x08
+};
+
+typedef unsigned long NSKeyValueChange;
+enum {
+    NSKeyValueChangeSetting    = 1,
+    NSKeyValueChangeInsertion  = 2,
+    NSKeyValueChangeRemoval    = 3,
+    NSKeyValueChangeReplacement = 4
+};
+
+extern id NSKeyValueChangeKindKey;
+extern id NSKeyValueChangeNewKey;
+extern id NSKeyValueChangeOldKey;
+extern id NSKeyValueChangeIndexesKey;
+extern id NSKeyValueChangeNotificationIsPriorKey;
+
 __attribute__((objc_root_class))
 @interface NSObject {
     Class isa;
@@ -49,6 +75,29 @@ __attribute__((objc_root_class))
 + (void)cancelPreviousPerformRequestsWithTarget:(id)target
                                        selector:(SEL)selector
                                          object:(id)argument;
+
+/* Key-value coding. Accessor lookup follows KVC's get<Key>, <key>, is<Key>
+ * order for reads and set<Key>:, _set<Key>: for writes; key paths walk the
+ * dot-separated components. */
+- (id)valueForKey:(NSString *)key;
+- (void)setValue:(id)value forKey:(NSString *)key;
+- (id)valueForKeyPath:(NSString *)keyPath;
+- (void)setValue:(id)value forKeyPath:(NSString *)keyPath;
+- (id)dictionaryWithValuesForKeys:(NSArray *)keys;
+- (void)setValuesForKeysWithDictionary:(NSDictionary *)keyedValues;
+
+/* Key-value observing. addObserver: installs an NSKVONotifying_ subclass and
+ * wraps the key's setter so changes notify automatically. */
+- (void)addObserver:(NSObject *)observer forKeyPath:(NSString *)keyPath
+            options:(NSKeyValueObservingOptions)options context:(void *)context;
+- (void)removeObserver:(NSObject *)observer forKeyPath:(NSString *)keyPath;
+- (void)removeObserver:(NSObject *)observer forKeyPath:(NSString *)keyPath
+               context:(void *)context;
+- (void)observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object
+                        change:(NSDictionary *)change context:(void *)context;
+- (void)willChangeValueForKey:(NSString *)key;
+- (void)didChangeValueForKey:(NSString *)key;
++ (BOOL)automaticallyNotifiesObserversForKey:(NSString *)key;
 @end
 
 @class NSString;

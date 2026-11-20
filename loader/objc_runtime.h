@@ -34,7 +34,23 @@ void *objc_getClass(const char *name);
 const char *class_getName(void *cls);
 const char *object_getClassName(void *obj);
 void *sel_registerName(const char *name);
+void *sel_getUid(const char *name);
 const char *sel_getName(void *sel);
+
+/* Runtime class creation, used by KVO notifying subclasses. */
+void *objc_allocateClassPair(void *superclass, const char *name,
+                             unsigned long extraBytes);
+void objc_registerClassPair(void *cls);
+int   class_addMethod(void *cls, void *sel, void *imp, const char *types);
+void *class_getInstanceMethod(void *cls, void *sel);
+void *class_getMethodImplementation(void *cls, void *sel);
+const char *method_getTypeEncoding(void *method);
+void *method_getImplementation(void *method);
+void *method_setImplementation(void *method, void *imp);
+void *class_getSuperclass(void *cls);
+unsigned long class_getInstanceSize(void *cls);
+void *object_getClass(void *obj);
+void *object_setClass(void *obj, void *cls);
 
 extern char _objc_empty_cache[32];
 
