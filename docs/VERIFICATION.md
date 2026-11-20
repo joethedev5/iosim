@@ -139,8 +139,8 @@ height follows its wrapped width. No view uses `setFrame:` for layout.
 
 | Metric | Value |
 |---|---|
-| Mean absolute channel error | **3.06 / 255** |
-| Pixels with max-channel error > 24 | **2.71 %** |
+| Mean absolute channel error | **3.05 / 255** |
+| Pixels with max-channel error > 24 | **2.70 %** |
 | Best residual alignment | 1 px horizontal, 1 px vertical |
 | Safe-area top inset (iPhone 18 Pro, iOS 27.2) | 62 pt, matched |
 
@@ -164,13 +164,41 @@ frame:
 
 | Metric | Value |
 |---|---|
-| Mean absolute channel error | **4.07 / 255** |
-| Pixels with max-channel error > 24 | **3.88 %** |
-| App content above the keyboard | **2.32 / 255** mean, 2.00 % over 24 |
+| Mean absolute channel error | **2.21 / 255** |
+| Pixels with max-channel error > 24 | **1.99 %** |
+| App content above the keyboard | **2.11 / 255** mean, 1.84 % over 24 |
 | Key background / keyboard background | `#444448` / `#202025` (sampled) |
 
-The residual is concentrated on glyph antialiasing and key-corner edges; key
-rows, the predictive bar and the bottom emoji/mic row align within a pixel.
+The keyboard geometry was measured key by key against the iPhone 18 Pro
+capture: a 324 pt panel with 26 pt top corners, a 24 pt predictive bar with
+1 pt dividers inset one point from each third, 43 pt key rows on an 11 pt
+gap, 33.2 pt letters (32.2 pt on the shift row), 44.7 pt shift/delete keys and
+92.7/191.3/92.7 pt bottom keys. Labels sit 1.2 pt above the geometric centre.
+The return key uses the measured `↵` glyph (18 pt shaft, left arrowhead, right
+riser and top hook); shift, delete, emoji and mic are drawn from measured
+glyph bounds as well. The residual is concentrated on glyph antialiasing and
+the sub-pixel key edges.
+
+### Modal presentation: UIAlertController
+
+`demo/AlertApp.m` presents a two-action `UIAlertController` from
+`viewDidAppear`, and its Delete handler (a block copied to the heap by
+`_Block_copy`) updates the status label and dismisses the modal. iOS 26 draws
+alert-style controllers as a bottom-biased floating card rather than the
+classic centred dialog, so iosim draws that measured design: a 320×151.7 pt
+card at `#23242d` with 33.7 pt corners, left-aligned 17 pt bold title and 15 pt
+`#71727a` message, and two 140×47 pt pill buttons at `#404149` with white and
+`#ff6b6f` labels. The dimming view uses the measured 0.47 black, and the
+status bar is redrawn above it exactly as on the reference.
+
+| Metric | Value |
+|---|---|
+| Mean absolute channel error | **0.75 / 255** |
+| Pixels with max-channel error > 24 | **0.77 %** |
+| Best residual alignment | 0 px, 0 px |
+
+Tapping Delete through the event FIFO runs the handler and dismisses the
+alert; the post-action capture shows the updated "Deleted" label.
 
 ### Services: dispatch, Mach, bootstrap and XPC
 

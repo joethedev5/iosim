@@ -361,7 +361,19 @@ framebuffer has an intersection clip stack, used by scroll views and
 placeholder or text, secure bullets and a caret, and `UITextField` edits from
 keyboard taps or `key`/`backspace` FIFO records. When a field is first
 responder, `UIApplicationMain` paints a QWERTY keyboard over the app frame
-with the same framebuffer primitives used for everything else.
+with the same framebuffer primitives used for everything else. The keyboard
+uses measured iOS 26 geometry: a 324 pt panel with 26 pt top corners, 43 pt
+key rows on an 11 pt gap, 33.2 pt letters (32.2 pt on the shift row), 44.7 pt
+shift/delete keys, a 24 pt predictive bar and measured return, shift, delete,
+emoji and mic artwork.
+
+`UIAlertController` presents alert-style modals in the iOS 26 form measured
+from the reference capture: a bottom-biased 320 pt floating card with 33.7 pt
+corners, left-aligned title and message, and side-by-side pill actions. The
+dimming view is painted at the measured 0.47 black and the status bar is
+redrawn above it, matching the reference. Action blocks are copied to the heap
+with `_Block_copy`, run on tap, then the modal dismisses through the same
+presentation stack as any other controller.
 
 ### 2.12 SpringBoard-like shell
 

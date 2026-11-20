@@ -1566,6 +1566,36 @@ static int wrap_text_lines(const char *text, int style, double points,
         memcpy(lines[count], line, (unsigned long)lineLen + 1);
         count++;
     }
+    /* UIKit avoids a one-word last line by pulling the previous line's
+     * final word down when the combined line still fits. Measured against
+     * the real simulator this push-out applies to two-line paragraphs
+     * (e.g. a body label); longer paragraphs keep the greedy break. */
+    if (count == 2 && maxWidth > 0)
+    {
+        int lastHasSpace = 0;
+        for (const char *q = lines[count - 1]; *q; q++)
+            if (*q == ' ')
+                lastHasSpace = 1;
+        char *prev = lines[count - 2];
+        char *sp = 0;
+        for (char *q = prev; *q; q++)
+            if (*q == ' ')
+                sp = q;
+        if (!lastHasSpace && sp && sp != prev)
+        {
+            const char *moved = sp + 1;
+            char cand[256];
+            int n = snprintf(cand, sizeof cand, "%s %s", moved,
+                             lines[count - 1]);
+            if (n > 0 && n < (int)sizeof cand &&
+                iosim_fb_font_text_width(cand, style, points, scale) <=
+                    maxWidth)
+            {
+                *sp = 0;
+                memcpy(lines[count - 1], cand, (unsigned long)n + 1);
+            }
+        }
+    }
     return count;
 }
 
@@ -4607,14 +4637,14 @@ static void draw_device_chrome(int fbWidth, double scale)
         iosim_fb_fill_round_rect((int)(360.0 * scale), (int)(29.67 * scale),
                                  (int)(2.0 * scale), (int)(5.0 * scale),
                                  (int)(1.0 * scale), 0x34c759);
-        double boltX[7] = {344.5, 349.5, 347.0, 351.0, 344.0, 347.5, 344.5};
-        double boltY[7] = {28.0, 28.0, 32.0, 32.0, 37.0, 33.0, 33.0};
-        for (int i = 0; i < 7; i++)
+        double boltX[6] = {348.0, 342.33, 346.1, 344.0, 349.67, 346.1};
+        double boltY[6] = {25.33, 32.0, 32.0, 38.67, 32.0, 32.0};
+        for (int i = 0; i < 6; i++)
         {
             boltX[i] *= scale;
             boltY[i] *= scale;
         }
-        iosim_fb_fill_polygon(boltX, boltY, 7, 0xffffff);
+        iosim_fb_fill_polygon(boltX, boltY, 6, 0x85868c);
     }
     else
     {
@@ -4647,12 +4677,16 @@ static int keyboard_is_number_pad(void)
 
 static void kb_key(int x, int y, int w, int h, double scale, unsigned color)
 {
-    iosim_fb_fill_round_rect(x, y, w, h, (int)(4.5 * scale), color);
+    int r = (int)(4.5 * scale);
+    iosim_fb_fill_round_rect(x, y, w, h, r, 0x2e2e33);
+    iosim_fb_fill_rect(x + 1, y + r, w - 2, h - 2 * r, color);
+    iosim_fb_fill_round_rect(x + 1, y, w - 2, h, r - 1, color);
 }
 
 static void kb_label(const char *text, int cx, int cy, double size,
                      double scale, unsigned color)
 {
+    cy -= (int)(1.2 * scale + 0.5);
     int tw = iosim_fb_font_text_width(text, IOSIM_FONT_REGULAR, size, scale);
     int asc = 0, desc = 0, lh = 0;
     iosim_fb_font_metrics(IOSIM_FONT_REGULAR, size, scale, &asc, &desc, &lh);
@@ -4664,8 +4698,8 @@ static void kb_shift(int x, int y, int w, int h, double scale)
 {
     int cx = x + w / 2, cy = y + h / 2;
     double pts[7][2] = {
-        {0.0, -8.0}, {-9.0, 2.0}, {-3.5, 2.0}, {-3.5, 9.0},
-        {3.5, 9.0}, {3.5, 2.0}, {9.0, 2.0}
+        {0.0, -8.0}, {-9.5, 2.7}, {-4.8, 2.7}, {-4.8, 9.0},
+        {4.8, 9.0}, {4.8, 2.7}, {9.5, 2.7}
     };
     double xs[7], ys[7];
     for (int i = 0; i < 7; i++)
@@ -4678,92 +4712,150 @@ static void kb_shift(int x, int y, int w, int h, double scale)
 
 static void kb_return(int x, int y, int w, int h, double scale)
 {
+    /* Apple's return glyph is a bottom shaft with a left arrowhead, a
+     * right riser and a short hook back left across the top. Measured
+     * from the real iPhone 18 Pro key: shaft at center+1.5pt, 18pt wide,
+     * riser at +9pt, hook at -8.5pt, arrowhead barbs 6pt at 45 degrees. */
     int cx = x + w / 2, cy = y + h / 2;
-    int left = cx - (int)(8 * scale);
-    int right = cx + (int)(8 * scale);
-    int top = cy - (int)(5 * scale);
-    iosim_fb_draw_line(left, cy, right, cy, (int)(2 * scale), 0xffffff);
-    iosim_fb_draw_line(left, cy, left, top, (int)(2 * scale), 0xffffff);
-    iosim_fb_draw_line(left, top, left + (int)(5 * scale), top,
-                       (int)(2 * scale), 0xffffff);
+    int t = (int)(1.5 * scale + 0.5);
+    if (t < 1) t = 1;
+    int base = cy + (int)(1.5 * scale + 0.5);
+    int left = cx - (int)(9 * scale + 0.5);
+    int right = cx + (int)(9 * scale + 0.5);
+    int top = base - (int)(10 * scale + 0.5);
+    int barb = (int)(6 * scale + 0.5);
+    iosim_fb_draw_line(left, base, right, base, t, 0xffffff);
+    iosim_fb_draw_line(right, base, right, top, t, 0xffffff);
+    iosim_fb_draw_line(right, top, cx + (int)(1 * scale + 0.5), top, t,
+                       0xffffff);
+    iosim_fb_draw_line(left, base, left + barb, base - barb, t, 0xffffff);
+    iosim_fb_draw_line(left, base, left + barb, base + barb, t, 0xffffff);
 }
 
 static void kb_backspace(int x, int y, int w, int h, double scale)
 {
     int cx = x + w / 2, cy = y + h / 2;
-    int r = (int)(8 * scale);
-    int t = (int)(2 * scale);
-    iosim_fb_draw_line(cx - r, cy, cx - r + (int)(5 * scale), cy - r,
-                       t, 0xffffff);
-    iosim_fb_draw_line(cx - r + (int)(5 * scale), cy - r, cx + r, cy - r,
-                       t, 0xffffff);
-    iosim_fb_draw_line(cx + r, cy - r, cx + r, cy + r, t, 0xffffff);
-    iosim_fb_draw_line(cx + r, cy + r, cx - r + (int)(5 * scale), cy + r,
-                       t, 0xffffff);
-    iosim_fb_draw_line(cx - r + (int)(5 * scale), cy + r, cx - r, cy, t,
-                       0xffffff);
-    iosim_fb_draw_line(cx - (int)(2 * scale), cy - (int)(3 * scale),
-                       cx + (int)(3 * scale), cy + (int)(3 * scale), t,
-                       0xffffff);
-    iosim_fb_draw_line(cx - (int)(2 * scale), cy + (int)(3 * scale),
-                       cx + (int)(3 * scale), cy - (int)(3 * scale), t,
-                       0xffffff);
+    int t = (int)(2 * scale + 0.5);
+    if (t < 1) t = 1;
+    int lx = cx - (int)(10.0 * scale + 0.5);
+    int px = cx - (int)(2.3 * scale + 0.5);
+    int rx = cx + (int)(9.5 * scale + 0.5);
+    int ty = cy - (int)(7.7 * scale + 0.5);
+    int by = cy + (int)(9.0 * scale + 0.5);
+    int my = cy + (int)(1.0 * scale + 0.5);
+    iosim_fb_draw_line(lx, my, px, ty, t, 0xffffff);
+    iosim_fb_draw_line(px, ty, rx, ty, t, 0xffffff);
+    iosim_fb_draw_line(rx, ty, rx, by, t, 0xffffff);
+    iosim_fb_draw_line(rx, by, px, by, t, 0xffffff);
+    iosim_fb_draw_line(px, by, lx, my, t, 0xffffff);
+    int e = (int)(2.2 * scale + 0.5);
+    int q = (int)(4.0 * scale + 0.5);
+    int ox = cx + (int)(1.8 * scale + 0.5);
+    iosim_fb_draw_line(ox - e, cy - q, ox + e, cy + q, t, 0xffffff);
+    iosim_fb_draw_line(ox - e, cy + q, ox + e, cy - q, t, 0xffffff);
 }
 
 static void kb_emoji(int cx, int cy, double scale)
 {
-    iosim_fb_fill_circle(cx, cy, (int)(11 * scale), 0xffffff);
-    iosim_fb_fill_circle(cx, cy, (int)(9 * scale), 0x202025);
-    iosim_fb_fill_circle(cx - (int)(3.5 * scale), cy - (int)(3 * scale),
-                         (int)(1.3 * scale), 0xffffff);
-    iosim_fb_fill_circle(cx + (int)(3.5 * scale), cy - (int)(3 * scale),
-                         (int)(1.3 * scale), 0xffffff);
-    for (int i = 0; i <= 8; i++)
+    /* Filled smiley measured from the real key: white disc, two eyes,
+     * a thick dark smile band, a white teeth crescent and the dark
+     * open mouth below it. */
+    iosim_fb_fill_circle(cx, cy, (int)(13.5 * scale + 0.5), 0xffffff);
+    int ex = (int)(4.17 * scale + 0.5), ey = (int)(3.17 * scale + 0.5);
+    int er = (int)(1.5 * scale + 0.5);
+    if (er < 1) er = 1;
+    iosim_fb_fill_circle(cx - ex, cy - ey, er, 0x202025);
+    iosim_fb_fill_circle(cx + ex, cy - ey, er, 0x202025);
+    int t = (int)(1.7 * scale + 0.5);
+    if (t < 1) t = 1;
+    int prevX = 0, prevY = 0;
+    for (int i = 0; i <= 32; i++)
     {
-        double a = 0.15 * 3.14159265358979323846 +
-                   i * 0.0875 * 3.14159265358979323846;
-        iosim_fb_fill_circle(cx + (int)(5.2 * scale * __builtin_cos(a)),
-                             cy + (int)(1.5 * scale) +
-                                 (int)(4.5 * scale * __builtin_sin(a)),
-                             (int)(1.1 * scale), 0xffffff);
+        double xx = -8.3 + 16.6 * i / 32.0;
+        double yy = 2.3 - 0.0145 * xx * xx;
+        int px = cx + (int)(xx * scale);
+        int py = cy + (int)(yy * scale);
+        if (i > 0)
+            iosim_fb_draw_line(prevX, prevY, px, py, t, 0x202025);
+        iosim_fb_fill_circle(px, py, (t + 1) / 2, 0x202025);
+        prevX = px;
+        prevY = py;
     }
+    double poly[66][2];
+    int n = 0;
+    for (int i = 0; i <= 32; i++)
+    {
+        double xx = -8.3 + 16.6 * i / 32.0;
+        poly[n][0] = xx;
+        poly[n][1] = 5.5 - 0.046 * xx * xx;
+        n++;
+    }
+    for (int i = 32; i >= 0; i--)
+    {
+        double xx = -8.3 + 16.6 * i / 32.0;
+        poly[n][0] = xx;
+        poly[n][1] = 9.3 - 0.086 * xx * xx;
+        n++;
+    }
+    double xs[66], ys[66];
+    for (int i = 0; i < n; i++)
+    {
+        xs[i] = cx + poly[i][0] * scale;
+        ys[i] = cy + poly[i][1] * scale;
+    }
+    iosim_fb_fill_polygon(xs, ys, n, 0x202025);
 }
 
 static void kb_mic(int cx, int cy, double scale)
 {
-    iosim_fb_fill_round_rect(cx - (int)(3 * scale), cy - (int)(10 * scale),
-                             (int)(6 * scale), (int)(14 * scale),
-                             (int)(3 * scale), 0xffffff);
-    iosim_fb_set_opacity(1.0);
-    for (int i = 0; i <= 10; i++)
+    /* Capsule, U-shaped cradle, stem and base from the real key. */
+    iosim_fb_fill_round_rect(cx - (int)(4.0 * scale + 0.5),
+                             cy - (int)(14.2 * scale + 0.5),
+                             (int)(8.0 * scale + 0.5),
+                             (int)(16.8 * scale + 0.5),
+                             (int)(4.0 * scale + 0.5), 0xffffff);
+    int t = (int)(2.3 * scale + 0.5);
+    if (t < 1) t = 1;
+    int ax = (int)(7.8 * scale + 0.5);
+    int ay0 = cy - (int)(3.5 * scale + 0.5);
+    int ay1 = cy + (int)(1.0 * scale + 0.5);
+    iosim_fb_draw_line(cx - ax, ay0, cx - ax, ay1, t, 0xffffff);
+    iosim_fb_draw_line(cx + ax, ay0, cx + ax, ay1, t, 0xffffff);
+    int r = (int)(7.8 * scale + 0.5);
+    for (int i = 0; i <= 24; i++)
     {
-        double a = 0.0 + i * 0.1 * 3.14159265358979323846;
-        iosim_fb_fill_circle(cx - (int)(7 * scale * __builtin_cos(a)),
-                             cy + (int)(1 * scale) +
-                                 (int)(7 * scale * __builtin_sin(a)),
-                             (int)(1.2 * scale), 0xffffff);
+        double a = 3.14159265358979323846 +
+                   i * (3.14159265358979323846 / 24.0);
+        iosim_fb_fill_circle(cx + (int)(r * __builtin_cos(a)),
+                             ay1 - (int)(r * __builtin_sin(a)),
+                             (int)(1.15 * scale + 0.5), 0xffffff);
     }
-    iosim_fb_fill_rect(cx - (int)(1 * scale), cy + (int)(8 * scale),
-                       (int)(2 * scale), (int)(4 * scale), 0xffffff);
-    iosim_fb_fill_rect(cx - (int)(4 * scale), cy + (int)(11 * scale),
-                       (int)(8 * scale), (int)(2 * scale), 0xffffff);
+    int sw = (int)(1.0 * scale + 0.5);
+    if (sw < 2) sw = 2;
+    iosim_fb_fill_rect(cx - sw / 2, cy + (int)(8.3 * scale + 0.5), sw,
+                       (int)(4.7 * scale + 0.5), 0xffffff);
+    iosim_fb_fill_round_rect(cx - (int)(5.7 * scale + 0.5),
+                             cy + (int)(12.7 * scale + 0.5),
+                             (int)(11.4 * scale + 0.5),
+                             (int)(1.3 * scale + 0.5),
+                             (int)(0.7 * scale + 0.5), 0xffffff);
 }
 
 static void draw_qwerty(int fbW, int fbH, double scale)
 {
     double W = fbW / scale, H = fbH / scale;
-    double top = H - 326.0;
+    double top = H - 324.0;
     int topPx = (int)(top * scale + 0.5);
     iosim_fb_fill_round_rect(0, topPx, fbW, fbH - topPx + (int)(26 * scale),
                              (int)(26 * scale), 0x202025);
-    int predTop = topPx + (int)(20 * scale);
-    int predH = (int)(23 * scale);
+    int predTop = topPx + (int)(9 * scale);
+    int predH = (int)(24 * scale);
     for (int i = 1; i < 3; i++)
-        iosim_fb_fill_rect((int)(W * i / 3.0 * scale), predTop,
-                           (int)(1 * scale), predH, 0x2e2e33);
-    double rowTop = top + 50.6;
-    double rowH = 42.3, rowGap = 11.7;
-    double margin = 6.7, keyW = 33.3, keyGap = 6.0;
+        iosim_fb_fill_rect((int)(W * i / 3.0 * scale - 1 * scale), predTop,
+                           (int)(1 * scale), predH, 0x313136);
+    double rowTop = top + 48.0;
+    double rowH = 43.0, rowGap = 11.0;
+    double margin = 6.7, keyW = 33.2, keyGap = 6.3;
     static const char *r1 = "QWERTYUIOP";
     for (int i = 0; i < 10; i++)
     {
@@ -4776,7 +4868,7 @@ static void draw_qwerty(int fbW, int fbH, double scale)
         kb_label(label, x + w / 2, y + h / 2, 22, scale, 0xffffff);
     }
     double row2Top = rowTop + rowH + rowGap;
-    double m2 = 26.7, w2 = 31.0, g2 = 8.3;
+    double m2 = 26.3, w2 = 33.2, g2 = 6.3;
     static const char *r2 = "ASDFGHJKL";
     for (int i = 0; i < 9; i++)
     {
@@ -4791,8 +4883,8 @@ static void draw_qwerty(int fbW, int fbH, double scale)
     double row3Top = row2Top + rowH + rowGap;
     int y3 = (int)(row3Top * scale + 0.5);
     int h3 = (int)(rowH * scale + 0.5);
-    double m3 = 6.7, shiftW = 45.0, delW = 45.0, w3 = 26.0;
-    double g3 = (W - 2 * m3 - 2 * shiftW - 7 * w3) / 8.0;
+    double m3 = 7.0, shiftW = 44.67, delW = 44.67, w3 = 33.0, g3 = 6.5;
+    double gBig = (W - 2 * m3 - shiftW - delW - 7 * w3 - 6 * g3) / 2.0;
     int sx = (int)(m3 * scale);
     int sw = (int)(shiftW * scale);
     kb_key(sx, y3, sw, h3, scale, 0x444448);
@@ -4800,7 +4892,7 @@ static void draw_qwerty(int fbW, int fbH, double scale)
     static const char *r3 = "ZXCVBNM";
     for (int i = 0; i < 7; i++)
     {
-        int x = (int)((m3 + shiftW + g3 + i * (w3 + g3)) * scale + 0.5);
+        int x = (int)((m3 + shiftW + gBig + i * (w3 + g3)) * scale + 0.5);
         int w = (int)(w3 * scale + 0.5);
         kb_key(x, y3, w, h3, scale, 0x444448);
         char label[2] = { r3[i], 0 };
@@ -4817,7 +4909,7 @@ static void draw_qwerty(int fbW, int fbH, double scale)
     int nx = (int)(m4 * scale);
     int nw = (int)(numW * scale);
     kb_key(nx, y4, nw, h4, scale, 0x444448);
-    kb_label("123", nx + nw / 2, y4 + h4 / 2, 16, scale, 0xffffff);
+    kb_label("123", nx + nw / 2, y4 + h4 / 2, 17.5, scale, 0xffffff);
     int spx = (int)((m4 + numW + g4) * scale);
     int spw = (int)(spaceW * scale);
     kb_key(spx, y4, spw, h4, scale, 0x444448);
@@ -4825,8 +4917,8 @@ static void draw_qwerty(int fbW, int fbH, double scale)
     int rw = (int)(retW * scale);
     kb_key(rx, y4, rw, h4, scale, 0x444448);
     kb_return(rx, y4, rw, h4, scale);
-    kb_emoji((int)(34 * scale), (int)(833 * scale), scale);
-    kb_mic((int)(368 * scale), (int)(833 * scale), scale);
+    kb_emoji((int)(42.3 * scale + 0.5), (int)(833.8 * scale + 0.5), scale);
+    kb_mic((int)(359.2 * scale + 0.5), (int)(833.2 * scale + 0.5), scale);
 }
 
 static void draw_number_pad(int fbW, int fbH, double scale)
@@ -4907,10 +4999,10 @@ static int keyboard_handle_tap(int px, int py, int fbW, int fbH,
         }
         return 1;
     }
-    double top = H - 326.0;
+    double top = H - 324.0;
     if (y < top)
         return 0;
-    double rowTop = top + 50.6, rowH = 42.3, rowGap = 11.7;
+    double rowTop = top + 48.0, rowH = 43.0, rowGap = 11.0;
     int row = (int)((y - rowTop) / (rowH + rowGap));
     double localY = y - (rowTop + row * (rowH + rowGap));
     if (row < 0 || row > 3 || localY > rowH)
@@ -4918,7 +5010,7 @@ static int keyboard_handle_tap(int px, int py, int fbW, int fbH,
     char buf[2] = {0, 0};
     if (row == 0)
     {
-        double margin = 6.7, kw = 33.3, gap = 6.0;
+        double margin = 6.7, kw = 33.2, gap = 6.3;
         int i = (int)((x - margin) / (kw + gap));
         if (i >= 0 && i < 10)
         {
@@ -4929,7 +5021,7 @@ static int keyboard_handle_tap(int px, int py, int fbW, int fbH,
     }
     if (row == 1)
     {
-        double m2 = 26.7, w2 = 31.0, g2 = 8.3;
+        double m2 = 26.3, w2 = 33.2, g2 = 6.3;
         int i = (int)((x - m2) / (w2 + g2));
         if (i >= 0 && i < 9)
         {
@@ -4938,13 +5030,13 @@ static int keyboard_handle_tap(int px, int py, int fbW, int fbH,
         }
         return 1;
     }
-    double m3 = 6.7, shiftW = 45.0, delW = 45.0, w3 = 26.0;
-    double g3 = (W - 2 * m3 - 2 * shiftW - 7 * w3) / 8.0;
+    double m3 = 7.0, shiftW = 44.67, delW = 44.67, w3 = 33.0, g3 = 6.5;
+    double gBig = (W - 2 * m3 - shiftW - delW - 7 * w3 - 6 * g3) / 2.0;
     if (row == 2)
     {
         if (x < m3 + shiftW)
             return 1;
-        int i = (int)((x - m3 - shiftW - g3) / (w3 + g3));
+        int i = (int)((x - m3 - shiftW - gBig) / (w3 + g3));
         if (i >= 0 && i < 7)
         {
             buf[0] = "ZXCVBNM"[i];
@@ -5383,17 +5475,19 @@ static void alert_metrics(UIAlertController *alert, int fbW, double scale,
                           double *messageH)
 {
     double W = fbW / scale;
-    double width = W - 40;
-    if (width > 270)
-        width = 270;
-    double titleW = width - 32;
+    double width = W - 82;
+    if (width > 320)
+        width = 320;
+    if (width < 200)
+        width = 200;
+    double textW = width - 64;
     double th = 0, mh = 0;
     if (alert->_title)
     {
         const char *t = iosim_string_cstr(alert->_title);
         char lines[IOSIM_MAX_WRAP_LINES][256];
         int n = wrap_text_lines(t, IOSIM_FONT_BOLD, 17, scale,
-                                (int)(titleW * scale), lines, 4);
+                                (int)(textW * scale), lines, 4);
         int asc = 0, desc = 0, lh = 0;
         iosim_fb_font_metrics(IOSIM_FONT_BOLD, 17, scale, &asc, &desc, &lh);
         th = (n > 0 ? n : 1) * lh / scale;
@@ -5402,15 +5496,20 @@ static void alert_metrics(UIAlertController *alert, int fbW, double scale,
     {
         const char *m = iosim_string_cstr(alert->_message);
         char lines[IOSIM_MAX_WRAP_LINES][256];
-        int n = wrap_text_lines(m, IOSIM_FONT_REGULAR, 13, scale,
-                                (int)(titleW * scale), lines, 8);
+        int n = wrap_text_lines(m, IOSIM_FONT_REGULAR, 15, scale,
+                                (int)(textW * scale), lines, 8);
         int asc = 0, desc = 0, lh = 0;
-        iosim_fb_font_metrics(IOSIM_FONT_REGULAR, 13, scale, &asc, &desc,
+        iosim_fb_font_metrics(IOSIM_FONT_REGULAR, 15, scale, &asc, &desc,
                               &lh);
         mh = (n > 0 ? n : 1) * lh / scale;
     }
-    double h = 22 + th + (mh > 0 ? 8 + mh : 0) + 22;
-    h += alert->_actionCount * 44;
+    double buttons;
+    if (alert->_actionCount == 2)
+        buttons = 47;
+    else
+        buttons = alert->_actionCount * 47 +
+                  (alert->_actionCount > 1 ? (alert->_actionCount - 1) * 8 : 0);
+    double h = 22 + th + (mh > 0 ? 7 + mh : 0) + 20.5 + buttons + 17;
     *outW = width;
     *outH = h;
     *titleH = th;
@@ -5433,12 +5532,7 @@ static void alert_draw_wrapped(id text, double width, double scale, int x,
                           scale, &asc, &desc, &lh);
     for (int i = 0; i < n; i++)
     {
-        int lw = iosim_fb_font_text_width(lines[i],
-                                          bold ? IOSIM_FONT_BOLD
-                                               : IOSIM_FONT_REGULAR,
-                                          size, scale);
-        iosim_fb_font_text(x + ((int)(width * scale) - lw) / 2,
-                           y + i * lh + asc, lines[i],
+        iosim_fb_font_text(x, y + i * lh + asc, lines[i],
                            bold ? IOSIM_FONT_BOLD : IOSIM_FONT_REGULAR, size,
                            scale, color);
     }
@@ -5448,73 +5542,88 @@ static void draw_alert(UIAlertController *alert, int fbW, int fbH,
                        double scale)
 {
     double W = fbW / scale, H = fbH / scale;
-    iosim_fb_set_opacity(0.4);
+    iosim_fb_set_opacity(0.47);
     iosim_fb_fill_rect(0, 0, fbW, fbH, 0x000000);
     iosim_fb_set_opacity(1.0);
+    /* The system status bar lives above the alert's dimming view. */
+    draw_device_chrome(fbW, scale);
     double width, height, titleH, messageH;
     alert_metrics(alert, fbW, scale, &width, &height, &titleH, &messageH);
     double x = (W - width) / 2;
-    double y = (H - height) / 2 - 20;
+    double y = (H - height) / 2 + 14.0;
     int ix = (int)(x * scale + 0.5);
     int iy = (int)(y * scale + 0.5);
     int iw = (int)(width * scale + 0.5);
     int ih = (int)(height * scale + 0.5);
-    iosim_fb_set_opacity(0.35);
-    iosim_fb_fill_round_rect(ix + (int)(2 * scale),
-                             iy + (int)(8 * scale), iw, ih,
-                             (int)(18 * scale), 0x000000);
-    iosim_fb_set_opacity(1.0);
-    iosim_fb_fill_round_rect(ix, iy, iw, ih, (int)(14 * scale), 0x2c2c2e);
-    int textX = ix + (int)(16 * scale);
-    int textW = iw - (int)(32 * scale);
-    int cursor = iy + (int)(20 * scale);
+    iosim_fb_fill_round_rect(ix, iy, iw, ih, (int)(33.7 * scale), 0x23242d);
+    int cursor = iy + (int)(22 * scale);
+    int textX = ix + (int)(30 * scale);
     if (alert->_title)
     {
-        alert_draw_wrapped(alert->_title, width - 32, scale, textX, cursor,
+        alert_draw_wrapped(alert->_title, width - 64, scale, textX, cursor,
                            0xffffff, 1, 17, 4);
-        cursor += (int)(titleH * scale) + (int)(8 * scale);
+        cursor += (int)(titleH * scale) + (int)(7 * scale);
     }
     if (alert->_message)
     {
-        alert_draw_wrapped(alert->_message, width - 32, scale, textX, cursor,
-                           0xb8b8bd, 0, 13, 8);
-        cursor += (int)(messageH * scale) + (int)(14 * scale);
+        alert_draw_wrapped(alert->_message, width - 64, scale, textX, cursor,
+                           0x71727a, 0, 15, 8);
+        cursor += (int)(messageH * scale) + (int)(20.5 * scale);
     }
-    int sepY = iy + ih - (int)(alert->_actionCount * 44 * scale);
-    iosim_fb_set_opacity(0.6);
-    iosim_fb_fill_rect(ix, sepY, iw, (int)(0.5 * scale + 1), 0x3a3a3c);
-    iosim_fb_set_opacity(1.0);
-    for (int i = 0; i < alert->_actionCount; i++)
+    int by = iy + ih - (int)(17 * scale) - (int)(47 * scale);
+    int bh = (int)(47 * scale);
+    if (alert->_actionCount == 2)
     {
-        UIAlertAction *action = alert->_actions[i];
-        int rowY = sepY + (int)(i * 44 * scale);
-        if (i > 0)
+        int gap = (int)(8.3 * scale);
+        int bw = (iw - (int)(16 * scale) * 2 - gap) / 2;
+        for (int i = 0; i < 2; i++)
         {
-            iosim_fb_set_opacity(0.6);
-            iosim_fb_fill_rect(ix, rowY, iw, (int)(0.5 * scale + 1),
-                               0x3a3a3c);
-            iosim_fb_set_opacity(1.0);
-        }
-        const char *title = iosim_string_cstr(action->_title);
-        if (title)
-        {
+            int bx = ix + (int)(16 * scale) + i * (bw + gap);
+            iosim_fb_fill_round_rect(bx, by, bw, bh, bh / 2, 0x404149);
+            UIAlertAction *action = alert->_actions[i];
+            const char *title = iosim_string_cstr(action->_title);
+            if (!title)
+                continue;
             unsigned color = action->_style == UIAlertActionStyleDestructive
-                                 ? 0xff453a : 0x0a84ff;
-            int tw = iosim_fb_font_text_width(
-                title, action->_style == UIAlertActionStyleCancel
-                           ? IOSIM_FONT_SEMIBOLD : IOSIM_FONT_REGULAR,
-                17, scale);
+                                 ? 0xff6b6f : 0xffffff;
+            int tw = iosim_fb_font_text_width(title, IOSIM_FONT_REGULAR, 17,
+                                              scale);
             int asc = 0, desc = 0, lh = 0;
-            iosim_fb_font_metrics(
-                action->_style == UIAlertActionStyleCancel
-                    ? IOSIM_FONT_SEMIBOLD : IOSIM_FONT_REGULAR,
-                17, scale, &asc, &desc, &lh);
-            iosim_fb_font_text(ix + (iw - tw) / 2,
-                               rowY + (int)(44 * scale) / 2 - lh / 2 + asc,
-                               title,
-                               action->_style == UIAlertActionStyleCancel
-                                   ? IOSIM_FONT_SEMIBOLD : IOSIM_FONT_REGULAR,
-                               17, scale, color);
+            iosim_fb_font_metrics(IOSIM_FONT_REGULAR, 17, scale, &asc, &desc,
+                                  &lh);
+            iosim_fb_font_text(bx + (bw - tw) / 2,
+                               by + bh / 2 - lh / 2 + asc +
+                                   (int)(0.7 * scale + 0.5),
+                               title, IOSIM_FONT_REGULAR, 17, scale, color);
+        }
+    }
+    else
+    {
+        int rowY = by - (alert->_actionCount - 1) * (bh + (int)(8 * scale));
+        for (int i = 0; i < alert->_actionCount; i++)
+        {
+            int bx = ix + (int)(16 * scale);
+            int bw = iw - (int)(32 * scale);
+            iosim_fb_fill_round_rect(bx, rowY, bw, bh, bh / 2, 0x404149);
+            UIAlertAction *action = alert->_actions[i];
+            const char *title = iosim_string_cstr(action->_title);
+            if (title)
+            {
+                unsigned color =
+                    action->_style == UIAlertActionStyleDestructive
+                        ? 0xff6b6f : 0xffffff;
+                int tw = iosim_fb_font_text_width(title, IOSIM_FONT_REGULAR,
+                                                  17, scale);
+                int asc = 0, desc = 0, lh = 0;
+                iosim_fb_font_metrics(IOSIM_FONT_REGULAR, 17, scale, &asc,
+                                      &desc, &lh);
+                iosim_fb_font_text(bx + (bw - tw) / 2,
+                                   rowY + bh / 2 - lh / 2 + asc +
+                                       (int)(0.7 * scale + 0.5),
+                                   title, IOSIM_FONT_REGULAR, 17, scale,
+                                   color);
+            }
+            rowY += bh + (int)(8 * scale);
         }
     }
 }
@@ -5540,6 +5649,7 @@ static void draw_modals(UIViewController *root, int fbW, int fbH,
 static int alert_handle_tap(UIViewController *root, int px, int py, int fbW,
                             int fbH, double scale)
 {
+    (void)fbH;
     if (!root || !root->_presentedController)
         return 0;
     UIViewController *top = top_presented(root);
@@ -5548,18 +5658,38 @@ static int alert_handle_tap(UIViewController *root, int px, int py, int fbW,
     UIAlertController *alert = (UIAlertController *)top;
     double width, height, titleH, messageH;
     alert_metrics(alert, fbW, scale, &width, &height, &titleH, &messageH);
-    double W = fbW / scale, H = fbH / scale;
-    double x = (W - width) / 2, y = (H - height) / 2 - 20;
+    double W = fbW / scale;
+    double x = (W - width) / 2;
+    double H = fbH / scale;
+    double topY = (H - height) / 2 + 14.0;
     double tapX = px / scale, tapY = py / scale;
-    if (tapX < x || tapX > x + width || tapY < y || tapY > y + height)
+    if (tapX < x || tapX > x + width || tapY < topY || tapY > topY + height)
         return 1;
-    double actionsTop = y + height - alert->_actionCount * 44;
-    int row = (int)((tapY - actionsTop) / 44);
-    if (row >= 0 && row < alert->_actionCount)
+    double by = topY + height - 17 - 47;
+    int action = -1;
+    if (alert->_actionCount == 2)
     {
-        UIAlertAction *action = alert->_actions[row];
-        if (action && action->_handler)
-            action->_handler(action);
+        double gap = 8.3;
+        double bw = (width - 32 - gap) / 2;
+        if (tapY >= by && tapY <= by + 47)
+        {
+            if (tapX >= x + 16 && tapX <= x + 16 + bw)
+                action = 0;
+            else if (tapX >= x + 16 + bw + gap &&
+                     tapX <= x + 16 + bw + gap + bw)
+                action = 1;
+        }
+    }
+    else if (tapY >= by && tapY <= by + 47)
+    {
+        if (tapX >= x + 16 && tapX <= x + width - 16)
+            action = 0;
+    }
+    if (action >= 0 && action < alert->_actionCount)
+    {
+        UIAlertAction *a = alert->_actions[action];
+        if (a && a->_handler)
+            a->_handler(a);
         [root dismissViewControllerAnimated:NO completion:nil];
     }
     return 1;
