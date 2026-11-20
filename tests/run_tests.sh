@@ -254,6 +254,27 @@ else
     echo "FAIL keyed archive plist"; echo "$out"; fails=$((fails+1))
 fi
 
+# ---------- 4e. run loop, delayed performs and timers ----------
+"$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
+    -ffreestanding -O1 -I "$ROOT/frameworks" \
+    -c "$ROOT/tests/runloop_test.m" -o "$T/runloop.o"
+"$LD64" -arch x86_64 -platform_version $PLATFORM -e _main -o "$T/runloop" \
+    "$T/runloop.o" \
+    "$ROOT/runtime/System/Library/Frameworks/Foundation.framework/Foundation" \
+    -undefined dynamic_lookup
+out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/runloop" 2>&1)"
+check "runloop: mainthread=1" "$out" "NSThread reports the main thread"
+check "runloop: perform now" "$out" \
+    "performSelector:withObject: sends immediately"
+check "runloop: idle=0 waited=1" "$out" \
+    "runMode:beforeDate: waits for its deadline"
+check "runloop: fired=1 timing=1" "$out" \
+    "a delayed perform runs on the run loop"
+check "runloop: tick 2" "$out" \
+    "a repeating NSTimer fires and invalidates"
+check "runloop: sleeping=1 cancelled=0" "$out" \
+    "cancelled performs do not fire and sleeping waits"
+
 # ---------- 5. UIKit-lite framework dylib ----------
 cat > "$T/uikit_app.c" <<'EOF'
 extern int printf(const char *fmt, ...);
@@ -618,7 +639,8 @@ for line in open(sys.argv[1], errors='replace'):
         dots.append(float(line.split()[2]))
 if not any(305.0 < v < 465.0 for v in present):
     raise SystemExit('no in-flight presentation frame: %r' % present)
-if not any(v < 0.40 for v in dots):
+# The keyframe bottoms out at 0.4; a sample may print exactly 0.4.
+if not any(v < 0.45 for v in dots):
     raise SystemExit('no keyframe opacity sample: %r' % dots)
 print('ok   presentation layer interpolates frame and keyframe opacity')
 PY

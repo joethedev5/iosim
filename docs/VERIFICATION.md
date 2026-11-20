@@ -435,6 +435,16 @@ parses the file as a genuine keyed archive: `$archiver` is `NSKeyedArchiver`,
 (`$classname` `Profile`, `$classes` chain), and `$top`/`$objects` refer to
 entries through `CF$UID` dictionaries — the shape Foundation writes.
 
+### Foundation: run loop and delayed performs
+
+`tests/runloop_test.m` schedules `performSelector:withObject:afterDelay:` on
+an object, cancels a second request and drives `NSRunLoop` directly. It
+reports `mainthread=1` from `NSThread`; an idle
+`runMode:beforeDate:` returns `idle=0 waited=1` after its 100 ms deadline;
+the 150 ms delayed perform then runs (`fired=1 timing=1`) and the cancelled
+one never does. A repeating 50 ms timer fires twice and invalidates itself,
+and `sleepForTimeInterval:` really waits (`sleeping=1 cancelled=0`).
+
 ### UIKit: app bundle resources
 
 `demo/ResourceApp.m` is installed as a real `.app` with a 4 x 4 red `dot.png`

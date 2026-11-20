@@ -14,6 +14,7 @@
 #include <malloc.h>
 #include <time.h>
 #include <unistd.h>
+#include <pthread.h>
 #include <math.h>
 #include <time.h>
 #include <stdarg.h>
@@ -560,6 +561,8 @@ double iosim_wall_time(void)
 
 /* ---------- table ---------- */
 
+int shim_pthread_main_np(void);
+
 #define SHIM(fn) { #fn, (void *)(uintptr_t)&shim_##fn }
 #define SHIM_ALIAS(nm, fn) { nm, (void *)(uintptr_t)&shim_##fn }
 #define SHIM_DIRECT(nm) { #nm, (void *)(uintptr_t)&nm }
@@ -668,6 +671,8 @@ static const struct iosim_shim shims[] = {
     SHIM_DIRECT(_Block_object_dispose),
     SHIM_DIRECT(iosim_now),
     SHIM_DIRECT(iosim_wall_time),
+    SHIM_DIRECT(usleep),
+    SHIM_ALIAS("pthread_main_np", pthread_main_np),
     SHIM_DIRECT(malloc),
     SHIM_DIRECT(calloc),
     SHIM_DIRECT(realloc),
@@ -747,6 +752,29 @@ double iosim_now(void)
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (double)ts.tv_sec + ts.tv_nsec / 1e9;
+}
+
+/* pthread_main_np: the guest asks whether it runs on the process's first
+ * thread. Record that thread here, while the host loader is still single
+ * threaded, and compare against it. */
+static pthread_t g_main_pthread;
+static int g_main_pthread_set;
+
+__attribute__((constructor)) static void iosim_record_main_thread(void)
+{
+    g_main_pthread = pthread_self();
+    g_main_pthread_set = 1;
+}
+
+int shim_pthread_main_np(void)
+{
+    if (!g_main_pthread_set)
+    {
+        g_main_pthread = pthread_self();
+        g_main_pthread_set = 1;
+        return 1;
+    }
+    return pthread_equal(pthread_self(), g_main_pthread) ? 1 : 0;
 }
 
 struct iosim_block_descriptor {

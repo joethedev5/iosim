@@ -29,6 +29,13 @@ __attribute__((objc_root_class))
 - (BOOL)isEqual:(id)other;
 - (unsigned long)hash;
 - (id)description;
+- (void)performSelector:(SEL)selector withObject:(id)argument;
+- (void)performSelector:(SEL)selector withObject:(id)argument
+             afterDelay:(double)delay;
++ (void)cancelPreviousPerformRequestsWithTarget:(id)target;
++ (void)cancelPreviousPerformRequestsWithTarget:(id)target
+                                       selector:(SEL)selector
+                                         object:(id)argument;
 @end
 
 @class NSString;
@@ -325,11 +332,33 @@ enum {
     BOOL _repeats;
     double _nextFire;
     BOOL _valid;
+    id _performArgument;
+    BOOL _isPerform;
 }
 + (id)scheduledTimerWithTimeInterval:(double)interval target:(id)target
     selector:(SEL)selector userInfo:(id)userInfo repeats:(BOOL)repeats;
 - (void)invalidate;
 - (void)fire;
+@end
+
+@class NSDate;
+
+extern id NSDefaultRunLoopMode;
+
+@interface NSRunLoop : NSObject
++ (NSRunLoop *)currentRunLoop;
++ (NSRunLoop *)mainRunLoop;
+- (void)addTimer:(NSTimer *)timer forMode:(id)mode;
+- (BOOL)runMode:(id)mode beforeDate:(NSDate *)limitDate;
+- (void)runUntilDate:(NSDate *)limitDate;
+- (void)run;
+@end
+
+@interface NSThread : NSObject
++ (NSThread *)currentThread;
++ (NSThread *)mainThread;
++ (BOOL)isMainThread;
++ (void)sleepForTimeInterval:(double)interval;
 @end
 
 @interface NSDate : NSObject {
@@ -338,6 +367,7 @@ enum {
 }
 + (id)date;
 + (id)dateWithTimeIntervalSince1970:(double)interval;
++ (id)dateWithTimeIntervalSinceNow:(double)interval;
 - (id)initWithTimeIntervalSince1970:(double)interval;
 - (double)timeIntervalSince1970;
 - (double)timeIntervalSinceNow;

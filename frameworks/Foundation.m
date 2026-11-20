@@ -12,6 +12,9 @@ extern int   iosim_objc_is_kind_of(void *obj, void *cls);
 extern int   iosim_objc_responds(void *obj, void *sel);
 extern void  iosim_nslog(const char *message);
 extern double iosim_now(void);
+extern double iosim_wall_time(void);
+extern int usleep(unsigned int usec);
+extern int pthread_main_np(void);
 extern void *objc_msgSend(void *self, void *sel, ...);
 extern void *objc_getClass(const char *name);
 extern char *getenv(const char *name);
@@ -52,6 +55,9 @@ struct cf_constant_string {
 extern void *objc_getClass(const char *name);
 extern const char *class_getName(void *cls);
 extern char *getenv(const char *name);
+
+static NSTimer *g_timers[64];
+static int g_timer_count;
 
 
 static char *iosim_utf16_to_utf8(const unsigned short *s, unsigned long n)
@@ -173,6 +179,47 @@ static int objects_equal(id a, id b)
 - (BOOL)isEqual:(id)other { return self == other; }
 - (unsigned long)hash { return (unsigned long)(long)self; }
 - (id)description { return [NSString stringWithUTF8String:"<NSObject>"]; }
+- (void)performSelector:(SEL)selector withObject:(id)argument
+{
+    if (!selector)
+        return;
+    ((void (*)(id, SEL, id))objc_msgSend)(self, selector, argument);
+}
+- (void)performSelector:(SEL)selector withObject:(id)argument
+             afterDelay:(double)delay
+{
+    if (!selector)
+        return;
+    NSTimer *timer = [NSTimer scheduledTimerWithTimeInterval:delay
+                                                      target:self
+                                                    selector:selector
+                                                    userInfo:nil
+                                                     repeats:NO];
+    timer->_isPerform = YES;
+    timer->_performArgument = argument;
+}
++ (void)cancelPreviousPerformRequestsWithTarget:(id)target
+                                       selector:(SEL)selector
+                                         object:(id)argument
+{
+    for (int i = 0; i < g_timer_count; i++)
+    {
+        NSTimer *timer = g_timers[i];
+        if (!timer || !timer->_isPerform || timer->_target != target)
+            continue;
+        if (selector && timer->_selector != selector)
+            continue;
+        if (argument && timer->_performArgument != argument)
+            continue;
+        [timer invalidate];
+    }
+}
++ (void)cancelPreviousPerformRequestsWithTarget:(id)target
+{
+    [self cancelPreviousPerformRequestsWithTarget:target
+                                         selector:0
+                                           object:0];
+}
 @end
 
 /* ------------------------------------------------------------- NSString */
@@ -1585,9 +1632,6 @@ static void defaults_path(char *out, unsigned long cap)
 
 /* ---------------------------------------------------------------- Timer */
 
-static NSTimer *g_timers[64];
-static int g_timer_count;
-
 @implementation NSTimer
 + (id)scheduledTimerWithTimeInterval:(double)interval target:(id)target
     selector:(SEL)selector userInfo:(id)userInfo repeats:(BOOL)repeats
@@ -1610,7 +1654,10 @@ static int g_timer_count;
     if (!_valid || !_target)
         return;
     void (*imp)(id, SEL, id) = (void (*)(id, SEL, id))objc_msgSend;
-    imp(_target, _selector, self);
+    if (_isPerform)
+        imp(_target, _selector, _performArgument);
+    else
+        imp(_target, _selector, self);
     if (_repeats)
         _nextFire = iosim_now() + _interval;
     else
@@ -1633,6 +1680,74 @@ int iosim_foundation_tick(void)
     }
     return fired;
 }
+
+/* ------------------------------------------------------- run loop & threads */
+
+id NSDefaultRunLoopMode = @"NSDefaultRunLoopMode";
+
+@implementation NSRunLoop
++ (NSRunLoop *)currentRunLoop
+{
+    static NSRunLoop *loop;
+    if (!loop)
+        loop = [[self alloc] init];
+    return loop;
+}
++ (NSRunLoop *)mainRunLoop { return [self currentRunLoop]; }
+- (void)addTimer:(NSTimer *)timer forMode:(id)mode
+{
+    (void)timer;
+    (void)mode;
+}
+- (BOOL)runMode:(id)mode beforeDate:(NSDate *)limitDate
+{
+    (void)mode;
+    double limit = limitDate ? [limitDate timeIntervalSince1970]
+                             : iosim_wall_time() + 1.0;
+    while (iosim_wall_time() < limit)
+    {
+        if (iosim_foundation_tick() > 0)
+            return YES;
+        usleep(2000);
+    }
+    return NO;
+}
+- (void)runUntilDate:(NSDate *)limitDate
+{
+    double limit = limitDate ? [limitDate timeIntervalSince1970]
+                             : iosim_wall_time();
+    while (iosim_wall_time() < limit)
+    {
+        iosim_foundation_tick();
+        usleep(2000);
+    }
+}
+- (void)run
+{
+    for (;;)
+    {
+        iosim_foundation_tick();
+        usleep(2000);
+    }
+}
+@end
+
+@implementation NSThread
++ (NSThread *)currentThread
+{
+    static NSThread *thread;
+    if (!thread)
+        thread = [[self alloc] init];
+    return thread;
+}
++ (NSThread *)mainThread { return [self currentThread]; }
++ (BOOL)isMainThread { return pthread_main_np() ? YES : NO; }
++ (void)sleepForTimeInterval:(double)interval
+{
+    if (interval > 0)
+        usleep((unsigned int)(interval * 1000000.0));
+}
+@end
 
 /* ---------------------------------------------------------------- NSLog */
 
@@ -1677,6 +1792,11 @@ static void iosim_civil_from_days(long long z, int *year, int *month, int *day)
 + (id)dateWithTimeIntervalSince1970:(double)interval
 {
     return [[self alloc] initWithTimeIntervalSince1970:interval];
+}
++ (id)dateWithTimeIntervalSinceNow:(double)interval
+{
+    return [[self alloc] initWithTimeIntervalSince1970:
+                iosim_wall_time() + interval];
 }
 - (id)initWithTimeIntervalSince1970:(double)interval
 {

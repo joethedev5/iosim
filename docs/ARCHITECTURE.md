@@ -309,6 +309,14 @@ entry reserved before its children so cycles resolve. `NSKeyedUnarchiver`
 rebuilds objects lazily and allocates custom classes by name through the ObjC
 runtime; `NSMutableData` backs incremental archive output.
 
+`NSRunLoop` runs the same timer table through `runMode:beforeDate:`,
+`runUntilDate:` and `run`, sleeping through the `usleep` libc shim.
+`performSelector:withObject:afterDelay:` registers a one-shot timer whose
+fire sends the argument instead of the timer, and the
+`cancelPreviousPerformRequests...` class methods invalidate matching entries.
+`NSThread` answers `isMainThread` through a `pthread_main_np` shim that
+records the loader's first thread, and sleeps with the same shim.
+
 Bundle resources follow the executable: when a guest image lives inside
 `Foo.app`, the loader exports `IOSIM_BUNDLE_DIR=Foo.app` (derived from the real
 executable path, so an app launched by SpringBoard does not inherit the system
