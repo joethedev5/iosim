@@ -6228,6 +6228,22 @@ struct shell_app {
 
 static struct shell_app g_shell_apps[SHELL_MAX_APPS];
 static int g_shell_app_count;
+static int g_home_page;
+
+static int shell_grid_count(void)
+{
+    int count = 0;
+    for (int i = 0; i < g_shell_app_count; i++)
+        if (!g_shell_apps[i].dock)
+            count++;
+    return count;
+}
+
+static int shell_page_count(void)
+{
+    int grid = shell_grid_count();
+    return grid > 0 ? (grid + 15) / 16 : 1;
+}
 static unsigned *g_shell_wallpaper;
 static int g_shell_wallpaper_w, g_shell_wallpaper_h;
 
@@ -6857,16 +6873,36 @@ static void shell_draw(int fbWidth, int fbHeight, double scale)
         struct shell_app *a = &g_shell_apps[i];
         if (a->dock)
             continue;
-        if (grid_index >= 16)
-            break;
-        int col = grid_index % 4, row = grid_index / 4;
-        int cx = (int)((SHELL_MARGIN_PT + SHELL_ICON_PT / 2 + col * pitch) *
-                       scale + 0.5);
-        int cy = (int)(shell_row_center[row] * scale + 0.5);
-        shell_stock_icon(a->stock, cx - s / 2, cy - s / 2, s, scale);
-        int baseline = cy + s / 2 + (int)(16.1 * scale + 0.5);
-        shell_label(a->name, cx, baseline, scale);
+        int page = grid_index / 16;
+        int page_slot = grid_index % 16;
+        if (page == g_home_page)
+        {
+            int col = page_slot % 4, row = page_slot / 4;
+            int cx = (int)((SHELL_MARGIN_PT + SHELL_ICON_PT / 2 + col * pitch) *
+                           scale + 0.5);
+            int cy = (int)(shell_row_center[row] * scale + 0.5);
+            shell_stock_icon(a->stock, cx - s / 2, cy - s / 2, s, scale);
+            int baseline = cy + s / 2 + (int)(16.1 * scale + 0.5);
+            shell_label(a->name, cx, baseline, scale);
+        }
         grid_index++;
+    }
+
+    /* Page dots sit between the grid and the search pill and are hidden for
+     * a single page, as on the captured single-page home screen. */
+    int pages = shell_page_count();
+    if (pages > 1)
+    {
+        int dot_r = (int)(3.5 * scale + 0.5);
+        double pitch_dots = 16.0;
+        int dot_y = (int)(686.0 * scale + 0.5);
+        int first_x = (int)((W / 2.0 - (pages - 1) * pitch_dots / 2.0) * scale);
+        for (int i = 0; i < pages; i++)
+        {
+            int dot_x = first_x + (int)(i * pitch_dots * scale + 0.5);
+            unsigned color = i == g_home_page ? 0xffffff : 0x8e8e93;
+            iosim_fb_fill_circle(dot_x, dot_y, dot_r, color);
+        }
     }
 
     /* Dock glass and its two apps. */
@@ -7224,6 +7260,10 @@ static int run_springboard(void)
             /* The set of installed apps changed: rebuild the home screen. */
             g_switcher = 0;
             shell_load_apps();
+            if (g_home_page >= shell_page_count())
+                g_home_page = shell_page_count() - 1;
+            if (g_home_page < 0)
+                g_home_page = 0;
             shell_draw(fbWidth, fbHeight, scale);
             if (path && *path)
                 iosim_fb_present(path);
@@ -7288,6 +7328,24 @@ static int run_springboard(void)
                     g_switcher_index = count > 0 ? count - 1 : 0;
                 shell_repaint(fbWidth, fbHeight, scale, path, 1);
             }
+            else if (!g_switcher && (dx > 80 || dx < -80) &&
+                     dy > -60 && dy < 60)
+            {
+                int pages = shell_page_count();
+                int page = g_home_page + (dx < 0 ? 1 : -1);
+                if (page < 0)
+                    page = 0;
+                if (page >= pages)
+                    page = pages - 1;
+                if (page != g_home_page)
+                {
+                    g_home_page = page;
+                    printf("[SpringBoard] home page %d of %d\n", page + 1,
+                           pages);
+                    fflush(0);
+                    shell_repaint(fbWidth, fbHeight, scale, path, 0);
+                }
+            }
             continue;
         }
         if (r == 1 && type == 7 && g_switcher)
@@ -7331,14 +7389,17 @@ static int run_springboard(void)
         {
             if (g_shell_apps[i].dock)
                 continue;
-            if (slot >= 16)
-                break;
-            int col = slot % 4, row = slot / 4;
-            double cx = SHELL_MARGIN_PT + SHELL_ICON_PT / 2 + col * pitch;
-            double cy = shell_row_center[row];
-            if (px >= cx - 34 && px < cx + 34 && py >= cy - 34 &&
-                py < cy + 50)
-                hit = i;
+            int page = slot / 16;
+            int page_slot = slot % 16;
+            if (page == g_home_page)
+            {
+                int col = page_slot % 4, row = page_slot / 4;
+                double cx = SHELL_MARGIN_PT + SHELL_ICON_PT / 2 + col * pitch;
+                double cy = shell_row_center[row];
+                if (px >= cx - 34 && px < cx + 34 && py >= cy - 34 &&
+                    py < cy + 50)
+                    hit = i;
+            }
             slot++;
         }
         if (hit < 0 && px >= 201.0 - 80 && px < 201.0 + 80 &&

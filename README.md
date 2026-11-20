@@ -47,6 +47,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | SpringBoard system UI: measured iOS 26 home screen, installed apps, real app launching | ✅ |
 | Real app suspension: home stops the process, the icon resumes it in place | ✅ |
 | App switcher: bottom-edge gesture, cached app frames, card resume | ✅ |
+| Multi-page home screen: 16-slot pages, page dots, horizontal swipe paging | ✅ |
 | UIView 2D affine transforms (translate/scale/rotate), layout callbacks, UIScrollView offsets | ✅ (basic) |
 | Layer clipping (`clipsToBounds`/`masksToBounds`), shadows and borders | ✅ |
 | Switch, slider, segmented, progress, page and activity controls in the iOS 26 glass design | ✅ |

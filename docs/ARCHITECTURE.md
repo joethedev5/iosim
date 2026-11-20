@@ -485,15 +485,20 @@ App enumeration is real. `tools/iosimctl` writes a manifest of installed
 bundles, in install order, with display name, executable, bundle identifier and
 data container. SpringBoard loads that manifest, draws the stock system apps
 plus every installed app (generic placeholder artwork until a bundle carries an
-icon), and hit-tests taps against the same grid. Tapping an installed app
-closes the UI's event stream, forks the loader with the app executable, waits
-for the app to exit and repaints the home screen. The child runs the app's own
-`main` → `UIApplicationMain` → scene lifecycle, with its `HOME` moved to the
-bundle's data container and `XPC_SERVICE_NAME` set, and writes the same shared
-framebuffer. `home` is delivered as a system event (type 7): the app runs
-`sceneWillResignActive:` and `sceneDidEnterBackground:` and terminates, and
-SpringBoard resumes with a freshly rendered home screen. `apps` (type 8)
-reloads the manifest and redraws when an install changes the app set.
+icon), and hit-tests taps against the same grid. Slots are assigned in order
+and split into 16-slot pages; the first page holds seven stock apps plus the
+first nine installed apps. With more than one page, page dots (3.5 pt radius,
+16 pt pitch, white for the active page) sit between the grid and the search
+pill, a horizontal swipe moves between pages, and hit-testing only considers
+the current page. Tapping an installed app closes the UI's event stream, forks
+the loader with the app executable and waits for it with `WUNTRACED`. The child
+runs the app's own `main` → `UIApplicationMain` → scene lifecycle, with its
+`HOME` moved to the bundle's data container and `XPC_SERVICE_NAME` set, and
+writes the same shared framebuffer. `home` (type 7) makes the app run
+`sceneWillResignActive:`/`sceneDidEnterBackground:`, release the stream and
+SIGSTOP itself; the same process resumes from its icon or switcher card.
+`apps` (type 8) reloads the manifest and redraws when an install changes the
+app set.
 
 Stock system apps (Fitness, Watch, Reminders, Files, Preview, Utilities,
 Contacts, Safari, Messages) are drawn from measured vector artwork. Their
@@ -542,8 +547,9 @@ Python for iteration speed.
 - The dyld shared cache is not parsed; each dylib is loaded from disk.
 - Class method dispatch covers the common path; message forwarding, associated
   objects, ARC entry points and exceptions are pending.
-- The SpringBoard grid is a single page with 16 slots; there is no paging.
-  The switcher shows at most three cards and opens from the home screen or
+- The SpringBoard grid pages in 16-slot pages; page changes are discrete (no
+  sliding animation), and there are no folders, widgets or Today view. The
+  switcher shows at most three cards and opens from the home screen or
   `ui switcher` (a foreground app owns the event stream, so an in-app
   bottom-edge gesture is not intercepted); cards have no scrolling animation
   or swipe-to-kill. A backgrounded app is suspended in place (the process

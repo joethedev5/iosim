@@ -490,6 +490,17 @@ PNG's 1206 x 2622 dimensions, selection of the card, and a second
 A bottom-edge swipe up opens the switcher from the home screen and a downward
 swipe closes it; `ui switcher` injects the same toggle for headless tests.
 
+The home grid pages in groups of 16 once seven stock apps and nine
+installed apps are present. The test installs ten extra page fixtures (21 grid apps in
+all), then swipes left: SpringBoard reports `home page 2 of 2`, draws the
+second page with `Page6` at the top-left slot, and the page dots swap from
+white-on-the-left to white-on-the-right. A screenshot check reads the two dot
+centres at x = 193 pt and 209 pt, y = 686 pt, verifying #ffffff for the active
+page and #8e8e93 for the inactive one; tapping the top-left slot then launches
+`Page6` and swiping right returns to page 1. The dot row's placement between
+the grid and the search pill is a modeled iOS 26 relationship; the rest of the
+layout (pitch, icon size, labels, dock and pill) remains the measured capture.
+
 ## Limitations
 
 The framework surface is still a subset. Auto Layout supports equality and
@@ -500,9 +511,10 @@ without comments, streaming or fragments unless enabled.
 Text input is a single-line `UITextField` with a QWERTY keyboard; UITextView,
 multitap gestures and selection handles are not implemented. Touch input is
 single-finger: there is no multitouch, touch prediction or pressure. Cross-process Mach ports and
-XPC remain in-process, the SpringBoard grid is a single 16-slot page with no
-paging, and the switcher shows at most three cards with no scrolling animation
-or kill gesture; stock system apps have no executables in this runtime.
+XPC remain in-process, SpringBoard pages in groups of 16 without a sliding
+page animation, and the switcher shows at most three cards with no scrolling
+animation or kill gesture; stock system apps have no executables in this
+runtime.
 Backgrounded apps are suspended in place (SIGSTOP) and resumed from their icon
 or switcher card, with no memory-pressure termination policy. CoreText shaping is limited to the glyphs in SFUI;
 right-to-left and complex scripts are not shaped. `UIView.transform` applies a

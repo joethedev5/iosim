@@ -501,6 +501,80 @@ else
     echo "FAIL animated frames"; echo "$out"; fails=$((fails+1))
 fi
 
+# ---------- 9. home-screen pages ----------
+"$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
+sleep 0.7
+for i in 1 2 3 4 5 6 7 8 9 10; do
+    d="$T/Page$i.app"
+    rm -rf "$d"
+    mkdir -p "$d"
+    cp "$T/hello" "$d/Page$i"
+    python3 - "$d/Info.plist" "$i" <<'PY'
+import plistlib, sys
+i = sys.argv[2]
+with open(sys.argv[1], "wb") as f:
+    plistlib.dump({
+        "CFBundleIdentifier": "com.iosim.page%s" % i,
+        "CFBundleExecutable": "Page%s" % i,
+        "CFBundleName": "Page%s" % i,
+        "CFBundlePackageType": "APPL",
+        "CFBundleVersion": "1",
+        "CFBundleShortVersionString": "1.0",
+    }, f)
+PY
+    "$ROOT/tools/iosimctl" install "$UDID" "$d" >/dev/null
+done
+sleep 0.5
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/page1.png" >/dev/null
+"$ROOT/tools/iosimctl" ui "$UDID" swipe 350 400 50 400 0.3 >/dev/null
+if wait_log "home page 2 of 2"; then
+    echo "ok   horizontal swipe moves to the second home page"
+else
+    echo "FAIL home page swipe"; fails=$((fails+1))
+fi
+sleep 0.4
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/page2.png" >/dev/null
+if out="$(python3 - "$ROOT/tools" "$T/page1.png" "$T/page2.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+
+def dot(path, x):
+    w, h, bpp, rows = pngpixel.load(path)
+    return pngpixel.px(rows, bpp, x * 3, 686 * 3)
+
+white = lambda c: (c >> 16) & 255 > 230 and (c >> 8) & 255 > 230 and \
+    (c & 255) > 230
+gray = lambda c: 100 < ((c >> 16) & 255) < 180 and \
+    100 < ((c >> 8) & 255) < 180 and 100 < (c & 255) < 180
+first1, second1 = dot(sys.argv[2], 193), dot(sys.argv[2], 209)
+first2, second2 = dot(sys.argv[3], 193), dot(sys.argv[3], 209)
+if not (white(first1) and gray(second1)):
+    raise SystemExit('page 1 dots wrong: %06x %06x' % (first1, second1))
+if not (gray(first2) and white(second2)):
+    raise SystemExit('page 2 dots wrong: %06x %06x' % (first2, second2))
+print('ok   page dots mark the active home page')
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL page dots"; echo "$out"; fails=$((fails+1))
+fi
+# With four apps installed before the ten page fixtures, page 2 starts at
+# Page6 (grid slot 16), top-left.
+"$ROOT/tools/iosimctl" ui "$UDID" tap 62.1667 121.8333 >/dev/null
+if wait_log "launching Page6"; then
+    echo "ok   tapping a second-page icon launches that app"
+else
+    echo "FAIL second-page launch"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" swipe 50 400 350 400 0.3 >/dev/null
+if wait_log "home page 1 of 2"; then
+    echo "ok   swiping back returns to the first page"
+else
+    echo "FAIL page back-swipe"; fails=$((fails+1))
+fi
+
 "$ROOT/tools/iosimctl" shutdown "$UDID" >/dev/null
 
 if [ "$fails" -ne 0 ]; then
