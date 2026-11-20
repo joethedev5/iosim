@@ -520,6 +520,14 @@ exercises the runtime's nil-receiver semantics as well: the touch lands on a
 view with no touch overrides, the responder chain forwards `touchesBegan:`
 to `nil`, and the trampoline returns zero instead of aborting the process.
 
+Swiping up on a switcher card force-quits the app. The test suspends TouchApp,
+opens the switcher, swipes up from the card, and asserts SpringBoard's
+`closed TouchApp (pid N)` line; the recorded pid no longer exists afterwards,
+so the process was continued, terminated and reaped rather than left stopped.
+Tapping the icon then reports a fresh launch and the fixture's `[touch] app
+ready` appears again, confirming the kill really discarded the old process
+state instead of resuming it.
+
 The home grid pages in groups of 16 once seven stock apps and nine
 installed apps are present. The test installs ten extra page fixtures (21 grid apps in
 all), then swipes left: SpringBoard reports `home page 2 of 2`, draws the

@@ -356,6 +356,11 @@ exist: `list`, `create`, `delete`, `boot`, `bootstatus`, `shutdown`, `erase`,
   screen. The app still stops itself and the same SIGCONT path resumes it,
   so a gesture-initiated switcher card behaves identically to a home-screen
   one.
+- A swipe up that starts on a switcher card force-quits that app. SpringBoard
+  continues the stopped process so the pending SIGTERM is delivered, waits
+  for it to be reaped, drops the pid and cached frame, and repaints the
+  switcher (or home, when the last card is gone). Tapping the icon then runs
+  the executable from scratch, so `viewDidLoad` runs again.
 
 ### 2.9 Services: libdispatch, Mach and XPC
 
@@ -585,8 +590,8 @@ Python for iteration speed.
   sliding animation), and there are no folders, widgets or Today view. The
   switcher shows at most three cards and opens from the home screen, an
   in-app bottom-edge swipe, or `ui switcher`; cards have no scrolling
-  animation or swipe-to-kill. A backgrounded app is suspended in place (the
-  process stops and the same process resumes from its icon), with no
-  memory-pressure termination policy. Stock system apps are display icons
+  animation, and a swipe up on a card force-quits its app. A backgrounded app
+  is suspended in place (the process stops and the same process resumes from
+  its icon), with no memory-pressure termination policy. Stock system apps are display icons
   without executables, and a directly launched app alongside a running
   SpringBoard is not coordinated through launchd.

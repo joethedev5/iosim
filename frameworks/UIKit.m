@@ -6211,6 +6211,7 @@ extern int iosim_spawn_app(const char *exe, const char *bundle, const char *home
 extern int iosim_spawn_wait(int pid);
 extern void iosim_suspend_self(void);
 extern int iosim_resume_app(int pid);
+extern int iosim_terminate_app(int pid);
 extern void iosim_on_switcher_request(void (*handler)(void));
 extern int iosim_request_switcher(void);
 extern void iosim_event_close(void);
@@ -7186,6 +7187,28 @@ static void shell_after_app_stop(int fbWidth, int fbHeight, double scale,
         shell_repaint(fbWidth, fbHeight, scale, path, 0);
 }
 
+/* Force-quit a suspended app from the switcher (a swipe up on its card).
+ * The process is continued so the pending SIGTERM is delivered, then reaped;
+ * its card disappears and the home screen shows the slot again. */
+static void shell_close_app(int index, int fbWidth, int fbHeight, double scale,
+                            const char *path)
+{
+    struct shell_app *a = &g_shell_apps[index];
+    if (a->pid <= 0)
+        return;
+    printf("[SpringBoard] closed %s (pid %d)\n", a->name, a->pid);
+    fflush(0);
+    iosim_terminate_app(a->pid);
+    a->pid = 0;
+    a->snapshot[0] = 0;
+    int count = shell_suspended_count();
+    if (count == 0)
+        g_switcher = 0;
+    if (g_switcher_index >= count)
+        g_switcher_index = count > 0 ? count - 1 : 0;
+    shell_repaint(fbWidth, fbHeight, scale, path, g_switcher);
+}
+
 static void shell_launch(int index, int fbWidth, int fbHeight, double scale,
                          const char *path)
 {
@@ -7349,6 +7372,18 @@ static int run_springboard(void)
                        count);
                 fflush(0);
                 shell_repaint(fbWidth, fbHeight, scale, path, 1);
+            }
+            else if (g_switcher && dy < -100 && dx > -140 && dx < 140)
+            {
+                /* A swipe up that starts on a card closes that app. */
+                int ordinal = shell_switcher_hit(
+                    (int)(g_sb_down_x * scale), (int)(g_sb_down_y * scale),
+                    fbWidth, fbHeight, scale);
+                int appIndex = -1;
+                if (ordinal >= 0)
+                    shell_suspended_app(ordinal, &appIndex);
+                if (appIndex >= 0)
+                    shell_close_app(appIndex, fbWidth, fbHeight, scale, path);
             }
             else if (g_switcher && dy > 90)
             {

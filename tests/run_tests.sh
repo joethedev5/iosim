@@ -432,6 +432,49 @@ else
 fi
 sleep 0.4
 
+# ---------- 7e. the switcher's swipe-up force-quits a suspended app ----------
+"$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
+sleep 0.6
+sw_before="$(grep -Fc "[SpringBoard] app switcher opened" "$SBLOG" 2>/dev/null || true)"
+"$ROOT/tools/iosimctl" ui "$UDID" switcher >/dev/null
+sw_now="$sw_before"
+i=0
+while [ "$i" -lt 50 ]; do
+    sw_now="$(grep -Fc "[SpringBoard] app switcher opened" "$SBLOG" 2>/dev/null || true)"
+    [ "$sw_now" -gt "$sw_before" ] && break
+    sleep 0.1
+    i=$((i+1))
+done
+"$ROOT/tools/iosimctl" ui "$UDID" swipe 201 400 201 180 0.25 >/dev/null
+if wait_log "closed TouchApp (pid"; then
+    echo "ok   swiping up on a switcher card closes the app"
+else
+    echo "FAIL switcher kill gesture"; fails=$((fails+1))
+fi
+sleep 0.3
+closed_pid="$(sed -n 's/.*closed TouchApp (pid \([0-9][0-9]*\)).*/\1/p' "$SBLOG" 2>/dev/null | tail -1)"
+if [ -n "$closed_pid" ] && ! kill -0 "$closed_pid" 2>/dev/null; then
+    echo "ok   the closed app's process is terminated and reaped"
+else
+    echo "FAIL switcher termination (pid=$closed_pid)"; fails=$((fails+1))
+fi
+launch_before="$(grep -Fc "[SpringBoard] launching TouchApp" "$SBLOG" 2>/dev/null || true)"
+"$ROOT/tools/iosimctl" ui "$UDID" tap 154.7222 322.5 >/dev/null
+launch_now="$launch_before"
+i=0
+while [ "$i" -lt 50 ]; do
+    launch_now="$(grep -Fc "[SpringBoard] launching TouchApp" "$SBLOG" 2>/dev/null || true)"
+    [ "$launch_now" -gt "$launch_before" ] && break
+    sleep 0.1
+    i=$((i+1))
+done
+if [ "$launch_now" -gt "$launch_before" ]; then
+    echo "ok   tapping the icon starts a fresh process after the kill"
+else
+    echo "FAIL relaunch after kill"; fails=$((fails+1))
+fi
+sleep 0.5
+
 # ---------- 8. display link, animation timeline and presentation values ----------
 "$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
 sleep 0.8

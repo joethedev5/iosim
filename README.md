@@ -47,7 +47,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | XPC connections and dictionaries, serialized across processes | ✅ |
 | SpringBoard system UI: measured iOS 26 home screen, installed apps, real app launching | ✅ |
 | Real app suspension: home stops the process, the icon resumes it in place | ✅ |
-| App switcher: home and in-app bottom-edge gestures, cached frames, card resume | ✅ |
+| App switcher: bottom-edge gestures, cached frames, resume, swipe-up kill | ✅ |
 | Multi-page home screen: 16-slot pages, page dots, horizontal swipe paging | ✅ |
 | UIView 2D affine transforms (translate/scale/rotate), layout callbacks, UIScrollView offsets | ✅ (basic) |
 | Layer clipping (`clipsToBounds`/`masksToBounds`), shadows and borders | ✅ |

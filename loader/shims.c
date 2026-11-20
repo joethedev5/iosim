@@ -225,6 +225,24 @@ int iosim_resume_app(int pid)
     return kill(pid, SIGCONT);
 }
 
+/* Force-quit a suspended app the way SpringBoard does: continue it so the
+ * pending SIGTERM is delivered, then reap it. */
+int iosim_terminate_app(int pid)
+{
+    if (pid <= 0)
+        return -1;
+    kill(pid, SIGCONT);
+    kill(pid, SIGTERM);
+    int status = 0;
+    pid_t r;
+    while ((r = waitpid(pid, &status, 0)) < 0)
+    {
+        if (errno != EINTR)
+            return -1;
+    }
+    return 0;
+}
+
 /* An app asks its SpringBoard parent to open the switcher when it suspends.
  * The handler only sets a flag; the guest supplies a plain C function. */
 static void (*switcher_request_handler)(void);
@@ -640,6 +658,7 @@ static const struct iosim_shim shims[] = {
     SHIM_DIRECT(iosim_spawn_wait),
     SHIM_DIRECT(iosim_suspend_self),
     SHIM_DIRECT(iosim_resume_app),
+    SHIM_DIRECT(iosim_terminate_app),
     SHIM_DIRECT(iosim_on_switcher_request),
     SHIM_DIRECT(iosim_request_switcher),
     SHIM_DIRECT(iosim_dispatch_drain_main),
