@@ -164,9 +164,9 @@ frame:
 
 | Metric | Value |
 |---|---|
-| Mean absolute channel error | **1.91 / 255** |
-| Pixels with max-channel error > 24 | **1.67 %** |
-| App content above the keyboard | **1.84 / 255** mean, 1.39 % over 24 |
+| Mean absolute channel error | **1.84 / 255** |
+| Pixels with max-channel error > 24 | **1.64 %** |
+| App content above the keyboard | **1.72 / 255** mean, 1.34 % over 24 |
 | Keyboard panel | **2.02 / 255** mean, 2.14 % over 24 |
 | Key background / keyboard background | `#444448` / `#202025` (sampled) |
 

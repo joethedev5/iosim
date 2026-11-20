@@ -4616,10 +4616,12 @@ static void draw_device_chrome(int fbWidth, double scale)
     if (signalStyle && strcmp(signalStyle, "bars") == 0)
     {
         for (int i = 0; i < 4; i++)
-            iosim_fb_fill_round_rect((int)((277.5 + i * 5.667) * scale),
-                                     (int)((42.0 - (3 + i * 2)) * scale),
-                                     (int)(3.0 * scale),
-                                     (int)((3 + i * 2) * scale),
+            iosim_fb_fill_round_rect((int)((277.0 + i * 5.667) * scale +
+                                           0.5),
+                                     (int)((33.0 - i * 2.333) * scale + 0.5),
+                                     (int)(3.33 * scale + 0.5),
+                                     (int)((6.333 + i * 2.333) * scale +
+                                           0.5),
                                      (int)(1.0 * scale), 0xffffff);
     }
     else
@@ -5452,10 +5454,10 @@ static void shell_draw(int fbWidth, int fbHeight, double scale, int launched)
 
     draw_device_chrome(fbWidth, scale);
     for (int i = 0; i < 4; i++)
-        iosim_fb_fill_round_rect((int)((277.5 + i * 5.667) * scale),
-                                 (int)((42.0 - (3 + i * 2)) * scale),
-                                 (int)(3.0 * scale),
-                                 (int)((3 + i * 2) * scale),
+        iosim_fb_fill_round_rect((int)((277.0 + i * 5.667) * scale + 0.5),
+                                 (int)((33.0 - i * 2.333) * scale + 0.5),
+                                 (int)(3.33 * scale + 0.5),
+                                 (int)((6.333 + i * 2.333) * scale + 0.5),
                                  (int)(1.0 * scale), 0xffffff);
 
     if (launched >= 0 && launched < 12)
