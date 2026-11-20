@@ -32,6 +32,21 @@ extern void *class_getMethodImplementation(void *cls, void *sel);
 extern const char *method_getTypeEncoding(void *method);
 extern void *class_getSuperclass(void *cls);
 extern void *sel_registerName(const char *name);
+extern void *dispatch_get_global_queue(long priority, unsigned long flags);
+extern void dispatch_async_f(void *queue, void *context,
+                             void (*function)(void *));
+extern int iosim_http_request(const char *url, const char *method,
+                              const char *extra_headers, const void *body,
+                              unsigned long body_len,
+                              unsigned char **out_data,
+                              unsigned long *out_len, int *out_status,
+                              char **out_headers, char **out_error);
+extern void iosim_http_free(void *pointer);
+extern int iosim_regex_search(const char *pattern, const char *text,
+                              int options, unsigned long **out_ranges,
+                              unsigned long *out_matches,
+                              unsigned long *out_groups, char **out_error);
+extern void iosim_regex_free(void *pointer);
 
 extern void *malloc(unsigned long size);
 extern void *calloc(unsigned long n, unsigned long size);
@@ -39,6 +54,8 @@ extern void *realloc(void *ptr, unsigned long size);
 extern void  free(void *ptr);
 extern int   snprintf(char *buf, unsigned long size, const char *fmt, ...);
 extern double strtod(const char *s, char **end);
+extern long long strtoll(const char *s, char **end, int base);
+extern char *strstr(const char *haystack, const char *needle);
 extern int   iosim_fs_exists(const char *path);
 extern int   iosim_fs_is_dir(const char *path);
 extern long  iosim_fs_size(const char *path);
@@ -59,10 +76,12 @@ extern int   fsync(int fd);
 extern int   ftruncate(int fd, long long length);
 extern unsigned long strlen(const char *s);
 extern int   strcmp(const char *a, const char *b);
+extern char *strcpy(char *dst, const char *src);
 extern int   strncmp(const char *a, const char *b, unsigned long n);
 extern char *strchr(const char *s, int c);
 extern char *strrchr(const char *s, int c);
 extern void *memcpy(void *dst, const void *src, unsigned long n);
+extern void *memchr(const void *s, int c, unsigned long n);
 extern void *memset(void *dst, int c, unsigned long n);
 extern int   memcmp(const void *a, const void *b, unsigned long n);
 extern char *strstr(const char *haystack, const char *needle);
@@ -1217,6 +1236,35 @@ static char *format_va(const char *fmt, va_list ap)
     return (BOOL)(strcmp(iosim_string_cstr(self), iosim_string_cstr(other)) == 0);
 }
 - (BOOL)isEqualToString:(id)other { return [self isEqual:other]; }
+- (long)compare:(NSString *)other
+{
+    const char *a = [self UTF8String];
+    const char *b = [other UTF8String];
+    int result = strcmp(a ? a : "", b ? b : "");
+    return result < 0 ? NSOrderedAscending
+                      : (result > 0 ? NSOrderedDescending : NSOrderedSame);
+}
+- (long)caseInsensitiveCompare:(NSString *)other
+{
+    const char *a = [self UTF8String];
+    const char *b = [other UTF8String];
+    a = a ? a : "";
+    b = b ? b : "";
+    while (*a && *b)
+    {
+        int ca = *a, cb = *b;
+        if (ca >= 'A' && ca <= 'Z')
+            ca += 'a' - 'A';
+        if (cb >= 'A' && cb <= 'Z')
+            cb += 'a' - 'A';
+        if (ca != cb)
+            return ca < cb ? NSOrderedAscending : NSOrderedDescending;
+        a++;
+        b++;
+    }
+    return *a == *b ? NSOrderedSame
+                    : (*a ? NSOrderedDescending : NSOrderedAscending);
+}
 - (unsigned long)hash
 {
     const char *chars = iosim_string_cstr(self);
@@ -1283,6 +1331,24 @@ static char *format_va(const char *fmt, va_list ap)
     if (index > len)
         index = len;
     return [NSString stringWithUTF8String:chars + index];
+}
+- (id)substringWithRange:(NSRange)range
+{
+    const char *chars = iosim_string_cstr(self);
+    unsigned long len = strlen(chars);
+    if (range.location > len)
+        return @"";
+    unsigned long length = range.length;
+    if (range.location + length > len)
+        length = len - range.location;
+    char *buffer = malloc(length + 1);
+    if (!buffer)
+        return @"";
+    memcpy(buffer, chars + range.location, length);
+    buffer[length] = 0;
+    NSString *result = [NSString stringWithUTF8String:buffer];
+    free(buffer);
+    return result;
 }
 - (BOOL)hasPrefix:(id)prefix
 {
@@ -1482,6 +1548,136 @@ static char *format_va(const char *fmt, va_list ap)
 }
 @end
 
+@implementation NSScanner
++ (id)scannerWithString:(id)string
+{
+    return [[[self alloc] initWithString:string] autorelease];
+}
+- (id)initWithString:(id)string
+{
+    self = [super init];
+    if (self)
+    {
+        _string = string;
+        _caseSensitive = YES;
+        _skipsWhitespace = YES;
+    }
+    return self;
+}
+- (id)string { return _string; }
+- (unsigned long)scanLocation { return _location; }
+- (void)setScanLocation:(unsigned long)location
+{
+    const char *text = [_string UTF8String];
+    unsigned long length = text ? strlen(text) : 0;
+    _location = location > length ? length : location;
+}
+- (BOOL)isAtEnd
+{
+    const char *text = [_string UTF8String];
+    if (!text)
+        return YES;
+    unsigned long i = _location;
+    if (_skipsWhitespace)
+        while (text[i] == ' ' || text[i] == '\t' || text[i] == '\n' ||
+               text[i] == '\r')
+            i++;
+    return text[i] == 0;
+}
+- (BOOL)scanString:(id)string intoString:(id *)result
+{
+    const char *text = [_string UTF8String];
+    const char *needle = [string UTF8String];
+    if (!text || !needle)
+        return NO;
+    unsigned long i = _location;
+    if (_skipsWhitespace)
+        while (text[i] == ' ' || text[i] == '\t' || text[i] == '\n' ||
+               text[i] == '\r')
+            i++;
+    unsigned long n = strlen(needle);
+    if (strncmp(text + i, needle, n) != 0)
+        return NO;
+    _location = i + n;
+    if (result)
+        *result = string;
+    return YES;
+}
+- (BOOL)scanLongLong:(long long *)result
+{
+    const char *text = [_string UTF8String];
+    if (!text)
+        return NO;
+    unsigned long i = _location;
+    if (_skipsWhitespace)
+        while (text[i] == ' ' || text[i] == '\t' || text[i] == '\n' ||
+               text[i] == '\r')
+            i++;
+    char *end = 0;
+    long long value = strtoll(text + i, &end, 10);
+    if (end == text + i)
+        return NO;
+    _location = (unsigned long)(end - text);
+    if (result)
+        *result = value;
+    return YES;
+}
+- (BOOL)scanInt:(int *)result
+{
+    long long value = 0;
+    if (![self scanLongLong:&value])
+        return NO;
+    if (result)
+        *result = (int)value;
+    return YES;
+}
+- (BOOL)scanDouble:(double *)result
+{
+    const char *text = [_string UTF8String];
+    if (!text)
+        return NO;
+    unsigned long i = _location;
+    if (_skipsWhitespace)
+        while (text[i] == ' ' || text[i] == '\t' || text[i] == '\n' ||
+               text[i] == '\r')
+            i++;
+    char *end = 0;
+    double value = strtod(text + i, &end);
+    if (end == text + i)
+        return NO;
+    _location = (unsigned long)(end - text);
+    if (result)
+        *result = value;
+    return YES;
+}
+- (BOOL)scanUpToString:(id)stop intoString:(id *)result
+{
+    const char *text = [_string UTF8String];
+    const char *needle = [stop UTF8String];
+    if (!text || !needle)
+        return NO;
+    unsigned long i = _location;
+    if (_skipsWhitespace)
+        while (text[i] == ' ' || text[i] == '\t' || text[i] == '\n' ||
+               text[i] == '\r')
+            i++;
+    const char *found = strstr(text + i, needle);
+    unsigned long end = found ? (unsigned long)(found - text) : strlen(text);
+    if (end == i)
+        return NO;
+    char *buffer = malloc(end - i + 1);
+    if (!buffer)
+        return NO;
+    memcpy(buffer, text + i, end - i);
+    buffer[end - i] = 0;
+    _location = end;
+    if (result)
+        *result = [NSString stringWithUTF8String:buffer];
+    free(buffer);
+    return YES;
+}
+@end
+
 @implementation NSMutableString
 + (id)string { return [[[self alloc] init] autorelease]; }
 - (void)appendString:(id)string
@@ -1574,6 +1770,708 @@ static char *format_va(const char *fmt, va_list ap)
 
 /* -------------------------------------------------------------- NSArray */
 
+@implementation NSSortDescriptor
++ (id)sortDescriptorWithKey:(id)key ascending:(BOOL)ascending
+{
+    return [[[self alloc] initWithKey:key ascending:ascending] autorelease];
+}
++ (id)sortDescriptorWithKey:(id)key ascending:(BOOL)ascending
+                   selector:(SEL)selector
+{
+    NSSortDescriptor *descriptor =
+        [[[self alloc] initWithKey:key ascending:ascending] autorelease];
+    descriptor->_selector = selector;
+    return descriptor;
+}
+- (id)initWithKey:(id)key ascending:(BOOL)ascending
+{
+    self = [super init];
+    if (self)
+    {
+        _key = key;
+        _ascending = ascending;
+    }
+    return self;
+}
+- (id)key { return _key; }
+- (BOOL)ascending { return _ascending; }
+- (SEL)selector { return _selector; }
+- (long)compareObject:(id)first toObject:(id)second
+{
+    id a = _key ? [first valueForKey:_key] : first;
+    id b = _key ? [second valueForKey:_key] : second;
+    if (_selector)
+        return ((long (*)(id, SEL, id))objc_msgSend)(a, _selector, b);
+    if ([a isKindOfClass:[NSString class]] &&
+        [b isKindOfClass:[NSString class]])
+        return [(NSString *)a compare:(NSString *)b];
+    if ([a isKindOfClass:[NSNumber class]] &&
+        [b isKindOfClass:[NSNumber class]])
+    {
+        double da = [a doubleValue], db = [b doubleValue];
+        return da < db ? NSOrderedAscending
+                       : (da > db ? NSOrderedDescending : NSOrderedSame);
+    }
+    if (iosim_objc_responds(a, @selector(compare:)))
+        return ((long (*)(id, SEL, id))objc_msgSend)(a, @selector(compare:), b);
+    return NSOrderedSame;
+}
+@end
+
+static long sort_descriptors_compare(id first, id second, NSArray *descriptors)
+{
+    for (unsigned long i = 0; i < [descriptors count]; i++)
+    {
+        NSSortDescriptor *descriptor = [descriptors objectAtIndex:i];
+        long result = [descriptor compareObject:first toObject:second];
+        if (result != NSOrderedSame)
+            return [descriptor ascending] ? result : -result;
+    }
+    return NSOrderedSame;
+}
+
+static void sort_array_descriptors(NSMutableArray *array, NSArray *descriptors)
+{
+    for (unsigned long i = 1; i < array->_count; i++)
+    {
+        id item = array->_items[i];
+        long j = (long)i - 1;
+        while (j >= 0 &&
+               sort_descriptors_compare(array->_items[j], item, descriptors) >
+                   NSOrderedSame)
+        {
+            array->_items[j + 1] = array->_items[j];
+            j--;
+        }
+        array->_items[j + 1] = item;
+    }
+}
+
+static void sort_array_selector(NSMutableArray *array, SEL selector)
+{
+    for (unsigned long i = 1; i < array->_count; i++)
+    {
+        id item = array->_items[i];
+        long j = (long)i - 1;
+        while (j >= 0 && ((long (*)(id, SEL, id))objc_msgSend)(
+                             array->_items[j], selector, item) > NSOrderedSame)
+        {
+            array->_items[j + 1] = array->_items[j];
+            j--;
+        }
+        array->_items[j + 1] = item;
+    }
+}
+
+/* ---------------------------------------------------------- regular expressions */
+
+static NSString *regex_string_from_bytes(const char *text, unsigned long start,
+                                         unsigned long length)
+{
+    char *buffer = malloc(length + 1);
+    if (!buffer)
+        return @"";
+    if (text && length)
+        memcpy(buffer, text + start, length);
+    buffer[length] = 0;
+    NSString *string = [NSString stringWithUTF8String:buffer];
+    free(buffer);
+    return string;
+}
+
+@implementation NSTextCheckingResult
++ (id)resultWithRanges:(NSRange *)ranges count:(unsigned long)count
+{
+    NSTextCheckingResult *result = [[self alloc] init];
+    result->_ranges = malloc(sizeof(NSRange) * count);
+    if (result->_ranges && ranges)
+        memcpy(result->_ranges, ranges, sizeof(NSRange) * count);
+    result->_rangeCount = count;
+    return result;
+}
+- (NSRange)range { return [self rangeAtIndex:0]; }
+- (NSRange)rangeAtIndex:(unsigned long)index
+{
+    if (!_ranges || index >= _rangeCount)
+        return NSMakeRange((unsigned long)-1, 0);
+    return _ranges[index];
+}
+- (unsigned long)numberOfRanges { return _rangeCount; }
+@end
+
+@implementation NSRegularExpression
++ (id)regularExpressionWithPattern:(id)pattern options:(unsigned long)options
+                             error:(id *)error
+{
+    return [[self alloc] initWithPattern:pattern options:options error:error];
+}
+- (id)initWithPattern:(id)pattern options:(unsigned long)options
+                error:(id *)error
+{
+    self = [super init];
+    if (self)
+    {
+        _pattern = pattern;
+        _options = options;
+        _groups = 0;
+        if (error)
+            *error = nil;
+    }
+    return self;
+}
+- (id)pattern { return _pattern; }
+- (unsigned long)options { return _options; }
+- (unsigned long)numberOfCaptureGroups
+{
+    return _groups > 0 ? _groups - 1 : 0;
+}
+- (id)matchesInString:(id)string options:(unsigned long)options
+                range:(NSRange)range
+{
+    const char *text = [string UTF8String];
+    unsigned long text_length = text ? strlen(text) : 0;
+    if (!text || range.location > text_length)
+        return [NSArray array];
+    unsigned long offset = range.location;
+    unsigned long *raw = 0;
+    unsigned long matches = 0, groups = 0;
+    char *service_error = 0;
+    if (iosim_regex_search([_pattern UTF8String], text + offset,
+                           (int)(_options | options), &raw, &matches, &groups,
+                           &service_error) != 0)
+    {
+        if (service_error)
+            iosim_regex_free(service_error);
+        return [NSArray array];
+    }
+    if (groups)
+        _groups = groups;
+    NSMutableArray *results = [NSMutableArray array];
+    for (unsigned long m = 0; m < matches; m++)
+    {
+        NSRange *ranges = malloc(sizeof(NSRange) * groups);
+        for (unsigned long g = 0; g < groups; g++)
+        {
+            unsigned long location = raw[(m * groups + g) * 2];
+            unsigned long length = raw[(m * groups + g) * 2 + 1];
+            ranges[g] = location == (unsigned long)-1
+                            ? NSMakeRange((unsigned long)-1, 0)
+                            : NSMakeRange(offset + location, length);
+        }
+        [results addObject:[NSTextCheckingResult resultWithRanges:ranges
+                                                            count:groups]];
+        free(ranges);
+    }
+    iosim_regex_free(raw);
+    if (service_error)
+        iosim_regex_free(service_error);
+    return results;
+}
+- (id)firstMatchInString:(id)string options:(unsigned long)options
+                   range:(NSRange)range
+{
+    NSArray *matches = [self matchesInString:string options:options
+                                       range:range];
+    return [matches count] ? [matches objectAtIndex:0] : nil;
+}
+- (id)stringByReplacingMatchesInString:(id)string options:(unsigned long)options
+                                 range:(NSRange)range
+                          withTemplate:(id)template
+{
+    const char *text = [string UTF8String];
+    if (!text)
+        return string;
+    unsigned long text_length = strlen(text);
+    unsigned long offset = range.location < text_length ? range.location : 0;
+    unsigned long *raw = 0;
+    unsigned long matches = 0, groups = 0;
+    char *service_error = 0;
+    if (iosim_regex_search([_pattern UTF8String], text + offset,
+                           (int)(_options | options), &raw, &matches, &groups,
+                           &service_error) != 0)
+    {
+        if (service_error)
+            iosim_regex_free(service_error);
+        return string;
+    }
+    if (groups)
+        _groups = groups;
+    const char *templ = [template UTF8String];
+    NSMutableString *output = [NSMutableString string];
+    unsigned long cursor = 0;
+    for (unsigned long m = 0; m < matches; m++)
+    {
+        unsigned long match_start = raw[(m * groups) * 2];
+        unsigned long match_length = raw[(m * groups) * 2 + 1];
+        if (match_start < cursor)
+            continue;
+        [output appendString:regex_string_from_bytes(text, cursor,
+                                                     match_start - cursor)];
+        for (const char *p = templ; p && *p; )
+        {
+            if (*p == '\\' && p[1])
+            {
+                [output appendString:regex_string_from_bytes(p + 1, 0, 1)];
+                p += 2;
+                continue;
+            }
+            if (*p == '$' && p[1] >= '0' && p[1] <= '9')
+            {
+                unsigned long group = (unsigned long)(p[1] - '0');
+                if (group < groups)
+                {
+                    unsigned long location = raw[(m * groups + group) * 2];
+                    unsigned long length = raw[(m * groups + group) * 2 + 1];
+                    if (location != (unsigned long)-1)
+                        [output appendString:regex_string_from_bytes(
+                                                 text, location, length)];
+                }
+                p += 2;
+                continue;
+            }
+            [output appendString:regex_string_from_bytes(p, 0, 1)];
+            p++;
+        }
+        cursor = match_start + match_length;
+    }
+    [output appendString:regex_string_from_bytes(text, cursor,
+                                                 text_length - cursor)];
+    iosim_regex_free(raw);
+    if (service_error)
+        iosim_regex_free(service_error);
+    return output;
+}
+@end
+
+/* ------------------------------------------------------------ predicates */
+
+typedef struct {
+    const char *p;
+    id object;
+} pred_parser;
+
+typedef struct {
+    id value;
+    int is_nil;
+    int valid;
+} pred_value;
+
+static void pred_skip(pred_parser *parser)
+{
+    while (*parser->p == ' ' || *parser->p == '\t' || *parser->p == '\n' ||
+           *parser->p == '\r')
+        parser->p++;
+}
+
+static int pred_word(pred_parser *parser, const char *word)
+{
+    pred_skip(parser);
+    const char *p = parser->p;
+    for (const char *w = word; *w; w++, p++)
+    {
+        char a = *p, b = *w;
+        if (a >= 'A' && a <= 'Z')
+            a += 'a' - 'A';
+        if (b >= 'A' && b <= 'Z')
+            b += 'a' - 'A';
+        if (a != b)
+            return 0;
+    }
+    if ((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') ||
+        (*p >= '0' && *p <= '9') || *p == '_')
+        return 0;
+    parser->p = p;
+    return 1;
+}
+
+static pred_value pred_invalid_value(void)
+{
+    pred_value value;
+    value.value = nil;
+    value.is_nil = 1;
+    value.valid = 0;
+    return value;
+}
+
+static pred_value pred_parse_operand(pred_parser *parser);
+
+static pred_value pred_parse_operand(pred_parser *parser)
+{
+    pred_skip(parser);
+    pred_value result = pred_invalid_value();
+    if (*parser->p == '\'' || *parser->p == '"')
+    {
+        char quote = *parser->p++;
+        unsigned long cap = 32, length = 0;
+        char *buffer = malloc(cap);
+        while (*parser->p && *parser->p != quote)
+        {
+            char c = *parser->p++;
+            if (c == '\\' && *parser->p)
+                c = *parser->p++;
+            if (length + 2 > cap)
+            {
+                cap *= 2;
+                buffer = realloc(buffer, cap);
+            }
+            buffer[length++] = c;
+        }
+        if (*parser->p == quote)
+            parser->p++;
+        if (!buffer)
+            return result;
+        buffer[length] = 0;
+        result.value = [NSString stringWithUTF8String:buffer];
+        result.is_nil = 0;
+        result.valid = 1;
+        free(buffer);
+        return result;
+    }
+    if (*parser->p == '{')
+    {
+        parser->p++;
+        NSMutableArray *items = [NSMutableArray array];
+        for (;;)
+        {
+            pred_value item = pred_parse_operand(parser);
+            if (!item.valid)
+                return pred_invalid_value();
+            [items addObject:item.is_nil ? [NSNull null] : item.value];
+            pred_skip(parser);
+            if (*parser->p == ',')
+            {
+                parser->p++;
+                continue;
+            }
+            if (*parser->p == '}')
+            {
+                parser->p++;
+                break;
+            }
+            return pred_invalid_value();
+        }
+        result.value = items;
+        result.is_nil = 0;
+        result.valid = 1;
+        return result;
+    }
+    if ((*parser->p >= '0' && *parser->p <= '9') ||
+        (*parser->p == '-' && parser->p[1] >= '0' && parser->p[1] <= '9') ||
+        (*parser->p == '.' && parser->p[1] >= '0' && parser->p[1] <= '9'))
+    {
+        char *end = 0;
+        double number = strtod(parser->p, &end);
+        if (end == parser->p)
+            return result;
+        parser->p = end;
+        result.value = [NSNumber numberWithDouble:number];
+        result.is_nil = 0;
+        result.valid = 1;
+        return result;
+    }
+    const char *start = parser->p;
+    while (*parser->p && *parser->p != ' ' && *parser->p != '\t' &&
+           *parser->p != '\n' && *parser->p != '\r' && *parser->p != '(' &&
+           *parser->p != ')' && *parser->p != ',' && *parser->p != '}' &&
+           *parser->p != '=' && *parser->p != '!' && *parser->p != '<' &&
+           *parser->p != '>')
+        parser->p++;
+    unsigned long length = (unsigned long)(parser->p - start);
+    if (!length)
+        return result;
+    char name[256];
+    if (length >= sizeof(name))
+        return result;
+    memcpy(name, start, length);
+    name[length] = 0;
+    if (strcmp(name, "nil") == 0 || strcmp(name, "NULL") == 0)
+    {
+        result.is_nil = 1;
+        result.valid = 1;
+        return result;
+    }
+    if (strcmp(name, "YES") == 0 || strcmp(name, "TRUE") == 0 ||
+        strcmp(name, "true") == 0)
+    {
+        result.value = [NSNumber numberWithBool:YES];
+        result.is_nil = 0;
+        result.valid = 1;
+        return result;
+    }
+    if (strcmp(name, "NO") == 0 || strcmp(name, "FALSE") == 0 ||
+        strcmp(name, "false") == 0)
+    {
+        result.value = [NSNumber numberWithBool:NO];
+        result.is_nil = 0;
+        result.valid = 1;
+        return result;
+    }
+    if (strcmp(name, "SELF") == 0)
+    {
+        result.value = parser->object;
+        result.is_nil = parser->object == nil;
+        result.valid = 1;
+        return result;
+    }
+    NSString *key = [NSString stringWithUTF8String:name];
+    result.value = [parser->object valueForKeyPath:key];
+    result.is_nil = result.value == nil;
+    result.valid = 1;
+    return result;
+}
+
+static int pred_is_number(pred_value value, double *out)
+{
+    if (value.is_nil || ![value.value isKindOfClass:[NSNumber class]])
+        return 0;
+    if (out)
+        *out = [value.value doubleValue];
+    return 1;
+}
+
+static BOOL pred_equal_values(pred_value first, pred_value second)
+{
+    if (first.is_nil || second.is_nil)
+        return first.is_nil && second.is_nil;
+    if ([first.value isKindOfClass:[NSString class]] &&
+        [second.value isKindOfClass:[NSString class]])
+        return [(NSString *)first.value
+            isEqualToString:(NSString *)second.value];
+    if ([first.value isKindOfClass:[NSNumber class]] &&
+        [second.value isKindOfClass:[NSNumber class]])
+        return [first.value doubleValue] == [second.value doubleValue];
+    if ([first.value isKindOfClass:[NSArray class]] &&
+        [second.value isKindOfClass:[NSArray class]])
+    {
+        NSArray *a = (NSArray *)first.value;
+        NSArray *b = (NSArray *)second.value;
+        if ([a count] != [b count])
+            return NO;
+        for (unsigned long i = 0; i < [a count]; i++)
+            if (![[a objectAtIndex:i] isEqual:[b objectAtIndex:i]])
+                return NO;
+        return YES;
+    }
+    return first.value == second.value;
+}
+
+static BOOL pred_like_match(const char *text, const char *pattern)
+{
+    if (!*pattern)
+        return *text == 0;
+    if (*pattern == '*')
+    {
+        while (*pattern == '*')
+            pattern++;
+        if (!*pattern)
+            return 1;
+        for (const char *p = text; ; p++)
+        {
+            if (pred_like_match(p, pattern))
+                return 1;
+            if (!*p)
+                return 0;
+        }
+    }
+    if (*pattern == '?')
+        return *text && pred_like_match(text + 1, pattern + 1);
+    if (*text != *pattern)
+        return 0;
+    return pred_like_match(text + 1, pattern + 1);
+}
+
+static int pred_parse_or(pred_parser *parser);
+
+static int pred_parse_atom(pred_parser *parser)
+{
+    pred_skip(parser);
+    if (pred_word(parser, "TRUEPREDICATE"))
+        return 1;
+    if (pred_word(parser, "FALSEPREDICATE"))
+        return 0;
+    if (*parser->p == '(')
+    {
+        parser->p++;
+        int value = pred_parse_or(parser);
+        pred_skip(parser);
+        if (*parser->p == ')')
+            parser->p++;
+        return value;
+    }
+    pred_value left = pred_parse_operand(parser);
+    if (!left.valid)
+        return 0;
+    pred_skip(parser);
+    char op[16];
+    int is_word = 0;
+    if (parser->p[0] == '=' && parser->p[1] == '=')
+        strcpy(op, "=="), parser->p += 2;
+    else if (parser->p[0] == '!' && parser->p[1] == '=')
+        strcpy(op, "!="), parser->p += 2;
+    else if (parser->p[0] == '<' && parser->p[1] == '>')
+        strcpy(op, "!="), parser->p += 2;
+    else if (parser->p[0] == '<' && parser->p[1] == '=')
+        strcpy(op, "<="), parser->p += 2;
+    else if (parser->p[0] == '>' && parser->p[1] == '=')
+        strcpy(op, ">="), parser->p += 2;
+    else if (parser->p[0] == '<')
+        strcpy(op, "<"), parser->p++;
+    else if (parser->p[0] == '>')
+        strcpy(op, ">"), parser->p++;
+    else if (parser->p[0] == '=')
+        strcpy(op, "=="), parser->p++;
+    else if (pred_word(parser, "CONTAINS"))
+        strcpy(op, "CONTAINS"), is_word = 1;
+    else if (pred_word(parser, "BEGINSWITH"))
+        strcpy(op, "BEGINSWITH"), is_word = 1;
+    else if (pred_word(parser, "ENDSWITH"))
+        strcpy(op, "ENDSWITH"), is_word = 1;
+    else if (pred_word(parser, "LIKE"))
+        strcpy(op, "LIKE"), is_word = 1;
+    else if (pred_word(parser, "IN"))
+        strcpy(op, "IN"), is_word = 1;
+    else
+        return 0;
+    (void)is_word;
+    pred_value right = pred_parse_operand(parser);
+    if (!right.valid)
+        return 0;
+    if (strcmp(op, "==") == 0)
+        return pred_equal_values(left, right) ? 1 : 0;
+    if (strcmp(op, "!=") == 0)
+        return pred_equal_values(left, right) ? 0 : 1;
+    if (strcmp(op, "IN") == 0)
+    {
+        if (![right.value isKindOfClass:[NSArray class]])
+            return 0;
+        if (left.is_nil)
+            return 0;
+        return [(NSArray *)right.value containsObject:left.value] ? 1 : 0;
+    }
+    if (strcmp(op, "CONTAINS") == 0)
+    {
+        if (left.is_nil || right.is_nil)
+            return 0;
+        if ([left.value isKindOfClass:[NSString class]] &&
+            [right.value isKindOfClass:[NSString class]])
+            return strstr([left.value UTF8String],
+                          [right.value UTF8String]) != 0;
+        if ([left.value isKindOfClass:[NSArray class]])
+            return [left.value containsObject:right.value] ? 1 : 0;
+        return 0;
+    }
+    if (strcmp(op, "BEGINSWITH") == 0 ||
+        strcmp(op, "ENDSWITH") == 0)
+    {
+        if (left.is_nil || right.is_nil ||
+            ![left.value isKindOfClass:[NSString class]] ||
+            ![right.value isKindOfClass:[NSString class]])
+            return 0;
+        const char *text = [left.value UTF8String];
+        const char *part = [right.value UTF8String];
+        unsigned long text_len = strlen(text), part_len = strlen(part);
+        if (strcmp(op, "BEGINSWITH") == 0)
+            return strncmp(text, part, part_len) == 0;
+        return text_len >= part_len &&
+               strcmp(text + text_len - part_len, part) == 0;
+    }
+    if (strcmp(op, "LIKE") == 0)
+    {
+        if (left.is_nil || right.is_nil ||
+            ![left.value isKindOfClass:[NSString class]] ||
+            ![right.value isKindOfClass:[NSString class]])
+            return 0;
+        return pred_like_match([left.value UTF8String],
+                               [right.value UTF8String]);
+    }
+    double a = 0, b = 0;
+    int left_number = pred_is_number(left, &a);
+    int right_number = pred_is_number(right, &b);
+    if (left_number && right_number)
+    {
+        if (strcmp(op, "<") == 0)
+            return a < b;
+        if (strcmp(op, "<=") == 0)
+            return a <= b;
+        if (strcmp(op, ">") == 0)
+            return a > b;
+        return a >= b;
+    }
+    if (!left.is_nil && !right.is_nil &&
+        [left.value isKindOfClass:[NSString class]] &&
+        [right.value isKindOfClass:[NSString class]])
+    {
+        long comparison = [(NSString *)left.value
+            compare:(NSString *)right.value];
+        if (strcmp(op, "<") == 0)
+            return comparison < 0;
+        if (strcmp(op, "<=") == 0)
+            return comparison <= 0;
+        if (strcmp(op, ">") == 0)
+            return comparison > 0;
+        return comparison >= 0;
+    }
+    return 0;
+}
+
+static int pred_parse_not(pred_parser *parser)
+{
+    if (pred_word(parser, "NOT"))
+        return !pred_parse_not(parser);
+    return pred_parse_atom(parser);
+}
+
+static int pred_parse_and(pred_parser *parser)
+{
+    int value = pred_parse_not(parser);
+    while (pred_word(parser, "AND"))
+    {
+        int right = pred_parse_not(parser);
+        value = value && right;
+    }
+    return value;
+}
+
+static int pred_parse_or(pred_parser *parser)
+{
+    int value = pred_parse_and(parser);
+    while (pred_word(parser, "OR"))
+    {
+        int right = pred_parse_and(parser);
+        value = value || right;
+    }
+    return value;
+}
+
+@implementation NSPredicate
++ (id)predicateWithFormat:(id)format, ...
+{
+    NSPredicate *predicate = [[self alloc] init];
+    va_list ap;
+    va_start(ap, format);
+    char *buffer = format_va(iosim_string_cstr(format), ap);
+    va_end(ap);
+    predicate->_format = [[NSString alloc] initWithUTF8String:
+        buffer ? buffer : ""];
+    free(buffer);
+    return predicate;
+}
++ (id)predicateWithValue:(BOOL)value
+{
+    return [self predicateWithFormat:
+        value ? @"TRUEPREDICATE" : @"FALSEPREDICATE"];
+}
+- (BOOL)evaluateWithObject:(id)object
+{
+    pred_parser parser;
+    parser.p = iosim_string_cstr(_format);
+    parser.object = object;
+    int value = pred_parse_or(&parser);
+    return value ? YES : NO;
+}
+- (id)predicateFormat { return _format; }
+@end
+
 @implementation NSArray
 + (id)array { return [[[self alloc] init] autorelease]; }
 + (id)arrayWithObject:(id)object
@@ -1665,6 +2563,26 @@ static char *format_va(const char *fmt, va_list ap)
     state->mutationsPtr = &state->extra[0];
     return _count;
 }
+- (id)sortedArrayUsingDescriptors:(id)descriptors
+{
+    NSMutableArray *copy = [NSMutableArray arrayWithArray:self];
+    [copy sortUsingDescriptors:descriptors];
+    return copy;
+}
+- (id)sortedArrayUsingSelector:(SEL)selector
+{
+    NSMutableArray *copy = [NSMutableArray arrayWithArray:self];
+    [copy sortUsingSelector:selector];
+    return copy;
+}
+- (id)filteredArrayUsingPredicate:(id)predicate
+{
+    NSMutableArray *result = [NSMutableArray array];
+    for (unsigned long i = 0; i < _count; i++)
+        if ([predicate evaluateWithObject:_items[i]])
+            [result addObject:_items[i]];
+    return result;
+}
 - (id)description
 {
     NSMutableString *s = [NSMutableString string];
@@ -1728,6 +2646,31 @@ static char *format_va(const char *fmt, va_list ap)
         _items[index] = object;
     else if (index == _count)
         [self addObject:object];
+}
+- (void)sortUsingDescriptors:(id)descriptors
+{
+    sort_array_descriptors(self, descriptors);
+}
+- (void)sortUsingSelector:(SEL)selector
+{
+    sort_array_selector(self, selector);
+}
+- (void)exchangeObjectAtIndex:(unsigned long)first
+        withObjectAtIndex:(unsigned long)second
+{
+    if (first >= _count || second >= _count || first == second)
+        return;
+    id item = _items[first];
+    _items[first] = _items[second];
+    _items[second] = item;
+}
+- (void)filterUsingPredicate:(id)predicate
+{
+    unsigned long kept = 0;
+    for (unsigned long i = 0; i < _count; i++)
+        if ([predicate evaluateWithObject:_items[i]])
+            _items[kept++] = _items[i];
+    _count = kept;
 }
 @end
 
@@ -1846,6 +2789,12 @@ static char *format_va(const char *fmt, va_list ap)
 
 @implementation NSDictionary
 + (id)dictionary { return [[[self alloc] init] autorelease]; }
++ (id)dictionaryWithObject:(id)object forKey:(id)key
+{
+    NSMutableDictionary *dictionary = [NSMutableDictionary dictionary];
+    [dictionary setObject:object forKey:key];
+    return dictionary;
+}
 + (id)dictionaryWithObjects:(const id *)objects
                     forKeys:(const id *)keys
                       count:(unsigned long)count
@@ -3308,6 +4257,234 @@ static double number_formatter_pow10(int digits)
         [(id)_userInfo respondsToSelector:@selector(objectForKey:)])
         return [(id)_userInfo objectForKey:@"NSLocalizedDescription"];
     return @"";
+}
+@end
+
+/* ------------------------------------------------------- URL loading */
+
+static NSMutableDictionary *url_headers_from_raw(const char *raw)
+{
+    NSMutableDictionary *headers = [NSMutableDictionary dictionary];
+    while (raw && *raw)
+    {
+        const char *line = raw;
+        const char *newline = strchr(raw, '\n');
+        unsigned long length = newline ? (unsigned long)(newline - raw)
+                                       : strlen(raw);
+        raw = newline ? newline + 1 : raw + strlen(raw);
+        if (length && line[length - 1] == '\r')
+            length--;
+        if (!length)
+            break;
+        const char *colon = memchr(line, ':', length);
+        if (!colon)
+            continue;
+        unsigned long key_length = (unsigned long)(colon - line);
+        while (key_length && line[key_length - 1] == ' ')
+            key_length--;
+        const char *value = colon + 1;
+        const char *value_end = line + length;
+        while (value < value_end && (*value == ' ' || *value == '\t'))
+            value++;
+        while (value_end > value && (value_end[-1] == ' ' ||
+                                     value_end[-1] == '\r'))
+            value_end--;
+        char key[256], text[2048];
+        unsigned long value_length = (unsigned long)(value_end - value);
+        if (key_length >= sizeof(key) || value_length >= sizeof(text))
+            continue;
+        memcpy(key, line, key_length);
+        key[key_length] = 0;
+        memcpy(text, value, value_length);
+        text[value_length] = 0;
+        [headers setObject:[NSString stringWithUTF8String:text]
+                    forKey:[NSString stringWithUTF8String:key]];
+    }
+    return headers;
+}
+
+@implementation NSURLRequest
++ (id)requestWithURL:(id)url
+{
+    NSURLRequest *request = [[self alloc] init];
+    request->_URL = url;
+    request->_timeoutInterval = 60.0;
+    request->_HTTPMethod = @"GET";
+    return request;
+}
+- (id)URL { return _URL; }
+- (void)setURL:(id)url { _URL = url; }
+- (double)timeoutInterval { return _timeoutInterval; }
+- (void)setTimeoutInterval:(double)timeout { _timeoutInterval = timeout; }
+- (id)HTTPMethod { return _HTTPMethod ? _HTTPMethod : @"GET"; }
+- (void)setHTTPMethod:(id)method { _HTTPMethod = method; }
+- (id)HTTPBody { return _HTTPBody; }
+- (void)setHTTPBody:(id)body { _HTTPBody = body; }
+- (id)allHTTPHeaderFields { return _allHTTPHeaderFields; }
+- (void)setAllHTTPHeaderFields:(id)fields { _allHTTPHeaderFields = fields; }
+- (id)valueForHTTPHeaderField:(id)field
+{
+    return _allHTTPHeaderFields ? [_allHTTPHeaderFields objectForKey:field] : nil;
+}
+@end
+
+@implementation NSURLResponse
+- (id)initWithURL:(id)url statusCode:(long)status headers:(id)headers
+{
+    self = [super init];
+    if (self)
+    {
+        _URL = url;
+        _statusCode = status;
+        _allHeaderFields = headers;
+    }
+    return self;
+}
+- (id)URL { return _URL; }
+- (long)statusCode { return _statusCode; }
+- (id)allHeaderFields { return _allHeaderFields; }
+@end
+
+@implementation NSHTTPURLResponse
+@end
+
+struct url_task_ctx {
+    id task;
+    id url;
+    id url_string_object;
+    id method_object;
+    id headers_object;
+    const char *url_string;
+    const char *method;
+    const char *headers;
+    const void *body;
+    unsigned long body_length;
+};
+
+static void url_task_main(void *raw)
+{
+    struct url_task_ctx *ctx = raw;
+    NSURLSessionDataTask *task = ctx->task;
+    unsigned char *bytes = 0;
+    char *raw_headers = 0, *service_error = 0;
+    unsigned long length = 0;
+    int status = 0;
+    NSData *data = nil;
+    NSURLResponse *response = nil;
+    NSError *error = nil;
+    if (task->_canceled)
+    {
+        error = [NSError errorWithDomain:@"NSURLErrorDomain" code:-999
+                                    userInfo:nil];
+    }
+    else if (iosim_http_request(ctx->url_string, ctx->method, ctx->headers,
+                                ctx->body, ctx->body_length, &bytes, &length,
+                                &status, &raw_headers, &service_error) == 0)
+    {
+        data = [NSData dataWithBytes:bytes length:length];
+        response = [[NSHTTPURLResponse alloc]
+            initWithURL:ctx->url
+             statusCode:status
+                headers:url_headers_from_raw(raw_headers)];
+    }
+    else
+    {
+        NSDictionary *info = [NSDictionary
+            dictionaryWithObject:[NSString stringWithUTF8String:
+                service_error ? service_error : "request failed"]
+                          forKey:@"NSLocalizedDescription"];
+        error = [NSError errorWithDomain:@"NSURLErrorDomain" code:-1004
+                                    userInfo:info];
+    }
+    if (bytes)
+        iosim_http_free(bytes);
+    if (raw_headers)
+        iosim_http_free(raw_headers);
+    if (service_error)
+        iosim_http_free(service_error);
+    void (^handler)(id, id, id) = (void (^)(id, id, id))task->_completion;
+    if (handler)
+        handler(data, response, error);
+    if (task->_completion)
+    {
+        _Block_release(task->_completion);
+        task->_completion = 0;
+    }
+    task->_context = 0;
+    free(ctx);
+}
+
+@implementation NSURLSessionDataTask
+- (void)resume
+{
+    if (_resumed)
+        return;
+    _resumed = 1;
+    NSURLRequest *request = (NSURLRequest *)_request;
+    struct url_task_ctx *ctx = calloc(1, sizeof(*ctx));
+    if (!ctx)
+        return;
+    ctx->task = self;
+    ctx->url = [request URL];
+    ctx->url_string_object = [ctx->url absoluteString];
+    ctx->url_string = [ctx->url_string_object UTF8String];
+    ctx->method_object = [request HTTPMethod];
+    ctx->method = [ctx->method_object UTF8String];
+    id headers = [request allHTTPHeaderFields];
+    if (headers && [headers count])
+    {
+        NSMutableString *raw = [NSMutableString string];
+        for (id key in headers)
+        {
+            [raw appendString:key];
+            [raw appendString:@": "];
+            [raw appendString:[headers objectForKey:key]];
+            [raw appendString:@"\r\n"];
+        }
+        ctx->headers_object = raw;
+        ctx->headers = [raw UTF8String];
+    }
+    id body = [request HTTPBody];
+    if (body)
+    {
+        if ([body isKindOfClass:[NSData class]])
+        {
+            ctx->body = [body bytes];
+            ctx->body_length = [body length];
+        }
+        else if ([body isKindOfClass:[NSString class]])
+        {
+            ctx->body = [body UTF8String];
+            ctx->body_length = strlen([body UTF8String]);
+        }
+    }
+    _context = ctx;
+    dispatch_async_f(dispatch_get_global_queue(0, 0), ctx, url_task_main);
+}
+- (void)cancel { _canceled = 1; }
+@end
+
+@implementation NSURLSession
++ (id)sharedSession
+{
+    static id shared;
+    if (!shared)
+        shared = [[NSURLSession alloc] init];
+    return shared;
+}
+- (NSURLSessionDataTask *)dataTaskWithURL:(id)url
+                        completionHandler:(NSURLSessionCompletionHandler)handler
+{
+    return [self dataTaskWithRequest:[NSURLRequest requestWithURL:url]
+                   completionHandler:handler];
+}
+- (NSURLSessionDataTask *)dataTaskWithRequest:(id)request
+                            completionHandler:(NSURLSessionCompletionHandler)handler
+{
+    NSURLSessionDataTask *task = [[NSURLSessionDataTask alloc] init];
+    task->_request = request;
+    task->_completion = handler ? _Block_copy((void *)handler) : 0;
+    return task;
 }
 @end
 

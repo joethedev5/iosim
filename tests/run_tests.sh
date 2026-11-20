@@ -1218,8 +1218,8 @@ if wait_log "[collection] selected 5"; then
 else
     echo "FAIL collection selection"; fails=$((fails+1))
 fi
-"$ROOT/tools/iosimctl" ui "$UDID" swipe 200 500 200 250 0.4 >/dev/null
-sleep 0.4
+"$ROOT/tools/iosimctl" ui "$UDID" swipe 200 500 200 400 0.4 >/dev/null
+sleep 1.5
 "$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/collection-scrolled.png" >/dev/null
 if out="$(python3 - "$ROOT/tools" "$T/collection-scrolled.png" <<'PY'
 import sys
@@ -2977,6 +2977,154 @@ check "[kvcop] union 4 distinct 3" "$out" \
     "@unionOfArrays flattens while @distinctUnionOfArrays removes duplicates"
 check "[kvcop] dict 10" "$out" \
     "NSDictionary valueForKey: maps to objectForKey:"
+
+# ---------- 28. NSURLSession over the host HTTP client ----------
+HTTP_ROOT="$T/http-root"
+mkdir -p "$HTTP_ROOT"
+printf 'hello over http\n' > "$HTTP_ROOT/hello.txt"
+python3 -u -m http.server 0 --bind 127.0.0.1 --directory "$HTTP_ROOT" \
+    > "$T/http.log" 2>&1 &
+HTTP_PID=$!
+HTTP_PORT=""
+i=0
+while [ "$i" -lt 100 ]; do
+    HTTP_PORT=$(sed -n 's/.*port \([0-9][0-9]*\).*/\1/p' "$T/http.log" | head -1)
+    [ -n "$HTTP_PORT" ] && break
+    i=$((i + 1))
+    sleep 0.05
+done
+if [ -z "$HTTP_PORT" ]; then
+    echo "FAIL loopback HTTP server did not start"
+    fails=$((fails + 1))
+else
+    "$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
+        -fblocks -ffreestanding -O1 -I "$ROOT/frameworks" \
+        -c "$ROOT/tests/urlsession_test.m" -o "$T/urlsession_test.o"
+    "$LD64" -arch x86_64 -platform_version $PLATFORM -e _main \
+        -o "$T/urlsession_test" "$T/urlsession_test.o" \
+        "$ROOT/runtime/System/Library/Frameworks/Foundation.framework/Foundation" \
+        -undefined dynamic_lookup
+    out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/urlsession_test" \
+        "$HTTP_PORT" 2>&1)"
+    check "[http] status 200" "$out" \
+        "NSURLSessionDataTask completes with the HTTP status"
+    check "[http] body hello over http" "$out" \
+        "the response body is delivered as NSData"
+    check "[http] header text/plain" "$out" \
+        "response headers populate allHeaderFields"
+    check "[http] error -1004" "$out" \
+        "an unsupported scheme completes with an NSError"
+    check "[http] done 1" "$out" \
+        "the completion handler runs on a background queue"
+fi
+kill "$HTTP_PID" 2>/dev/null || true
+wait "$HTTP_PID" 2>/dev/null || true
+
+# ---------- 29. UIScrollView momentum and animated offsets ----------
+"$ROOT/tools/build_app.sh" "$ROOT/tests/scroll_deceleration_test.m" \
+    "$T/scroll_deceleration_test" >/dev/null
+out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" \
+    "$T/scroll_deceleration_test" 2>&1)"
+check "[scroll] released decel=1 will=1 offset=300" "$out" \
+    "a fast release starts deceleration and reports willDecelerate:YES"
+check "[scroll] decelerated end=1 moved=1" "$out" \
+    "momentum advances the offset and ends with didEndDecelerating"
+check "[scroll] animating mid=1 end=1 offset=200 animend=1" "$out" \
+    "setContentOffset:animated: eases to its target and reports completion"
+
+# ---------- 30. NSSortDescriptor and array sorting ----------
+"$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
+    -ffreestanding -O1 -I "$ROOT/frameworks" \
+    -c "$ROOT/tests/sorting_test.m" -o "$T/sorting_test.o"
+"$LD64" -arch x86_64 -platform_version $PLATFORM -e _main \
+    -o "$T/sorting_test" "$T/sorting_test.o" \
+    "$ROOT/runtime/System/Library/Frameworks/Foundation.framework/Foundation" \
+    -undefined dynamic_lookup
+out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/sorting_test" 2>&1)"
+check "[sort] strings apple fig pear" "$out" \
+    "sortedArrayUsingSelector: orders strings with compare:"
+check "[sort] numbers 1 2 3" "$out" \
+    "a key-less descriptor sorts boxed numbers"
+check "[sort] names Amy Bob Cara prices 25 10 5" "$out" \
+    "descriptors sort dictionaries by key with a descending tie-breaker"
+check "[sort] ages 18 30 41" "$out" \
+    "a custom selector comparator sorts model objects"
+check "[sort] swapped 2 1" "$out" \
+    "exchangeObjectAtIndex:withObjectAtIndex: swaps in place"
+check "[sort] ci 0" "$out" \
+    "caseInsensitiveCompare: folds ASCII case"
+
+# ---------- 31. NSScanner ----------
+"$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
+    -ffreestanding -O1 -I "$ROOT/frameworks" \
+    -c "$ROOT/tests/scanner_test.m" -o "$T/scanner_test.o"
+"$LD64" -arch x86_64 -platform_version $PLATFORM -e _main \
+    -o "$T/scanner_test" "$T/scanner_test.o" \
+    "$ROOT/runtime/System/Library/Frameworks/Foundation.framework/Foundation" \
+    -undefined dynamic_lookup
+out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/scanner_test" 2>&1)"
+check "[scan] int=1 value=42 at=2" "$out" \
+    "scanInt: parses a number and advances the scan location"
+check "[scan] double=1 value=-3.5" "$out" \
+    "scanDouble: parses signed fractions"
+check "[scan] up=1 word=name" "$out" \
+    "scanUpToString: stops before the terminator"
+check "[scan] equals=1" "$out" \
+    "scanString: matches literal text"
+check "[scan] value=1" "$out" \
+    "scanString: advances past the matched text"
+check "[scan] rest=1 string=rest end=1" "$out" \
+    "scanning to the end reports isAtEnd"
+
+# ---------- 32. NSPredicate and array filtering ----------
+"$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
+    -ffreestanding -O1 -I "$ROOT/frameworks" \
+    -c "$ROOT/tests/predicate_test.m" -o "$T/predicate_test.o"
+"$LD64" -arch x86_64 -platform_version $PLATFORM -e _main \
+    -o "$T/predicate_test" "$T/predicate_test.o" \
+    "$ROOT/runtime/System/Library/Frameworks/Foundation.framework/Foundation" \
+    -undefined dynamic_lookup
+out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/predicate_test" 2>&1)"
+check "[pred] contains=1" "$out" \
+    "NSPredicate evaluates AND plus CONTAINS on key paths"
+check "[pred] notor=3" "$out" \
+    "NOT and OR compose with correct precedence"
+check "[pred] like=1" "$out" \
+    "LIKE matches wildcard patterns"
+check "[pred] range=2" "$out" \
+    "numeric range comparisons filter records"
+check "[pred] in=2" "$out" \
+    "IN matches against an array literal"
+check "[pred] nonnil=3" "$out" \
+    "comparison against nil uses key-path existence"
+check "[pred] self=1" "$out" \
+    "SELF binds the evaluated object"
+check "[pred] filtered=1" "$out" \
+    "filterUsingPredicate: compacts a mutable array in place"
+check "[pred] true=1 false=0" "$out" \
+    "predicateWithValue: creates constant predicates"
+
+# ---------- 33. NSRegularExpression ----------
+"$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
+    -ffreestanding -O1 -I "$ROOT/frameworks" \
+    -c "$ROOT/tests/regex_test.m" -o "$T/regex_test.o"
+"$LD64" -arch x86_64 -platform_version $PLATFORM -e _main \
+    -o "$T/regex_test" "$T/regex_test.o" \
+    "$ROOT/runtime/System/Library/Frameworks/Foundation.framework/Foundation" \
+    -undefined dynamic_lookup
+out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/regex_test" 2>&1)"
+check "[regex] matches=2 groups=2" "$out" \
+    "matchesInString: returns every match and captures groups"
+check "[regex] first 0 7 abc 123" "$out" \
+    "the whole match and capture ranges slice the source string"
+check "[regex] second xyz" "$out" \
+    "subsequent matches retain their own capture groups"
+check "[regex] digits=3 third=8,3" "$out" \
+    "a digit escape matches all number runs with byte ranges"
+check "[regex] ci=1" "$out" \
+    "NSRegularExpressionCaseInsensitive folds case at creation"
+check "[regex] replace=a<1>b<22>" "$out" \
+    "template replacement expands \$1 capture references"
 
 if [ "$fails" -ne 0 ]; then
     echo "$fails test(s) failed" >&2

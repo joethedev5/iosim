@@ -1,0 +1,2 @@
+CompileFlags:
+  Add: [-fblocks, -fobjc-runtime=ios-18.0, -fno-objc-arc, -Iframeworks, -Idemo]

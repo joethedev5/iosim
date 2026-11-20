@@ -170,6 +170,81 @@ Measured with `zig-x86_64-linux-0.17.1` from ziglang.org:
 - `NSDictionary valueForKey:` now maps ordinary keys to `objectForKey:`.
 - Fixture `tests/kvc_operators_test.m` (section 27).
 
+## 2026-11-20: NSURLSession and host HTTP
+
+- The loader exports `iosim_http_request`/`iosim_http_free` in the service
+  symbol table; it performs DNS, connect, request streaming and response
+  splitting in the host process.
+- Foundation's `NSURLSessionDataTask` copies the completion block and uses
+  `dispatch_async_f` on the global queue; `NSHTTPURLResponse` carries the
+  parsed status and headers.
+- HTTPS is deliberately rejected with an unsupported-scheme error until a
+  TLS client exists.
+- Fixture `tests/urlsession_test.m` (section 28) uses a loopback Python HTTP
+  server.
+
+## 2026-11-20: scroll momentum
+
+- Recent-move velocity (70/30 smoothing) feeds `willEndDragging` and
+  deceleration; the old whole-gesture average is gone.
+- `iosim_scroll_tick` owns momentum and animated content offsets, integrated
+  per UI loop with the 0.998/ms decay and a 25 pt/s stop threshold.
+- Paging snaps toward the projected offset (`offset + velocity * 0.25`), and
+  delegate target offsets act as hard deceleration endpoints.
+- Fixture `tests/scroll_deceleration_test.m` (section 29).
+
+## 2026-11-20: sorting
+
+- Stable insertion sort backs `sortedArrayUsingDescriptors:` and in-place
+  `sortUsingDescriptors:`; descriptors compare strings, numbers, or a custom
+  selector, then apply ascending/descending.
+- `NSString` gains `compare:`/`caseInsensitiveCompare:`.
+- Fixture `tests/sorting_test.m` (section 30).
+
+## 2026-11-20: NSScanner
+
+- Byte-oriented scanner over NSString UTF8 storage: int/long long/double,
+  literal string matching, scan-up-to and clamped scan locations.
+- Fixture `tests/scanner_test.m` (section 31).
+
+## 2026-11-20: NSPredicate
+
+- Recursive-descent format parser (NOT > AND > OR) over comparisons,
+  CONTAINS/BEGINSWITH/ENDSWITH/LIKE/IN, key paths, SELF, literals and array
+  literals; evaluates per object and filters arrays.
+- Fixture `tests/predicate_test.m` (section 32).
+
+## 2026-11-20: NSRegularExpression
+
+- Loader exports `iosim_regex_search` over host POSIX `regcomp`/`regexec`,
+  translating `\d`, `\w`, `\s`, non-capturing groups and lazy quantifiers
+  to ERE.
+- Foundation wraps it in NSRegularExpression/NSTextCheckingResult with
+  capture ranges, case-insensitive matching and `$n` replacement templates.
+- Fixture `tests/regex_test.m` (section 33).
+
+## 2026-11-20: CoreGraphics plan
+
+UIKit apps still cannot draw into their own views: there is no `drawRect:`
+bridge, `CGContext` or `UIGraphics*` image context. The next graphics slice is
+a real CoreGraphics surface, not more renderer special cases:
+
+- Build `CoreGraphics.framework/CoreGraphics` at the canonical install name,
+  exporting `CGContextRef`, `CGPathRef`, `CGColorRef`, affine transforms,
+  fill/stroke colors, line width and the common fill/stroke rect/ellipse/path
+  entry points. Own an ARGB8888 buffer with a saved graphics-state stack.
+- Add a `UIView` display path: when a subclass overrides `drawRect:`, the
+  renderer allocates a view-sized surface, makes it the current context, calls
+  `drawRect:` with the view bounds, then blits the surface after background
+  and before subviews. `setNeedsDisplay` marks the view dirty.
+- Add `UIGraphicsBeginImageContextWithOptions`, `UIGraphicsGetCurrentContext`,
+  `UIGraphicsGetImageFromCurrentImageContext` and `UIGraphicsEndImageContext`
+  as the same surface implementation, so offscreen image drawing works.
+- Flatten `UIBezierPath`/`CGPath` elements (move, line, quad/cubic curve,
+  close) into the same scan converter used by `CAShapeLayer` where practical.
+- Verify with a custom view fixture that fills a rect, strokes a path and
+  draws an offscreen image, then sample framebuffer pixels.
+
 ## Open directions
 
 - `metal-cpp` + macOS SDK Metal headers make it possible to implement a

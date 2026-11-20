@@ -10,3 +10,5 @@ __pycache__/
 recon-runner/
 build-zig/
 compile_commands.json
+.cache/
+build-regex/

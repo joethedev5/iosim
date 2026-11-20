@@ -619,6 +619,64 @@ Counts are exactly `2` and `2`; after `removeObserver:` the next
 `setName:@"erin"` produces no notification while the getter returns `erin`.
 The suite asserts all ten lines.
 
+### Foundation: NSRegularExpression
+
+`tests/regex_test.m` matches `([A-Za-z]+) (\\d+)` against
+`abc 123 xyz 45`: two matches, two capture groups, first whole range `0 7`
+with captures `abc` and `123`, second capture `xyz`. A `\\d+` expression
+finds three runs and the third range is `8,3` in `a1 b22 c333`; a
+case-insensitive expression matches `ABC`; and replacing `([0-9]+)` in
+`a1b22` with `<$1>` yields `a<1>b<22>`.
+
+### Foundation: NSPredicate
+
+`tests/predicate_test.m` builds three records (`Amy 25`, `Bob 10`, `Cara 5`)
+and filters them with a `price < 20 AND name CONTAINS 'o'` predicate (1
+match), `NOT (price < 10) OR name == 'Cara'` (3), `name LIKE 'A*'` (1), a
+two-sided numeric range (2), `name IN {'Amy', 'Cara'}` (2) and `name != nil`
+(3). It also filters strings with `SELF BEGINSWITH 'p'` (1), compacts a
+mutable copy with `filterUsingPredicate:` (1), and checks
+`predicateWithValue:YES/NO`.
+
+### Foundation: NSScanner
+
+`tests/scanner_test.m` scans `42 -3.5 name=value rest`: `scanInt:` returns 1
+for 42 and leaves the location at 2, `scanDouble:` returns -3.5,
+`scanUpToString:@"="` yields `name`, two `scanString:` calls consume `=` and
+`value`, and a final scan-up-to-`!` yields `rest` with `isAtEnd` true.
+
+### Foundation: sorting
+
+`tests/sorting_test.m` sorts `pear, apple, fig` with the `compare:` selector
+to `apple, fig, pear`, sorts `3, 1, 2` through a key-less ascending
+`NSSortDescriptor`, orders dictionary records by `name` and then by descending
+`price` (`Amy 25`, `Bob 10`, `Cara 5`), and sorts custom `Person` objects with
+a `compareAge:` selector (`18 30 41`). `exchangeObjectAtIndex:` swaps `1 2`
+to `2 1`, and `caseInsensitiveCompare:` returns 0 for `hello` and `HELLO`.
+
+### UIKit: scroll momentum and animated offsets
+
+`tests/scroll_deceleration_test.m` builds an off-screen window and scroll
+view, feeds twelve 25-point upward moves through the window's synthetic touch
+path at 20 ms intervals, and releases. The fixture asserts the release offset
+of 300 points, that `isDecelerating` and `willDecelerate:YES` are set, that
+the offset advances beyond the release point, and that the momentum finishes
+with `scrollViewDidEndDecelerating:`. It then sets the offset back to zero,
+calls `setContentOffset:animated:YES` to 200, observes an intermediate value
+after one tick and exactly 200 after 40 ticks, with
+`scrollViewDidEndScrollingAnimation:` delivered.
+
+### Foundation: NSURLSession
+
+The suite starts `python -m http.server` on a loopback ephemeral port, then a
+guest builds `http://127.0.0.1:<port>/hello.txt` and asks the shared
+`NSURLSession` for a data task. The completion handler reports status 200,
+the body `hello over http`, and `Content-type: text/plain` from
+`allHeaderFields`, proving the loader's host socket client, response parsing
+and the background completion dispatch. A second task with an `https://`
+URL completes with `NSError` code -1004 (request failed / unsupported
+scheme). The test waits for both handlers and prints `done 1` for each.
+
 ### Foundation: KVC collection operators
 
 `tests/kvc_operators_test.m` runs the operators over an array of boxed

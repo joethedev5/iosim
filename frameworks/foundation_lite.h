@@ -8,6 +8,15 @@ typedef struct {
     unsigned long length;
 } NSRange;
 
+static inline NSRange NSMakeRange(unsigned long location,
+                                  unsigned long length)
+{
+    NSRange range;
+    range.location = location;
+    range.length = length;
+    return range;
+}
+
 typedef struct {
     unsigned long state;
     id *itemsPtr;
@@ -102,6 +111,12 @@ __attribute__((objc_root_class))
 
 @class NSString;
 
+typedef enum {
+    NSOrderedAscending = -1,
+    NSOrderedSame = 0,
+    NSOrderedDescending = 1
+} NSComparisonResult;
+
 @interface NSString : NSObject {
 @public
     char *_cstr;
@@ -116,11 +131,14 @@ __attribute__((objc_root_class))
 - (unsigned long)length;
 - (unsigned short)characterAtIndex:(unsigned long)index;
 - (BOOL)isEqualToString:(id)other;
+- (long)compare:(NSString *)other;
+- (long)caseInsensitiveCompare:(NSString *)other;
 - (id)stringByAppendingString:(id)other;
 - (id)uppercaseString;
 - (id)lowercaseString;
 - (id)substringToIndex:(unsigned long)index;
 - (id)substringFromIndex:(unsigned long)index;
+- (id)substringWithRange:(NSRange)range;
 - (BOOL)hasPrefix:(id)prefix;
 - (BOOL)hasSuffix:(id)suffix;
 - (id)componentsSeparatedByString:(id)separator;
@@ -133,6 +151,76 @@ __attribute__((objc_root_class))
 - (id)dataUsingEncoding:(unsigned long)encoding;
 - (id)initWithData:(id)data encoding:(unsigned long)encoding;
 - (BOOL)containsString:(id)needle;
+@end
+
+enum {
+    NSRegularExpressionCaseInsensitive = 1 << 0,
+    NSRegularExpressionAllowCommentsAndWhitespace = 1 << 1,
+    NSRegularExpressionIgnoreMetaCharacters = 1 << 2,
+    NSRegularExpressionUseUnixLineSeparators = 1 << 3,
+    NSRegularExpressionUseUnicodeWordBoundaries = 1 << 4
+};
+
+@interface NSTextCheckingResult : NSObject {
+@public
+    NSRange *_ranges;
+    unsigned long _rangeCount;
+}
+- (NSRange)range;
+- (NSRange)rangeAtIndex:(unsigned long)index;
+- (unsigned long)numberOfRanges;
+@end
+
+@interface NSRegularExpression : NSObject {
+@public
+    id _pattern;
+    unsigned long _options;
+    unsigned long _groups;
+}
++ (id)regularExpressionWithPattern:(id)pattern options:(unsigned long)options
+                             error:(id *)error;
+- (id)initWithPattern:(id)pattern options:(unsigned long)options
+                error:(id *)error;
+- (id)pattern;
+- (unsigned long)options;
+- (unsigned long)numberOfCaptureGroups;
+- (id)matchesInString:(id)string options:(unsigned long)options
+                range:(NSRange)range;
+- (id)firstMatchInString:(id)string options:(unsigned long)options
+                   range:(NSRange)range;
+- (id)stringByReplacingMatchesInString:(id)string options:(unsigned long)options
+                                 range:(NSRange)range
+                          withTemplate:(id)template;
+@end
+
+@interface NSPredicate : NSObject {
+@public
+    id _format;
+}
++ (id)predicateWithFormat:(id)format, ...;
++ (id)predicateWithValue:(BOOL)value;
+- (BOOL)evaluateWithObject:(id)object;
+- (id)predicateFormat;
+@end
+
+@interface NSScanner : NSObject {
+@public
+    id _string;
+    unsigned long _location;
+    BOOL _caseSensitive;
+    BOOL _skipsWhitespace;
+}
++ (id)scannerWithString:(id)string;
+- (id)initWithString:(id)string;
+- (id)string;
+- (unsigned long)scanLocation;
+- (void)setScanLocation:(unsigned long)location;
+- (BOOL)isAtEnd;
+- (BOOL)scanString:(id)string intoString:(id *)result;
+- (BOOL)scanInt:(int *)result;
+- (BOOL)scanLongLong:(long long *)result;
+- (BOOL)scanDouble:(double *)result;
+- (BOOL)scanUpToString:(id)stop intoString:(id *)result;
 @end
 
 @interface NSMutableString : NSString
@@ -172,6 +260,22 @@ __attribute__((objc_root_class))
 - (id)stringValue;
 @end
 
+@interface NSSortDescriptor : NSObject {
+@public
+    id _key;
+    BOOL _ascending;
+    SEL _selector;
+}
++ (id)sortDescriptorWithKey:(id)key ascending:(BOOL)ascending;
++ (id)sortDescriptorWithKey:(id)key ascending:(BOOL)ascending
+                   selector:(SEL)selector;
+- (id)initWithKey:(id)key ascending:(BOOL)ascending;
+- (id)key;
+- (BOOL)ascending;
+- (SEL)selector;
+- (long)compareObject:(id)first toObject:(id)second;
+@end
+
 @interface NSArray : NSObject <NSFastEnumeration> {
 @public
     id *_items;
@@ -193,6 +297,9 @@ __attribute__((objc_root_class))
 - (unsigned long)countByEnumeratingWithState:(NSFastEnumerationState *)state
                                      objects:(id *)buffer
                                        count:(unsigned long)len;
+- (id)sortedArrayUsingDescriptors:(id)descriptors;
+- (id)sortedArrayUsingSelector:(SEL)selector;
+- (id)filteredArrayUsingPredicate:(id)predicate;
 @end
 
 @interface NSMutableArray : NSArray
@@ -203,6 +310,11 @@ __attribute__((objc_root_class))
 - (void)removeAllObjects;
 - (void)removeObject:(id)object;
 - (void)setObject:(id)object atIndexedSubscript:(unsigned long)index;
+- (void)sortUsingDescriptors:(id)descriptors;
+- (void)sortUsingSelector:(SEL)selector;
+- (void)filterUsingPredicate:(id)predicate;
+- (void)exchangeObjectAtIndex:(unsigned long)first
+        withObjectAtIndex:(unsigned long)second;
 @end
 
 @interface NSSet : NSObject <NSFastEnumeration> {
@@ -239,6 +351,7 @@ __attribute__((objc_root_class))
     unsigned long _count;
 }
 + (id)dictionary;
++ (id)dictionaryWithObject:(id)object forKey:(id)key;
 + (id)dictionaryWithObjects:(id)firstObject forKeys:(id)firstKey, ...;
 + (id)dictionaryWithObjects:(const id *)objects
                     forKeys:(const id *)keys
@@ -363,6 +476,70 @@ __attribute__((objc_root_class))
 - (id)pathExtension;
 - (id)URLByAppendingPathComponent:(id)component;
 - (id)URLByDeletingLastPathComponent;
+@end
+
+#ifdef __BLOCKS__
+typedef void (^NSURLSessionCompletionHandler)(id data, id response,
+                                              id error);
+#else
+typedef void *NSURLSessionCompletionHandler;
+#endif
+
+@interface NSURLRequest : NSObject {
+@public
+    id _URL;
+    double _timeoutInterval;
+    id _HTTPMethod;
+    id _HTTPBody;
+    id _allHTTPHeaderFields;
+}
++ (id)requestWithURL:(id)url;
+- (id)URL;
+- (void)setURL:(id)url;
+- (double)timeoutInterval;
+- (void)setTimeoutInterval:(double)timeout;
+- (id)HTTPMethod;
+- (void)setHTTPMethod:(id)method;
+- (id)HTTPBody;
+- (void)setHTTPBody:(id)body;
+- (id)allHTTPHeaderFields;
+- (void)setAllHTTPHeaderFields:(id)fields;
+- (id)valueForHTTPHeaderField:(id)field;
+@end
+
+@interface NSURLResponse : NSObject {
+@public
+    id _URL;
+    long _statusCode;
+    id _allHeaderFields;
+}
+- (id)initWithURL:(id)url statusCode:(long)status headers:(id)headers;
+- (id)URL;
+- (long)statusCode;
+- (id)allHeaderFields;
+@end
+
+@interface NSHTTPURLResponse : NSURLResponse
+@end
+
+@interface NSURLSessionDataTask : NSObject {
+@public
+    id _request;
+    void *_completion;
+    volatile int _canceled;
+    int _resumed;
+    void *_context;
+}
+- (void)resume;
+- (void)cancel;
+@end
+
+@interface NSURLSession : NSObject
++ (id)sharedSession;
+- (NSURLSessionDataTask *)dataTaskWithURL:(id)url
+                        completionHandler:(NSURLSessionCompletionHandler)handler;
+- (NSURLSessionDataTask *)dataTaskWithRequest:(id)request
+                            completionHandler:(NSURLSessionCompletionHandler)handler;
 @end
 
 @interface NSFileManager : NSObject

@@ -581,6 +581,22 @@ extern id UIWindowSceneSessionRoleApplication;
 @property(nonatomic, retain) UIViewController *rootViewController;
 - (id)initWithWindowScene:(UIWindowScene *)scene;
 - (void)makeKeyAndVisible;
+- (void)dispatchTouchDownX:(int)x y:(int)y;
+- (void)dispatchTouchMoveX:(int)x y:(int)y;
+- (void)dispatchTouchUpX:(int)x y:(int)y;
+@end
+
+@protocol UIScrollViewDelegate
+@optional
+- (void)scrollViewDidScroll:(UIScrollView *)scrollView;
+- (void)scrollViewWillBeginDragging:(UIScrollView *)scrollView;
+- (void)scrollViewDidEndDragging:(UIScrollView *)scrollView
+                  willDecelerate:(BOOL)decelerate;
+- (void)scrollViewDidEndDecelerating:(UIScrollView *)scrollView;
+- (void)scrollViewDidEndScrollingAnimation:(UIScrollView *)scrollView;
+- (void)scrollViewWillEndDragging:(UIScrollView *)scrollView
+                     withVelocity:(CGPoint)velocity
+              targetContentOffset:(CGPoint *)targetContentOffset;
 @end
 
 enum {

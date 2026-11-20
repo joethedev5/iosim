@@ -6,14 +6,18 @@
 #define _GNU_SOURCE
 #include <errno.h>
 #include <fcntl.h>
+#include <netdb.h>
+#include <netinet/in.h>
 #include <poll.h>
 #include <pthread.h>
+#include <regex.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <sys/un.h>
 #include <time.h>
 #include <unistd.h>
@@ -2652,6 +2656,469 @@ void dispatch_source_merge_data(void *source, unsigned long value)
     ds_trigger(s);
 }
 
+/* Minimal host HTTP client used by Foundation's NSURLSession.  The guest
+ * passes a URL, method, extra headers and an optional body; the loader owns
+ * the host socket, DNS lookup and response parsing. */
+
+static void http_set_error(char **out_error, const char *message)
+{
+    if (out_error && !*out_error)
+        *out_error = strdup(message);
+}
+
+static int http_split_url(const char *url, char *host, size_t host_cap,
+                          char *port, size_t port_cap, char *path,
+                          size_t path_cap, char **out_error)
+{
+    if (!url || strncmp(url, "http://", 7) != 0)
+    {
+        http_set_error(out_error, "unsupported URL scheme");
+        return -1;
+    }
+    const char *authority = url + 7;
+    const char *slash = strchr(authority, '/');
+    const char *authority_end = slash ? slash : authority + strlen(authority);
+    size_t authority_len = (size_t)(authority_end - authority);
+    if (authority_len == 0)
+    {
+        http_set_error(out_error, "URL has no host");
+        return -1;
+    }
+    const char *colon = memchr(authority, ':', authority_len);
+    size_t host_len = colon ? (size_t)(colon - authority) : authority_len;
+    if (host_len == 0 || host_len >= host_cap)
+    {
+        http_set_error(out_error, "URL host is too long");
+        return -1;
+    }
+    memcpy(host, authority, host_len);
+    host[host_len] = 0;
+    if (colon)
+    {
+        size_t port_len = authority_len - host_len - 1;
+        if (port_len == 0 || port_len >= port_cap)
+        {
+            http_set_error(out_error, "URL port is invalid");
+            return -1;
+        }
+        memcpy(port, colon + 1, port_len);
+        port[port_len] = 0;
+    }
+    else
+    {
+        snprintf(port, port_cap, "80");
+    }
+    const char *path_start = slash ? slash : "/";
+    size_t path_len = strlen(path_start);
+    if (path_len == 0)
+        path_start = "/", path_len = 1;
+    if (path_len >= path_cap)
+    {
+        http_set_error(out_error, "URL path is too long");
+        return -1;
+    }
+    memcpy(path, path_start, path_len);
+    path[path_len] = 0;
+    return 0;
+}
+
+static int http_send_all(int fd, const char *data, size_t length)
+{
+    while (length)
+    {
+        ssize_t n = send(fd, data, length, 0);
+        if (n < 0)
+        {
+            if (errno == EINTR)
+                continue;
+            return -1;
+        }
+        data += n;
+        length -= (size_t)n;
+    }
+    return 0;
+}
+
+int iosim_http_request(const char *url, const char *method,
+                       const char *extra_headers, const void *body,
+                       size_t body_len, unsigned char **out_data,
+                       size_t *out_len, int *out_status,
+                       char **out_headers, char **out_error)
+{
+    char host[256], port[16], path[2048];
+    int fd = -1, status = 0, rc = -1;
+    unsigned char *reply = NULL;
+    char *headers = NULL, *error = NULL;
+    if (out_data)
+        *out_data = NULL;
+    if (out_len)
+        *out_len = 0;
+    if (out_status)
+        *out_status = 0;
+    if (out_headers)
+        *out_headers = NULL;
+    if (out_error)
+        *out_error = NULL;
+    if (http_split_url(url, host, sizeof(host), port, sizeof(port), path,
+                       sizeof(path), &error) != 0)
+        goto done;
+
+    struct addrinfo hints, *addresses = NULL;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    if (getaddrinfo(host, port, &hints, &addresses) != 0)
+    {
+        http_set_error(&error, "could not resolve host");
+        goto done;
+    }
+    for (struct addrinfo *a = addresses; a; a = a->ai_next)
+    {
+        fd = socket(a->ai_family, a->ai_socktype, a->ai_protocol);
+        if (fd < 0)
+            continue;
+        if (connect(fd, a->ai_addr, a->ai_addrlen) == 0)
+            break;
+        close(fd);
+        fd = -1;
+    }
+    freeaddrinfo(addresses);
+    if (fd < 0)
+    {
+        http_set_error(&error, "could not connect to host");
+        goto done;
+    }
+    struct timeval timeout = { 15, 0 };
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+
+    const char *verb = method && method[0] ? method : "GET";
+    size_t extra_len = extra_headers ? strlen(extra_headers) : 0;
+    size_t request_cap = strlen(verb) + strlen(path) + strlen(host) +
+                         extra_len + body_len + 512;
+    char *request = malloc(request_cap);
+    if (!request)
+    {
+        http_set_error(&error, "out of memory");
+        goto done;
+    }
+    int n = snprintf(request, request_cap,
+                     "%s %s HTTP/1.0\r\nHost: %s\r\nConnection: close\r\n"
+                     "User-Agent: iosim/1.0\r\n", verb, path, host);
+    if (extra_len)
+        n += snprintf(request + n, request_cap - (size_t)n, "%s", extra_headers);
+    if (body_len)
+        n += snprintf(request + n, request_cap - (size_t)n,
+                      "Content-Length: %lu\r\n", (unsigned long)body_len);
+    n += snprintf(request + n, request_cap - (size_t)n, "\r\n");
+    if (body_len && (size_t)n + body_len < request_cap)
+        memcpy(request + n, body, body_len), n += (int)body_len;
+    int sent = http_send_all(fd, request, (size_t)n);
+    free(request);
+    if (sent != 0)
+    {
+        http_set_error(&error, "could not send request");
+        goto done;
+    }
+
+    size_t length = 0, capacity = 0;
+    char chunk[8192];
+    for (;;)
+    {
+        ssize_t got = recv(fd, chunk, sizeof(chunk), 0);
+        if (got < 0)
+        {
+            if (errno == EINTR)
+                continue;
+            http_set_error(&error, "could not read response");
+            goto done;
+        }
+        if (got == 0)
+            break;
+        if (length + (size_t)got + 1 > capacity)
+        {
+            size_t want = capacity ? capacity * 2 : 16384;
+            while (want < length + (size_t)got + 1)
+                want *= 2;
+            unsigned char *grown = realloc(reply, want);
+            if (!grown)
+            {
+                http_set_error(&error, "out of memory");
+                goto done;
+            }
+            reply = grown;
+            capacity = want;
+        }
+        memcpy(reply + length, chunk, (size_t)got);
+        length += (size_t)got;
+    }
+    if (reply)
+        reply[length] = 0;
+    if (!reply || length < 12)
+    {
+        http_set_error(&error, "empty response");
+        goto done;
+    }
+
+    char *header_end = strstr((char *)reply, "\r\n\r\n");
+    if (!header_end)
+    {
+        http_set_error(&error, "malformed response headers");
+        goto done;
+    }
+    char *status_space = strchr((char *)reply, ' ');
+    if (!status_space || status_space > header_end)
+    {
+        http_set_error(&error, "malformed status line");
+        goto done;
+    }
+    status = atoi(status_space + 1);
+    char *header_start = strchr((char *)reply, '\n');
+    size_t header_len = 0;
+    if (header_start && header_start + 1 <= header_end)
+        header_len = (size_t)(header_end - (header_start + 1));
+    headers = malloc(header_len + 1);
+    if (headers)
+    {
+        if (header_len)
+            memcpy(headers, header_start + 1, header_len);
+        headers[header_len] = 0;
+    }
+    size_t body_start = (size_t)(header_end - (char *)reply) + 4;
+    size_t body_size = length - body_start;
+    unsigned char *body_copy = NULL;
+    if (body_size)
+    {
+        body_copy = malloc(body_size + 1);
+        if (!body_copy)
+        {
+            http_set_error(&error, "out of memory");
+            goto done;
+        }
+        memcpy(body_copy, reply + body_start, body_size);
+        body_copy[body_size] = 0;
+    }
+    if (out_data)
+        *out_data = body_copy;
+    else
+        free(body_copy);
+    if (out_len)
+        *out_len = body_size;
+    if (out_status)
+        *out_status = status;
+    if (out_headers)
+    {
+        *out_headers = headers;
+        headers = NULL;
+    }
+    rc = 0;
+
+done:
+    if (fd >= 0)
+        close(fd);
+    free(reply);
+    free(headers);
+    if (error)
+    {
+        if (out_error)
+            *out_error = error;
+        else
+            free(error);
+    }
+    return rc;
+}
+
+void iosim_http_free(void *pointer)
+{
+    free(pointer);
+}
+
+/* Host POSIX regex used by Foundation's NSRegularExpression.  Patterns are
+ * translated from the common ICU spelling (\d, \w, \s, non-capturing groups
+ * and lazy quantifiers) to POSIX ERE before compilation. */
+
+static char *regex_translate_pattern(const char *pattern)
+{
+    size_t capacity = strlen(pattern) * 6 + 16;
+    char *out = malloc(capacity);
+    size_t length = 0;
+    if (!out)
+        return NULL;
+    for (const char *p = pattern; *p; )
+    {
+        const char *insert = NULL;
+        size_t skip = 0;
+        if (p[0] == '\\' && p[1])
+        {
+            if (p[1] == 'd')
+                insert = "[0-9]";
+            else if (p[1] == 'w')
+                insert = "[A-Za-z0-9_]";
+            else if (p[1] == 's')
+                insert = "[ \t\r\n]";
+            else if (p[1] == 'D')
+                insert = "[^0-9]";
+            else if (p[1] == 'W')
+                insert = "[^A-Za-z0-9_]";
+            else if (p[1] == 'S')
+                insert = "[^ \t\r\n]";
+            if (insert)
+                skip = 2;
+        }
+        else if (p[0] == '(' && p[1] == '?' && p[2] == ':')
+        {
+            insert = "(";
+            skip = 3;
+        }
+        else if ((p[0] == '*' || p[0] == '+' || p[0] == '?') &&
+                 p[1] == '?')
+        {
+            insert = NULL;
+            skip = 2;
+        }
+        if (insert || skip)
+        {
+            const char *text = insert ? insert : p;
+            size_t n = insert ? strlen(insert) : 1;
+            if (length + n + 1 >= capacity)
+            {
+                capacity = (length + n + 1) * 2;
+                char *grown = realloc(out, capacity);
+                if (!grown)
+                {
+                    free(out);
+                    return NULL;
+                }
+                out = grown;
+            }
+            memcpy(out + length, text, n);
+            length += n;
+            p += skip;
+            continue;
+        }
+        if (length + 2 >= capacity)
+        {
+            capacity *= 2;
+            char *grown = realloc(out, capacity);
+            if (!grown)
+            {
+                free(out);
+                return NULL;
+            }
+            out = grown;
+        }
+        out[length++] = *p++;
+    }
+    out[length] = 0;
+    return out;
+}
+
+int iosim_regex_search(const char *pattern, const char *text, int options,
+                       unsigned long **out_ranges,
+                       unsigned long *out_matches,
+                       unsigned long *out_groups, char **out_error)
+{
+    if (out_ranges)
+        *out_ranges = NULL;
+    if (out_matches)
+        *out_matches = 0;
+    if (out_groups)
+        *out_groups = 0;
+    if (out_error)
+        *out_error = NULL;
+    if (!pattern || !text)
+        return -1;
+    char *translated = regex_translate_pattern(pattern);
+    if (!translated)
+    {
+        if (out_error)
+            *out_error = strdup("out of memory");
+        return -1;
+    }
+    regex_t regex;
+    int flags = REG_EXTENDED;
+    if (options & 1)
+        flags |= REG_ICASE;
+    int compiled = regcomp(&regex, translated, flags);
+    free(translated);
+    if (compiled != 0)
+    {
+        char message[256];
+        regerror(compiled, &regex, message, sizeof(message));
+        if (out_error)
+            *out_error = strdup(message);
+        return -1;
+    }
+    size_t groups = regex.re_nsub + 1;
+    if (groups > 16)
+        groups = 16;
+    regmatch_t matches[16];
+    unsigned long *ranges = NULL;
+    size_t range_count = 0, range_capacity = 0;
+    unsigned long match_count = 0;
+    size_t offset = 0;
+    size_t text_length = strlen(text);
+    while (offset <= text_length)
+    {
+        int result = regexec(&regex, text + offset, groups, matches, 0);
+        if (result != 0)
+            break;
+        if ((size_t)matches[0].rm_so == (size_t)-1)
+            break;
+        if (range_count + groups * 2 > range_capacity)
+        {
+            size_t want = range_capacity ? range_capacity * 2 : 64;
+            while (want < range_count + groups * 2)
+                want *= 2;
+            unsigned long *grown = realloc(ranges, want * sizeof(unsigned long));
+            if (!grown)
+            {
+                free(ranges);
+                regfree(&regex);
+                if (out_error)
+                    *out_error = strdup("out of memory");
+                return -1;
+            }
+            ranges = grown;
+            range_capacity = want;
+        }
+        for (size_t g = 0; g < groups; g++)
+        {
+            if (matches[g].rm_so < 0)
+            {
+                ranges[range_count++] = (unsigned long)-1;
+                ranges[range_count++] = 0;
+            }
+            else
+            {
+                ranges[range_count++] = offset + (size_t)matches[g].rm_so;
+                ranges[range_count++] = (size_t)(matches[g].rm_eo -
+                                                 matches[g].rm_so);
+            }
+        }
+        match_count++;
+        size_t advance = (size_t)matches[0].rm_eo;
+        if (advance == 0)
+            advance = 1;
+        offset += advance;
+    }
+    regfree(&regex);
+    if (out_ranges)
+        *out_ranges = ranges;
+    else
+        free(ranges);
+    if (out_matches)
+        *out_matches = match_count;
+    if (out_groups)
+        *out_groups = groups;
+    return 0;
+}
+
+void iosim_regex_free(void *pointer)
+{
+    free(pointer);
+}
+
 struct service_symbol { const char *name; void *addr; };
 
 #define SVC(fn) { #fn, (void *)(uintptr_t)&fn }
@@ -2659,6 +3126,8 @@ struct service_symbol { const char *name; void *addr; };
 
 static const struct service_symbol service_symbols[] = {
     SVC(dispatch_get_main_queue), SVC(dispatch_get_global_queue),
+    SVC(iosim_http_request), SVC(iosim_http_free),
+    SVC(iosim_regex_search), SVC(iosim_regex_free),
     SVC(dispatch_queue_create), SVC(dispatch_release), SVC(dispatch_retain),
     SVC(dispatch_async), SVC(dispatch_async_f), SVC(dispatch_sync), SVC(dispatch_sync_f),
     SVC(dispatch_after), SVC(dispatch_after_f), SVC(dispatch_after_f_np),

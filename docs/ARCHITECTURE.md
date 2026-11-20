@@ -333,6 +333,46 @@ serializer and parser over `NSDictionary`, `NSArray`, `NSString`, `NSNumber`
 and `NSNull`. Compact output is deterministic (dictionary insertion order on
 this runtime) and the parser rejects truncated or malformed input.
 
+`NSURLSession` implements data tasks: `NSURLRequest` carries the URL, method,
+body and headers; `NSURLSessionDataTask` copies the completion block and
+returns immediately, dispatching the transfer to a global queue. The loader
+owns a small host HTTP/1.0 client (`iosim_http_request`) that parses the URL,
+resolves and connects to the host, streams the request body, reads until the
+peer closes and splits status line, headers and body. The task builds
+`NSData` and `NSHTTPURLResponse` with a parsed header dictionary; failures and
+cancellation arrive as `NSError` in `NSURLErrorDomain`. HTTPS is rejected
+with an unsupported-scheme error until a TLS client is wired in.
+
+`NSRegularExpression` compiles patterns through a loader-host POSIX regex
+shim: the pattern translator accepts ICU spellings for `\d`, `\w`, `\s`
+(and their negations), non-capturing groups and lazy quantifiers before
+`regcomp`/`regexec`. Matches carry a byte range plus one range per capture
+group; `matchesInString:` returns `NSTextCheckingResult` objects,
+`firstMatchInString:` returns the first, and
+`stringByReplacingMatchesInString:` expands `$0`–`$9` templates. Case
+insensitivity is a creation option and is merged with per-search options.
+
+`NSPredicate` parses a Foundation format string into boolean expressions:
+comparisons (`==`, `=`, `!=`, `<`, `<=`, `>`, `>=`), string operators
+(`CONTAINS`, `BEGINSWITH`, `ENDSWITH`, `LIKE` with `*` and `?`), `IN` with
+array literals, key paths, `SELF`, quoted strings, numbers, `nil`/`NULL`,
+`YES`/`NO`, `TRUEPREDICATE`/`FALSEPREDICATE`, parentheses and `NOT`/`AND`/`OR`
+with conventional precedence. `NSArray filteredArrayUsingPredicate:` and
+`NSMutableArray filterUsingPredicate:` evaluate it per element; a variadic
+`predicateWithFormat:` routes through the same NSString formatter.
+
+`NSScanner` scans integers, doubles, literal strings and up-to-terminator
+substrings from an `NSString`, tracking a byte scan location and skipping
+whitespace between scans; `scanString:` compares case-sensitively at the
+current location, and `scanUpToString:` copies the run into a fresh string.
+
+`NSArray` and `NSMutableArray` sort stably with `NSSortDescriptor` keys
+(ascending or descending, with selector comparators), with a custom selector,
+or in place; `exchangeObjectAtIndex:withObjectAtIndex:` swaps storage.
+`NSString` implements `compare:` and `caseInsensitiveCompare:` with
+`NSComparisonResult`, so descriptor comparisons work for text and boxed
+numbers alike.
+
 `NSArray`, `NSSet` and `NSDictionary` adopt `NSFastEnumeration`: because their
 backing stores are contiguous C arrays, `countByEnumeratingWithState:` hands
 the loop `itemsPtr` straight at that storage (arrays and sets yield members,
@@ -356,6 +396,19 @@ the receiver's fast enumeration: `@count`, `@sum`, `@avg`, `@max`, `@min`,
 `@distinctUnionOfObjects`, `@unionOfArrays` and `@distinctUnionOfArrays`,
 with a trailing key path applied to every element. `NSDictionary` overrides
 `valueForKey:` to return `objectForKey:` for ordinary keys.
+
+UIScrollView tracks recent pointer velocity while dragging instead of
+averaging the whole gesture. A release above 50 pt/s records the deceleration
+velocity, target and start time and adds the view to a small animation
+registry; `iosim_scroll_tick` runs once per UI loop, integrates velocity over
+the elapsed time, applies the 0.998-per-millisecond decay, clamps to the
+scrollable bounds, honors paging/delegate targets and calls
+`scrollViewDidScroll:` each step. It finishes at 25 pt/s, when a target is
+reached, or after five seconds, then reports `scrollViewDidEndDecelerating:`.
+The same registry eases `setContentOffset:animated:` over 300 ms with a
+smoothstep curve and reports `scrollViewDidEndScrollingAnimation:`; setting
+the offset directly cancels any running animation, and a new touch stops
+momentum before recording the drag origin.
 
 Automatic key-value observing uses the same isa-swizzling design as objc4.
 The loader runtime now creates classes at run time
@@ -940,12 +993,14 @@ Python for iteration speed.
   Mach port rights are per-service send sockets rather than general port right
   transfer; launchd starts LaunchDaemon plists with boolean RunAtLoad and
   KeepAlive but does not implement socket activation or job throttling.
-- `libdispatch` covers main/global queues, groups, semaphores and timers.
-  Foundation is a subset (strings, collections, numbers, data, notifications,
-  timers, dates, errors, bundles, defaults, plists, file manager, URLs and
-  JSON); it is not the full Foundation. `NSUserDefaults` persists XML property
-  lists under `$HOME/Library/Preferences`; binary property lists are not
-  parsed.
+- `libdispatch` covers main/global queues, groups, semaphores, timers and
+  read/write/data sources. Foundation is a subset (strings, collections,
+  sorting, predicates, scanner, regex, numbers, data, notifications, timers,
+  dates, errors, bundles, defaults, plists, file manager, URLs, JSON and
+  HTTP-only NSURLSession); it is not the full Foundation. HTTPS is not
+  implemented; regexes are POSIX ERE with common ICU escapes translated, not
+  full ICU syntax. `NSUserDefaults` persists XML property lists under
+  `$HOME/Library/Preferences`; binary property lists are not parsed.
 - Auto Layout is a relaxation solver over anchors and guides, not Cassowary;
   it does not cover every UIKit layout API or content-size class.
 - Text input is `UITextField` and an append-only `UITextView`; selection
