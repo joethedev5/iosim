@@ -61,8 +61,12 @@ __attribute__((objc_root_class))
 - (CGRect)bounds;
 @end
 
+@class NSArray;
+@class NSString;
+
 @interface UIView : UIResponder
 - (id)initWithFrame:(CGRect)frame;
+- (CGRect)bounds;
 @property CGRect frame;
 @property double alpha;
 @property(nonatomic, retain) UIColor *backgroundColor;
@@ -81,6 +85,8 @@ __attribute__((objc_root_class))
 @interface UIViewController : NSObject
 - (id)init;
 @property(nonatomic, retain) UIView *view;
+@property(nonatomic, retain) id title;
+@property(readonly) id navigationController;
 - (void)loadView;
 - (void)viewDidLoad;
 @end
@@ -138,8 +144,6 @@ extern id UIWindowSceneSessionRoleApplication;
 extern int UIApplicationMain(int argc, char **argv, id principal,
                              id delegateName);
 
-#endif
-
 @interface UIBezierPath : NSObject
 + (instancetype)bezierPath;
 - (void)moveToPoint:(CGPoint)point;
@@ -168,3 +172,23 @@ extern int UIApplicationMain(int argc, char **argv, id principal,
 @property(nonatomic, retain) UIImage *image;
 @property int contentMode;
 @end
+
+
+@interface UIStackView : UIView
+- (id)initWithArrangedSubviews:(NSArray *)views;
+- (void)addArrangedSubview:(UIView *)view;
+@property long axis;
+@property double spacing;
+@property long distribution;
+@property long alignment;
+@end
+
+@interface UINavigationController : UIViewController
+- (id)initWithRootViewController:(UIViewController *)root;
+- (void)pushViewController:(UIViewController *)controller animated:(BOOL)animated;
+- (UIViewController *)popViewControllerAnimated:(BOOL)animated;
+@end
+
+#define CGRectZero CGRectMake(0, 0, 0, 0)
+
+#endif

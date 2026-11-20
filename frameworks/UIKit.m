@@ -1247,7 +1247,7 @@ int iosim_animations_active(void)
             double x = 0;
             if (_alignment == 2) x = (W - w) / 2;
             else if (_alignment == 3) x = W - w;
-            v->_frame = CGRectMake(x, y, w, h);
+            [v setFrame:CGRectMake(x, y, w, h)];
             [v setNeedsLayout];
             [v layoutIfNeeded];
             y += h + _spacing;
@@ -1271,7 +1271,7 @@ int iosim_animations_active(void)
             double y = 0;
             if (_alignment == 2) y = (H - h) / 2;
             else if (_alignment == 3) y = H - h;
-            v->_frame = CGRectMake(x, y, w, h);
+            [v setFrame:CGRectMake(x, y, w, h)];
             [v setNeedsLayout];
             [v layoutIfNeeded];
             x += w + _spacing;

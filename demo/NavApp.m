@@ -33,6 +33,7 @@
                                             alpha:1.0];
     back.layer.cornerRadius = 14;
     [back setTitle:@"Back to Library" forState:UIControlStateNormal];
+    [back setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
     [back addTarget:self action:@selector(goBack)
         forControlEvents:UIControlEventTouchUpInside];
     [self.view addSubview:back];
@@ -92,6 +93,7 @@
     UIButton *open = [UIButton buttonWithType:UIButtonTypeSystem];
     open.frame = CGRectZero;
     [open setTitle:@"Open detail" forState:UIControlStateNormal];
+    [open setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
     open.backgroundColor = [UIColor systemBlueColor];
     open.layer.cornerRadius = 14;
     [open addTarget:self action:@selector(openDetail)
