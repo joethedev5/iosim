@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <unistd.h>
 #include <sys/stat.h>
 #include <zlib.h>
 
@@ -1050,9 +1051,20 @@ int iosim_fb_present(const char *path)
     free(raw);
 
     mkdir_parents(path);
-    FILE *f = fopen(path, "wb");
+    /* Write beside the target and rename, so a reader that copies the
+     * framebuffer while the UI repaints never sees a half-written PNG. */
+    size_t tmplen = strlen(path) + 40;
+    char *tmp_path = malloc(tmplen);
+    if (!tmp_path)
+    {
+        free(comp);
+        return -1;
+    }
+    snprintf(tmp_path, tmplen, "%s.tmp.%ld", path, (long)getpid());
+    FILE *f = fopen(tmp_path, "wb");
     if (!f)
     {
+        free(tmp_path);
         free(comp);
         return -1;
     }
@@ -1078,8 +1090,15 @@ int iosim_fb_present(const char *path)
         rc = write_chunk(f, "IDAT", comp, (uint32_t)comp_len);
     if (rc == 0)
         rc = write_chunk(f, "IEND", NULL, 0);
-    fclose(f);
+    if (fclose(f) != 0)
+        rc = -1;
     free(comp);
+
+    if (rc == 0 && rename(tmp_path, path) != 0)
+        rc = -1;
+    if (rc != 0)
+        remove(tmp_path);
+    free(tmp_path);
 
     if (rc == 0)
         fprintf(stderr, "iosim: framebuffer %ux%u written to %s\n",
