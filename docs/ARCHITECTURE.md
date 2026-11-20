@@ -910,7 +910,10 @@ of ending editing, which `UITextField` does. The renderer wraps the stored
 text preserving spaces (breaking at the last space that fits), paints a
 selected-range highlight behind the text, draws the caret at the selection
 end and, for a non-empty selection, draws the two handle stems and knobs at
-the span's start and end lines. Hardware input reaches both views through
+the span's start and end lines. A touch that lands within 14 points of a knob
+grabs it: dragging the start knob moves the selection start and dragging the
+end knob extends or shrinks the end, sampling the index on the handle's line
+rather than under the knob itself. Hardware input reaches both views through
 `ui key` records, which
 `iosimctl` emits per character (`key return` for a newline, `key space` for a
 space) and `ui backspace`; the on-screen keyboard taps use the same edit

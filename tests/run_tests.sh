@@ -3586,6 +3586,17 @@ else
     fails=$((fails+1))
 fi
 
+"$ROOT/tools/build_app.sh" "$ROOT/tests/textview_handle_drag_test.m" \
+    "$T/textview_handle_drag_test" >/dev/null
+out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" \
+    "$T/textview_handle_drag_test" 2>&1)"
+check "[handle] knob 1 1" "$out" \
+    "the computed selection-handle position lands inside the text view"
+check "[handle] end 1 1" "$out" \
+    "dragging the end handle extends the selection within the text"
+check "[handle] start 1" "$out" \
+    "dragging the start handle moves the selection start"
+
 if [ "$fails" -ne 0 ]; then
     echo "$fails test(s) failed" >&2
     exit 1

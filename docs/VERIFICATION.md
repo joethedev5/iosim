@@ -318,7 +318,11 @@ synthesizes touches on a 24 pt editor: dragging from the left inset to past
 the right edge selects `0 11`, and a second drag leaves a non-empty partial
 selection. The capture (caret dropped after resigning) counts 25723
 highlight pixels and 1404 `#426bf2` handle pixels, proving both selection
-endpoints draw stems and knobs.
+endpoints draw stems and knobs. `tests/textview_handle_drag_test.m` computes
+the end knob from the font metrics, drags it 20 points right (the selection
+grows past five characters but stays inside `hello world`), then grabs the
+new start knob and pulls it right; the selection start moves to 3 with a
+3-character span. This covers knob hit testing and per-endpoint dragging.
 
 ### Text input: multiline UITextView and hardware keys
 

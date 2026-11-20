@@ -273,7 +273,7 @@ color spaces, CGColorCreate, CGPath bounding boxes, containment and copies
 are covered. UITextView maps taps to byte indices, selects words on a second
 tap, extends the selection while dragging, clamps programmatic selectedRange
 and replaces/removes selected ranges; the renderer paints the selection
-highlight and end handles. CGContextClip rasterizes path
+highlight and draggable end handles. CGContextClip rasterizes path
 masks and intersects active masks; framebuffer fills, strokes, glyphs and
 image blits honor them. Quadratic/cubic CGPath, CGContext and UIBezierPath
 curves flatten adaptively from the second-derivative bound (1 to 128
@@ -354,8 +354,11 @@ management.
 - Fixture `tests/textview_drag_selection_test.m` synthesizes UITouch
   objects (the stub now exposes the touch ivars), drags across the text and
   captures the frame: 25723 highlight pixels and 1404 handle pixels.
-- Remaining text-selection gaps: handle dragging, long-press selection and
-  the edit menu.
+- Handle dragging: a touch within 14 points of a drawn knob sets a handle
+  mode; touchesMoved samples the index at the knob's line (the knob sits
+  below the text, where a raw lookup would clamp to the text end) and moves
+  the corresponding endpoint. Fixture `tests/textview_handle_drag_test.m`.
+- Remaining text-selection gaps: long-press selection and the edit menu.
 
 ## 2026-11-20: CALayer.transform (2D CATransform3D)
 

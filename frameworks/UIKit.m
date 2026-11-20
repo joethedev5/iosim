@@ -786,6 +786,7 @@ typedef enum {
     unsigned long _lastTapIndex;
     unsigned long _dragAnchor;
     BOOL _dragging;
+    int _dragHandle;
 }
 - (id)text;
 - (void)setText:(id)text;
@@ -3724,6 +3725,54 @@ static void text_index_line_position(const char (*lines)[256], int n,
     *out_y = y + inset;
 }
 
+/* Byte index to a point in the text view's own coordinate space: x at the
+ * glyph run and y at the bottom of its line. */
+static void text_index_point_in_view(UITextView *editor,
+                                     unsigned long index, CGPoint *out)
+{
+    const char *text = editor->_text ? iosim_string_cstr(editor->_text) : "";
+    if (!text)
+        text = "";
+    unsigned long length = strlen(text);
+    if (index > length)
+        index = length;
+    double scale = [[UIScreen mainScreen] scale];
+    if (scale <= 0)
+        scale = 1.0;
+    double points = editor->_font ? editor->_font->_size : 17.0;
+    int style = editor->_font && editor->_font->_bold ? IOSIM_FONT_BOLD
+                                                       : IOSIM_FONT_REGULAR;
+    int ascent = 0, descent = 0, lineHeight = 0;
+    iosim_fb_font_metrics(style, points, scale, &ascent, &descent,
+                          &lineHeight);
+    double line_height_pts = lineHeight / scale;
+    if (line_height_pts <= 0)
+        line_height_pts = points * 1.2;
+    double width = editor->_frame.size.width - 24.0;
+    if (width <= 0)
+    {
+        out->x = 12.0;
+        out->y = 12.0 + line_height_pts;
+        return;
+    }
+    char lines[IOSIM_MAX_WRAP_LINES][256];
+    int count = wrap_editable_lines(text, style, points, scale,
+                                    (int)(width * scale + 0.5), lines,
+                                    IOSIM_MAX_WRAP_LINES);
+    int px = 0, py = 0;
+    if (count <= 0)
+    {
+        out->x = 12.0;
+        out->y = 12.0 + line_height_pts;
+        return;
+    }
+    text_index_line_position((const char (*)[256])lines, count, style,
+                             points, scale, 0, 0, 0, lineHeight, index,
+                             &px, &py);
+    out->x = 12.0 + px / scale;
+    out->y = 12.0 + py / scale + line_height_pts;
+}
+
 - (id)initWithFrame:(CGRect)frame
 {
     self = [super initWithFrame:frame];
@@ -3782,6 +3831,31 @@ static void text_index_line_position(const char (*lines)[256], int n,
     CGPoint point = touch ? [touch locationInView:self] : CGPointMake(0, 0);
     const char *text = _text ? iosim_string_cstr(_text) : "";
     unsigned long index = text_index_at_point(self, point);
+    if (_selectedRange.length > 0)
+    {
+        CGPoint start_pt, end_pt;
+        unsigned long selection_start = _selectedRange.location;
+        unsigned long selection_end = selection_start + _selectedRange.length;
+        text_index_point_in_view(self, selection_start, &start_pt);
+        text_index_point_in_view(self, selection_end, &end_pt);
+        start_pt.y += 6.0;
+        end_pt.y += 6.0;
+        double ds = (point.x - start_pt.x) * (point.x - start_pt.x) +
+                    (point.y - start_pt.y) * (point.y - start_pt.y);
+        double de = (point.x - end_pt.x) * (point.x - end_pt.x) +
+                    (point.y - end_pt.y) * (point.y - end_pt.y);
+        if (ds <= 196.0 || de <= 196.0)
+        {
+            _dragHandle = ds <= de ? 1 : 2;
+            _dragAnchor = _dragHandle == 1 ? selection_end : selection_start;
+            _dragging = YES;
+            if (_editable)
+                [self becomeFirstResponder];
+            _needsLayout = YES;
+            return;
+        }
+    }
+    _dragHandle = 0;
     double now = iosim_now();
     if (now - _lastTapTime < 0.35)
     {
@@ -3817,7 +3891,33 @@ static void text_index_line_position(const char (*lines)[256], int n,
     (void)event;
     UITouch *touch = [touches anyObject];
     CGPoint point = touch ? [touch locationInView:self] : CGPointMake(0, 0);
-    unsigned long index = text_index_at_point(self, point);
+    unsigned long index;
+    if (_dragHandle == 1 || _dragHandle == 2)
+    {
+        /* The knob sits below its line; sample the index on that line. */
+        CGPoint anchor_pt;
+        text_index_point_in_view(self, _dragAnchor, &anchor_pt);
+        index = text_index_at_point(
+            self, CGPointMake(point.x, anchor_pt.y - 1.0));
+    }
+    else
+    {
+        index = text_index_at_point(self, point);
+    }
+    if (_dragHandle == 1)
+    {
+        unsigned long end = _dragAnchor;
+        unsigned long start = index > end ? end : index;
+        [self setSelectedRange:NSMakeRange(start, end - start)];
+        return;
+    }
+    if (_dragHandle == 2)
+    {
+        unsigned long start = _dragAnchor;
+        unsigned long finish = index < start ? start : index;
+        [self setSelectedRange:NSMakeRange(start, finish - start)];
+        return;
+    }
     if (!_dragging)
     {
         if (index == _dragAnchor)
@@ -3833,6 +3933,7 @@ static void text_index_line_position(const char (*lines)[256], int n,
     (void)touches;
     (void)event;
     _dragging = NO;
+    _dragHandle = 0;
 }
 - (void)insertText:(id)text
 {
