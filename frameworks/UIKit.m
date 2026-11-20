@@ -2730,12 +2730,8 @@ static void layout_collect(UIView *view, struct layout_entry *entries,
     e->fixed = view->_translatesAutoresizingMaskIntoConstraints ? 1 : 0;
     (*count)++;
     for (int i = 0; i < view->_subviewCount; i++)
-    {
-        struct layout_entry *child;
-        (void)child;
         layout_collect((UIView *)view->_subviews[i], entries, count, e->x,
                        e->y);
-    }
 }
 
 static void layout_write(UIView *view, struct layout_entry *entries, int count)
