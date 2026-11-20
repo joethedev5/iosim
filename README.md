@@ -37,7 +37,8 @@ runners**, combined with the public Darling and Apple dyld sources.
 | UISwitch, UISlider, UISegmentedControl, UIPageControl, UIActivityIndicatorView, UIProgressView | ✅ |
 | UIAlertController alerts, actions and modal presentation | ✅ |
 | UINavigationController push/pop, UIStackView intrinsic layout, UIButton titles | ✅ |
-| UIView animations (frame, alpha), CALayer backing/opacity/corner radius | ✅ |
+| UIView animations (frame, alpha), delay/curve/repeat options, completion blocks | ✅ |
+| `CADisplayLink`, presentation layers, `CAKeyframeAnimation` on layer properties | ✅ |
 | CoreAnimation paths, gradients, sublayers (z-ordered), PNG images | ✅ |
 | Foundation collections, strings, notifications, timers, NSIndexPath | ✅ |
 | libdispatch queues, groups, semaphores; main-queue drain from UIKit | ✅ |
@@ -55,9 +56,13 @@ natively: a graphics app using `CAGradientLayer`, `CAShapeLayer` and
 accessories and selection; an Auto Layout app using anchors, guides and a
 multiline label; a text-input app with a software keyboard; a controls app
 covering switch, slider, segmented control, progress, page control and
-activity indicator; and a services test that round-trips Mach messages,
-registers a bootstrap service, uses libdispatch queues/semaphores/groups and
-sends an XPC dictionary between a listener and a client.
+activity indicator; a touch fixture that drives `UITouch` through a custom
+view, slider, switch and button from injected gestures; an animation fixture
+whose `CADisplayLink` moves a view while a delayed UIView animation runs and
+a keyframe animation pulses a layer; and a services test that round-trips Mach
+messages, registers a bootstrap service, uses libdispatch
+queues/semaphores/groups and sends an XPC dictionary between a listener and a
+client.
 
 ```sh
 DYLD_ROOT_PATH=$PWD/runtime ./build/iosim-run build/binaries/services_test_x86_64

@@ -125,6 +125,10 @@ typedef void *CGColorRef;
     double _animDuration;
     double _animRepeatCount;
     BOOL _animInfinite;
+    id _animValues;
+    id _animKeyTimes;
+    id _animTimingFunction;
+    id _ownerView;
     UIColor *_shadowColor;
     double _shadowOpacity;
     double _shadowRadius;
@@ -147,6 +151,8 @@ typedef void *CGColorRef;
 - (void)removeFromSuperlayer;
 - (void)addAnimation:(id)animation forKey:(id)key;
 - (void)removeAnimationForKey:(id)key;
+- (CALayer *)presentationLayer;
+- (CALayer *)modelLayer;
 @end
 
 
@@ -252,6 +258,41 @@ extern id kCAMediaTimingFunctionEaseInEaseOut;
 @end
 
 @interface CABasicAnimation : CAAnimation
+@end
+
+@interface CAKeyframeAnimation : CAAnimation {
+@public
+    id _values;
+    id _keyTimes;
+}
+- (void)setValues:(id)values;
+- (void)setKeyTimes:(id)keyTimes;
+@end
+
+@interface CADisplayLink : NSObject {
+@public
+    id _target;
+    SEL _selector;
+    double _timestamp;
+    double _duration;
+    double _targetTimestamp;
+    long _frameInterval;
+    BOOL _paused;
+    BOOL _valid;
+    BOOL _scheduled;
+}
++ (CADisplayLink *)displayLinkWithTarget:(id)target selector:(SEL)selector;
+- (void)addToRunLoop:(id)runloop forMode:(id)mode;
+- (void)removeFromRunLoop:(id)runloop forMode:(id)mode;
+- (void)invalidate;
+- (double)timestamp;
+- (double)duration;
+- (double)targetTimestamp;
+- (BOOL)isPaused;
+- (void)setPaused:(BOOL)paused;
+- (BOOL)isValid;
+- (long)frameInterval;
+- (void)setFrameInterval:(long)interval;
 @end
 
 @interface UIColor : NSObject {
@@ -490,6 +531,23 @@ typedef enum {
 - (long)direction;
 @end
 
+typedef enum {
+    UIViewAnimationOptionLayoutSubviews = 1 << 0,
+    UIViewAnimationOptionAllowUserInteraction = 1 << 1,
+    UIViewAnimationOptionBeginFromCurrentState = 1 << 2,
+    UIViewAnimationOptionRepeat = 1 << 3,
+    UIViewAnimationOptionAutoreverse = 1 << 4,
+    UIViewAnimationOptionOverrideInheritedDuration = 1 << 5,
+    UIViewAnimationOptionOverrideInheritedCurve = 1 << 6,
+    UIViewAnimationOptionAllowAnimatedContent = 1 << 7,
+    UIViewAnimationOptionShowHideTransitionViews = 1 << 8,
+    UIViewAnimationOptionOverrideInheritedOptions = 1 << 9,
+    UIViewAnimationOptionCurveEaseInOut = 0 << 16,
+    UIViewAnimationOptionCurveEaseIn = 1 << 16,
+    UIViewAnimationOptionCurveEaseOut = 2 << 16,
+    UIViewAnimationOptionCurveLinear = 3 << 16
+} UIViewAnimationOptions;
+
 @interface UIView : UIResponder {
 @public
     CGRect _frame;
@@ -504,6 +562,10 @@ typedef enum {
     BOOL _animatingFrame;
     CGRect _animFrameFrom, _animFrameTo;
     double _animStart, _animDuration;
+    double _animDelay;
+    BOOL _animInfinite;
+    BOOL _animAutoreverse;
+    int _animCurve;
     id _superview;
     BOOL _needsLayout;
     CGAffineTransform _transform;
@@ -1099,6 +1161,10 @@ extern int UIApplicationMain(int argc, char **argv, id principal,
 /* ---------------------------------------------------------------- layers */
 
 static void animation_mark_active(double duration, double repeat);
+static void animation_unmark_infinite(void);
+static CGRect current_frame(UIView *view);
+static double current_alpha(UIView *view);
+static double layer_key_value(CALayer *layer, const char *key, double base);
 
 @implementation CALayer
 - (id)init
@@ -1149,9 +1215,13 @@ static void animation_mark_active(double duration, double repeat);
 {
     (void)key;
     CAAnimation *anim = (CAAnimation *)animation;
+    BOOL keyframe = [anim isKindOfClass:[CAKeyframeAnimation class]];
     _animKeyPath = anim->_keyPath;
-    _animFrom = anim->_fromValue;
-    _animTo = anim->_toValue;
+    _animFrom = keyframe ? nil : anim->_fromValue;
+    _animTo = keyframe ? nil : anim->_toValue;
+    _animValues = keyframe ? ((CAKeyframeAnimation *)anim)->_values : nil;
+    _animKeyTimes = keyframe ? ((CAKeyframeAnimation *)anim)->_keyTimes : nil;
+    _animTimingFunction = anim->_timingFunction;
     _animDuration = anim->_duration;
     _animRepeatCount = anim->_repeatCount;
     _animStart = iosim_now();
@@ -1160,7 +1230,37 @@ static void animation_mark_active(double duration, double repeat);
         _animDuration = 0.25;
     animation_mark_active(_animDuration, _animRepeatCount);
 }
-- (void)removeAnimationForKey:(id)key { (void)key; _animKeyPath = nil; }
+- (void)removeAnimationForKey:(id)key
+{
+    (void)key;
+    if (_animInfinite)
+    {
+        _animInfinite = NO;
+        animation_unmark_infinite();
+    }
+    _animKeyPath = nil;
+    _animValues = nil;
+    _animKeyTimes = nil;
+    _animTimingFunction = nil;
+}
+- (CALayer *)presentationLayer
+{
+    CALayer *presentation = [[CALayer alloc] init];
+    CGRect frame = _frame;
+    double opacity = _opacity;
+    if (_ownerView)
+    {
+        frame = current_frame((UIView *)_ownerView);
+        opacity = current_alpha((UIView *)_ownerView) * _opacity;
+    }
+    presentation->_frame = frame;
+    presentation->_opacity = layer_key_value(self, "opacity", opacity);
+    presentation->_cornerRadius =
+        layer_key_value(self, "cornerRadius", _cornerRadius);
+    presentation->_backgroundColor = _backgroundColor;
+    return presentation;
+}
+- (CALayer *)modelLayer { return self; }
 @end
 
 id kCAMediaTimingFunctionLinear = @"linear";
@@ -1206,6 +1306,123 @@ id kCAMediaTimingFunctionEaseInEaseOut = @"easeInEaseOut";
 @end
 
 @implementation CABasicAnimation
+@end
+
+@implementation CAKeyframeAnimation
+- (void)setValues:(id)values { _values = values; }
+- (void)setKeyTimes:(id)keyTimes { _keyTimes = keyTimes; }
+@end
+
+/* Display links are driven by the UIApplicationMain run loop, which wakes
+ * every 16 ms even when the event stream is idle. */
+
+#define MAX_DISPLAY_LINKS 16
+static CADisplayLink *g_displayLinks[MAX_DISPLAY_LINKS];
+static int g_displayLinkCount;
+
+static void display_link_remove(CADisplayLink *link)
+{
+    for (int i = 0; i < g_displayLinkCount; i++)
+        if (g_displayLinks[i] == link)
+        {
+            for (int j = i; j + 1 < g_displayLinkCount; j++)
+                g_displayLinks[j] = g_displayLinks[j + 1];
+            g_displayLinkCount--;
+            return;
+        }
+}
+
+static int display_links_active(void)
+{
+    for (int i = 0; i < g_displayLinkCount; i++)
+        if (g_displayLinks[i] && g_displayLinks[i]->_valid &&
+            !g_displayLinks[i]->_paused)
+            return 1;
+    return 0;
+}
+
+int iosim_display_link_tick(void)
+{
+    int fired = 0;
+    double now = iosim_now();
+    int count = g_displayLinkCount;
+    for (int i = 0; i < count && i < g_displayLinkCount; i++)
+    {
+        CADisplayLink *link = g_displayLinks[i];
+        if (!link || !link->_valid || link->_paused)
+            continue;
+        if (now < link->_targetTimestamp)
+            continue;
+        link->_timestamp = now;
+        link->_targetTimestamp = now + link->_duration;
+        fired = 1;
+        if (link->_target && link->_selector)
+        {
+            void (*imp)(id, SEL, id) = (void (*)(id, SEL, id))objc_msgSend;
+            imp(link->_target, link->_selector, link);
+        }
+    }
+    return fired;
+}
+
+@implementation CADisplayLink
++ (CADisplayLink *)displayLinkWithTarget:(id)target selector:(SEL)selector
+{
+    CADisplayLink *link = [[self alloc] init];
+    if (link)
+    {
+        link->_target = target;
+        link->_selector = selector;
+        link->_duration = 1.0 / 60.0;
+        link->_timestamp = iosim_now();
+        link->_targetTimestamp = link->_timestamp;
+        link->_frameInterval = 1;
+        link->_valid = YES;
+    }
+    return link;
+}
+- (void)addToRunLoop:(id)runloop forMode:(id)mode
+{
+    (void)runloop;
+    (void)mode;
+    if (!_valid || _scheduled)
+        return;
+    if (g_displayLinkCount < MAX_DISPLAY_LINKS)
+        g_displayLinks[g_displayLinkCount++] = self;
+    _scheduled = YES;
+}
+- (void)removeFromRunLoop:(id)runloop forMode:(id)mode
+{
+    (void)runloop;
+    (void)mode;
+    display_link_remove(self);
+    _scheduled = NO;
+}
+- (void)invalidate
+{
+    _valid = NO;
+    _scheduled = NO;
+    display_link_remove(self);
+}
+- (double)timestamp { return _timestamp; }
+- (double)duration { return _duration; }
+- (double)targetTimestamp { return _targetTimestamp; }
+- (BOOL)isPaused { return _paused; }
+- (void)setPaused:(BOOL)paused
+{
+    _paused = paused;
+    if (!paused)
+        _targetTimestamp = iosim_now() + _duration;
+}
+- (BOOL)isValid { return _valid; }
+- (long)frameInterval { return _frameInterval; }
+- (void)setFrameInterval:(long)interval
+{
+    if (interval < 1)
+        interval = 1;
+    _frameInterval = interval;
+    _duration = interval / 60.0;
+}
 @end
 
 /* ---------------------------------------------------------------- colors */
@@ -1282,13 +1499,26 @@ id kCAMediaTimingFunctionEaseInEaseOut = @"easeInEaseOut";
 
 static BOOL g_animating;
 static double g_animStart, g_animDuration;
+static double g_animateDelay;
+static BOOL g_animateInfinite;
+static BOOL g_animateAutoreverse;
+static int g_animateCurve;
 static double g_animActiveUntil;
-static BOOL g_animInfinite;
+static int g_animInfiniteCount;
+
+#define MAX_ANIMATION_COMPLETIONS 32
+static void (^g_completionBlocks[MAX_ANIMATION_COMPLETIONS])(BOOL);
+static double g_completionDue[MAX_ANIMATION_COMPLETIONS];
+static int g_completionCount;
+
+static int display_links_active(void);
+int iosim_display_link_tick(void);
+int iosim_animation_tick(void);
 
 static void animation_mark_active(double duration, double repeat)
 {
     if (repeat < 0)
-        g_animInfinite = YES;
+        g_animInfiniteCount++;
     else
     {
         double total = duration * (repeat > 0 ? repeat : 1);
@@ -1298,9 +1528,51 @@ static void animation_mark_active(double duration, double repeat)
     }
 }
 
+static void animation_unmark_infinite(void)
+{
+    if (g_animInfiniteCount > 0)
+        g_animInfiniteCount--;
+}
+
+static void animation_add_completion(double delay, void (^completion)(BOOL))
+{
+    if (!completion || g_completionCount >= MAX_ANIMATION_COMPLETIONS)
+        return;
+    g_completionBlocks[g_completionCount] =
+        (void (^)(BOOL))_Block_copy(completion);
+    g_completionDue[g_completionCount] = iosim_now() + delay;
+    g_completionCount++;
+}
+
+/* Fire animations that have reached their end. The run loop calls this on
+ * every tick, so a completion block observes the settled model values. */
+int iosim_animation_tick(void)
+{
+    int fired = 0;
+    double now = iosim_now();
+    int i = 0;
+    while (i < g_completionCount)
+    {
+        if (now >= g_completionDue[i])
+        {
+            void (^block)(BOOL) = g_completionBlocks[i];
+            g_completionBlocks[i] = g_completionBlocks[g_completionCount - 1];
+            g_completionDue[i] = g_completionDue[g_completionCount - 1];
+            g_completionCount--;
+            if (block)
+                block(YES);
+            fired = 1;
+        }
+        else
+            i++;
+    }
+    return fired;
+}
+
 int iosim_animations_active(void)
 {
-    return g_animInfinite || iosim_now() < g_animActiveUntil;
+    return g_animInfiniteCount > 0 || iosim_now() < g_animActiveUntil ||
+           g_completionCount > 0 || display_links_active();
 }
 
 @implementation UIResponder
@@ -1802,6 +2074,7 @@ static int wrap_text_lines(const char *text, int style, double points,
         _hidden = NO;
         _layer = [[CALayer alloc] init];
         _layer->_frame = CGRectMake(0, 0, frame.size.width, frame.size.height);
+        _layer->_ownerView = self;
         _transform = CGAffineTransformIdentityValue();
         _translatesAutoresizingMaskIntoConstraints = YES;
     }
@@ -1816,8 +2089,13 @@ static int wrap_text_lines(const char *text, int style, double points,
         _animFrameTo = frame;
         _animStart = g_animStart;
         _animDuration = g_animDuration;
+        _animDelay = g_animateDelay;
+        _animInfinite = g_animateInfinite;
+        _animAutoreverse = g_animateAutoreverse;
+        _animCurve = g_animateCurve;
         _animatingFrame = YES;
-        animation_mark_active(g_animDuration, 0);
+        animation_mark_active(g_animDuration + g_animateDelay,
+                              g_animateInfinite ? -1 : 0);
     }
     _frame = frame;
     if (_layer)
@@ -1865,8 +2143,13 @@ static int wrap_text_lines(const char *text, int style, double points,
         _animAlphaTo = alpha;
         _animStart = g_animStart;
         _animDuration = g_animDuration;
+        _animDelay = g_animateDelay;
+        _animInfinite = g_animateInfinite;
+        _animAutoreverse = g_animateAutoreverse;
+        _animCurve = g_animateCurve;
         _animatingAlpha = YES;
-        animation_mark_active(g_animDuration, 0);
+        animation_mark_active(g_animDuration + g_animateDelay,
+                              g_animateInfinite ? -1 : 0);
     }
     _alpha = alpha;
 }
@@ -2049,30 +2332,38 @@ static int wrap_text_lines(const char *text, int style, double points,
 }
 + (void)animateWithDuration:(double)duration animations:(void (^)(void))animations
 {
-    if (!animations)
-        return;
-    g_animating = YES;
-    g_animStart = iosim_now();
-    g_animDuration = duration;
-    animations();
-    g_animating = NO;
-    animation_mark_active(duration, 0);
+    [self animateWithDuration:duration delay:0.0 options:0
+                   animations:animations completion:nil];
 }
 + (void)animateWithDuration:(double)duration animations:(void (^)(void))animations
                  completion:(void (^)(BOOL finished))completion
 {
-    (void)completion;
-    [self animateWithDuration:duration animations:animations];
+    [self animateWithDuration:duration delay:0.0 options:0
+                   animations:animations completion:completion];
 }
 + (void)animateWithDuration:(double)duration delay:(double)delay
                     options:(unsigned long)options
                  animations:(void (^)(void))animations
                  completion:(void (^)(BOOL finished))completion
 {
-    (void)delay;
-    (void)options;
-    (void)completion;
-    [self animateWithDuration:duration animations:animations];
+    if (!animations)
+        return;
+    BOOL repeat = (options & UIViewAnimationOptionRepeat) != 0;
+    g_animating = YES;
+    g_animStart = iosim_now();
+    g_animDuration = duration;
+    g_animateDelay = delay;
+    g_animateInfinite = repeat;
+    g_animateAutoreverse = (options & UIViewAnimationOptionAutoreverse) != 0;
+    g_animateCurve = (int)((options >> 16) & 3);
+    animations();
+    g_animating = NO;
+    g_animateDelay = 0.0;
+    g_animateInfinite = NO;
+    g_animateAutoreverse = NO;
+    g_animateCurve = 0;
+    if (!repeat && completion)
+        animation_add_completion(delay + duration, completion);
 }
 @end
 
@@ -2296,10 +2587,18 @@ static UITextField *g_firstResponder;
 }
 - (void)startAnimating
 {
+    if (_animating)
+        return;
     _animating = YES;
     animation_mark_active(1.0, -1);
 }
-- (void)stopAnimating { _animating = NO; }
+- (void)stopAnimating
+{
+    if (!_animating)
+        return;
+    _animating = NO;
+    animation_unmark_infinite();
+}
 - (BOOL)isAnimating { return _animating; }
 - (void)setColor:(UIColor *)color { _color = color; }
 - (UIColor *)color { return _color; }
@@ -3733,26 +4032,72 @@ static unsigned color_rgb(UIColor *color)
     return ((unsigned)r << 16) | ((unsigned)g << 8) | (unsigned)b;
 }
 
-static double ease_t(double t)
+static double curve_value(double t, int curve)
 {
-    if (t < 0) t = 0;
-    if (t > 1) t = 1;
-    return t * t * (3 - 2 * t);
+    if (t < 0)
+        t = 0;
+    if (t > 1)
+        t = 1;
+    if (curve == 1)
+        return t * t;
+    if (curve == 2)
+        return 1.0 - (1.0 - t) * (1.0 - t);
+    if (curve == 3)
+        return t;
+    return t * t * (3.0 - 2.0 * t);
+}
+
+/* Progress in 0..1 for a view animation, honouring its delay, curve and
+ * repeat/autoreverse options. Sets *finished once a finite animation ends. */
+static double view_animation_progress(UIView *view, int *finished)
+{
+    if (finished)
+        *finished = 0;
+    double elapsed = iosim_now() - view->_animStart - view->_animDelay;
+    if (elapsed <= 0.0)
+        return 0.0;
+    double duration = view->_animDuration;
+    if (duration <= 0.0)
+    {
+        if (finished)
+            *finished = 1;
+        return 1.0;
+    }
+    double p = elapsed / duration;
+    if (!view->_animInfinite)
+    {
+        if (p >= 1.0)
+        {
+            if (finished)
+                *finished = 1;
+            return 1.0;
+        }
+        return curve_value(p, view->_animCurve);
+    }
+    double local;
+    if (view->_animAutoreverse)
+    {
+        double cycle = p - 2.0 * (long)(p / 2.0);
+        local = cycle > 1.0 ? 2.0 - cycle : cycle;
+    }
+    else
+        local = p - (long)p;
+    return curve_value(local, view->_animCurve);
 }
 
 static CGRect current_frame(UIView *view)
 {
     if (view->_animatingFrame)
     {
-        double t = (iosim_now() - view->_animStart) / view->_animDuration;
-        if (t >= 1.0)
+        int finished = 0;
+        double e = view_animation_progress(view, &finished);
+        if (finished)
         {
             view->_animatingFrame = NO;
             view->_frame = view->_animFrameTo;
         }
         else
         {
-            double e = ease_t(t);
             CGRect a = view->_animFrameFrom, b = view->_animFrameTo;
             return CGRectMake(a.origin.x + (b.origin.x - a.origin.x) * e,
                               a.origin.y + (b.origin.y - a.origin.y) * e,
@@ -3767,15 +4112,16 @@ static double current_alpha(UIView *view)
 {
     if (view->_animatingAlpha)
     {
-        double t = (iosim_now() - view->_animStart) / view->_animDuration;
-        if (t >= 1.0)
+        int finished = 0;
+        double e = view_animation_progress(view, &finished);
+        if (finished)
         {
             view->_animatingAlpha = NO;
             view->_alpha = view->_animAlphaTo;
         }
         else
             return view->_animAlphaFrom +
-                   (view->_animAlphaTo - view->_animAlphaFrom) * ease_t(t);
+                   (view->_animAlphaTo - view->_animAlphaFrom) * e;
     }
     return view->_alpha;
 }
@@ -3787,23 +4133,81 @@ static double number_value(id value, double fallback)
     return ((double (*)(id, SEL))objc_msgSend)(value, @selector(doubleValue));
 }
 
+static double layer_keyframe_value(id values, id keyTimes, double t)
+{
+    int n = values ? (int)[values count] : 0;
+    if (n <= 0)
+        return 0.0;
+    double first = number_value([values objectAtIndex:0], 0.0);
+    if (n == 1 || t <= 0.0)
+        return first;
+    double last = number_value([values objectAtIndex:(unsigned long)(n - 1)],
+                               0.0);
+    if (t >= 1.0)
+        return last;
+    for (int i = 0; i + 1 < n; i++)
+    {
+        double t0 = keyTimes
+            ? number_value([keyTimes objectAtIndex:(unsigned long)i],
+                           (double)i / (n - 1))
+            : (double)i / (n - 1);
+        double t1 = keyTimes
+            ? number_value([keyTimes objectAtIndex:(unsigned long)(i + 1)],
+                           (double)(i + 1) / (n - 1))
+            : (double)(i + 1) / (n - 1);
+        if (t <= t1 || i == n - 2)
+        {
+            double a = number_value([values objectAtIndex:(unsigned long)i],
+                                    0.0);
+            double b = number_value(
+                [values objectAtIndex:(unsigned long)(i + 1)], 0.0);
+            if (t1 <= t0)
+                return b;
+            double f = (t - t0) / (t1 - t0);
+            if (f < 0)
+                f = 0;
+            if (f > 1)
+                f = 1;
+            return a + (b - a) * f;
+        }
+    }
+    return last;
+}
+
 static double layer_key_value(CALayer *layer, const char *key, double base)
 {
     if (!layer->_animKeyPath ||
         strcmp(iosim_string_cstr(layer->_animKeyPath), key) != 0)
         return base;
+    double t = (iosim_now() - layer->_animStart) / layer->_animDuration;
+    double repeat = layer->_animRepeatCount;
+    if (t < 0)
+        t = 0;
+    if (repeat < 0)
+        t = t - (long)t;
+    else if (repeat > 1 && t >= repeat)
+        t = 1.0;
+    else if (repeat > 1)
+        t = t - (long)t;
+    else if (t >= 1.0)
+    {
+        if (layer->_animValues)
+            return layer_keyframe_value(layer->_animValues,
+                                        layer->_animKeyTimes, 1.0);
+        return number_value(layer->_animTo, base);
+    }
+    if (layer->_animValues)
+        return layer_keyframe_value(layer->_animValues, layer->_animKeyTimes,
+                                    t);
     double from = number_value(layer->_animFrom, base);
     double to = number_value(layer->_animTo, base);
-    double t = (iosim_now() - layer->_animStart) / layer->_animDuration;
-    if (layer->_animRepeatCount < 0 || layer->_animRepeatCount > 1)
-    {
-        double loops = t;
-        if (loops < 0) loops = 0;
-        t = loops - (long)loops;
-    }
-    else if (t >= 1.0)
-        return to;
-    return from + (to - from) * ease_t(t);
+    double e;
+    if (layer->_animTimingFunction)
+        e = ((double (*)(id, SEL, double))objc_msgSend)(
+            layer->_animTimingFunction, @selector(evaluate:), t);
+    else
+        e = curve_value(t, 3); /* Core Animation defaults to linear. */
+    return from + (to - from) * e;
 }
 
 
@@ -4375,7 +4779,10 @@ static void render_view(UIView *view, double originX, double originY,
         [view layoutSubviews];
     }
 
-    double alpha = parentAlpha * current_alpha(view);
+    double layerOpacity = view->_layer
+        ? layer_key_value(view->_layer, "opacity", view->_layer->_opacity)
+        : 1.0;
+    double alpha = parentAlpha * current_alpha(view) * layerOpacity;
     if (alpha <= 0.001)
         return;
     iosim_fb_set_opacity(alpha);
@@ -4411,7 +4818,7 @@ static void render_view(UIView *view, double originX, double originY,
                 double ftx = x + cx - (tf.a * cx + tf.c * cy) + tf.tx * scale;
                 double fty = y + cy - (tf.b * cx + tf.d * cy) + tf.ty * scale;
                 iosim_fb_blit_affine(buf, bw, bh, tf.a, tf.b, tf.c, tf.d,
-                                     ftx, fty, parentAlpha);
+                                     ftx, fty, alpha);
                 iosim_fb_free_offscreen(buf);
             }
             return;
@@ -4446,7 +4853,10 @@ static void render_view(UIView *view, double originX, double originY,
             radius = 1;
         int ox = (int)(view->_layer->_shadowOffset.width * scale);
         int oy = (int)(view->_layer->_shadowOffset.height * scale);
-        int corner = view->_layer ? (int)(view->_layer->_cornerRadius * scale + 0.5) : 0;
+        int corner = view->_layer
+            ? (int)(layer_key_value(view->_layer, "cornerRadius",
+                                    view->_layer->_cornerRadius) * scale + 0.5)
+            : 0;
         unsigned shadowColor = view->_layer->_shadowColor
                                    ? color_rgb(view->_layer->_shadowColor)
                                    : 0x000000;
@@ -4470,7 +4880,10 @@ static void render_view(UIView *view, double originX, double originY,
     {
         unsigned color = color_rgb(view->_backgroundColor);
         iosim_fb_set_opacity(alpha * view->_backgroundColor->_a);
-        double radius = view->_layer ? view->_layer->_cornerRadius : 0;
+        double radius = view->_layer
+            ? layer_key_value(view->_layer, "cornerRadius",
+                              view->_layer->_cornerRadius)
+            : 0;
         if (radius > 0)
             iosim_fb_fill_round_rect(x, y, w, h, (int)(radius * scale + 0.5),
                                      color);
@@ -7003,6 +7416,10 @@ int UIApplicationMain(int argc, char **argv, id principal, id delegateName)
             if (iosim_foundation_tick())
                 redraw = 1;
             if (iosim_dispatch_drain_main())
+                redraw = 1;
+            if (iosim_display_link_tick())
+                redraw = 1;
+            if (iosim_animation_tick())
                 redraw = 1;
             if (iosim_animations_active())
                 redraw = 1;

@@ -295,6 +295,114 @@ check "[switch] 1" "$out" "switch toggles on touch up inside"
 check "[button] pressed" "$out" \
     "button target/action fires from the touch pipeline"
 
+# ---------- 8. display link, animation timeline and presentation values ----------
+"$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
+sleep 0.8
+"$ROOT/tools/build_app.sh" "$ROOT/demo/AnimationApp.m" "$T/AnimationApp" >/dev/null
+mkdir -p "$T/AnimationApp.app"
+cp "$T/AnimationApp" "$T/AnimationApp.app/AnimationApp"
+python3 - "$T/AnimationApp.app/Info.plist" <<'PY'
+import plistlib, sys
+with open(sys.argv[1], "wb") as f:
+    plistlib.dump({
+        "CFBundleIdentifier": "com.iosim.animation",
+        "CFBundleExecutable": "AnimationApp",
+        "CFBundleName": "Animation",
+        "CFBundlePackageType": "APPL",
+        "CFBundleVersion": "1",
+        "CFBundleShortVersionString": "1.0",
+    }, f)
+PY
+"$ROOT/tools/iosimctl" install "$UDID" "$T/AnimationApp.app" >/dev/null
+sleep 0.5
+# Fourth installed app: grid slot 10, row 2 column 2.
+"$ROOT/tools/iosimctl" ui "$UDID" tap 247.2778 322.5 >/dev/null
+if wait_log "[anim] app ready"; then
+    echo "ok   SpringBoard launches the animation fixture"
+else
+    echo "FAIL animation fixture launch"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" tap 200 628 >/dev/null
+sleep 0.5
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/anim-mid.png" >/dev/null
+sleep 2.0
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/anim-end.png" >/dev/null
+if wait_log "[anim] completed 1"; then
+    echo "ok   UIView animation completion fires with finished=YES"
+else
+    echo "FAIL animation completion"; fails=$((fails+1))
+fi
+if out="$(python3 - "$SBLOG" <<'PY'
+import sys
+present = []
+dots = []
+for line in open(sys.argv[1], errors='replace'):
+    if line.startswith('[anim] present '):
+        present.append(float(line.split()[2]))
+    elif line.startswith('[anim] dot '):
+        dots.append(float(line.split()[2]))
+if not any(305.0 < v < 465.0 for v in present):
+    raise SystemExit('no in-flight presentation frame: %r' % present)
+if not any(v < 0.40 for v in dots):
+    raise SystemExit('no keyframe opacity sample: %r' % dots)
+print('ok   presentation layer interpolates frame and keyframe opacity')
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL presentation values"; echo "$out"; fails=$((fails+1))
+fi
+if out="$(python3 - "$ROOT/tools" "$T/anim-mid.png" "$T/anim-end.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+
+def blue(c):
+    r, g, b = (c >> 16) & 255, (c >> 8) & 255, c & 255
+    return b > 150 and b > r + 60 and g > 60
+
+def settled(c):
+    # The completed animation leaves the box at 15% alpha over the
+    # background: a dim navy rather than the background itself.
+    r, g, b = (c >> 16) & 255, (c >> 8) & 255, c & 255
+    return r < 40 and g > 25 and b > 50
+
+def box_top(path, pred):
+    w, h, bpp, rows = pngpixel.load(path)
+    for y in range(280 * 3, 600 * 3):
+        if pred(pngpixel.px(rows, bpp, 603, y)):
+            return y / 3.0
+    return None
+
+mid = box_top(sys.argv[2], blue)
+end = box_top(sys.argv[3], settled)
+if mid is None or end is None:
+    raise SystemExit('box missing (mid=%r end=%r)' % (mid, end))
+if not (300.0 <= mid <= 455.0):
+    raise SystemExit('mid frame box not in flight: %.1f' % mid)
+if not (465.0 <= end <= 475.0):
+    raise SystemExit('end frame box not settled: %.1f' % end)
+w, h, bpp, rows = pngpixel.load(sys.argv[3])
+dot = False
+for y in range(740 * 3, 790 * 3, 3):
+    for x in range(0, w, 3):
+        c = pngpixel.px(rows, bpp, x, y)
+        r, g, b = (c >> 16) & 255, (c >> 8) & 255, c & 255
+        if g > 150 and g > r * 1.5 and g > b * 1.3:
+            dot = True
+            break
+    if dot:
+        break
+if not dot:
+    raise SystemExit('display-link dot missing from the end frame')
+print('ok   framebuffer shows the in-flight box and the display-link dot')
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL animated frames"; echo "$out"; fails=$((fails+1))
+fi
+
 "$ROOT/tools/iosimctl" shutdown "$UDID" >/dev/null
 
 if [ "$fails" -ne 0 ]; then

@@ -19,6 +19,11 @@ __attribute__((objc_root_class))
 - (unsigned long)length;
 @end
 
+@interface NSNumber : NSObject
++ (id)numberWithDouble:(double)value;
+- (double)doubleValue;
+@end
+
 @interface NSSet : NSObject
 - (unsigned long)count;
 - (id)anyObject;
@@ -87,6 +92,37 @@ typedef enum {
 @property double cornerRadius;
 @property double opacity;
 - (void)addSublayer:(CALayer *)layer;
+- (void)addAnimation:(id)animation forKey:(id)key;
+- (void)removeAnimationForKey:(id)key;
+- (CALayer *)presentationLayer;
+@end
+
+@interface CAAnimation : NSObject
++ (id)animationWithKeyPath:(id)path;
+- (void)setFromValue:(id)value;
+- (void)setToValue:(id)value;
+- (void)setDuration:(double)duration;
+- (void)setRepeatCount:(double)count;
+- (void)setTimingFunction:(id)function;
+@end
+
+@interface CABasicAnimation : CAAnimation
+@end
+
+@interface CAKeyframeAnimation : CAAnimation
+- (void)setValues:(id)values;
+- (void)setKeyTimes:(id)keyTimes;
+@end
+
+@interface CADisplayLink : NSObject
++ (CADisplayLink *)displayLinkWithTarget:(id)target selector:(SEL)selector;
+- (void)addToRunLoop:(id)runloop forMode:(id)mode;
+- (void)invalidate;
+@property(readonly) double timestamp;
+@property(readonly) double duration;
+@property(readonly) double targetTimestamp;
+@property(getter=isPaused) BOOL paused;
+@property(readonly, getter=isValid) BOOL valid;
 @end
 
 @interface UIColor : NSObject
@@ -148,6 +184,18 @@ typedef enum {
 @property(readonly) NSLayoutAnchor *centerYAnchor;
 @end
 
+enum {
+    UIViewAnimationOptionLayoutSubviews = 1 << 0,
+    UIViewAnimationOptionAllowUserInteraction = 1 << 1,
+    UIViewAnimationOptionBeginFromCurrentState = 1 << 2,
+    UIViewAnimationOptionRepeat = 1 << 3,
+    UIViewAnimationOptionAutoreverse = 1 << 4,
+    UIViewAnimationOptionCurveEaseInOut = 0 << 16,
+    UIViewAnimationOptionCurveEaseIn = 1 << 16,
+    UIViewAnimationOptionCurveEaseOut = 2 << 16,
+    UIViewAnimationOptionCurveLinear = 3 << 16
+};
+
 @interface UIView : UIResponder
 - (id)initWithFrame:(CGRect)frame;
 - (CGRect)bounds;
@@ -168,6 +216,12 @@ typedef enum {
 @property(readonly) NSLayoutDimension *heightAnchor;
 @property(readonly) UILayoutGuide *safeAreaLayoutGuide;
 + (void)animateWithDuration:(double)duration animations:(void (^)(void))animations;
++ (void)animateWithDuration:(double)duration animations:(void (^)(void))animations
+                 completion:(void (^)(BOOL finished))completion;
++ (void)animateWithDuration:(double)duration delay:(double)delay
+                    options:(unsigned long)options
+                 animations:(void (^)(void))animations
+                 completion:(void (^)(BOOL finished))completion;
 @end
 
 @interface UITextField : UIView

@@ -4,7 +4,12 @@
 #import "UIKitStub.h"
 #endif
 
-@class SceneDelegate;
+extern int printf(const char *fmt, ...);
+extern int fflush(void *stream);
+
+@interface SceneDelegate : UIResponder <UIWindowSceneDelegate>
+@property(nonatomic, retain) UIWindow *window;
+@end
 
 @interface AppDelegate : UIResponder <UIApplicationDelegate>
 @end
@@ -23,12 +28,14 @@
 }
 @end
 
-@interface SceneDelegate : UIResponder <UIWindowSceneDelegate>
-@property(nonatomic, retain) UIWindow *window;
-@end
-
-@interface AnimationViewController : UIViewController
+@interface AnimationViewController : UIViewController {
+    int _ticks;
+    BOOL _running;
+    double _pulseEnd;
+}
 @property(nonatomic, retain) UIView *box;
+@property(nonatomic, retain) UIView *dot;
+@property(nonatomic, retain) CADisplayLink *link;
 @end
 
 @implementation AnimationViewController
@@ -67,14 +74,69 @@
     [button addTarget:self action:@selector(animate:)
         forControlEvents:UIControlEventTouchUpInside];
     [self.view addSubview:button];
+
+    self.dot = [[UIView alloc] initWithFrame:CGRectMake(40, 752, 24, 24)];
+    self.dot.backgroundColor =
+        [UIColor colorWithRed:0.35 green:0.85 blue:0.45 alpha:1.0];
+    self.dot.layer.cornerRadius = 12;
+    [self.view addSubview:self.dot];
+
+    self.link = [CADisplayLink displayLinkWithTarget:self
+                                            selector:@selector(step:)];
+    [self.link addToRunLoop:nil forMode:nil];
+    printf("[anim] app ready\n");
+    fflush(0);
+}
+- (void)step:(CADisplayLink *)link
+{
+    _ticks++;
+    double t = [link timestamp];
+    double phase = t - (long)t;
+    self.dot.frame = CGRectMake(40 + phase * 300.0, 752, 24, 24);
+    if (_ticks % 10 == 0)
+    {
+        printf("[anim] tick %d\n", _ticks);
+        if (_running)
+        {
+            CALayer *presentation = [self.box.layer presentationLayer];
+            printf("[anim] present %.1f\n", presentation.frame.origin.y);
+        }
+    }
+    if (_ticks % 5 == 0 && t < _pulseEnd)
+    {
+        CALayer *dotPresentation = [self.dot.layer presentationLayer];
+        printf("[anim] dot %.2f\n", dotPresentation.opacity);
+    }
+    if (_ticks % 5 == 0)
+        fflush(0);
 }
 - (void)animate:(id)sender
 {
     (void)sender;
-    [UIView animateWithDuration:1.0 animations:^{
-        self.box.alpha = 0.15;
-        self.box.frame = CGRectMake(24, 470, 354, 120);
-    }];
+    _running = YES;
+    _pulseEnd = [self.link timestamp] + 1.7;
+    CAKeyframeAnimation *pulse =
+        [CAKeyframeAnimation animationWithKeyPath:@"opacity"];
+    pulse.duration = 0.8;
+    pulse.repeatCount = 2.0;
+    [pulse setValues:[NSArray arrayWithObjects:(const id[]){
+        [NSNumber numberWithDouble:1.0], [NSNumber numberWithDouble:0.25],
+        [NSNumber numberWithDouble:1.0]} count:3]];
+    [pulse setKeyTimes:[NSArray arrayWithObjects:(const id[]){
+        [NSNumber numberWithDouble:0.0], [NSNumber numberWithDouble:0.5],
+        [NSNumber numberWithDouble:1.0]} count:3]];
+    [self.dot.layer addAnimation:pulse forKey:@"pulse"];
+    [UIView animateWithDuration:2.0 delay:0.1
+        options:UIViewAnimationOptionCurveEaseInOut
+        animations:^{
+            self.box.alpha = 0.15;
+            self.box.frame = CGRectMake(24, 470, 354, 120);
+        }
+        completion:^(BOOL finished) {
+            _running = NO;
+            printf("[anim] completed %d\n", finished);
+            fflush(0);
+        }];
 }
 @end
 

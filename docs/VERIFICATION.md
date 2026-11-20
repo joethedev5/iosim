@@ -291,6 +291,41 @@ The same synthetic tap path focuses a `UITextField` and the runtime keyboard
 accepts the next tap, verified by the text-input fixture. `ui swipe` emits a
 whole down/moves/up gesture in one command.
 
+### Animation timeline and display link
+
+`demo/AnimationApp.m` runs a `CADisplayLink` that moves a green dot every
+frame, then starts `animateWithDuration:2.0 delay:0.1
+options:UIViewAnimationOptionCurveEaseInOut animations:completion:` on a blue
+box while a `CAKeyframeAnimation` pulses a layer's opacity from 1.0 to 0.25
+and back twice. The app samples `layer.presentationLayer` every fifth display
+link frame:
+
+```
+[anim] tick 30
+[anim] present 302.2
+[anim] dot 0.69
+[anim] tick 40
+[anim] present 390.2
+[anim] dot 0.66
+...
+[anim] completed 1
+```
+
+The test asserts:
+
+- the completion block runs once with `finished = YES`;
+- a sampled presentation frame lies strictly between the box's start (300 pt)
+  and end (470 pt) positions;
+- a sampled presentation opacity drops below 0.40 (the keyframe animation);
+- the mid-flight screenshot's topmost blue pixel is between 300 and 455 pt,
+  while the settled screenshot's dimmed box starts at 470 pt;
+- the display-link dot is present in the lower band of the settled frame.
+
+This exercises the run loop rather than a still image: the dot moves only
+because the link ticks, the box moves because the animation timeline is
+interpolated in the renderer, and the layer pulse is a keyframe animation
+composited into the view's alpha.
+
 ### Services: dispatch, Mach, bootstrap and XPC
 
 `tests/services_test.m` is an Apple-clang x86_64 executable with no UI. It
@@ -403,5 +438,7 @@ paging or app switcher, a backgrounded app is terminated rather than suspended,
 and stock system apps have no executables in this runtime. CoreText shaping is limited to the glyphs in SFUI;
 right-to-left and complex scripts are not shaped. `UIView.transform` applies a
 full 2D affine transform (translation, scale and rotation) through an offscreen
-composite; `CATransform3D` is not supported. XPC is an in-process transport.
-Metal and video remain unimplemented.
+composite; `CATransform3D` is not supported. Core Animation keeps one explicit
+animation slot per layer, so a layer can animate one property at a time, and
+`CADisplayLink` ignores preferred frame-rate ranges. XPC is an in-process
+transport. Metal and video remain unimplemented.

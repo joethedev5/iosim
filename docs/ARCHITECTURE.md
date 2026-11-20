@@ -355,9 +355,15 @@ decoded with libpng in `loader/image.c`.
   update continuously while the finger moves. A single `tap` is synthesised
   as a down/up pair through the same path, then run-loop ticks, dispatch and
   active animations decide whether to re-render.
-- `UIView` animations interpolate frames and alpha; `CAAnimation` key paths
-  drive layer opacity and corner radius. Transforms apply translation and scale
-  around the view center.
+- `UIView` animations interpolate frames and alpha with the animation's
+  delay, curve, repeat and autoreverse options; completion blocks run on the
+  run-loop tick that passes their deadline. `CAAnimation` key paths drive
+  layer opacity and corner radius, either from/to (`CABasicAnimation`) or
+  through keyframes (`CAKeyframeAnimation` with values and keyTimes), using
+  the animation's timing function or Core Animation's default linear pacing.
+  `layer.presentationLayer` returns the values at the current instant, so an
+  app can sample an animation in flight. A 2D affine transform is applied
+  around the view center through an offscreen composite.
 
 ### 2.11 Auto Layout, gestures and text input
 
@@ -389,6 +395,12 @@ release point, and `UITextField` becomes first responder on down.
 and swipe `UIGestureRecognizer` subclasses deliver target actions. The
 framebuffer has an intersection clip stack, used by scroll views and
 `clipsToBounds`/`masksToBounds`, so content cannot paint outside its host.
+
+While an app is foreground its run loop is `UIApplicationMain`: it wakes
+every 16 ms even when the event stream is idle, drains Foundation timers and
+the main dispatch queue, fires scheduled `CADisplayLink` callbacks, completes
+finished animations, and re-renders when any of them changed state. A display
+link keeps the loop rendering at 60 Hz until it is paused or invalidated.
 
 `UITextField` participates in the responder chain. A focused field draws its
 placeholder or text, secure bullets and a caret, and `UITextField` edits from
