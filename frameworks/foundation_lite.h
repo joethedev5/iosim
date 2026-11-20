@@ -59,6 +59,16 @@ __attribute__((objc_root_class))
 - (void)setString:(id)string;
 @end
 
+@interface NSIndexPath : NSObject {
+@public
+    long _row;
+    long _section;
+}
++ (id)indexPathForRow:(long)row inSection:(long)section;
+- (long)row;
+- (long)section;
+@end
+
 @interface NSNumber : NSObject {
 @public
     long long _ival;

@@ -24,6 +24,12 @@ void iosim_fb_fill_polygon(const double *xs, const double *ys, int count,
 void iosim_fb_fill_linear_gradient(int x, int y, int w, int h,
                                    uint32_t start_color, uint32_t end_color,
                                    double sx, double sy, double ex, double ey);
+void iosim_fb_fill_linear_gradient_round_rect(int x, int y, int w, int h,
+                                              int radius,
+                                              uint32_t start_color,
+                                              uint32_t end_color,
+                                              double sx, double sy,
+                                              double ex, double ey);
 void iosim_fb_blit_rgba(int x, int y, int w, int h, const uint8_t *rgba,
                         int stride);
 void iosim_fb_blit_rgba_scaled(int x, int y, int w, int h,

@@ -33,6 +33,14 @@ jobs:
             -framework QuartzCore 2> out/build-graphics-x86_64.err; then
             echo "GraphicsApp x86_64 build failed:"; cat out/build-graphics-x86_64.err; exit 1
           fi
+          if ! xcrun clang -arch arm64 $CFLAGS -framework UIKit -framework Foundation \
+              demo/ListApp.m -o ListApp_arm64 2> out/build-list-arm64.err; then
+            echo "ListApp arm64 build failed:"; cat out/build-list-arm64.err; exit 1
+          fi
+          if ! xcrun clang -arch x86_64 $CFLAGS -framework UIKit -framework Foundation \
+              demo/ListApp.m -o ListApp_x86_64 2> out/build-list-x86_64.err; then
+            echo "ListApp x86_64 build failed:"; cat out/build-list-x86_64.err; exit 1
+          fi
           file HelloSim_arm64 HelloSim_x86_64 services_test_x86_64 > out/file.txt
           otool -L services_test_x86_64 > out/services-libs.txt 2>&1
           for f in HelloSim_arm64 HelloSim_x86_64; do
@@ -94,6 +102,14 @@ jobs:
           plutil -lint GraphicsApp.app/Info.plist
           codesign --force --sign - --timestamp=none GraphicsApp.app 2> out/codesign-graphics.err || true
 
+          mkdir -p ListApp.app
+          cp ListApp_arm64 ListApp.app/ListApp
+          sed -e 's/HelloSim/ListApp/g' \
+              -e 's/com\.iosim\.hellosim/com.iosim.listapp/g' \
+            HelloSim.app/Info.plist > ListApp.app/Info.plist
+          plutil -lint ListApp.app/Info.plist
+          codesign --force --sign - --timestamp=none ListApp.app 2> out/codesign-list.err || true
+
       - name: Boot simulator, install and launch the app
         run: |
           set +e
@@ -124,6 +140,7 @@ jobs:
             xcrun simctl help status_bar > out/status-bar-help.txt 2>&1
             xcrun simctl boot "$UDID" >> out/boot.txt 2>&1
             xcrun simctl bootstatus "$UDID" -b >> out/boot.txt 2>&1
+            xcrun simctl io "$UDID" screenshot out/springboard-real.png >> out/boot.txt 2>&1
             xcrun simctl install "$UDID" HelloSim.app >> out/boot.txt 2>&1
             ( xcrun simctl launch --console-pty "$UDID" com.iosim.hellosim \
                 > out/console.txt 2>&1 & echo $! > /tmp/console.pid )
@@ -145,6 +162,13 @@ jobs:
             xcrun simctl io "$UDID" screenshot out/graphics-real.png >> out/boot.txt 2>&1
             kill "$(cat /tmp/gconsole.pid)" 2>/dev/null || true
             xcrun simctl terminate "$UDID" com.iosim.graphicsapp >> out/boot.txt 2>&1
+            xcrun simctl install "$UDID" ListApp.app >> out/boot.txt 2>&1
+            ( xcrun simctl launch --console-pty "$UDID" com.iosim.listapp \
+                > out/list-console.txt 2>&1 & echo $! > /tmp/lconsole.pid )
+            sleep 6
+            xcrun simctl io "$UDID" screenshot out/listapp-real.png >> out/boot.txt 2>&1
+            kill "$(cat /tmp/lconsole.pid)" 2>/dev/null || true
+            xcrun simctl terminate "$UDID" com.iosim.listapp >> out/boot.txt 2>&1
             find "$HOME/Library/Logs/DiagnosticReports" -maxdepth 2 \
               -iname 'HelloSim*' -mmin -15 -print -exec cp {} out/ \; \
               > out/crash-reports.txt 2>&1 || true
@@ -184,6 +208,10 @@ jobs:
           cp GraphicsApp_arm64 GraphicsApp_x86_64 artifact/
           tar czf artifact/GraphicsApp.app.tgz GraphicsApp.app
           cp out/graphics-real.png artifact/ 2>/dev/null
+          cp ListApp_arm64 ListApp_x86_64 artifact/
+          tar czf artifact/ListApp.app.tgz ListApp.app
+          cp out/listapp-real.png artifact/ 2>/dev/null
+          cp out/springboard-real.png artifact/ 2>/dev/null
           cp out/real-sim.png artifact/ 2>/dev/null
           cp -R out artifact/out
           tar czf same-app.tgz -C artifact .

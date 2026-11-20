@@ -1093,3 +1093,62 @@ void iosim_fb_blit_rgba_scaled(int x, int y, int w, int h,
         }
     }
 }
+
+void iosim_fb_fill_linear_gradient_round_rect(int x, int y, int w, int h,
+                                              int radius, uint32_t start_color,
+                                              uint32_t end_color, double sx,
+                                              double sy, double ex, double ey)
+{
+    if (!fb_pixels || w <= 0 || h <= 0)
+        return;
+    if (radius <= 0)
+    {
+        iosim_fb_fill_linear_gradient(x, y, w, h, start_color, end_color,
+                                      sx, sy, ex, ey);
+        return;
+    }
+    if (radius * 2 > w) radius = w / 2;
+    if (radius * 2 > h) radius = h / 2;
+    double ax = x + sx * w, ay = y + sy * h;
+    double bx = x + ex * w, by = y + ey * h;
+    double dx = bx - ax, dy = by - ay;
+    double len2 = dx * dx + dy * dy;
+    if (len2 < 1e-9) len2 = 1.0;
+    int x0 = x < 0 ? 0 : x, y0 = y < 0 ? 0 : y;
+    int x1 = x + w > (int)fb_width ? (int)fb_width : x + w;
+    int y1 = y + h > (int)fb_height ? (int)fb_height : y + h;
+    int sr = (start_color >> 16) & 0xFF, sg = (start_color >> 8) & 0xFF,
+        sb = start_color & 0xFF;
+    int er = (end_color >> 16) & 0xFF, eg = (end_color >> 8) & 0xFF,
+        eb = end_color & 0xFF;
+    double cx = x + w / 2.0, cy = y + h / 2.0;
+    double exr = w / 2.0 - radius, eyr = h / 2.0 - radius;
+    for (int yy = y0; yy < y1; yy++)
+    {
+        double py = yy + 0.5 - cy;
+        double qy = __builtin_fabs(py) - eyr;
+        for (int xx = x0; xx < x1; xx++)
+        {
+            double px = xx + 0.5 - cx;
+            double qx = __builtin_fabs(px) - exr;
+            double axr = qx > 0 ? qx : 0, ayr = qy > 0 ? qy : 0;
+            double outside = __builtin_sqrt(axr * axr + ayr * ayr);
+            double inside = qx > qy ? qx : qy;
+            double d = outside + (inside < 0 ? inside : 0) - radius;
+            double coverage = (0.5 - d) * fb_opacity;
+            if (coverage <= 0)
+                continue;
+            if (coverage > 1) coverage = 1;
+            double t = ((xx + 0.5 - ax) * dx + (yy + 0.5 - ay) * dy) / len2;
+            if (t < 0) t = 0;
+            if (t > 1) t = 1;
+            unsigned r = (unsigned)(sr + (er - sr) * t + 0.5);
+            unsigned g = (unsigned)(sg + (eg - sg) * t + 0.5);
+            unsigned b = (unsigned)(sb + (eb - sb) * t + 0.5);
+            double save = fb_opacity;
+            fb_opacity = 1.0;
+            fb_blend_pixel(xx, yy, (r << 16) | (g << 8) | b, coverage);
+            fb_opacity = save;
+        }
+    }
+}

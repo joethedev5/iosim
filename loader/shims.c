@@ -357,6 +357,7 @@ static const struct iosim_shim shims[] = {
     SHIM_DIRECT(iosim_fb_fill_ellipse),
     SHIM_DIRECT(iosim_fb_fill_polygon),
     SHIM_DIRECT(iosim_fb_fill_linear_gradient),
+    SHIM_DIRECT(iosim_fb_fill_linear_gradient_round_rect),
     SHIM_DIRECT(iosim_fb_blit_rgba),
     SHIM_DIRECT(iosim_fb_blit_rgba_scaled),
     SHIM_DIRECT(iosim_fb_width),

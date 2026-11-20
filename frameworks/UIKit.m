@@ -19,6 +19,7 @@ extern void *objc_getClass(const char *name);
 extern void *objc_msgSend(void *self, void *sel, ...);
 
 extern int  iosim_fb_begin(unsigned width, unsigned height);
+extern void iosim_fb_clear(unsigned color);
 extern void iosim_fb_fill_rect(int x, int y, int w, int h, unsigned color);
 extern void iosim_fb_fill_round_rect(int x, int y, int w, int h, int radius,
                                      unsigned color);
@@ -63,6 +64,12 @@ extern void iosim_fb_fill_linear_gradient(int x, int y, int w, int h,
 extern void iosim_fb_blit_rgba_scaled(int x, int y, int w, int h,
                                       const unsigned char *rgba,
                                       int sw, int sh, int stride);
+extern void iosim_fb_fill_linear_gradient_round_rect(int x, int y, int w,
+                                                     int h, int radius,
+                                                     unsigned start_color,
+                                                     unsigned end_color,
+                                                     double sx, double sy,
+                                                     double ex, double ey);
 
 typedef const void *CGPathRef;
 typedef void *CGColorRef;
@@ -256,6 +263,8 @@ extern id kCAMediaTimingFunctionEaseInEaseOut;
     BOOL _animatingFrame;
     CGRect _animFrameFrom, _animFrameTo;
     double _animStart, _animDuration;
+    id _superview;
+    BOOL _needsLayout;
 }
 - (id)initWithFrame:(CGRect)frame;
 - (CGRect)frame;
@@ -271,6 +280,10 @@ extern id kCAMediaTimingFunctionEaseInEaseOut;
 - (double)alpha;
 - (BOOL)pointInside:(CGPoint)point;
 - (UIView *)hitTest:(CGPoint)point;
+- (id)superview;
+- (void)layoutSubviews;
+- (void)setNeedsLayout;
+- (void)layoutIfNeeded;
 + (void)animateWithDuration:(double)duration animations:(void (^)(void))animations;
 + (void)animateWithDuration:(double)duration animations:(void (^)(void))animations
                  completion:(void (^)(BOOL finished))completion;
@@ -322,6 +335,12 @@ extern id kCAMediaTimingFunctionEaseInEaseOut;
 - (void)setView:(UIView *)view;
 - (void)loadView;
 - (void)viewDidLoad;
+- (void)viewWillAppear:(BOOL)animated;
+- (void)viewDidAppear:(BOOL)animated;
+- (void)viewWillDisappear:(BOOL)animated;
+- (void)viewDidDisappear:(BOOL)animated;
+- (void)viewWillLayoutSubviews;
+- (void)viewDidLayoutSubviews;
 @end
 
 enum {
@@ -357,6 +376,90 @@ enum {
 + (id)buttonWithType:(int)type;
 - (void)setTitle:(id)title forState:(unsigned long)state;
 - (void)setTitleColor:(UIColor *)color forState:(unsigned long)state;
+@end
+
+
+@class UITableView;
+@class UITableViewCell;
+@class NSIndexPath;
+
+@protocol UITableViewDataSource
+@optional
+- (long)tableView:(UITableView *)tableView numberOfRowsInSection:(long)section;
+- (UITableViewCell *)tableView:(UITableView *)tableView
+         cellForRowAtIndexPath:(NSIndexPath *)indexPath;
+@end
+
+@protocol UITableViewDelegate
+@optional
+- (double)tableView:(UITableView *)tableView
+    heightForRowAtIndexPath:(NSIndexPath *)indexPath;
+- (void)tableView:(UITableView *)tableView
+    didSelectRowAtIndexPath:(NSIndexPath *)indexPath;
+@end
+
+enum {
+    UITableViewCellStyleDefault = 0,
+    UITableViewCellStyleValue1 = 1,
+    UITableViewCellStyleValue2 = 2,
+    UITableViewCellStyleSubtitle = 3,
+    UITableViewCellAccessoryNone = 0,
+    UITableViewCellAccessoryDisclosureIndicator = 1,
+    UITableViewCellAccessoryDetailDisclosureButton = 2,
+    UITableViewCellAccessoryCheckmark = 3,
+    UITableViewCellSelectionStyleNone = 0,
+    UITableViewCellSelectionStyleBlue = 1,
+    UITableViewCellSelectionStyleGray = 2,
+    UITableViewStylePlain = 0,
+    UITableViewStyleGrouped = 1
+};
+
+@interface UITableViewCell : UIView {
+@public
+    UILabel *_textLabel;
+    UILabel *_detailTextLabel;
+    UIImageView *_imageView;
+    long _accessoryType;
+    long _selectionStyle;
+    BOOL _selected;
+    id _reuseIdentifier;
+    long _style;
+}
+- (id)initWithStyle:(long)style reuseIdentifier:(id)reuseIdentifier;
+- (UILabel *)textLabel;
+- (UILabel *)detailTextLabel;
+- (UIImageView *)imageView;
+- (UIView *)contentView;
+- (id)reuseIdentifier;
+- (void)setAccessoryType:(long)type;
+- (long)accessoryType;
+- (void)setSelectionStyle:(long)style;
+- (long)selectionStyle;
+- (void)setSelected:(BOOL)selected animated:(BOOL)animated;
+- (BOOL)isSelected;
+- (void)setHighlighted:(BOOL)highlighted animated:(BOOL)animated;
+- (void)prepareForReuse;
+@end
+
+@interface UITableView : UIView {
+@public
+    id _dataSource;
+    id _delegate;
+    double _rowHeight;
+    long _selectedRow;
+    long _style;
+    BOOL _needsReload;
+}
+- (void)setDataSource:(id)dataSource;
+- (id)dataSource;
+- (void)setDelegate:(id)delegate;
+- (id)delegate;
+- (void)setRowHeight:(double)height;
+- (double)rowHeight;
+- (id)initWithFrame:(CGRect)frame style:(long)style;
+- (void)reloadData;
+- (id)dequeueReusableCellWithIdentifier:(id)identifier;
+- (void)handleTapAtPoint:(CGPoint)point;
 @end
 
 @interface UIWindow : UIView {
@@ -640,7 +743,10 @@ int iosim_animations_active(void)
 - (UIColor *)backgroundColor { return _backgroundColor; }
 - (void)addSubview:(UIView *)view
 {
-    if (view && _subviewCount < 32)
+    if (!view)
+        return;
+    view->_superview = self;
+    if (_subviewCount < 32)
         _subviews[_subviewCount++] = view;
 }
 - (CALayer *)layer { return _layer; }
@@ -660,6 +766,17 @@ int iosim_animations_active(void)
     _alpha = alpha;
 }
 - (double)alpha { return _alpha; }
+- (id)superview { return _superview; }
+- (void)layoutSubviews { }
+- (void)setNeedsLayout { _needsLayout = YES; }
+- (void)layoutIfNeeded
+{
+    if (_needsLayout)
+    {
+        _needsLayout = NO;
+        [self layoutSubviews];
+    }
+}
 - (BOOL)pointInside:(CGPoint)point
 {
     return point.x >= 0 && point.y >= 0 && point.x < _frame.size.width &&
@@ -921,6 +1038,12 @@ int iosim_animations_active(void)
         [self viewDidLoad];
     }
 }
+- (void)viewWillAppear:(BOOL)animated { (void)animated; }
+- (void)viewDidAppear:(BOOL)animated { (void)animated; }
+- (void)viewWillDisappear:(BOOL)animated { (void)animated; }
+- (void)viewDidDisappear:(BOOL)animated { (void)animated; }
+- (void)viewWillLayoutSubviews { }
+- (void)viewDidLayoutSubviews { }
 - (void)viewDidLoad
 {
 }
@@ -983,6 +1106,113 @@ int iosim_animations_active(void)
 }
 @end
 
+
+/* ------------------------------------------------------------ table views */
+
+@implementation UITableViewCell
+- (id)initWithStyle:(long)style reuseIdentifier:(id)reuseIdentifier
+{
+    self = [super initWithFrame:CGRectMake(0, 0, 0, 0)];
+    if (self)
+    {
+        _style = style;
+        _reuseIdentifier = reuseIdentifier;
+        _selectionStyle = UITableViewCellSelectionStyleGray;
+        _textLabel = [[UILabel alloc] initWithFrame:CGRectMake(16, 0, 200, 22)];
+        _textLabel->_font = [UIFont systemFontOfSize:17];
+        _textLabel->_textColor = [UIColor whiteColor];
+        [self addSubview:_textLabel];
+        if (style == UITableViewCellStyleSubtitle ||
+            style == UITableViewCellStyleValue1 ||
+            style == UITableViewCellStyleValue2)
+        {
+            _detailTextLabel =
+                [[UILabel alloc] initWithFrame:CGRectMake(16, 22, 200, 18)];
+            _detailTextLabel->_font = [UIFont systemFontOfSize:14];
+            _detailTextLabel->_textColor =
+                [UIColor colorWithRed:0.55 green:0.58 blue:0.64 alpha:1.0];
+            [self addSubview:_detailTextLabel];
+        }
+    }
+    return self;
+}
+- (UILabel *)textLabel { return _textLabel; }
+- (UILabel *)detailTextLabel { return _detailTextLabel; }
+- (UIImageView *)imageView { return _imageView; }
+- (UIView *)contentView { return self; }
+- (id)reuseIdentifier { return _reuseIdentifier; }
+- (void)setAccessoryType:(long)type { _accessoryType = type; }
+- (long)accessoryType { return _accessoryType; }
+- (void)setSelectionStyle:(long)style { _selectionStyle = style; }
+- (long)selectionStyle { return _selectionStyle; }
+- (void)setSelected:(BOOL)selected animated:(BOOL)animated
+{
+    (void)animated;
+    _selected = selected;
+}
+- (BOOL)isSelected { return _selected; }
+- (void)setHighlighted:(BOOL)highlighted animated:(BOOL)animated
+{
+    (void)highlighted; (void)animated;
+}
+- (void)prepareForReuse { }
+- (void)setFrame:(CGRect)frame
+{
+    [super setFrame:frame];
+    double w = frame.size.width;
+    _textLabel->_frame = CGRectMake(16, 0, w - 76, 22);
+    if (_detailTextLabel)
+        _detailTextLabel->_frame = CGRectMake(16, 22, w - 76, 18);
+}
+@end
+
+@implementation UITableView
+- (id)initWithFrame:(CGRect)frame
+{
+    self = [super initWithFrame:frame];
+    if (self)
+    {
+        _rowHeight = 44.0;
+        _selectedRow = -1;
+    }
+    return self;
+}
+- (id)initWithFrame:(CGRect)frame style:(long)style
+{
+    self = [self initWithFrame:frame];
+    if (self)
+        _style = style;
+    return self;
+}
+- (void)setDataSource:(id)dataSource { _dataSource = dataSource; }
+- (id)dataSource { return _dataSource; }
+- (void)setDelegate:(id)delegate { _delegate = delegate; }
+- (id)delegate { return _delegate; }
+- (void)setRowHeight:(double)height { _rowHeight = height; }
+- (double)rowHeight { return _rowHeight; }
+- (void)reloadData { _needsReload = NO; }
+- (id)dequeueReusableCellWithIdentifier:(id)identifier
+{
+    return [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault
+                                   reuseIdentifier:identifier];
+}
+- (void)handleTapAtPoint:(CGPoint)point
+{
+    if (point.y < 0)
+        return;
+    long row = (long)(point.y / _rowHeight);
+    if (row < 0)
+        return;
+    _selectedRow = row;
+    if (_delegate &&
+        [_delegate respondsToSelector:@selector(tableView:didSelectRowAtIndexPath:)])
+    {
+        NSIndexPath *path = [NSIndexPath indexPathForRow:row inSection:0];
+        [_delegate tableView:self didSelectRowAtIndexPath:path];
+    }
+}
+@end
+
 static UIWindow *g_keyWindow;
 
 @implementation UIWindow
@@ -1007,6 +1237,19 @@ static UIWindow *g_keyWindow;
     UIView *hit = [self hitTest:point];
     if (hit && [hit isKindOfClass:[UIControl class]])
         [(UIControl *)hit sendActionsForControlEvents:UIControlEventTouchUpInside];
+    UIView *walker = hit;
+    CGPoint local = point;
+    while (walker)
+    {
+        if ([walker isKindOfClass:[UITableView class]])
+        {
+            [(UITableView *)walker handleTapAtPoint:local];
+            break;
+        }
+        local.x -= walker->_frame.origin.x;
+        local.y -= walker->_frame.origin.y;
+        walker = [walker superview];
+    }
 }
 - (void)makeKeyAndVisible { g_keyWindow = self; }
 + (UIWindow *)keyWindow { return g_keyWindow; }
@@ -1307,6 +1550,12 @@ static void render_view(UIView *view, double originX, double originY,
     if (!view || view->_hidden)
         return;
 
+    if (view->_needsLayout)
+    {
+        view->_needsLayout = NO;
+        [view layoutSubviews];
+    }
+
     double alpha = parentAlpha * current_alpha(view);
     if (alpha <= 0.001)
         return;
@@ -1373,6 +1622,85 @@ static void render_view(UIView *view, double originX, double originY,
         }
     }
 
+
+    if ([view isKindOfClass:[UITableView class]])
+    {
+        UITableView *table = (UITableView *)view;
+        long rows = 0;
+        if (table->_dataSource &&
+            [table->_dataSource respondsToSelector:
+                @selector(tableView:numberOfRowsInSection:)])
+        {
+            SEL sel = @selector(tableView:numberOfRowsInSection:);
+            rows = ((long (*)(id, void *, id, long))objc_msgSend)(
+                table->_dataSource, (void *)sel, table, 0);
+        }
+        double rowHeight = table->_rowHeight;
+        for (long i = 0; i < rows; i++)
+        {
+            NSIndexPath *path = [NSIndexPath indexPathForRow:i inSection:0];
+            if (table->_delegate &&
+                [table->_delegate respondsToSelector:
+                    @selector(tableView:heightForRowAtIndexPath:)])
+            {
+                SEL sel = @selector(tableView:heightForRowAtIndexPath:);
+                rowHeight = ((double (*)(id, void *, id, id))objc_msgSend)(
+                    table->_delegate, (void *)sel, table, path);
+            }
+            int ry = y + (int)(i * rowHeight * scale + 0.5);
+            int rh = (int)(rowHeight * scale + 0.5);
+            if (i == table->_selectedRow)
+            {
+                iosim_fb_set_opacity(alpha);
+                iosim_fb_fill_rect(x, ry, w, rh, 0x2c2c2e);
+            }
+            UITableViewCell *cell = nil;
+            if (table->_dataSource &&
+                [table->_dataSource respondsToSelector:
+                    @selector(tableView:cellForRowAtIndexPath:)])
+            {
+                SEL sel = @selector(tableView:cellForRowAtIndexPath:);
+                cell = (UITableViewCell *)((id (*)(id, void *, id, id))objc_msgSend)(
+                    table->_dataSource, (void *)sel, table, path);
+            }
+            if (cell)
+            {
+                cell->_frame = CGRectMake(0, i * rowHeight,
+                                          frame.size.width, rowHeight);
+                [cell setFrame:cell->_frame];
+                render_view(cell, originX + frame.origin.x,
+                            originY + frame.origin.y, scale, alpha);
+            }
+            iosim_fb_set_opacity(alpha);
+            iosim_fb_fill_rect(x + (int)(16 * scale), ry + rh - 1,
+                               w - (int)(16 * scale), 1, 0x38383a);
+            if (cell && cell->_accessoryType == 1)
+            {
+                int cx = x + w - (int)(22 * scale);
+                int cy = ry + rh / 2;
+                iosim_fb_draw_line(cx, cy - (int)(6 * scale),
+                                   cx + (int)(6 * scale), cy,
+                                   (int)(2 * scale), 0x8e8e93);
+                iosim_fb_draw_line(cx + (int)(6 * scale), cy, cx,
+                                   cy + (int)(6 * scale), (int)(2 * scale),
+                                   0x8e8e93);
+            }
+            else if (cell && cell->_accessoryType == 3)
+            {
+                int cx = x + w - (int)(24 * scale);
+                int cy = ry + rh / 2;
+                iosim_fb_draw_line(cx, cy, cx + (int)(5 * scale),
+                                   cy + (int)(6 * scale),
+                                   (int)(2.5 * scale), 0x0a84ff);
+                iosim_fb_draw_line(cx + (int)(5 * scale), cy + (int)(6 * scale),
+                                   cx + (int)(16 * scale),
+                                   cy - (int)(6 * scale),
+                                   (int)(2.5 * scale), 0x0a84ff);
+            }
+        }
+        iosim_fb_set_opacity(1.0);
+    }
+
     if ([view isKindOfClass:[UILabel class]])
     {
         UILabel *label = (UILabel *)view;
@@ -1417,10 +1745,452 @@ static void render_view(UIView *view, double originX, double originY,
     iosim_fb_set_opacity(1.0);
 }
 
+static void draw_device_chrome(int fbWidth, double scale)
+{
+    (void)fbWidth;
+    /* Status bar: time, cellular, Wi-Fi and battery. */
+    int margin = (int)(24 * scale);
+    int right = fbWidth - margin;
+    double timeSize = getenv("IOSIM_TIME_SIZE") ? atof(getenv("IOSIM_TIME_SIZE"))
+                                                : 18.0;
+    double timeBaseline = getenv("IOSIM_TIME_BASELINE")
+                              ? atof(getenv("IOSIM_TIME_BASELINE")) : 38.9;
+    int timeWidth = iosim_fb_font_text_width("9:41", IOSIM_FONT_SEMIBOLD,
+                                             timeSize, scale);
+    iosim_fb_font_text((int)(80.67 * scale) - timeWidth / 2,
+                       (int)(timeBaseline * scale), "9:41",
+                       IOSIM_FONT_SEMIBOLD, timeSize, scale, 0xffffff);
+    /* Cellular signal placeholders, Wi-Fi and battery, measured from the
+     * iPhone 18 Pro status bar. */
+    for (int i = 0; i < 4; i++)
+        iosim_fb_fill_circle((int)((278.83 + i * 5.667) * scale),
+                             (int)(37.83 * scale), (int)(1.85 * scale),
+                             0x484c58);
+    for (int i = 0; i < 51; i++)
+    {
+        double angle = (-140.0 + i * 2.0) * 3.14159265358979323846 / 180.0;
+        int x = (int)((315.33 + 11.08 * __builtin_cos(angle)) * scale);
+        int y = (int)((38.0 + 11.08 * __builtin_sin(angle)) * scale);
+        iosim_fb_fill_circle(x, y, (int)(1.03 * scale), 0xffffff);
+        x = (int)((315.33 + 7.08 * __builtin_cos(angle)) * scale);
+        y = (int)((38.0 + 7.08 * __builtin_sin(angle)) * scale);
+        iosim_fb_fill_circle(x, y, (int)(1.03 * scale), 0xffffff);
+    }
+    iosim_fb_fill_circle((int)(315.33 * scale), (int)(36.67 * scale),
+                         (int)(2.67 * scale), 0xffffff);
+    iosim_fb_fill_round_rect((int)(333.0 * scale), (int)(25.33 * scale),
+                             (int)(26.33 * scale), (int)(13.67 * scale),
+                             (int)(4.0 * scale), 0xffffff);
+    iosim_fb_fill_round_rect((int)(360.0 * scale), (int)(29.67 * scale),
+                             (int)(2.0 * scale), (int)(5.0 * scale),
+                             (int)(1.0 * scale), 0xffffff);
+}
+
+
+/* -------------------------------------------------------- springboard UI */
+
+static const char *shell_names[12] = {
+    "Calendar", "Photos", "Camera", "Mail", "Maps", "Weather",
+    "Clock", "Notes", "Settings", "App Store", "Files", "Health"
+};
+
+static void shell_tile(int x, int y, int size, unsigned top, unsigned bottom,
+                       double scale, int radius)
+{
+    iosim_fb_fill_linear_gradient_round_rect(x, y, size, size,
+                                             (int)(radius * scale), top,
+                                             bottom, 0.5, 0.0, 0.5, 1.0);
+}
+
+static void shell_glyph(int index, int x, int y, int size, double scale)
+{
+    int cx = x + size / 2, cy = y + size / 2;
+    double u = size / 60.0;
+    switch (index)
+    {
+    case 0: /* Calendar */
+        iosim_fb_font_text(cx - (int)(13 * u), cy + (int)(8 * u), "20",
+                           IOSIM_FONT_REGULAR, 22, scale, 0x111111);
+        break;
+    case 1: /* Photos */
+    {
+        static const unsigned petals[8] = {
+            0xffd60a, 0xff9f0a, 0xff453a, 0xbf5af2,
+            0x0a84ff, 0x64d2ff, 0x30d158, 0xff2d55
+        };
+        for (int i = 0; i < 8; i++)
+        {
+            double a = 2 * 3.14159265358979323846 * i / 8.0;
+            iosim_fb_fill_circle((int)(cx + __builtin_cos(a) * size * 0.18),
+                                 (int)(cy + __builtin_sin(a) * size * 0.18),
+                                 (int)(size * 0.125), petals[i]);
+        }
+        iosim_fb_fill_circle(cx, cy, (int)(size * 0.06), 0xffffff);
+        break;
+    }
+    case 2: /* Camera */
+        iosim_fb_fill_circle(cx, cy, (int)(size * 0.29), 0x1c1c1e);
+        iosim_fb_fill_circle(cx, cy, (int)(size * 0.20), 0x0a84ff);
+        iosim_fb_fill_circle(cx - (int)(size * 0.05),
+                             cy - (int)(size * 0.05), (int)(size * 0.05),
+                             0xffffff);
+        break;
+    case 3: /* Mail */
+        iosim_fb_fill_round_rect(x + (int)(size * 0.18), y + (int)(size * 0.30),
+                                 (int)(size * 0.64), (int)(size * 0.40),
+                                 (int)(size * 0.06), 0xffffff);
+        iosim_fb_draw_line(x + (int)(size * 0.18), y + (int)(size * 0.30),
+                           cx, y + (int)(size * 0.55), (int)(2 * u), 0x2f8cff);
+        iosim_fb_draw_line(cx, y + (int)(size * 0.55),
+                           x + (int)(size * 0.82), y + (int)(size * 0.30),
+                           (int)(2 * u), 0x2f8cff);
+        break;
+    case 4: /* Maps */
+        iosim_fb_draw_line(x + (int)(size * 0.05), y + (int)(size * 0.68),
+                           x + (int)(size * 0.95), y + (int)(size * 0.32),
+                           (int)(5 * u), 0xffffff);
+        iosim_fb_draw_line(x + (int)(size * 0.30), y + (int)(size * 0.05),
+                           x + (int)(size * 0.58), y + (int)(size * 0.95),
+                           (int)(3 * u), 0xffd60a);
+        iosim_fb_fill_circle(x + (int)(size * 0.62), y + (int)(size * 0.40),
+                             (int)(size * 0.09), 0xff453a);
+        break;
+    case 5: /* Weather */
+        iosim_fb_fill_circle(x + (int)(size * 0.34), y + (int)(size * 0.36),
+                             (int)(size * 0.15), 0xffd60a);
+        iosim_fb_fill_circle(x + (int)(size * 0.45), y + (int)(size * 0.60),
+                             (int)(size * 0.16), 0xffffff);
+        iosim_fb_fill_circle(x + (int)(size * 0.62), y + (int)(size * 0.60),
+                             (int)(size * 0.20), 0xffffff);
+        iosim_fb_fill_round_rect(x + (int)(size * 0.30),
+                                 y + (int)(size * 0.58),
+                                 (int)(size * 0.48), (int)(size * 0.18),
+                                 (int)(size * 0.09), 0xffffff);
+        break;
+    case 6: /* Clock */
+    {
+        for (int i = 0; i < 48; i++)
+        {
+            double a = 2 * 3.14159265358979323846 * i / 48.0;
+            double x0 = cx + __builtin_cos(a) * size * 0.37;
+            double y0 = cy + __builtin_sin(a) * size * 0.37;
+            iosim_fb_fill_circle((int)x0, (int)y0, (int)(1.6 * u), 0xffffff);
+        }
+        iosim_fb_draw_line(cx, cy, cx, cy - (int)(size * 0.24),
+                           (int)(3 * u), 0xffffff);
+        iosim_fb_draw_line(cx, cy, cx + (int)(size * 0.18), cy,
+                           (int)(3 * u), 0xffffff);
+        break;
+    }
+    case 7: /* Notes */
+        iosim_fb_fill_rect(x + (int)(size * 0.16), y + (int)(size * 0.12),
+                           (int)(size * 0.68), (int)(size * 0.13), 0xffd60a);
+        for (int i = 0; i < 3; i++)
+            iosim_fb_fill_round_rect(x + (int)(size * 0.20),
+                                     y + (int)(size * (0.40 + i * 0.13)),
+                                     (int)(size * 0.60), (int)(3 * u),
+                                     (int)(1.5 * u), 0xc7c7cc);
+        break;
+    case 8: /* Settings */
+    {
+        iosim_fb_fill_circle(cx, cy, (int)(size * 0.19), 0xffffff);
+        iosim_fb_fill_circle(cx, cy, (int)(size * 0.10), 0x636366);
+        for (int i = 0; i < 8; i++)
+        {
+            double a = 2 * 3.14159265358979323846 * i / 8.0;
+            iosim_fb_draw_line((int)(cx + __builtin_cos(a) * size * 0.24),
+                               (int)(cy + __builtin_sin(a) * size * 0.24),
+                               (int)(cx + __builtin_cos(a) * size * 0.36),
+                               (int)(cy + __builtin_sin(a) * size * 0.36),
+                               (int)(7 * u), 0xffffff);
+        }
+        break;
+    }
+    case 9: /* App Store */
+        iosim_fb_font_text(cx - (int)(9 * u), cy + (int)(9 * u), "A",
+                           IOSIM_FONT_SEMIBOLD, 22, scale, 0xffffff);
+        break;
+    case 10: /* Files */
+        iosim_fb_fill_round_rect(x + (int)(size * 0.16),
+                                 y + (int)(size * 0.28),
+                                 (int)(size * 0.68), (int)(size * 0.46),
+                                 (int)(size * 0.07), 0x0a84ff);
+        iosim_fb_fill_round_rect(x + (int)(size * 0.16),
+                                 y + (int)(size * 0.20),
+                                 (int)(size * 0.34), (int)(size * 0.18),
+                                 (int)(size * 0.05), 0x0a84ff);
+        break;
+    case 11: /* Health */
+    {
+        iosim_fb_fill_circle(cx - (int)(size * 0.10),
+                             cy - (int)(size * 0.06), (int)(size * 0.14),
+                             0xff2d55);
+        iosim_fb_fill_circle(cx + (int)(size * 0.10),
+                             cy - (int)(size * 0.06), (int)(size * 0.14),
+                             0xff2d55);
+        double xs[3] = {cx - (double)(size * 0.22), cx + (double)(size * 0.22),
+                        cx};
+        double ys[3] = {cy - (double)(size * 0.02), cy - (double)(size * 0.02),
+                        cy + (double)(size * 0.24)};
+        iosim_fb_fill_polygon(xs, ys, 3, 0xff2d55);
+        break;
+    }
+    }
+}
+
+static void shell_draw(int fbWidth, int fbHeight, double scale, int launched)
+{
+    iosim_fb_clear(0x05070d);
+    iosim_fb_fill_linear_gradient(0, 0, fbWidth, fbHeight, 0x1c3f78, 0x05070d,
+                                  0.3, 0.0, 0.7, 1.0);
+    iosim_fb_set_opacity(0.10);
+    iosim_fb_fill_circle((int)(70 * scale), (int)(210 * scale),
+                         (int)(175 * scale), 0x3f8cff);
+    iosim_fb_fill_circle((int)(360 * scale), (int)(640 * scale),
+                         (int)(165 * scale), 0x8e5cff);
+    iosim_fb_set_opacity(1.0);
+
+    int icon = (int)(60 * scale);
+    int step = (int)(87 * scale);
+    int left = (int)(40.5 * scale);
+    for (int i = 0; i < 12; i++)
+    {
+        int row = i / 4, col = i % 4;
+        int x = left + col * step;
+        int y = (int)((116 + row * 98) * scale);
+        unsigned top = 0x2c2c2e, bottom = 0x1c1c1e;
+        switch (i)
+        {
+        case 0: top = 0xffffff; bottom = 0xe9e9ee; break;
+        case 1: top = 0xffffff; bottom = 0xf2f2f7; break;
+        case 2: top = 0x4a4a4c; bottom = 0x1c1c1e; break;
+        case 3: top = 0x2f8cff; bottom = 0x0a64d8; break;
+        case 4: top = 0xa8e0a0; bottom = 0x6fc3ff; break;
+        case 5: top = 0x2f9bff; bottom = 0x0a5bd6; break;
+        case 6: top = 0x2c2c2e; bottom = 0x000000; break;
+        case 7: top = 0xffffff; bottom = 0xf7f7f7; break;
+        case 8: top = 0x8e8e93; bottom = 0x48484a; break;
+        case 9: top = 0x1e9bff; bottom = 0x0a64d8; break;
+        case 10: top = 0xffffff; bottom = 0xf0f0f5; break;
+        case 11: top = 0xffffff; bottom = 0xf8f8fa; break;
+        }
+        shell_tile(x, y, icon, top, bottom, scale, 14);
+        shell_glyph(i, x, y, icon, scale);
+        const char *name = shell_names[i];
+        int tw = iosim_fb_font_text_width(name, IOSIM_FONT_REGULAR, 11,
+                                          scale);
+        iosim_fb_font_text(x + icon / 2 - tw / 2,
+                           y + icon + (int)(16 * scale), name,
+                           IOSIM_FONT_REGULAR, 11, scale, 0xffffff);
+    }
+
+    /* Weather-style widget. */
+    int wx = (int)(24 * scale), wy = (int)(430 * scale);
+    int ww = fbWidth - (int)(48 * scale), wh = (int)(144 * scale);
+    iosim_fb_fill_linear_gradient_round_rect(wx, wy, ww, wh,
+                                             (int)(20 * scale), 0x2f6fe0,
+                                             0x173a7a, 0.0, 0.0, 1.0, 1.0);
+    iosim_fb_font_text(wx + (int)(18 * scale), wy + (int)(30 * scale),
+                       "Cupertino", IOSIM_FONT_SEMIBOLD, 15, scale, 0xffffff);
+    iosim_fb_font_text(wx + (int)(16 * scale), wy + (int)(92 * scale), "68\xc2\xb0",
+                       IOSIM_FONT_REGULAR, 44, scale, 0xffffff);
+    iosim_fb_font_text(wx + (int)(150 * scale), wy + (int)(92 * scale), "Sunny",
+                       IOSIM_FONT_REGULAR, 16, scale, 0xeaf2ff);
+    iosim_fb_font_text(wx + (int)(150 * scale), wy + (int)(112 * scale),
+                       "H:71\xc2\xb0  L:52\xc2\xb0", IOSIM_FONT_REGULAR, 14,
+                       scale, 0xeaf2ff);
+
+    /* Search pill and page dots. */
+    iosim_fb_set_opacity(0.16);
+    iosim_fb_fill_round_rect((int)(94 * scale), (int)(716 * scale),
+                             (int)(214 * scale), (int)(32 * scale),
+                             (int)(16 * scale), 0xffffff);
+    iosim_fb_set_opacity(1.0);
+    int sw = iosim_fb_font_text_width("Search", IOSIM_FONT_REGULAR, 14, scale);
+    iosim_fb_font_text((int)(201 * scale) - sw / 2, (int)(737 * scale),
+                       "Search", IOSIM_FONT_REGULAR, 14, scale, 0x3a4150);
+    iosim_fb_fill_circle((int)(188 * scale), (int)(697 * scale),
+                         (int)(3.5 * scale), 0xffffff);
+    iosim_fb_fill_circle((int)(214 * scale), (int)(697 * scale),
+                         (int)(3.5 * scale), 0x6b7485);
+
+    /* Dock. */
+    iosim_fb_set_opacity(0.12);
+    iosim_fb_fill_round_rect((int)(12 * scale), (int)(752 * scale),
+                             fbWidth - (int)(24 * scale),
+                             (int)(96 * scale), (int)(30 * scale), 0xffffff);
+    iosim_fb_set_opacity(1.0);
+    int dockIcon = (int)(58 * scale);
+    int dockLeft = (int)(34 * scale);
+    int dockStep = (int)(92 * scale);
+    static const unsigned dockTop[4] = {0x4cd964, 0x0a84ff, 0x33d158, 0xfa5c78};
+    static const unsigned dockBottom[4] = {0x22a94a, 0x0064d8, 0x0f9d3a, 0xb03050};
+    for (int i = 0; i < 4; i++)
+    {
+        int x = dockLeft + i * dockStep, y = (int)(772 * scale);
+        shell_tile(x, y, dockIcon, dockTop[i], dockBottom[i], scale, 14);
+        if (i == 0)
+        {
+            iosim_fb_fill_circle(x + dockIcon / 2, y + dockIcon / 2,
+                                 (int)(dockIcon * 0.24), 0xffffff);
+        }
+        else if (i == 1)
+        {
+            iosim_fb_fill_circle(x + dockIcon / 2, y + dockIcon / 2,
+                                 (int)(dockIcon * 0.32), 0xffffff);
+            iosim_fb_fill_circle(x + dockIcon / 2, y + dockIcon / 2,
+                                 (int)(dockIcon * 0.27), 0x0a84ff);
+            iosim_fb_fill_polygon(
+                (double[]){x + dockIcon * 0.5, x + dockIcon * 0.68,
+                           x + dockIcon * 0.5},
+                (double[]){y + dockIcon * 0.5, y + dockIcon * 0.5,
+                           y + dockIcon * 0.30}, 3, 0xff453a);
+        }
+        else if (i == 2)
+        {
+            iosim_fb_fill_round_rect(x + (int)(dockIcon * 0.16),
+                                     y + (int)(dockIcon * 0.20),
+                                     (int)(dockIcon * 0.68),
+                                     (int)(dockIcon * 0.52),
+                                     (int)(dockIcon * 0.26), 0xffffff);
+        }
+        else
+        {
+            int nx = x + (int)(dockIcon * 0.60), ny = y + (int)(dockIcon * 0.30);
+            iosim_fb_draw_line(nx, ny, nx, y + (int)(dockIcon * 0.66),
+                               (int)(3 * scale), 0xffffff);
+            iosim_fb_fill_circle(nx, y + (int)(dockIcon * 0.66),
+                                 (int)(dockIcon * 0.08), 0xffffff);
+            iosim_fb_fill_circle(x + (int)(dockIcon * 0.32),
+                                 y + (int)(dockIcon * 0.54),
+                                 (int)(dockIcon * 0.10), 0xffffff);
+        }
+    }
+
+    iosim_fb_set_opacity(0.85);
+    iosim_fb_fill_round_rect((int)(134 * scale), (int)(856 * scale),
+                             (int)(134 * scale), (int)(5 * scale),
+                             (int)(2.5 * scale), 0xffffff);
+    iosim_fb_set_opacity(1.0);
+
+    draw_device_chrome(fbWidth, scale);
+    for (int i = 0; i < 4; i++)
+        iosim_fb_fill_round_rect((int)((277.5 + i * 5.667) * scale),
+                                 (int)((42.0 - (3 + i * 2)) * scale),
+                                 (int)(3.0 * scale),
+                                 (int)((3 + i * 2) * scale),
+                                 (int)(1.0 * scale), 0xffffff);
+
+    if (launched >= 0 && launched < 12)
+    {
+        iosim_fb_set_opacity(0.62);
+        iosim_fb_fill_rect(0, 0, fbWidth, fbHeight, 0x000000);
+        iosim_fb_set_opacity(1.0);
+        int cx = fbWidth / 2, cy = (int)(400 * scale);
+        int cardW = (int)(300 * scale), cardH = (int)(330 * scale);
+        iosim_fb_fill_round_rect(cx - cardW / 2, cy - cardH / 2, cardW, cardH,
+                                 (int)(26 * scale), 0x1c1c1e);
+        int big = (int)(96 * scale);
+        shell_tile(cx - big / 2, cy - cardH / 2 + (int)(40 * scale), big,
+                   0x2f8cff, 0x0a64d8, scale, 20);
+        shell_glyph(launched, cx - big / 2,
+                    cy - cardH / 2 + (int)(40 * scale), big, scale);
+        int nw = iosim_fb_font_text_width(shell_names[launched],
+                                          IOSIM_FONT_SEMIBOLD, 24, scale);
+        iosim_fb_font_text(cx - nw / 2, cy + (int)(30 * scale),
+                           shell_names[launched], IOSIM_FONT_SEMIBOLD, 24,
+                           scale, 0xffffff);
+        const char *hint = "Tap anywhere to return";
+        int hw = iosim_fb_font_text_width(hint, IOSIM_FONT_REGULAR, 14, scale);
+        iosim_fb_font_text(cx - hw / 2, cy + (int)(66 * scale), hint,
+                           IOSIM_FONT_REGULAR, 14, scale, 0x9aa5b8);
+    }
+}
+
+static int run_springboard(void)
+{
+    double scale = 3.0;
+    const char *scaleEnv = getenv("SIMULATOR_MAINSCREEN_SCALE");
+    if (scaleEnv)
+        scale = atof(scaleEnv);
+    if (scale <= 0)
+        scale = 3.0;
+    const char *pw = getenv("SIMULATOR_MAINSCREEN_WIDTH");
+    const char *ph = getenv("SIMULATOR_MAINSCREEN_HEIGHT");
+    int fbWidth = pw ? atoi(pw) : 1206;
+    int fbHeight = ph ? atoi(ph) : 2622;
+    if (iosim_fb_begin((unsigned)fbWidth, (unsigned)fbHeight) != 0)
+        return 1;
+
+    int launched = -1;
+    shell_draw(fbWidth, fbHeight, scale, launched);
+    const char *path = getenv("IOSIM_SCREENSHOT_PATH");
+    if (path && *path)
+        iosim_fb_present(path);
+    printf("[SpringBoard-lite] home screen rendered at %.1fx\n", scale);
+
+    const char *fifo = getenv("IOSIM_EVENT_FIFO");
+    if (!fifo || !*fifo)
+        return 0;
+
+    int type = 0, x = 0, y = 0, r;
+    while ((r = iosim_event_next(&type, &x, &y)) != 0)
+    {
+        if (r != 1 || type != 1)
+            continue;
+        double px = x / scale, py = y / scale;
+        int changed = 0;
+        if (launched >= 0)
+        {
+            launched = -1;
+            changed = 1;
+        }
+        else
+        {
+            int icon = 60, step = 87, left = 40;
+            for (int i = 0; i < 12; i++)
+            {
+                int gx = left + (i % 4) * step;
+                int gy = 116 + (i / 4) * 98;
+                if (px >= gx && px < gx + icon && py >= gy && py < gy + icon)
+                {
+                    launched = i;
+                    changed = 1;
+                    printf("[SpringBoard-lite] launch %s\n", shell_names[i]);
+                    break;
+                }
+            }
+            if (!changed)
+            {
+                for (int i = 0; i < 4; i++)
+                {
+                    int gx = 34 + i * 92, gy = 772;
+                    if (px >= gx && px < gx + 58 && py >= gy && py < gy + 58)
+                    {
+                        launched = i;
+                        changed = 1;
+                        printf("[SpringBoard-lite] dock launch %d\n", i);
+                        break;
+                    }
+                }
+            }
+        }
+        if (!changed)
+            continue;
+        shell_draw(fbWidth, fbHeight, scale, launched);
+        if (path && *path)
+            iosim_fb_present(path);
+    }
+    return 0;
+}
+
 int UIApplicationMain(int argc, char **argv, id principal, id delegateName)
 {
     (void)principal;
     (void)argv;
+    const char *shellMode = getenv("IOSIM_SHELL");
+    if (shellMode && *shellMode)
+        return run_springboard();
 
     const char *name = string_cstr(delegateName);
     Class delegateClass = name ? (Class)objc_getClass(name) : 0;
@@ -1488,42 +2258,7 @@ int UIApplicationMain(int argc, char **argv, id principal, id delegateName)
     iosim_fb_begin((unsigned)fbWidth, (unsigned)fbHeight);
     render_view(window, 0, 0, scale, 1.0);
 
-    /* Simulated device chrome: status bar, Dynamic Island, home indicator. */
-    int margin = (int)(24 * scale);
-    int right = fbWidth - margin;
-    double timeSize = getenv("IOSIM_TIME_SIZE") ? atof(getenv("IOSIM_TIME_SIZE"))
-                                                : 18.0;
-    double timeBaseline = getenv("IOSIM_TIME_BASELINE")
-                              ? atof(getenv("IOSIM_TIME_BASELINE")) : 38.9;
-    int timeWidth = iosim_fb_font_text_width("9:41", IOSIM_FONT_SEMIBOLD,
-                                             timeSize, scale);
-    iosim_fb_font_text((int)(80.67 * scale) - timeWidth / 2,
-                       (int)(timeBaseline * scale), "9:41",
-                       IOSIM_FONT_SEMIBOLD, timeSize, scale, 0xffffff);
-    /* Cellular signal placeholders, Wi-Fi and battery, measured from the
-     * iPhone 18 Pro status bar. */
-    for (int i = 0; i < 4; i++)
-        iosim_fb_fill_circle((int)((278.83 + i * 5.667) * scale),
-                             (int)(37.83 * scale), (int)(1.85 * scale),
-                             0x484c58);
-    for (int i = 0; i < 51; i++)
-    {
-        double angle = (-140.0 + i * 2.0) * 3.14159265358979323846 / 180.0;
-        int x = (int)((315.33 + 11.08 * __builtin_cos(angle)) * scale);
-        int y = (int)((38.0 + 11.08 * __builtin_sin(angle)) * scale);
-        iosim_fb_fill_circle(x, y, (int)(1.03 * scale), 0xffffff);
-        x = (int)((315.33 + 7.08 * __builtin_cos(angle)) * scale);
-        y = (int)((38.0 + 7.08 * __builtin_sin(angle)) * scale);
-        iosim_fb_fill_circle(x, y, (int)(1.03 * scale), 0xffffff);
-    }
-    iosim_fb_fill_circle((int)(315.33 * scale), (int)(36.67 * scale),
-                         (int)(2.67 * scale), 0xffffff);
-    iosim_fb_fill_round_rect((int)(333.0 * scale), (int)(25.33 * scale),
-                             (int)(26.33 * scale), (int)(13.67 * scale),
-                             (int)(4.0 * scale), 0xffffff);
-    iosim_fb_fill_round_rect((int)(360.0 * scale), (int)(29.67 * scale),
-                             (int)(2.0 * scale), (int)(5.0 * scale),
-                             (int)(1.0 * scale), 0xffffff);
+    draw_device_chrome(fbWidth, scale);
 
     iosim_dispatch_drain_main();
 

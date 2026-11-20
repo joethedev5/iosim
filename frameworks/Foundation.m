@@ -439,6 +439,23 @@ static char *format_va(const char *fmt, va_list ap)
 
 /* ------------------------------------------------------------- NSNumber */
 
+@implementation NSIndexPath
++ (id)indexPathForRow:(long)row inSection:(long)section
+{
+    NSIndexPath *path = [[self alloc] init];
+    path->_row = row;
+    path->_section = section;
+    return path;
+}
+- (long)row { return _row; }
+- (long)section { return _section; }
+- (id)description
+{
+    return [NSString stringWithFormat:@"<NSIndexPath: %p> {length = 2, path = %ld - %ld}",
+            self, _section, _row];
+}
+@end
+
 @implementation NSNumber
 + (id)numberWithInt:(int)value { return [self numberWithLongLong:value]; }
 + (id)numberWithInteger:(long)value { return [self numberWithLongLong:value]; }
