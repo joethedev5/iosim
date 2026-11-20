@@ -38,6 +38,13 @@ extern int   iosim_fs_remove(const char *path);
 extern int   iosim_fs_rename(const char *from, const char *to);
 extern int   iosim_fs_mkdir(const char *path, int intermediates);
 extern int   iosim_fs_list(const char *path, char *out, unsigned long cap);
+extern int   open(const char *path, int flags, ...);
+extern long  read(int fd, void *buf, unsigned long count);
+extern long  write(int fd, const void *buf, unsigned long count);
+extern long long lseek(int fd, long long offset, int whence);
+extern int   close(int fd);
+extern int   fsync(int fd);
+extern int   ftruncate(int fd, long long length);
 extern unsigned long strlen(const char *s);
 extern int   strcmp(const char *a, const char *b);
 extern int   strncmp(const char *a, const char *b, unsigned long n);
@@ -1423,6 +1430,170 @@ static void defaults_path(char *out, unsigned long cap)
 @end
 
 /* ---------------------------------------------------------- files & URLs */
+
+/* NSFileHandle sits on real host descriptors so reads, writes, seeks and
+ * truncation share one offset. The open flags are the host's (Linux) values,
+ * since the descriptor crosses into the host through the symbol fallback. */
+#define FHO_RDONLY 0
+#define FHO_WRONLY 1
+#define FHO_RDWR   2
+#define FHO_CREAT  64
+#define FHO_TRUNC  512
+
+@implementation NSFileHandle
+- (id)initWithFileDescriptor:(int)fd
+{
+    self = [super init];
+    if (self)
+    {
+        _fd = fd;
+        _closed = fd < 0;
+    }
+    return self;
+}
++ (id)fileHandleForReadingAtPath:(NSString *)path
+{
+    int fd = open(iosim_string_cstr(path), FHO_RDONLY);
+    if (fd < 0)
+        return nil;
+    return [[self alloc] initWithFileDescriptor:fd];
+}
++ (id)fileHandleForWritingAtPath:(NSString *)path
+{
+    int fd = open(iosim_string_cstr(path),
+                  FHO_WRONLY | FHO_CREAT | FHO_TRUNC, 0666);
+    if (fd < 0)
+        return nil;
+    return [[self alloc] initWithFileDescriptor:fd];
+}
++ (id)fileHandleForUpdatingAtPath:(NSString *)path
+{
+    int fd = open(iosim_string_cstr(path), FHO_RDWR | FHO_CREAT);
+    if (fd < 0)
+        return nil;
+    return [[self alloc] initWithFileDescriptor:fd];
+}
++ (id)fileHandleWithStandardInput
+{
+    return [[self alloc] initWithFileDescriptor:0];
+}
++ (id)fileHandleWithStandardOutput
+{
+    return [[self alloc] initWithFileDescriptor:1];
+}
++ (id)fileHandleWithStandardError
+{
+    return [[self alloc] initWithFileDescriptor:2];
+}
++ (id)fileHandleWithNullDevice
+{
+    int fd = open("/dev/null", FHO_RDWR);
+    if (fd < 0)
+        return nil;
+    return [[self alloc] initWithFileDescriptor:fd];
+}
+- (NSData *)readDataOfLength:(unsigned long)length
+{
+    if (_closed || _fd < 0 || length == 0)
+        return [NSData data];
+    unsigned char *buf = malloc(length);
+    if (!buf)
+        return [NSData data];
+    unsigned long got = 0;
+    while (got < length)
+    {
+        long n = read(_fd, buf + got, length - got);
+        if (n <= 0)
+            break;
+        got += (unsigned long)n;
+    }
+    NSData *data = [NSData dataWithBytes:buf length:got];
+    free(buf);
+    return data;
+}
+- (NSData *)readDataToEndOfFile
+{
+    if (_closed || _fd < 0)
+        return [NSData data];
+    unsigned long cap = 4096, len = 0;
+    unsigned char *buf = malloc(cap);
+    if (!buf)
+        return [NSData data];
+    for (;;)
+    {
+        if (len == cap)
+        {
+            unsigned long grown = cap * 2;
+            unsigned char *next = realloc(buf, grown);
+            if (!next)
+                break;
+            buf = next;
+            cap = grown;
+        }
+        long n = read(_fd, buf + len, cap - len);
+        if (n <= 0)
+            break;
+        len += (unsigned long)n;
+    }
+    NSData *data = [NSData dataWithBytes:buf length:len];
+    free(buf);
+    return data;
+}
+- (void)writeData:(NSData *)data
+{
+    if (_closed || _fd < 0 || !data)
+        return;
+    const unsigned char *bytes = (const unsigned char *)data->_bytes;
+    unsigned long len = data->_length;
+    unsigned long put = 0;
+    while (put < len)
+    {
+        long n = write(_fd, bytes + put, len - put);
+        if (n <= 0)
+            break;
+        put += (unsigned long)n;
+    }
+}
+- (unsigned long long)offsetInFile
+{
+    if (_closed || _fd < 0)
+        return 0;
+    long long off = lseek(_fd, 0, 1);
+    return off < 0 ? 0 : (unsigned long long)off;
+}
+- (unsigned long long)seekToEndOfFile
+{
+    if (_closed || _fd < 0)
+        return 0;
+    long long off = lseek(_fd, 0, 2);
+    return off < 0 ? 0 : (unsigned long long)off;
+}
+- (void)seekToFileOffset:(unsigned long long)offset
+{
+    if (_closed || _fd < 0)
+        return;
+    lseek(_fd, (long long)offset, 0);
+}
+- (void)truncateFileAtOffset:(unsigned long long)offset
+{
+    if (_closed || _fd < 0)
+        return;
+    ftruncate(_fd, (long long)offset);
+}
+- (void)synchronizeFile
+{
+    if (_closed || _fd < 0)
+        return;
+    fsync(_fd);
+}
+- (int)fileDescriptor { return _closed ? -1 : _fd; }
+- (void)closeFile
+{
+    if (!_closed && _fd >= 0)
+        close(_fd);
+    _closed = YES;
+}
+@end
 
 @implementation NSFileManager
 + (NSFileManager *)defaultManager

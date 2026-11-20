@@ -249,6 +249,30 @@ __attribute__((objc_root_class))
 - (void)setLength:(unsigned long)length;
 @end
 
+@interface NSFileHandle : NSObject {
+@public
+    int _fd;
+    BOOL _closed;
+}
++ (id)fileHandleForReadingAtPath:(NSString *)path;
++ (id)fileHandleForWritingAtPath:(NSString *)path;
++ (id)fileHandleForUpdatingAtPath:(NSString *)path;
++ (id)fileHandleWithStandardInput;
++ (id)fileHandleWithStandardOutput;
++ (id)fileHandleWithStandardError;
++ (id)fileHandleWithNullDevice;
+- (NSData *)readDataToEndOfFile;
+- (NSData *)readDataOfLength:(unsigned long)length;
+- (void)writeData:(NSData *)data;
+- (unsigned long long)offsetInFile;
+- (unsigned long long)seekToEndOfFile;
+- (void)seekToFileOffset:(unsigned long long)offset;
+- (void)truncateFileAtOffset:(unsigned long long)offset;
+- (void)synchronizeFile;
+- (int)fileDescriptor;
+- (void)closeFile;
+@end
+
 @interface NSURL : NSObject {
 @public
     id _string;

@@ -43,7 +43,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | CoreAnimation paths, gradients, sublayers (z-ordered), PNG images | ✅ |
 | Foundation collections, strings, selector/block notifications with userInfo, timers, NSIndexPath | ✅ |
 | NSDateFormatter parse/print round trip, NSNumberFormatter decimal/currency/percent | ✅ |
-| `NSFileManager`, `NSData` file I/O, `NSURL`, `NSJSONSerialization` | ✅ |
+| `NSFileManager`, `NSData` file I/O, `NSFileHandle` read/write/seek/truncate, `NSURL`, `NSJSONSerialization` | ✅ |
 | `NSPropertyListSerialization` and persistent `NSUserDefaults` domains | ✅ |
 | `NSKeyedArchiver`/`NSKeyedUnarchiver` keyed archives with custom `NSCoding` classes | ✅ |
 | NSRunLoop timers and delayed performs, NSThread main-thread check and sleep | ✅ |

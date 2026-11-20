@@ -515,6 +515,18 @@ operations go through host-side wrappers for `fopen`, `stat`, `mkdir`,
 `rename` and `readdir`, so Darwin flag values and `struct stat` layouts never
 reach glibc.
 
+### Foundation: NSFileHandle
+
+`tests/filehandle_test.m` writes `hello file handle` through a writing
+`NSFileHandle`, reads all 17 bytes back, seeks to offset 6 and reads `file`,
+then checks `offsetInFile` (10) and `seekToEndOfFile` (17). It closes that
+read-only handle, opens an updating handle, truncates the file to 10 bytes
+(ftruncate needs a writable descriptor, matching Darwin), seeks to the end and
+appends `!`. `NSData` then reads the final file as `hello file!`. The output
+lines are asserted individually, and the descriptor really is shared between
+the seek, read, truncate and write calls because each step observes the
+previous step's offset and length.
+
 ### Foundation: persistent defaults and property lists
 
 `tests/defaults_test.m` writes a domain with `NSUserDefaults` in one process

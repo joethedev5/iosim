@@ -396,6 +396,29 @@ check "currency \$99.50" "$out" \
 check "percent 25.6%" "$out" \
     "the percent style scales the value and appends a sign"
 
+# ---------- 4k. NSFileHandle read/write/seek/truncate ----------
+"$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
+    -ffreestanding -O1 -I "$ROOT/frameworks" \
+    -c "$ROOT/tests/filehandle_test.m" -o "$T/filehandle_test.o"
+"$LD64" -arch x86_64 -platform_version $PLATFORM -e _main \
+    -o "$T/filehandle_test" "$T/filehandle_test.o" \
+    "$ROOT/runtime/System/Library/Frameworks/Foundation.framework/Foundation" \
+    -undefined dynamic_lookup
+FH_HOME="$T/filehandle-home"
+rm -rf "$FH_HOME"
+mkdir -p "$FH_HOME"
+out="$(HOME="$FH_HOME" DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/filehandle_test" 2>&1)"
+check "[fh] read 17" "$out" \
+    "NSFileHandle reads a written file back to the end"
+check "[fh] text hello file handle" "$out" \
+    "writeData: stores the bytes in order"
+check "[fh] mid file" "$out" \
+    "seekToFileOffset: positions readDataOfLength:"
+check "[fh] offset 10" "$out" "offsetInFile tracks the shared descriptor"
+check "[fh] end 17" "$out" "seekToEndOfFile returns the file length"
+check "[fh] final hello file!" "$out" \
+    "truncateFileAtOffset: and an updating handle append correctly"
+
 # ---------- 5. UIKit-lite framework dylib ----------
 cat > "$T/uikit_app.c" <<'EOF'
 extern int printf(const char *fmt, ...);

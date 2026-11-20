@@ -290,7 +290,12 @@ effort.
 
 The Foundation library builds on that substrate: `NSFileManager` creates,
 lists, copies, moves and removes items through the flag-free host helpers;
-`NSData` reads and writes files; `NSURL` carries file paths and path
+`NSData` reads and writes files; `NSFileHandle` opens reading, writing or
+updating handles on real host descriptors, so `readDataOfLength:`,
+`readDataToEndOfFile`, `writeData:`, the seek family, `offsetInFile`,
+`truncateFileAtOffset:` and `synchronizeFile` all share one descriptor
+offset — and the standard input/output/error/null handles are real
+descriptors too; `NSURL` carries file paths and path
 components; and `NSJSONSerialization` is a dependency-free recursive
 serializer and parser over `NSDictionary`, `NSArray`, `NSString`, `NSNumber`
 and `NSNull`. Compact output is deterministic (dictionary insertion order on
