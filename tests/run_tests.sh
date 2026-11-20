@@ -3490,6 +3490,45 @@ else
     fails=$((fails+1))
 fi
 
+"$ROOT/tools/build_app.sh" "$ROOT/tests/textview_drag_selection_test.m" \
+    "$T/textview_drag_selection_test" >/dev/null
+out="$(IOSIM_TEST_PNG="$T/textview_drag.png" \
+    DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" \
+    "$T/textview_drag_selection_test" 2>&1)"
+check "[drag] full 0 11" "$out" \
+    "dragging a touch across the text selects the whole range"
+check "[drag] partial 1" "$out" \
+    "a second drag leaves a non-empty partial selection"
+check "[drag] png written" "$out" \
+    "the drag selection fixture captures a frame"
+if out="$(python3 - "$ROOT/tools" "$T/textview_drag.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+highlight = handles = 0
+for y in range(100 * 3, 260 * 3):
+    for x in range(24 * 3, 344 * 3):
+        c = pngpixel.px(rows, bpp, x, y)
+        r, g, b = ((c >> 16) & 255), ((c >> 8) & 255), (c & 255)
+        if abs(r - 0x33) < 25 and abs(g - 0x50) < 25 and abs(b - 0x7a) < 25:
+            highlight += 1
+        if abs(r - 0x42) < 25 and abs(g - 0x6b) < 25 and abs(b - 0xf2) < 25:
+            handles += 1
+if highlight < 500:
+    raise SystemExit("selection highlight not visible: %d" % highlight)
+if handles < 400:
+    raise SystemExit("selection handles not visible: %d" % handles)
+print("ok   UITextView selection paints %d highlight and %d handle pixels:" %
+      (highlight, handles))
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL UITextView drag selection"; echo "$out"
+    fails=$((fails+1))
+fi
+
 if [ "$fails" -ne 0 ]; then
     echo "$fails test(s) failed" >&2
     exit 1

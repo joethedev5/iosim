@@ -271,8 +271,9 @@ sizeWithAttributes:/drawAtPoint: renders through the CGContext text bridge,
 and drawInRect:/boundingRectWithSize: word-wrap paragraphs. Device RGB/gray
 color spaces, CGColorCreate, CGPath bounding boxes, containment and copies
 are covered. UITextView maps taps to byte indices, selects words on a second
-tap, clamps programmatic selectedRange and replaces/removes selected ranges;
-the renderer paints the selection highlight. CGContextClip rasterizes path
+tap, extends the selection while dragging, clamps programmatic selectedRange
+and replaces/removes selected ranges; the renderer paints the selection
+highlight and end handles. CGContextClip rasterizes path
 masks and intersects active masks; framebuffer fills, strokes, glyphs and
 image blits honor them. Quadratic/cubic CGPath, CGContext and UIBezierPath
 curves flatten adaptively from the second-derivative bound (1 to 128
@@ -340,6 +341,21 @@ management.
   fade and as a mask (the mask pass copies the offscreen alpha channel).
 - Fixtures: `[cg] gradient fade 1 1` (opaque red to white backdrop) and the
   cagradient fade-mask layer (red, half blend `0x840810`, background).
+
+## 2026-11-20: UITextView drag selection and handles
+
+- `touchesBegan:` records the tapped byte index as the drag anchor (the
+  word's start after a double tap). `touchesMoved:` maps the moving touch to
+  a new index and selects the span between anchor and index; returning to the
+  anchor collapses to a caret. `touchesEnded:` clears the dragging flag.
+- The renderer computes the pixel position of any byte index on its wrapped
+  line and, when the selection is non-empty, paints a 2 px stem plus a
+  round knob in `#426bf2` below each end line.
+- Fixture `tests/textview_drag_selection_test.m` synthesizes UITouch
+  objects (the stub now exposes the touch ivars), drags across the text and
+  captures the frame: 25723 highlight pixels and 1404 handle pixels.
+- Remaining text-selection gaps: handle dragging, long-press selection and
+  the edit menu.
 
 ## Open directions
 

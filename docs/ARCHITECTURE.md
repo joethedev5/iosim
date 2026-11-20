@@ -892,14 +892,21 @@ emoji and mic artwork.
 
 `UITextView` shares the first-responder role. Touching an editable text view
 focuses it and maps the touch to a byte index in the wrapped text; a second
-tap within 350 ms selects the word under the finger. `selectedRange` can be
+tap within 350 ms selects the word under the finger. A drag continues from
+the initial index (or from the selected word's start after a double tap):
+`touchesMoved:` recomputes the index under the finger and selects the span
+between it and the anchor, collapsing back to a caret when the finger
+returns to the anchor, and `touchesEnded:` closes the drag.
+`selectedRange` can be
 set programmatically and is clamped to the text length. `insertText:`
 replaces the selected range and `deleteBackward:` removes it (or the
 character before a collapsed caret). The return key inserts a newline instead
 of ending editing, which `UITextField` does. The renderer wraps the stored
 text preserving spaces (breaking at the last space that fits), paints a
-selected-range highlight behind the text and draws the caret at the selection
-end. Hardware input reaches both views through `ui key` records, which
+selected-range highlight behind the text, draws the caret at the selection
+end and, for a non-empty selection, draws the two handle stems and knobs at
+the span's start and end lines. Hardware input reaches both views through
+`ui key` records, which
 `iosimctl` emits per character (`key return` for a newline, `key space` for a
 space) and `ui backspace`; the on-screen keyboard taps use the same edit
 methods.

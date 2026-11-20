@@ -781,6 +781,8 @@ typedef enum {
     NSRange _selectedRange;
     double _lastTapTime;
     unsigned long _lastTapIndex;
+    unsigned long _dragAnchor;
+    BOOL _dragging;
 }
 - (id)text;
 - (void)setText:(id)text;
@@ -3681,6 +3683,41 @@ static unsigned long text_index_at_point(UITextView *editor, CGPoint point)
     return index > length ? length : index;
 }
 
+/* Convert a byte index into the top-left pixel position of the glyph run on
+ * its wrapped line. Used for the caret and the selection handle stems. */
+static void text_index_line_position(const char (*lines)[256], int n,
+                                     int style, double points, double scale,
+                                     int inset, int x, int y, int lineHeight,
+                                     unsigned long index, int *out_x,
+                                     int *out_y)
+{
+    unsigned long remaining = index;
+    for (int i = 0; i < n; i++)
+    {
+        int length = (int)strlen(lines[i]);
+        if (remaining <= (unsigned long)length || i == n - 1)
+        {
+            int offset = (int)(remaining > (unsigned long)length
+                                   ? (unsigned long)length
+                                   : remaining);
+            char prefix[256];
+            if (offset > 255)
+                offset = 255;
+            memcpy(prefix, lines[i], (unsigned long)offset);
+            prefix[offset] = 0;
+            *out_x = x + inset + iosim_fb_font_text_width(prefix, style,
+                                                          points, scale);
+            *out_y = y + inset + i * lineHeight;
+            return;
+        }
+        remaining -= (unsigned long)length;
+        if (remaining > 0)
+            remaining--;
+    }
+    *out_x = x + inset;
+    *out_y = y + inset;
+}
+
 - (id)initWithFrame:(CGRect)frame
 {
     self = [super initWithFrame:frame];
@@ -3747,21 +3784,49 @@ static unsigned long text_index_at_point(UITextView *editor, CGPoint point)
         {
             [self setSelectedRange:word];
             _lastTapIndex = index;
+            _dragAnchor = word.location;
+            _dragging = YES;
         }
         else
         {
             [self setSelectedRange:NSMakeRange(index, 0)];
+            _dragAnchor = index;
+            _dragging = NO;
         }
     }
     else
     {
         [self setSelectedRange:NSMakeRange(index, 0)];
         _lastTapIndex = index;
+        _dragAnchor = index;
+        _dragging = NO;
     }
     _lastTapTime = now;
     if (_editable)
         [self becomeFirstResponder];
     _needsLayout = YES;
+}
+- (void)touchesMoved:(NSSet *)touches withEvent:(UIEvent *)event
+{
+    (void)event;
+    UITouch *touch = [touches anyObject];
+    CGPoint point = touch ? [touch locationInView:self] : CGPointMake(0, 0);
+    unsigned long index = text_index_at_point(self, point);
+    if (!_dragging)
+    {
+        if (index == _dragAnchor)
+            return;
+        _dragging = YES;
+    }
+    unsigned long start = _dragAnchor < index ? _dragAnchor : index;
+    unsigned long end = _dragAnchor < index ? index : _dragAnchor;
+    [self setSelectedRange:NSMakeRange(start, end - start)];
+}
+- (void)touchesEnded:(NSSet *)touches withEvent:(UIEvent *)event
+{
+    (void)touches;
+    (void)event;
+    _dragging = NO;
 }
 - (void)insertText:(id)text
 {
@@ -10209,6 +10274,33 @@ static void render_view(UIView *view, double originX, double originY,
             iosim_fb_fill_rect(caretX + (int)(1 * scale),
                                caretBaseline - ascent, (int)(2 * scale),
                                lineHeight, 0x426bf2);
+        if (selection.length > 0)
+        {
+            int start_x = 0, start_y = 0, end_x = 0, end_y = 0;
+            text_index_line_position((const char (*)[256])lines, n, style,
+                                     points, scale, inset, x, y, lineHeight,
+                                     selection_start, &start_x, &start_y);
+            text_index_line_position((const char (*)[256])lines, n, style,
+                                     points, scale, inset, x, y, lineHeight,
+                                     selection_end, &end_x, &end_y);
+            int stem = (int)(6 * scale + 0.5);
+            int radius = (int)(5 * scale + 0.5);
+            int width = (int)(2 * scale + 0.5);
+            if (stem < 2)
+                stem = 2;
+            if (radius < 2)
+                radius = 2;
+            if (width < 1)
+                width = 1;
+            iosim_fb_fill_rect(start_x - width / 2, start_y + lineHeight,
+                               width, stem + radius, 0x426bf2);
+            iosim_fb_fill_rect(end_x - width / 2, end_y + lineHeight, width,
+                               stem + radius, 0x426bf2);
+            iosim_fb_fill_circle(start_x, start_y + lineHeight + stem,
+                                 radius, 0x426bf2);
+            iosim_fb_fill_circle(end_x, end_y + lineHeight + stem, radius,
+                                 0x426bf2);
+        }
     }
 
     if ([view isKindOfClass:[UIVisualEffectView class]])

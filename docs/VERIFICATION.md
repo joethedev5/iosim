@@ -313,7 +313,12 @@ Selecting `{0,6}` and deleting leaves `there` with caret 0; setting `{99,5}`
 clamps to `5 0`. `tests/textview_selection_visual_test.m` places a 24 pt
 `hello world` view with `{6,5}` selected, captures a PNG through a later
 sibling view and the suite finds 12960 pixels of the `#33507a` selection
-highlight in the text region.
+highlight in the text region. `tests/textview_drag_selection_test.m`
+synthesizes touches on a 24 pt editor: dragging from the left inset to past
+the right edge selects `0 11`, and a second drag leaves a non-empty partial
+selection. The capture (caret dropped after resigning) counts 25723
+highlight pixels and 1404 `#426bf2` handle pixels, proving both selection
+endpoints draw stems and knobs.
 
 ### Text input: multiline UITextView and hardware keys
 

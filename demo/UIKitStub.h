@@ -100,7 +100,16 @@ typedef enum {
     UITouchPhaseCancelled = 4
 } UITouchPhase;
 
-@interface UITouch : NSObject
+@interface UITouch : NSObject {
+@public
+    CGPoint _location;
+    CGPoint _previousLocation;
+    long _phase;
+    double _timestamp;
+    UIView *_view;
+    UIWindow *_window;
+    unsigned long _tapCount;
+}
 - (CGPoint)locationInView:(UIView *)view;
 - (CGPoint)previousLocationInView:(UIView *)view;
 - (long)phase;
