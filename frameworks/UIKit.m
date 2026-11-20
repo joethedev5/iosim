@@ -54,6 +54,7 @@ extern void *memcpy(void *dst, const void *src, unsigned long n);
 extern int  snprintf(char *buf, unsigned long size, const char *fmt, ...);
 extern int  iosim_png_load(const char *path, unsigned char **out_rgba,
                            int *out_width, int *out_height);
+extern void *_Block_copy(void *block);
 extern void iosim_fb_fill_ellipse(int cx, int cy, int rx, int ry,
                                   unsigned color);
 extern void iosim_fb_draw_line(int x0, int y0, int x1, int y1, int thickness,
@@ -542,6 +543,7 @@ typedef enum {
     BOOL _viewLoaded;
     id _title;
     id _navigationController;
+    id _presentedController;
 }
 - (id)init;
 - (id)title;
@@ -557,6 +559,52 @@ typedef enum {
 - (void)viewDidDisappear:(BOOL)animated;
 - (void)viewWillLayoutSubviews;
 - (void)viewDidLayoutSubviews;
+- (void)presentViewController:(UIViewController *)controller animated:(BOOL)animated
+                   completion:(void (^)(void))completion;
+- (void)dismissViewControllerAnimated:(BOOL)animated
+                           completion:(void (^)(void))completion;
+- (UIViewController *)presentedViewController;
+@end
+
+enum {
+    UIAlertControllerStyleActionSheet = 0,
+    UIAlertControllerStyleAlert = 1
+};
+
+enum {
+    UIAlertActionStyleDefault = 0,
+    UIAlertActionStyleCancel = 1,
+    UIAlertActionStyleDestructive = 2
+};
+
+@class UIAlertAction;
+
+@interface UIAlertAction : NSObject {
+@public
+    id _title;
+    long _style;
+    void (^_handler)(UIAlertAction *);
+}
++ (id)actionWithTitle:(id)title style:(long)style
+              handler:(void (^)(UIAlertAction *action))handler;
+- (id)title;
+- (long)style;
+- (void (^)(UIAlertAction *))handler;
+@end
+
+@interface UIAlertController : UIViewController {
+@public
+    id _message;
+    id _actions[8];
+    int _actionCount;
+    long _preferredStyle;
+}
++ (id)alertControllerWithTitle:(id)title message:(id)message
+                 preferredStyle:(long)style;
+- (void)addAction:(UIAlertAction *)action;
+- (id)message;
+- (long)preferredStyle;
+- (NSArray *)actions;
 @end
 
 @interface UIStackView : UIView {
@@ -2249,8 +2297,81 @@ static UITextField *g_firstResponder;
 - (void)viewDidLoad
 {
 }
+- (void)presentViewController:(UIViewController *)controller animated:(BOOL)animated
+                   completion:(void (^)(void))completion
+{
+    (void)animated;
+    if (!controller)
+        return;
+    _presentedController = controller;
+    (void)[controller view];
+    [controller viewWillAppear:animated];
+    [controller viewDidAppear:animated];
+    if (completion)
+        completion();
+}
+- (void)dismissViewControllerAnimated:(BOOL)animated
+                           completion:(void (^)(void))completion
+{
+    (void)animated;
+    UIViewController *controller = (UIViewController *)_presentedController;
+    if (controller)
+    {
+        [controller viewWillDisappear:animated];
+        [controller viewDidDisappear:animated];
+    }
+    _presentedController = nil;
+    if (completion)
+        completion();
+}
+- (UIViewController *)presentedViewController
+{
+    return (UIViewController *)_presentedController;
+}
 @end
 
+
+/* ------------------------------------------------------------- alerts */
+
+@implementation UIAlertAction
++ (id)actionWithTitle:(id)title style:(long)style
+              handler:(void (^)(UIAlertAction *action))handler
+{
+    UIAlertAction *action = [[self alloc] init];
+    action->_title = title;
+    action->_style = style;
+    if (handler)
+        action->_handler = (void (^)(UIAlertAction *))_Block_copy(handler);
+    return action;
+}
+- (id)title { return _title; }
+- (long)style { return _style; }
+- (void (^)(UIAlertAction *))handler { return _handler; }
+@end
+
+@implementation UIAlertController
++ (id)alertControllerWithTitle:(id)title message:(id)message
+                 preferredStyle:(long)style
+{
+    UIAlertController *alert = [[self alloc] init];
+    alert->_title = title;
+    alert->_message = message;
+    alert->_preferredStyle = style;
+    return alert;
+}
+- (void)addAction:(UIAlertAction *)action
+{
+    if (action && _actionCount < 8)
+        _actions[_actionCount++] = action;
+}
+- (id)message { return _message; }
+- (long)preferredStyle { return _preferredStyle; }
+- (NSArray *)actions
+{
+    return [NSArray arrayWithObjects:_actions
+                                count:(unsigned long)_actionCount];
+}
+@end
 
 /* --------------------------------------------------------- stack views */
 
@@ -4220,6 +4341,8 @@ static void draw_device_chrome(int fbWidth, double scale)
 
 static int keyboard_visible(void)
 {
+    if (getenv("IOSIM_DEBUG_KEYBOARD"))
+        printf("[keyboard] firstResponder=%p\n", g_firstResponder);
     return g_firstResponder != 0;
 }
 
@@ -4449,6 +4572,8 @@ static void draw_number_pad(int fbW, int fbH, double scale)
 
 static int draw_keyboard(int fbW, int fbH, double scale)
 {
+    if (!keyboard_visible() || scale <= 0)
+        return 0;
     if (keyboard_is_number_pad())
     {
         draw_number_pad(fbW, fbH, scale);
@@ -4953,6 +5078,202 @@ static int run_springboard(void)
     return 0;
 }
 
+static UIViewController *top_presented(UIViewController *root)
+{
+    UIViewController *top = root;
+    int guard = 0;
+    while (top && top->_presentedController && guard++ < 16)
+        top = (UIViewController *)top->_presentedController;
+    return top;
+}
+
+static void alert_metrics(UIAlertController *alert, int fbW, double scale,
+                          double *outW, double *outH, double *titleH,
+                          double *messageH)
+{
+    double W = fbW / scale;
+    double width = W - 40;
+    if (width > 270)
+        width = 270;
+    double titleW = width - 32;
+    double th = 0, mh = 0;
+    if (alert->_title)
+    {
+        const char *t = iosim_string_cstr(alert->_title);
+        char lines[IOSIM_MAX_WRAP_LINES][256];
+        int n = wrap_text_lines(t, IOSIM_FONT_BOLD, 17, scale,
+                                (int)(titleW * scale), lines, 4);
+        int asc = 0, desc = 0, lh = 0;
+        iosim_fb_font_metrics(IOSIM_FONT_BOLD, 17, scale, &asc, &desc, &lh);
+        th = (n > 0 ? n : 1) * lh / scale;
+    }
+    if (alert->_message)
+    {
+        const char *m = iosim_string_cstr(alert->_message);
+        char lines[IOSIM_MAX_WRAP_LINES][256];
+        int n = wrap_text_lines(m, IOSIM_FONT_REGULAR, 13, scale,
+                                (int)(titleW * scale), lines, 8);
+        int asc = 0, desc = 0, lh = 0;
+        iosim_fb_font_metrics(IOSIM_FONT_REGULAR, 13, scale, &asc, &desc,
+                              &lh);
+        mh = (n > 0 ? n : 1) * lh / scale;
+    }
+    double h = 22 + th + (mh > 0 ? 8 + mh : 0) + 22;
+    h += alert->_actionCount * 44;
+    *outW = width;
+    *outH = h;
+    *titleH = th;
+    *messageH = mh;
+}
+
+static void alert_draw_wrapped(id text, double width, double scale, int x,
+                               int y, int color, int bold, double size,
+                               int maxLines)
+{
+    const char *t = iosim_string_cstr(text);
+    if (!t)
+        return;
+    char lines[IOSIM_MAX_WRAP_LINES][256];
+    int n = wrap_text_lines(t, bold ? IOSIM_FONT_BOLD : IOSIM_FONT_REGULAR,
+                            size, scale, (int)(width * scale), lines,
+                            maxLines);
+    int asc = 0, desc = 0, lh = 0;
+    iosim_fb_font_metrics(bold ? IOSIM_FONT_BOLD : IOSIM_FONT_REGULAR, size,
+                          scale, &asc, &desc, &lh);
+    for (int i = 0; i < n; i++)
+    {
+        int lw = iosim_fb_font_text_width(lines[i],
+                                          bold ? IOSIM_FONT_BOLD
+                                               : IOSIM_FONT_REGULAR,
+                                          size, scale);
+        iosim_fb_font_text(x + ((int)(width * scale) - lw) / 2,
+                           y + i * lh + asc, lines[i],
+                           bold ? IOSIM_FONT_BOLD : IOSIM_FONT_REGULAR, size,
+                           scale, color);
+    }
+}
+
+static void draw_alert(UIAlertController *alert, int fbW, int fbH,
+                       double scale)
+{
+    double W = fbW / scale, H = fbH / scale;
+    iosim_fb_set_opacity(0.4);
+    iosim_fb_fill_rect(0, 0, fbW, fbH, 0x000000);
+    iosim_fb_set_opacity(1.0);
+    double width, height, titleH, messageH;
+    alert_metrics(alert, fbW, scale, &width, &height, &titleH, &messageH);
+    double x = (W - width) / 2;
+    double y = (H - height) / 2 - 20;
+    int ix = (int)(x * scale + 0.5);
+    int iy = (int)(y * scale + 0.5);
+    int iw = (int)(width * scale + 0.5);
+    int ih = (int)(height * scale + 0.5);
+    iosim_fb_set_opacity(0.35);
+    iosim_fb_fill_round_rect(ix + (int)(2 * scale),
+                             iy + (int)(8 * scale), iw, ih,
+                             (int)(18 * scale), 0x000000);
+    iosim_fb_set_opacity(1.0);
+    iosim_fb_fill_round_rect(ix, iy, iw, ih, (int)(14 * scale), 0x2c2c2e);
+    int textX = ix + (int)(16 * scale);
+    int textW = iw - (int)(32 * scale);
+    int cursor = iy + (int)(20 * scale);
+    if (alert->_title)
+    {
+        alert_draw_wrapped(alert->_title, width - 32, scale, textX, cursor,
+                           0xffffff, 1, 17, 4);
+        cursor += (int)(titleH * scale) + (int)(8 * scale);
+    }
+    if (alert->_message)
+    {
+        alert_draw_wrapped(alert->_message, width - 32, scale, textX, cursor,
+                           0xb8b8bd, 0, 13, 8);
+        cursor += (int)(messageH * scale) + (int)(14 * scale);
+    }
+    int sepY = iy + ih - (int)(alert->_actionCount * 44 * scale);
+    iosim_fb_set_opacity(0.6);
+    iosim_fb_fill_rect(ix, sepY, iw, (int)(0.5 * scale + 1), 0x3a3a3c);
+    iosim_fb_set_opacity(1.0);
+    for (int i = 0; i < alert->_actionCount; i++)
+    {
+        UIAlertAction *action = alert->_actions[i];
+        int rowY = sepY + (int)(i * 44 * scale);
+        if (i > 0)
+        {
+            iosim_fb_set_opacity(0.6);
+            iosim_fb_fill_rect(ix, rowY, iw, (int)(0.5 * scale + 1),
+                               0x3a3a3c);
+            iosim_fb_set_opacity(1.0);
+        }
+        const char *title = iosim_string_cstr(action->_title);
+        if (title)
+        {
+            unsigned color = action->_style == UIAlertActionStyleDestructive
+                                 ? 0xff453a : 0x0a84ff;
+            int tw = iosim_fb_font_text_width(
+                title, action->_style == UIAlertActionStyleCancel
+                           ? IOSIM_FONT_SEMIBOLD : IOSIM_FONT_REGULAR,
+                17, scale);
+            int asc = 0, desc = 0, lh = 0;
+            iosim_fb_font_metrics(
+                action->_style == UIAlertActionStyleCancel
+                    ? IOSIM_FONT_SEMIBOLD : IOSIM_FONT_REGULAR,
+                17, scale, &asc, &desc, &lh);
+            iosim_fb_font_text(ix + (iw - tw) / 2,
+                               rowY + (int)(44 * scale) / 2 - lh / 2 + asc,
+                               title,
+                               action->_style == UIAlertActionStyleCancel
+                                   ? IOSIM_FONT_SEMIBOLD : IOSIM_FONT_REGULAR,
+                               17, scale, color);
+        }
+    }
+}
+
+static void draw_modals(UIViewController *root, int fbW, int fbH,
+                        double scale)
+{
+    if (!root || !root->_presentedController)
+        return;
+    UIViewController *top = top_presented(root);
+    if (!top)
+        return;
+    if ([top isKindOfClass:[UIAlertController class]])
+        draw_alert((UIAlertController *)top, fbW, fbH, scale);
+    else
+    {
+        UIView *view = [top view];
+        if (view)
+            render_view(view, 0, 0, scale, 1.0);
+    }
+}
+
+static int alert_handle_tap(UIViewController *root, int px, int py, int fbW,
+                            int fbH, double scale)
+{
+    if (!root || !root->_presentedController)
+        return 0;
+    UIViewController *top = top_presented(root);
+    if (!top || ![top isKindOfClass:[UIAlertController class]])
+        return 0;
+    UIAlertController *alert = (UIAlertController *)top;
+    double width, height, titleH, messageH;
+    alert_metrics(alert, fbW, scale, &width, &height, &titleH, &messageH);
+    double W = fbW / scale, H = fbH / scale;
+    double x = (W - width) / 2, y = (H - height) / 2 - 20;
+    double tapX = px / scale, tapY = py / scale;
+    if (tapX < x || tapX > x + width || tapY < y || tapY > y + height)
+        return 1;
+    double actionsTop = y + height - alert->_actionCount * 44;
+    int row = (int)((tapY - actionsTop) / 44);
+    if (row >= 0 && row < alert->_actionCount)
+    {
+        UIAlertAction *action = alert->_actions[row];
+        if (action && action->_handler)
+            action->_handler(action);
+        [root dismissViewControllerAnimated:NO completion:nil];
+    }
+    return 1;
+}
+
 int UIApplicationMain(int argc, char **argv, id principal, id delegateName)
 {
     (void)principal;
@@ -5040,6 +5361,7 @@ int UIApplicationMain(int argc, char **argv, id principal, id delegateName)
 
     draw_device_chrome(fbWidth, scale);
     draw_keyboard(fbWidth, fbHeight, scale);
+    draw_modals(rootController, fbWidth, fbHeight, scale);
 
     iosim_dispatch_drain_main();
 
@@ -5060,7 +5382,10 @@ int UIApplicationMain(int argc, char **argv, id principal, id delegateName)
             int redraw = 0;
             if (r == 1 && type == 1)
             {
-                if (keyboard_handle_tap(x, y, fbWidth, fbHeight, scale))
+                if (alert_handle_tap(rootController, x, y, fbWidth, fbHeight,
+                                     scale))
+                    redraw = 1;
+                else if (keyboard_handle_tap(x, y, fbWidth, fbHeight, scale))
                     redraw = 1;
                 else
                 {
@@ -5113,6 +5438,7 @@ int UIApplicationMain(int argc, char **argv, id principal, id delegateName)
                 [rootController viewDidLayoutSubviews];
             draw_device_chrome(fbWidth, scale);
             draw_keyboard(fbWidth, fbHeight, scale);
+            draw_modals(rootController, fbWidth, fbHeight, scale);
             if (path && *path)
                 iosim_fb_present(path);
         }
