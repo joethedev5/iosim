@@ -76,5 +76,19 @@ int iosim_event_next(int *type, int *x, int *y)
         *y = py;
         return 1;
     }
+    if (sscanf(line, "key %d", &px) == 1)
+    {
+        *type = 5;
+        *x = px;
+        *y = 0;
+        return 1;
+    }
+    if (strncmp(line, "backspace", 9) == 0)
+    {
+        *type = 6;
+        *x = 0;
+        *y = 0;
+        return 1;
+    }
     return iosim_event_next(type, x, y);
 }

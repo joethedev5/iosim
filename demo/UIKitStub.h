@@ -125,6 +125,15 @@ __attribute__((objc_root_class))
 + (void)animateWithDuration:(double)duration animations:(void (^)(void))animations;
 @end
 
+@interface UITextField : UIView
+@property(nonatomic, retain) id text;
+@property(nonatomic, retain) id placeholder;
+@property(nonatomic, retain) UIColor *textColor;
+@property(nonatomic, retain) UIFont *font;
+- (BOOL)becomeFirstResponder;
+- (BOOL)resignFirstResponder;
+@end
+
 @interface UILabel : UIView
 @property(nonatomic, retain) id text;
 @property(nonatomic, retain) UIColor *textColor;

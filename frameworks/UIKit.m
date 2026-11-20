@@ -600,7 +600,8 @@ enum {
 };
 
 enum {
-    UIControlEventTouchUpInside = 1 << 6
+    UIControlEventTouchUpInside = 1 << 6,
+    UIControlEventEditingChanged = 1 << 17
 };
 
 enum {
@@ -627,6 +628,48 @@ enum {
 + (id)buttonWithType:(int)type;
 - (void)setTitle:(id)title forState:(unsigned long)state;
 - (void)setTitleColor:(UIColor *)color forState:(unsigned long)state;
+@end
+
+
+@interface UITextField : UIControl {
+@public
+    id _text;
+    id _placeholder;
+    UIFont *_font;
+    UIColor *_textColor;
+    BOOL _secureTextEntry;
+    BOOL _firstResponder;
+    BOOL _enablesReturnKeyAutomatically;
+    int _textAlignment;
+    int _keyboardType;
+    int _returnKeyType;
+    id _delegate;
+}
+- (void)setText:(id)text;
+- (id)text;
+- (void)setPlaceholder:(id)text;
+- (id)placeholder;
+- (void)setTextColor:(UIColor *)color;
+- (UIColor *)textColor;
+- (void)setFont:(UIFont *)font;
+- (UIFont *)font;
+- (void)setTextAlignment:(int)alignment;
+- (int)textAlignment;
+- (void)setSecureTextEntry:(BOOL)secure;
+- (BOOL)isSecureTextEntry;
+- (void)setKeyboardType:(int)type;
+- (int)keyboardType;
+- (void)setReturnKeyType:(int)type;
+- (int)returnKeyType;
+- (void)setDelegate:(id)delegate;
+- (id)delegate;
+- (BOOL)becomeFirstResponder;
+- (BOOL)resignFirstResponder;
+- (BOOL)isFirstResponder;
+- (BOOL)hasText;
+- (void)insertText:(id)text;
+- (void)deleteBackward;
+- (CGSize)intrinsicContentSize;
 @end
 
 
@@ -1695,6 +1738,104 @@ static int wrap_text_lines(const char *text, int style, double points,
 }
 @end
 
+static UITextField *g_firstResponder;
+
+@implementation UITextField
+- (id)initWithFrame:(CGRect)frame
+{
+    self = [super initWithFrame:frame];
+    if (self)
+    {
+        _font = [UIFont systemFontOfSize:17];
+        _textColor = [UIColor whiteColor];
+        _textAlignment = 0;
+        _returnKeyType = 1;
+    }
+    return self;
+}
+- (void)setText:(id)text { _text = text; }
+- (id)text { return _text; }
+- (void)setPlaceholder:(id)text { _placeholder = text; }
+- (id)placeholder { return _placeholder; }
+- (void)setTextColor:(UIColor *)color { _textColor = color; }
+- (UIColor *)textColor { return _textColor; }
+- (void)setFont:(UIFont *)font { _font = font; }
+- (UIFont *)font { return _font; }
+- (void)setTextAlignment:(int)alignment { _textAlignment = alignment; }
+- (int)textAlignment { return _textAlignment; }
+- (void)setSecureTextEntry:(BOOL)secure { _secureTextEntry = secure; }
+- (BOOL)isSecureTextEntry { return _secureTextEntry; }
+- (void)setKeyboardType:(int)type { _keyboardType = type; }
+- (int)keyboardType { return _keyboardType; }
+- (void)setReturnKeyType:(int)type { _returnKeyType = type; }
+- (int)returnKeyType { return _returnKeyType; }
+- (void)setDelegate:(id)delegate { _delegate = delegate; }
+- (id)delegate { return _delegate; }
+- (BOOL)becomeFirstResponder
+{
+    if (g_firstResponder && g_firstResponder != self)
+        [g_firstResponder resignFirstResponder];
+    g_firstResponder = self;
+    _firstResponder = YES;
+    _needsLayout = YES;
+    return YES;
+}
+- (BOOL)resignFirstResponder
+{
+    if (g_firstResponder == self)
+        g_firstResponder = 0;
+    _firstResponder = NO;
+    _needsLayout = YES;
+    return YES;
+}
+- (BOOL)isFirstResponder { return _firstResponder; }
+- (BOOL)hasText
+{
+    const char *s = iosim_string_cstr(_text);
+    return s && *s;
+}
+- (void)insertText:(id)text
+{
+    if (!text)
+        return;
+    const char *add = iosim_string_cstr(text);
+    if (!add)
+        return;
+    char buf[512];
+    const char *cur = iosim_string_cstr(_text);
+    if (cur)
+        snprintf(buf, sizeof(buf), "%s%s", cur, add);
+    else
+        snprintf(buf, sizeof(buf), "%s", add);
+    _text = [NSString stringWithUTF8String:buf];
+    [self sendActionsForControlEvents:UIControlEventEditingChanged];
+    _needsLayout = YES;
+}
+- (void)deleteBackward
+{
+    const char *cur = iosim_string_cstr(_text);
+    if (!cur || !*cur)
+        return;
+    unsigned long n = strlen(cur);
+    while (n > 0 && ((unsigned char)cur[n - 1] & 0xc0) == 0x80)
+        n--;
+    if (n > 0)
+        n--;
+    char buf[512];
+    if (n >= sizeof(buf))
+        n = sizeof(buf) - 1;
+    memcpy(buf, cur, n);
+    buf[n] = 0;
+    _text = [NSString stringWithUTF8String:buf];
+    [self sendActionsForControlEvents:UIControlEventEditingChanged];
+    _needsLayout = YES;
+}
+- (CGSize)intrinsicContentSize
+{
+    return CGSizeMake(160, 34);
+}
+@end
+
 
 /* ------------------------------------------------------- paths and layers */
 
@@ -2564,6 +2705,12 @@ static double clamp_scroll(double value, double low, double high)
                 g->_location = point;
                 send_gesture_action(g, UIGestureRecognizerStateEnded);
             }
+        }
+    for (UIView *tv = hit; tv; tv = [tv superview])
+        if ([tv isKindOfClass:[UITextField class]])
+        {
+            [(UITextField *)tv becomeFirstResponder];
+            break;
         }
     if (hit && [hit isKindOfClass:[UIControl class]])
         [(UIControl *)hit sendActionsForControlEvents:UIControlEventTouchUpInside];
@@ -3482,6 +3629,59 @@ static void render_view(UIView *view, double originX, double originY,
         iosim_fb_set_opacity(1.0);
     }
 
+    if ([view isKindOfClass:[UITextField class]])
+    {
+        UITextField *field = (UITextField *)view;
+        const char *text = string_cstr(field->_text);
+        const char *placeholder = string_cstr(field->_placeholder);
+        double points = field->_font ? field->_font->_size : 17.0;
+        int style = field->_font && field->_font->_bold
+                        ? IOSIM_FONT_BOLD : IOSIM_FONT_REGULAR;
+        int ascent = 0, descent = 0, lineHeight = 0;
+        iosim_fb_font_metrics(style, points, scale, &ascent, &descent,
+                              &lineHeight);
+        int tx = x + (int)(12 * scale);
+        int baseline = y + (h - lineHeight) / 2 + ascent;
+        unsigned color = field->_textColor ? color_rgb(field->_textColor)
+                                           : 0xffffff;
+        int textWidth = 0;
+        if (text && *text)
+        {
+            if (field->_secureTextEntry)
+            {
+                unsigned long chars = strlen(text);
+                int dot = (int)(4 * scale);
+                int spacing = (int)(10 * scale);
+                for (unsigned long i = 0; i < chars && i < 40; i++)
+                    iosim_fb_fill_circle(tx + (int)(i * spacing) + dot,
+                                         baseline - (int)(5 * scale), dot,
+                                         color);
+                textWidth = (int)(chars * spacing);
+            }
+            else
+            {
+                iosim_fb_font_text(tx, baseline, text, style, points, scale,
+                                   color);
+                textWidth = iosim_fb_font_text_width(text, style, points,
+                                                     scale);
+            }
+        }
+        else if (placeholder && *placeholder)
+        {
+            iosim_fb_font_text(tx, baseline, placeholder, style, points, scale,
+                               0x8e8e93);
+            textWidth = iosim_fb_font_text_width(placeholder, style, points,
+                                                 scale);
+        }
+        if (field->_firstResponder)
+        {
+            int caretX = tx + textWidth + (int)(1 * scale);
+            int caretH = (int)(22 * scale);
+            iosim_fb_fill_rect(caretX, baseline - ascent, (int)(2 * scale),
+                               caretH, 0x0a84ff);
+        }
+    }
+
     if ([view isKindOfClass:[UILabel class]])
     {
         UILabel *label = (UILabel *)view;
@@ -3641,6 +3841,217 @@ static void draw_device_chrome(int fbWidth, double scale)
     }
 }
 
+
+/* --------------------------------------------------------- keyboard UI */
+
+static int keyboard_visible(void)
+{
+    return g_firstResponder != 0;
+}
+
+static void keyboard_row_1(int fbW, double scale, int y, int h, int special)
+{
+    (void)special;
+    double margin = 3, gap = 6;
+    double kw = ((double)fbW / scale - 2 * margin - 9 * gap) / 10.0;
+    static const char *letters = "QWERTYUIOP";
+    for (int i = 0; i < 10; i++)
+    {
+        int x = (int)((margin + i * (kw + gap)) * scale + 0.5);
+        int w = (int)(kw * scale + 0.5);
+        iosim_fb_fill_round_rect(x, y, w, h, (int)(5 * scale), 0x6b6b6d);
+        char label[2] = { letters[i], 0 };
+        int lw = iosim_fb_font_text_width(label, IOSIM_FONT_REGULAR, 22, scale);
+        int asc = 0, desc = 0, lh = 0;
+        iosim_fb_font_metrics(IOSIM_FONT_REGULAR, 22, scale, &asc, &desc, &lh);
+        iosim_fb_font_text(x + (w - lw) / 2, y + (h - lh) / 2 + asc, label,
+                           IOSIM_FONT_REGULAR, 22, scale, 0xffffff);
+    }
+}
+
+static void keyboard_row_2(int fbW, double scale, int y, int h)
+{
+    double margin = 3, gap = 6;
+    double kw = ((double)fbW / scale - 2 * margin - 9 * gap) / 10.0;
+    static const char *letters = "ASDFGHJKL";
+    for (int i = 0; i < 9; i++)
+    {
+        int x = (int)((margin + (kw + gap) / 2 + i * (kw + gap)) * scale + 0.5);
+        int w = (int)(kw * scale + 0.5);
+        iosim_fb_fill_round_rect(x, y, w, h, (int)(5 * scale), 0x6b6b6d);
+        char label[2] = { letters[i], 0 };
+        int lw = iosim_fb_font_text_width(label, IOSIM_FONT_REGULAR, 22, scale);
+        int asc = 0, desc = 0, lh = 0;
+        iosim_fb_font_metrics(IOSIM_FONT_REGULAR, 22, scale, &asc, &desc, &lh);
+        iosim_fb_font_text(x + (w - lw) / 2, y + (h - lh) / 2 + asc, label,
+                           IOSIM_FONT_REGULAR, 22, scale, 0xffffff);
+    }
+}
+
+static void keyboard_row_3(int fbW, double scale, int y, int h)
+{
+    double margin = 3, gap = 6;
+    double kw = ((double)fbW / scale - 2 * margin - 9 * gap) / 10.0;
+    int shiftW = (int)(42 * scale);
+    iosim_fb_fill_round_rect((int)(margin * scale), y, shiftW, h,
+                             (int)(5 * scale), 0x4a4a4d);
+    iosim_fb_font_text((int)(margin * scale) + shiftW / 2 -
+                           (int)(7 * scale), y + h / 2 + (int)(7 * scale),
+                       "⇧", IOSIM_FONT_REGULAR, 20, scale, 0xffffff);
+    static const char *letters = "ZXCVBNM";
+    for (int i = 0; i < 7; i++)
+    {
+        int x = (int)((margin + 42 + gap + i * (kw + gap)) * scale + 0.5);
+        int w = (int)(kw * scale + 0.5);
+        iosim_fb_fill_round_rect(x, y, w, h, (int)(5 * scale), 0x6b6b6d);
+        char label[2] = { letters[i], 0 };
+        int lw = iosim_fb_font_text_width(label, IOSIM_FONT_REGULAR, 22, scale);
+        int asc = 0, desc = 0, lh = 0;
+        iosim_fb_font_metrics(IOSIM_FONT_REGULAR, 22, scale, &asc, &desc, &lh);
+        iosim_fb_font_text(x + (w - lw) / 2, y + (h - lh) / 2 + asc, label,
+                           IOSIM_FONT_REGULAR, 22, scale, 0xffffff);
+    }
+    int delW = (int)(42 * scale);
+    int delX = fbW - (int)(margin * scale) - delW;
+    iosim_fb_fill_round_rect(delX, y, delW, h, (int)(5 * scale), 0x4a4a4d);
+    int dw = iosim_fb_font_text_width("⌫", IOSIM_FONT_REGULAR, 20, scale);
+    iosim_fb_font_text(delX + (delW - dw) / 2,
+                       y + h / 2 + (int)(7 * scale), "⌫",
+                       IOSIM_FONT_REGULAR, 20, scale, 0xffffff);
+}
+
+static void keyboard_row_4(int fbW, double scale, int y, int h)
+{
+    double margin = 3, gap = 6;
+    int numW = (int)(87 * scale);
+    int globeW = (int)(34 * scale);
+    int retW = (int)(84 * scale);
+    iosim_fb_fill_round_rect((int)(margin * scale), y, numW, h,
+                             (int)(5 * scale), 0x4a4a4d);
+    int nw = iosim_fb_font_text_width("123", IOSIM_FONT_REGULAR, 16, scale);
+    iosim_fb_font_text((int)(margin * scale) + (numW - nw) / 2,
+                       y + h / 2 + (int)(6 * scale), "123",
+                       IOSIM_FONT_REGULAR, 16, scale, 0xffffff);
+    int globeX = (int)(margin * scale) + numW + (int)(gap * scale);
+    iosim_fb_fill_round_rect(globeX, y, globeW, h, (int)(5 * scale), 0x4a4a4d);
+    int gw = iosim_fb_font_text_width("🌐", IOSIM_FONT_REGULAR, 18, scale);
+    iosim_fb_font_text(globeX + (globeW - gw) / 2,
+                       y + h / 2 + (int)(6 * scale), "🌐",
+                       IOSIM_FONT_REGULAR, 18, scale, 0xffffff);
+    int spaceX = globeX + globeW + (int)(gap * scale);
+    int retX = fbW - (int)(margin * scale) - retW;
+    int spaceW = retX - (int)(gap * scale) - spaceX;
+    iosim_fb_fill_round_rect(spaceX, y, spaceW, h, (int)(5 * scale),
+                             0x6b6b6d);
+    iosim_fb_fill_round_rect(retX, y, retW, h, (int)(5 * scale), 0x4a4a4d);
+    int rw = iosim_fb_font_text_width("return", IOSIM_FONT_REGULAR, 16, scale);
+    iosim_fb_font_text(retX + (retW - rw) / 2,
+                       y + h / 2 + (int)(6 * scale), "return",
+                       IOSIM_FONT_REGULAR, 16, scale, 0xffffff);
+}
+
+static int keyboard_handle_tap(int px, int py, int fbW, int fbH,
+                               double scale)
+{
+    if (!keyboard_visible() || scale <= 0)
+        return 0;
+    double x = px / scale, y = py / scale;
+    double W = fbW / scale, H = fbH / scale;
+    const char *hEnv = getenv("IOSIM_KEYBOARD_HEIGHT");
+    double kbH = hEnv ? atof(hEnv) : 291.0;
+    double top = H - kbH;
+    if (y < top)
+        return 0;
+    double rowsTop = top + 50, rowH = 43, gap = 12;
+    int row = (int)((y - rowsTop) / (rowH + gap));
+    double localY = y - (rowsTop + row * (rowH + gap));
+    if (row < 0 || row > 3 || localY > rowH)
+        return 1;
+    double margin = 3, keyGap = 6;
+    double kw = (W - 2 * margin - 9 * keyGap) / 10.0;
+    char buf[8];
+    if (row == 0)
+    {
+        int i = (int)((x - margin) / (kw + keyGap));
+        if (i >= 0 && i < 10)
+        {
+            buf[0] = "QWERTYUIOP"[i];
+            buf[1] = 0;
+            [g_firstResponder insertText:[NSString stringWithUTF8String:buf]];
+            return 1;
+        }
+    }
+    else if (row == 1)
+    {
+        int i = (int)((x - margin - (kw + keyGap) / 2) / (kw + keyGap));
+        if (i >= 0 && i < 9)
+        {
+            buf[0] = "ASDFGHJKL"[i];
+            buf[1] = 0;
+            [g_firstResponder insertText:[NSString stringWithUTF8String:buf]];
+            return 1;
+        }
+    }
+    else if (row == 2)
+    {
+        if (x < margin + 42)
+            return 1;
+        int i = (int)((x - margin - 42 - keyGap) / (kw + keyGap));
+        if (i >= 0 && i < 7)
+        {
+            buf[0] = "ZXCVBNM"[i];
+            buf[1] = 0;
+            [g_firstResponder insertText:[NSString stringWithUTF8String:buf]];
+            return 1;
+        }
+        if (x > W - margin - 42)
+        {
+            [g_firstResponder deleteBackward];
+            return 1;
+        }
+    }
+    else
+    {
+        if (x < margin + 87)
+            return 1;
+        if (x < margin + 87 + keyGap + 34)
+            return 1;
+        if (x > W - margin - 84)
+        {
+            [(UITextField *)g_firstResponder
+                sendActionsForControlEvents:1 << 18];
+            return 1;
+        }
+        [g_firstResponder insertText:[NSString stringWithUTF8String:" "]];
+        return 1;
+    }
+    return 1;
+}
+
+static void draw_keyboard(int fbW, int fbH, double scale)
+{
+    if (!keyboard_visible() || scale <= 0)
+        return;
+    double widthPt = fbW / scale, heightPt = fbH / scale;
+    const char *hEnv = getenv("IOSIM_KEYBOARD_HEIGHT");
+    double kbH = hEnv ? atof(hEnv) : 291.0;
+    double topPt = heightPt - kbH;
+    int top = (int)(topPt * scale + 0.5);
+    iosim_fb_set_opacity(1.0);
+    iosim_fb_fill_rect(0, top, fbW, fbH - top, 0x1c1c1e);
+    double rowsTopPt = topPt + 50;
+    int rowH = (int)(43 * scale);
+    int gap = (int)(12 * scale);
+    int y0 = (int)(rowsTopPt * scale + 0.5);
+    keyboard_row_1(fbW, scale, y0, rowH, 0);
+    keyboard_row_2(fbW, scale, y0 + rowH + gap, rowH);
+    keyboard_row_3(fbW, scale, y0 + 2 * (rowH + gap), rowH);
+    keyboard_row_4(fbW, scale, y0 + 3 * (rowH + gap), rowH);
+    int hw = (int)(134 * scale);
+    iosim_fb_fill_round_rect((fbW - hw) / 2, fbH - (int)(13 * scale), hw,
+                             (int)(5 * scale), (int)(2.5 * scale),
+                             0xffffff);
+}
 
 /* -------------------------------------------------------- springboard UI */
 
@@ -4102,6 +4513,13 @@ int UIApplicationMain(int argc, char **argv, id principal, id delegateName)
         fprintf(stderr, "uiapp: window=%p sceneDelegate=%p\n", window,
                 sceneDelegate);
 
+    UIViewController *rootController = [window rootViewController];
+    if (rootController)
+    {
+        [rootController viewWillAppear:NO];
+        [rootController viewDidAppear:NO];
+    }
+
     double scale = [[UIScreen mainScreen] scale];
     if (scale <= 0)
         scale = 3.0;
@@ -4114,6 +4532,7 @@ int UIApplicationMain(int argc, char **argv, id principal, id delegateName)
     render_view(window, 0, 0, scale, 1.0);
 
     draw_device_chrome(fbWidth, scale);
+    draw_keyboard(fbWidth, fbHeight, scale);
 
     iosim_dispatch_drain_main();
 
@@ -4134,7 +4553,26 @@ int UIApplicationMain(int argc, char **argv, id principal, id delegateName)
             int redraw = 0;
             if (r == 1 && type == 1)
             {
-                [window dispatchTapX:x y:y];
+                if (keyboard_handle_tap(x, y, fbWidth, fbHeight, scale))
+                    redraw = 1;
+                else
+                {
+                    [window dispatchTapX:x y:y];
+                    redraw = 1;
+                }
+            }
+            else if (r == 1 && type == 5 && g_firstResponder)
+            {
+                char buf[8];
+                buf[0] = (char)x;
+                buf[1] = 0;
+                [g_firstResponder
+                    insertText:[NSString stringWithUTF8String:buf]];
+                redraw = 1;
+            }
+            else if (r == 1 && type == 6 && g_firstResponder)
+            {
+                [g_firstResponder deleteBackward];
                 redraw = 1;
             }
             else if (r == 1 && type == 2)
@@ -4162,6 +4600,7 @@ int UIApplicationMain(int argc, char **argv, id principal, id delegateName)
                 continue;
             iosim_fb_set_opacity(1.0);
             render_view(window, 0, 0, scale, 1.0);
+            draw_keyboard(fbWidth, fbHeight, scale);
             if (path && *path)
                 iosim_fb_present(path);
         }
