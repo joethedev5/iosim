@@ -65,6 +65,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | UITableView sections, headers, per-row heights and section-aware selection | ✅ |
 | UILongPressGestureRecognizer duration, movement tolerance and state changes | ✅ |
 | UIBarButtonItem/UINavigationItem, right bar buttons and automatic back button | ✅ |
+| UISearchBar with delegate edits, Return action, Cancel and keyboard focus | ✅ |
 
 The test suite exercises a real Apple-toolchain-built x86_64 UIKit app, a
 Foundation app using `NSLog` with a constant `CFString`, a Foundation

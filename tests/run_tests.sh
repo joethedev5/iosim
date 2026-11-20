@@ -1454,6 +1454,90 @@ fi
 "$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
 sleep 0.4
 
+# ---------- 9k. UISearchBar text editing, Return and Cancel ----------
+"$ROOT/tools/build_app.sh" "$ROOT/demo/SearchBarApp.m" "$T/SearchBarApp" >/dev/null
+mkdir -p "$T/SearchBarApp.app"
+cp "$T/SearchBarApp" "$T/SearchBarApp.app/SearchBarApp"
+python3 - "$T/SearchBarApp.app/Info.plist" <<'PY'
+import plistlib, sys
+with open(sys.argv[1], "wb") as f:
+    plistlib.dump({
+        "CFBundleIdentifier": "com.iosim.searchbar",
+        "CFBundleExecutable": "SearchBarApp",
+        "CFBundleName": "SearchBar",
+        "CFBundlePackageType": "APPL",
+        "CFBundleVersion": "1",
+        "CFBundleShortVersionString": "1.0",
+    }, f)
+PY
+"$ROOT/tools/iosimctl" install "$UDID" "$T/SearchBarApp.app" >/dev/null
+sleep 0.5
+# Twenty-third installed app: grid slot 29, second page row 3 column 1.
+"$ROOT/tools/iosimctl" ui "$UDID" tap 154.7222 422.8333 >/dev/null
+if wait_log "[searchbar] ready"; then
+    echo "ok   SpringBoard launches the search bar fixture"
+else
+    echo "FAIL search bar fixture launch"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" tap 120 162 >/dev/null
+sleep 0.3
+"$ROOT/tools/iosimctl" ui "$UDID" key a >/dev/null
+"$ROOT/tools/iosimctl" ui "$UDID" key b >/dev/null
+if wait_log "[searchbar] q=ab"; then
+    echo "ok   typing in the search field reports textDidChange"
+else
+    echo "FAIL search bar editing"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/searchbar.png" >/dev/null
+if out="$(python3 - "$ROOT/tools" "$T/searchbar.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+c = pngpixel.px(rows, bpp, 23 * 3, 620 * 3)
+r, g, b = (c >> 16) & 255, (c >> 8) & 255, c & 255
+if not (50 <= r <= 100 and abs(r - g) < 12 and abs(g - b) < 12):
+    raise SystemExit("search keyboard not visible: %06x" % c)
+print("ok   focusing the search field raises the software keyboard")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL search bar keyboard"; echo "$out"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" key return >/dev/null
+if wait_log "[searchbar] go ab"; then
+    echo "ok   Return invokes the search action without a newline"
+else
+    echo "FAIL search bar return"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" tap 350 162 >/dev/null
+if wait_log "[searchbar] cancel"; then
+    echo "ok   the cancel button reports and clears the field"
+else
+    echo "FAIL search bar cancel"; fails=$((fails+1))
+fi
+sleep 0.4
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/searchbar-cancel.png" >/dev/null
+if out="$(python3 - "$ROOT/tools" "$T/searchbar-cancel.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+c = pngpixel.px(rows, bpp, 23 * 3, 620 * 3)
+r, g, b = (c >> 16) & 255, (c >> 8) & 255, c & 255
+if not (r < 30 and g < 40 and b < 70):
+    raise SystemExit("keyboard still visible after cancel: %06x" % c)
+print("ok   cancel resigns the field and dismisses the keyboard")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL search bar dismiss"; echo "$out"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
+sleep 0.4
+
 # ---------- 10. cross-process Mach services ----------
 # launchd owns the bootstrap namespace; two independent guest processes find
 # each other through it and exchange a Mach message over the service port.

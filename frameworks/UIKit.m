@@ -1051,6 +1051,25 @@ enum {
 - (CGSize)intrinsicContentSize;
 @end
 
+@interface UISearchBar : UIView {
+@public
+    id _delegate;
+    id _field;
+    id _cancelButton;
+    id _placeholder;
+    BOOL _showsCancelButton;
+}
+- (void)setDelegate:(id)delegate;
+- (id)delegate;
+- (id)text;
+- (void)setText:(id)text;
+- (id)placeholder;
+- (void)setPlaceholder:(id)text;
+- (BOOL)showsCancelButton;
+- (void)setShowsCancelButton:(BOOL)shows animated:(BOOL)animated;
+- (void)searchButtonClicked;
+@end
+
 
 @interface UISwitch : UIControl {
 @public
@@ -3025,6 +3044,138 @@ static id g_firstResponder;
 }
 @end
 
+/* The search field is a real UITextField so focus, the software keyboard
+ * and hardware keys work; Return asks the bar to invoke its search action
+ * instead of inserting a newline. */
+@interface UISearchBarField : UITextField {
+@public
+    id _bar;
+}
+@end
+
+@implementation UISearchBarField
+- (void)insertText:(id)text
+{
+    const char *s = iosim_string_cstr(text);
+    if (s && s[0] == '\n' && s[1] == 0)
+    {
+        if (_bar)
+            [(UISearchBar *)_bar searchButtonClicked];
+        return;
+    }
+    [super insertText:text];
+}
+@end
+
+@implementation UISearchBar
+- (id)initWithFrame:(CGRect)frame
+{
+    self = [super initWithFrame:frame];
+    if (self)
+    {
+        _placeholder = @"Search";
+        [self setBackgroundColor:
+            [UIColor colorWithRed:0.09 green:0.10 blue:0.13 alpha:0.95]];
+        [[self layer] setCornerRadius:12];
+
+        UISearchBarField *field = [[UISearchBarField alloc]
+            initWithFrame:CGRectMake(8, 6, frame.size.width - 16,
+                                     frame.size.height - 12)];
+        field->_bar = self;
+        field->_placeholder = _placeholder;
+        field->_font = [UIFont systemFontOfSize:16];
+        field->_textColor = [UIColor whiteColor];
+        [field addTarget:self action:@selector(fieldChanged)
+         forControlEvents:UIControlEventEditingChanged];
+        [self addSubview:field];
+        _field = field;
+
+        UIControl *cancel = [[UIControl alloc] initWithFrame:
+            CGRectMake(frame.size.width - 64, 6, 56,
+                       frame.size.height - 12)];
+        UILabel *label = [[UILabel alloc] initWithFrame:
+            CGRectMake(0, 0, 56, frame.size.height - 12)];
+        label->_text = @"Cancel";
+        label->_font = [UIFont systemFontOfSize:15];
+        label->_textColor = [UIColor whiteColor];
+        label->_textAlignment = 1;
+        [cancel addSubview:label];
+        [cancel addTarget:self action:@selector(cancelTapped)
+         forControlEvents:UIControlEventTouchUpInside];
+        cancel->_hidden = YES;
+        [self addSubview:cancel];
+        _cancelButton = cancel;
+        _needsLayout = YES;
+    }
+    return self;
+}
+- (void)setFrame:(CGRect)frame
+{
+    [super setFrame:frame];
+    _needsLayout = YES;
+}
+- (void)setDelegate:(id)delegate { _delegate = delegate; }
+- (id)delegate { return _delegate; }
+- (id)text { return _field ? [(UITextField *)_field text] : nil; }
+- (void)setText:(id)text
+{
+    if (_field)
+        [(UITextField *)_field setText:text];
+}
+- (id)placeholder { return _placeholder; }
+- (void)setPlaceholder:(id)text
+{
+    _placeholder = text;
+    if (_field)
+        [(UITextField *)_field setPlaceholder:text];
+}
+- (BOOL)showsCancelButton { return _showsCancelButton; }
+- (void)setShowsCancelButton:(BOOL)shows animated:(BOOL)animated
+{
+    (void)animated;
+    _showsCancelButton = shows;
+    if (_cancelButton)
+        ((UIView *)_cancelButton)->_hidden = !shows;
+    _needsLayout = YES;
+}
+- (void)layoutSubviews
+{
+    double width = _frame.size.width;
+    double height = _frame.size.height;
+    double fieldWidth = width - 16 - (_showsCancelButton ? 64 : 0);
+    if (fieldWidth < 40)
+        fieldWidth = 40;
+    if (_field)
+        ((UIView *)_field)->_frame =
+            CGRectMake(8, 6, fieldWidth, height - 12);
+    if (_cancelButton)
+        ((UIView *)_cancelButton)->_frame =
+            CGRectMake(width - 64, 6, 56, height - 12);
+}
+- (void)fieldChanged
+{
+    if (_delegate &&
+        [_delegate respondsToSelector:@selector(searchBar:textDidChange:)])
+        [_delegate searchBar:self textDidChange:[self text]];
+}
+- (void)cancelTapped
+{
+    if (_delegate &&
+        [_delegate respondsToSelector:
+            @selector(searchBarCancelButtonClicked:)])
+        [_delegate searchBarCancelButtonClicked:self];
+    [self setText:@""];
+    if (_field)
+        [(UITextField *)_field resignFirstResponder];
+}
+- (void)searchButtonClicked
+{
+    if (_delegate &&
+        [_delegate respondsToSelector:
+            @selector(searchBarSearchButtonClicked:)])
+        [_delegate searchBarSearchButtonClicked:self];
+}
+@end
 
 @implementation UISwitch
 - (id)initWithFrame:(CGRect)frame

@@ -256,6 +256,14 @@ enum {
 - (BOOL)resignFirstResponder;
 @end
 
+@interface UISearchBar : UIView
+@property(nonatomic, retain) id delegate;
+@property(nonatomic, retain) id text;
+@property(nonatomic, retain) id placeholder;
+@property BOOL showsCancelButton;
+- (void)setShowsCancelButton:(BOOL)shows animated:(BOOL)animated;
+@end
+
 @interface UILabel : UIView
 @property(nonatomic, retain) id text;
 @property(nonatomic, retain) UIColor *textColor;

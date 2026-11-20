@@ -165,6 +165,16 @@ controller, updates the title bar, and a second tap pops back. Both transitions
 were driven through `IOSIM_EVENT_FIFO` and captured in
 `build/nav-root.png` / `build/nav-pushed.png`.
 
+### UIKit: search bar text input
+
+`demo/SearchBarApp.m` places a `UISearchBar` with a visible Cancel button and
+a delegate that prints edits, searches and cancellation. After focusing the
+field the suite types `a` and `b` and sees `q=ab`; the screenshot at
+(23, 620) pt shows the software keyboard. Return reports `go ab` without a
+trailing newline in the text, and Cancel reports `cancel`, clears the field
+and resigns it — the same pixel returns to the app background once the
+keyboard is gone.
+
 ### UIKit: navigation bar items
 
 `demo/NavBarApp.m` gives its root controller a right `UIBarButtonItem`

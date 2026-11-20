@@ -477,6 +477,11 @@ decoded with libpng in `loader/image.c`.
   `registerClass:forCellWithReuseIdentifier:` and
   `dequeueReusableCellWithReuseIdentifier:forIndexPath:` create cells the way a
   data source expects.
+- `UISearchBar` embeds a real `UITextField` subclass, so focusing it raises
+  the software keyboard and hardware keys edit the same text. EditingChanged
+  reaches `searchBar:textDidChange:`; Return is intercepted before it can
+  insert a newline and calls `searchBarSearchButtonClicked:`; the Cancel
+  control clears the field, resigns it and calls the delegate.
 - `UINavigationController` reads each top controller's `navigationItem` and
   renders its title plus left/right `UIBarButtonItem`s as real `UIControl`s
   in the bar, so their targets fire through normal touch tracking. A pushed
