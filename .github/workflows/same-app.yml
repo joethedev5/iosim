@@ -32,6 +32,8 @@ jobs:
           xcrun clang -arch x86_64 $CFLAGS -framework UIKit -framework Foundation \
             demo/TextInputApp.m -o TextInputApp_x86_64 \
             2> out/build-textinput.err
+          xcrun clang -arch x86_64 $CFLAGS -framework UIKit -framework Foundation \
+            demo/AlertApp.m -o AlertApp_x86_64 2> out/build-alert.err
           xcrun clang -arch x86_64 $CFLAGS tests/services_test.m \
             -o services_test_x86_64 2> out/build-services.err
           file HelloSim_x86_64 GraphicsApp_x86_64 ListApp_x86_64 NavApp_x86_64 AutoLayoutApp_x86_64 services_test_x86_64
@@ -46,6 +48,7 @@ jobs:
             NavApp_x86_64
             AutoLayoutApp_x86_64
             TextInputApp_x86_64
+            AlertApp_x86_64
             services_test_x86_64
             out/*.err
           retention-days: 7
@@ -66,13 +69,15 @@ jobs:
           xcrun clang -arch arm64 $CFLAGS -framework UIKit -framework Foundation demo/ListApp.m -o ListApp_arm64
           xcrun clang -arch arm64 $CFLAGS -framework UIKit -framework Foundation demo/AutoLayoutApp.m -o AutoLayout_arm64
           xcrun clang -arch arm64 $CFLAGS -framework UIKit -framework Foundation demo/TextInputApp.m -o TextInput_arm64
-          mkdir -p HelloSim.app GraphicsApp.app ListApp.app AutoLayout.app TextInput.app
+          xcrun clang -arch arm64 $CFLAGS -framework UIKit -framework Foundation demo/AlertApp.m -o Alert_arm64
+          mkdir -p HelloSim.app GraphicsApp.app ListApp.app AutoLayout.app TextInput.app Alert.app
           cp HelloSim_arm64 HelloSim.app/HelloSim
           cp GraphicsApp_arm64 GraphicsApp.app/GraphicsApp
           cp demo/Assets/badge.png GraphicsApp.app/badge.png
           cp ListApp_arm64 ListApp.app/ListApp
           cp AutoLayout_arm64 AutoLayout.app/AutoLayout
           cp TextInput_arm64 TextInput.app/TextInput
+          cp Alert_arm64 Alert.app/Alert
           cat > /tmp/Info.plist <<'PLIST'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -111,7 +116,8 @@ jobs:
           sed -e 's/HelloSim/ListApp/g' -e 's/com\.iosim\.hellosim/com.iosim.listapp/g' /tmp/Info.plist > ListApp.app/Info.plist
           sed -e 's/HelloSim/AutoLayout/g' -e 's/com\.iosim\.hellosim/com.iosim.autolayout/g' /tmp/Info.plist > AutoLayout.app/Info.plist
           sed -e 's/HelloSim/TextInput/g' -e 's/com\.iosim\.hellosim/com.iosim.textinput/g' /tmp/Info.plist > TextInput.app/Info.plist
-          for app in HelloSim GraphicsApp ListApp AutoLayout TextInput; do codesign --force --sign - --timestamp=none "$app.app" || true; done
+          sed -e 's/HelloSim/Alert/g' -e 's/com\.iosim\.hellosim/com.iosim.alert/g' /tmp/Info.plist > Alert.app/Info.plist
+          for app in HelloSim GraphicsApp ListApp AutoLayout TextInput Alert; do codesign --force --sign - --timestamp=none "$app.app" || true; done
       - name: Boot and capture each app
         run: |
           set +e
@@ -149,7 +155,7 @@ jobs:
             run_timeout 20 xcrun simctl spawn "$UDID" defaults write "$domain" DidShowContinuousPathIntroduction -bool true 2>/dev/null || true
           done
           run_timeout 30 xcrun simctl io "$UDID" screenshot out/springboard-real.png
-          for spec in "HelloSim com.iosim.hellosim real-sim" "GraphicsApp com.iosim.graphicsapp graphics-real" "ListApp com.iosim.listapp listapp-real" "AutoLayout com.iosim.autolayout autolayout-real" "TextInput com.iosim.textinput textinput-real"; do
+          for spec in "HelloSim com.iosim.hellosim real-sim" "GraphicsApp com.iosim.graphicsapp graphics-real" "ListApp com.iosim.listapp listapp-real" "AutoLayout com.iosim.autolayout autolayout-real" "TextInput com.iosim.textinput textinput-real" "Alert com.iosim.alert alert-real"; do
             set -- $spec
             run_timeout 60 xcrun simctl install "$UDID" "$1.app" || echo "install $1 failed"
             run_timeout 30 xcrun simctl launch "$UDID" "$2" || echo "launch $1 failed"
