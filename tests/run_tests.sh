@@ -1233,6 +1233,97 @@ fi
 "$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
 sleep 0.4
 
+# ---------- 9h. UITableView sections, headers and per-row heights ----------
+"$ROOT/tools/build_app.sh" "$ROOT/demo/SectionApp.m" "$T/SectionApp" >/dev/null
+mkdir -p "$T/SectionApp.app"
+cp "$T/SectionApp" "$T/SectionApp.app/SectionApp"
+python3 - "$T/SectionApp.app/Info.plist" <<'PY'
+import plistlib, sys
+with open(sys.argv[1], "wb") as f:
+    plistlib.dump({
+        "CFBundleIdentifier": "com.iosim.sections",
+        "CFBundleExecutable": "SectionApp",
+        "CFBundleName": "Sections",
+        "CFBundlePackageType": "APPL",
+        "CFBundleVersion": "1",
+        "CFBundleShortVersionString": "1.0",
+    }, f)
+PY
+"$ROOT/tools/iosimctl" install "$UDID" "$T/SectionApp.app" >/dev/null
+sleep 0.5
+# Twentieth installed app: grid slot 26, second page row 2 column 2.
+"$ROOT/tools/iosimctl" ui "$UDID" tap 247.2778 322.5 >/dev/null
+if wait_log "[section] ready rows=5"; then
+    echo "ok   SpringBoard launches the sectioned table fixture"
+else
+    echo "FAIL section fixture launch"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/sections.png" >/dev/null
+if out="$(python3 - "$ROOT/tools" "$T/sections.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+c = pngpixel.px(rows, bpp, 200 * 3, 242 * 3)
+r, g, b = (c >> 16) & 255, (c >> 8) & 255, c & 255
+if not (40 < r < 90 and 20 < g < 60 and 70 < b < 120):
+    raise SystemExit("section row not at its header offset: %06x" % c)
+print("ok   section headers offset the rows below them")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL section layout"; echo "$out"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" tap 200 242 >/dev/null
+if wait_log "[section] select 0:2 Cherry"; then
+    echo "ok   tapping the third row maps through the header to 0:2"
+else
+    echo "FAIL section selection"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/sections-selected.png" >/dev/null
+if out="$(python3 - "$ROOT/tools" "$T/sections-selected.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+c = pngpixel.px(rows, bpp, 200 * 3, 242 * 3)
+r, g, b = (c >> 16) & 255, (c >> 8) & 255, c & 255
+if not (30 < r < 70 and abs(r - g) < 12 and abs(g - b) < 12):
+    raise SystemExit("selected row not highlighted: %06x" % c)
+print("ok   the selected row is drawn with the highlight color")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL section highlight"; echo "$out"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" tap 200 371 >/dev/null
+if wait_log "[section] select 1:1 Pea"; then
+    echo "ok   the second section's row heights resolve to 1:1"
+else
+    echo "FAIL second section selection"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/sections-second.png" >/dev/null
+if out="$(python3 - "$ROOT/tools" "$T/sections-second.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+c = pngpixel.px(rows, bpp, 200 * 3, 371 * 3)
+r, g, b = (c >> 16) & 255, (c >> 8) & 255, c & 255
+if not (30 < r < 70 and abs(r - g) < 12 and abs(g - b) < 12):
+    raise SystemExit("second section row not highlighted: %06x" % c)
+print("ok   the second section's selected row is highlighted too")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL second section highlight"; echo "$out"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
+sleep 0.4
+
 # ---------- 10. cross-process Mach services ----------
 # launchd owns the bootstrap namespace; two independent guest processes find
 # each other through it and exchange a Mach message over the service port.

@@ -1161,6 +1161,7 @@ enum {
     id _dataSource;
     double _rowHeight;
     long _selectedRow;
+    long _selectedSection;
     long _style;
     BOOL _needsReload;
 }
@@ -4131,6 +4132,93 @@ static id g_firstResponder;
 
 /* ------------------------------------------------------------ table views */
 
+static long table_sections(UITableView *table)
+{
+    if (table->_dataSource &&
+        [table->_dataSource respondsToSelector:
+            @selector(numberOfSectionsInTableView:)])
+    {
+        SEL sel = @selector(numberOfSectionsInTableView:);
+        return ((long (*)(id, void *, id))objc_msgSend)(
+            table->_dataSource, (void *)sel, table);
+    }
+    return 1;
+}
+
+static long table_rows(UITableView *table, long section)
+{
+    if (table->_dataSource &&
+        [table->_dataSource respondsToSelector:
+            @selector(tableView:numberOfRowsInSection:)])
+    {
+        SEL sel = @selector(tableView:numberOfRowsInSection:);
+        return ((long (*)(id, void *, id, long))objc_msgSend)(
+            table->_dataSource, (void *)sel, table, section);
+    }
+    return 0;
+}
+
+static id table_header_title(UITableView *table, long section)
+{
+    if (table->_delegate &&
+        [table->_delegate respondsToSelector:
+            @selector(tableView:titleForHeaderInSection:)])
+    {
+        SEL sel = @selector(tableView:titleForHeaderInSection:);
+        return ((id (*)(id, void *, id, long))objc_msgSend)(
+            table->_delegate, (void *)sel, table, section);
+    }
+    return nil;
+}
+
+static double table_header_height(UITableView *table, long section)
+{
+    id title = table_header_title(table, section);
+    if (!title)
+        return 0;
+    if (table->_delegate &&
+        [table->_delegate respondsToSelector:
+            @selector(tableView:heightForHeaderInSection:)])
+    {
+        SEL sel = @selector(tableView:heightForHeaderInSection:);
+        double height = ((double (*)(id, void *, id, long))objc_msgSend)(
+            table->_delegate, (void *)sel, table, section);
+        if (height > 0)
+            return height;
+    }
+    return table->_style == UITableViewStyleGrouped ? 32.0 : 28.0;
+}
+
+static double table_row_height(UITableView *table, NSIndexPath *path)
+{
+    if (table->_delegate &&
+        [table->_delegate respondsToSelector:
+            @selector(tableView:heightForRowAtIndexPath:)])
+    {
+        SEL sel = @selector(tableView:heightForRowAtIndexPath:);
+        double height = ((double (*)(id, void *, id, id))objc_msgSend)(
+            table->_delegate, (void *)sel, table, path);
+        if (height > 0)
+            return height;
+    }
+    return table->_rowHeight;
+}
+
+static double table_total_height(UITableView *table)
+{
+    double total = 0;
+    long sections = table_sections(table);
+    for (long s = 0; s < sections; s++)
+    {
+        total += table_header_height(table, s);
+        long rows = table_rows(table, s);
+        for (long r = 0; r < rows; r++)
+            total += table_row_height(
+                table, [NSIndexPath indexPathForRow:r inSection:s]);
+    }
+    return total;
+}
+
 @implementation UITableViewCell
 - (id)initWithStyle:(long)style reuseIdentifier:(id)reuseIdentifier
 {
@@ -4206,6 +4294,7 @@ static id g_firstResponder;
     {
         _rowHeight = 44.0;
         _selectedRow = -1;
+        _selectedSection = -1;
     }
     return self;
 }
@@ -4218,16 +4307,7 @@ static id g_firstResponder;
 }
 - (void)updateContentSize
 {
-    long rows = 0;
-    if (_dataSource &&
-        [_dataSource respondsToSelector:
-            @selector(tableView:numberOfRowsInSection:)])
-    {
-        SEL sel = @selector(tableView:numberOfRowsInSection:);
-        rows = ((long (*)(id, void *, id, long))objc_msgSend)(
-            _dataSource, (void *)sel, self, 0);
-    }
-    _contentSize = CGSizeMake(_frame.size.width, rows * _rowHeight);
+    _contentSize = CGSizeMake(_frame.size.width, table_total_height(self));
 }
 - (void)setDataSource:(id)dataSource
 {
@@ -4257,15 +4337,28 @@ static id g_firstResponder;
 {
     if (point.y < 0)
         return;
-    long row = (long)(point.y / _rowHeight);
-    if (row < 0)
-        return;
-    _selectedRow = row;
-    if (_delegate &&
-        [_delegate respondsToSelector:@selector(tableView:didSelectRowAtIndexPath:)])
+    double cursor = 0;
+    long sections = table_sections(self);
+    for (long s = 0; s < sections; s++)
     {
-        NSIndexPath *path = [NSIndexPath indexPathForRow:row inSection:0];
-        [_delegate tableView:self didSelectRowAtIndexPath:path];
+        cursor += table_header_height(self, s);
+        long rows = table_rows(self, s);
+        for (long r = 0; r < rows; r++)
+        {
+            NSIndexPath *path = [NSIndexPath indexPathForRow:r inSection:s];
+            double height = table_row_height(self, path);
+            if (point.y >= cursor && point.y < cursor + height)
+            {
+                _selectedSection = s;
+                _selectedRow = r;
+                if (_delegate &&
+                    [_delegate respondsToSelector:
+                        @selector(tableView:didSelectRowAtIndexPath:)])
+                    [_delegate tableView:self didSelectRowAtIndexPath:path];
+                return;
+            }
+            cursor += height;
+        }
     }
 }
 @end
@@ -6028,29 +6121,38 @@ static void render_view(UIView *view, double originX, double originY,
     if ([view isKindOfClass:[UITableView class]])
     {
         UITableView *table = (UITableView *)view;
-        long rows = 0;
-        if (table->_dataSource &&
-            [table->_dataSource respondsToSelector:
-                @selector(tableView:numberOfRowsInSection:)])
-        {
-            SEL sel = @selector(tableView:numberOfRowsInSection:);
-            rows = ((long (*)(id, void *, id, long))objc_msgSend)(
-                table->_dataSource, (void *)sel, table, 0);
-        }
-        double rowHeight = table->_rowHeight;
         double tableScrollY = table->_contentOffset.y;
+        double cursor = 0;
+        long sections = table_sections(table);
+        int headerAscent = 0, headerDescent = 0, headerLine = 0;
+        iosim_fb_font_metrics(IOSIM_FONT_REGULAR, 13, scale, &headerAscent,
+                              &headerDescent, &headerLine);
+        for (long section = 0; section < sections; section++)
+        {
+            id headerTitle = table_header_title(table, section);
+            double headerHeight = table_header_height(table, section);
+            if (headerHeight > 0)
+            {
+                int hy = y + (int)((cursor - tableScrollY) * scale + 0.5);
+                int hh = (int)(headerHeight * scale + 0.5);
+                if (headerTitle)
+                {
+                    iosim_fb_set_opacity(alpha);
+                    iosim_fb_font_text(x + (int)(16 * scale),
+                                       hy + hh / 2 + headerAscent / 2,
+                                       iosim_string_cstr(headerTitle),
+                                       IOSIM_FONT_REGULAR, 13, scale,
+                                       0x8e8e93);
+                }
+                cursor += headerHeight;
+            }
+        long rows = table_rows(table, section);
         for (long i = 0; i < rows; i++)
         {
-            NSIndexPath *path = [NSIndexPath indexPathForRow:i inSection:0];
-            if (table->_delegate &&
-                [table->_delegate respondsToSelector:
-                    @selector(tableView:heightForRowAtIndexPath:)])
-            {
-                SEL sel = @selector(tableView:heightForRowAtIndexPath:);
-                rowHeight = ((double (*)(id, void *, id, id))objc_msgSend)(
-                    table->_delegate, (void *)sel, table, path);
-            }
-            int ry = y + (int)((i * rowHeight - tableScrollY) * scale + 0.5);
+            NSIndexPath *path =
+                [NSIndexPath indexPathForRow:i inSection:section];
+            double rowHeight = table_row_height(table, path);
+            int ry = y + (int)((cursor - tableScrollY) * scale + 0.5);
             int rh = (int)(rowHeight * scale + 0.5);
             UITableViewCell *cell = nil;
             if (table->_dataSource &&
@@ -6063,11 +6165,12 @@ static void render_view(UIView *view, double originX, double originY,
             }
             if (cell)
             {
-                cell->_frame = CGRectMake(0, i * rowHeight - tableScrollY,
+                cell->_frame = CGRectMake(0, cursor - tableScrollY,
                                           frame.size.width, rowHeight);
                 [cell setFrame:cell->_frame];
                 UIColor *savedBackground = cell->_backgroundColor;
-                if (i == table->_selectedRow)
+                if (section == table->_selectedSection &&
+                    i == table->_selectedRow)
                     cell->_backgroundColor = [UIColor
                         colorWithRed:0.17 green:0.18 blue:0.20 alpha:1.0];
                 render_view(cell, originX + frame.origin.x,
@@ -6100,6 +6203,8 @@ static void render_view(UIView *view, double originX, double originY,
                                    cy - (int)(6 * scale),
                                    (int)(2.5 * scale), 0x0a84ff);
             }
+            cursor += rowHeight;
+        }
         }
         iosim_fb_set_opacity(1.0);
     }

@@ -456,8 +456,10 @@ decoded with libpng in `loader/image.c`.
 `frameworks/UIKit.m` maps the object model onto those primitives:
 
 - `UIView` renders its background, its `CALayer` sublayers, then its subviews;
-  `UIScrollView` shifts child origins by `contentOffset`; `UITableView` asks its
-  data source for cells per row and draws separators and accessories.
+  `UIScrollView` shifts child origins by `contentOffset`; `UITableView` walks
+  sections and rows (applying delegate header heights, title headers and
+  per-row heights), asks its data source for each cell and draws separators
+  and accessories, so a tap maps back through the same section geometry.
   `insertSubview:atIndex:`, `bringSubviewToFront:` and `sendSubviewToBack:`
   reorder the subview list.
 - `UICollectionViewFlowLayout` derives a column grid from the item size,

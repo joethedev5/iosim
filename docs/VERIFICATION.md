@@ -120,6 +120,19 @@ frame renders the highlight.
 | Pixels with max-channel error > 24 | **3.55 %** |
 | Text | same SFUI outlines, same per-size tracking, same cell metrics |
 
+### UIKit: sectioned table views
+
+`demo/SectionApp.m` builds a grouped table with two sections: a 32 pt
+"FRUITS" header over three 44 pt rows and a "VEGETABLES" header over two
+50 pt rows, each section painted a different color. The suite launches it
+from SpringBoard, samples the third row at (200, 242) pt (purple, so the
+header offset and 44 pt rows agree), taps it and the delegate reports
+`[section] select 0:2 Cherry`; the same point then reads the highlight gray.
+Tapping (200, 371) pt walks past the header and the first 50 pt row and the
+delegate reports `[section] select 1:1 Pea`, which also paints highlighted.
+Selection therefore shares one section/header/height computation with
+rendering.
+
 ### UIKit: collection views
 
 `demo/CollectionApp.m` puts a `UICollectionView` with a flow layout (100 pt

@@ -61,6 +61,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | Switch, slider, segmented, progress, page and activity controls in the iOS 26 glass design | ✅ |
 | Floating glass tab bar with per-item targets and content swapping | ✅ |
 | UICollectionView flow layout, reusable cells, selection and drag scrolling | ✅ |
+| UITableView sections, headers, per-row heights and section-aware selection | ✅ |
 
 The test suite exercises a real Apple-toolchain-built x86_64 UIKit app, a
 Foundation app using `NSLog` with a constant `CFString`, a Foundation
