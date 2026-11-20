@@ -536,6 +536,12 @@ decoded with libpng in `loader/image.c`.
   `-60 pt` and sends `UIControlEventValueChanged`. `endRefreshing` stops the
   infinite animation and returns the offset to zero. The spinner reuses the
   activity-indicator blade model with a rotating opacity tail.
+- `UIVisualEffectView` captures the framebuffer behind its frame
+  (`iosim_fb_capture`), runs a two-pass separable box blur over the RGB
+  channels, applies the blur effect's tint, and composites the result through
+  an RGBA blit whose alpha follows the layer's rounded-rect SDF, so the corner
+  radius stays sharp. Its `contentView` renders in the normal subview pass on
+  top of the glass.
 - `UICollectionViewFlowLayout` derives a column grid from the item size,
   interitem and line spacing and section insets; `UICollectionView` reloads
   cells as real subviews at those frames, so the scroll view's offset and clip

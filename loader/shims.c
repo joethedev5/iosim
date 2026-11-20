@@ -647,6 +647,7 @@ static const struct iosim_shim shims[] = {
     SHIM_DIRECT(iosim_fb_blit_rgba),
     SHIM_DIRECT(iosim_fb_blit_rgba_scaled),
     SHIM_DIRECT(iosim_fb_paste_xrgb),
+    SHIM_DIRECT(iosim_fb_capture),
     SHIM_DIRECT(iosim_fb_begin_offscreen),
     SHIM_DIRECT(iosim_fb_end_offscreen),
     SHIM_DIRECT(iosim_fb_free_offscreen),

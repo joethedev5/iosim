@@ -71,6 +71,7 @@ void *iosim_fb_begin_offscreen(unsigned width, unsigned height);
 uint32_t *iosim_fb_end_offscreen(void *state, int *out_w, int *out_h);
 void iosim_fb_free_offscreen(uint32_t *buf);
 void iosim_fb_paste_xrgb(const uint32_t *src);
+void iosim_fb_capture(int x, int y, int w, int h, uint32_t *out);
 void iosim_fb_fill_field(int x, int y, int w, int h, int radius,
                          const uint32_t *grid, int gw, int gh);
 void iosim_fb_blit_xrgb_scaled(const uint32_t *src, int sw, int sh,

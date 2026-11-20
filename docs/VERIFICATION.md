@@ -480,6 +480,21 @@ corner radius is really rendered. `removeAnimationForKey:@"group"` then logs
 `#ff3b30` at both points: the group's `key:index` children were all cleared,
 not just the first slot.
 
+### Graphics: UIVisualEffectView backdrop blur
+
+`demo/BlurApp.m` draws sixteen 25.125 pt black/white stripes and puts a dark
+`UIVisualEffectView` card with a 28 pt corner radius over them. The card's
+render pass captures its backdrop, box-blurs the RGB channels twice with a
+24 pt radius, tints the result and composites it inside the rounded-rect
+coverage mask. The suite's screenshot reads the sharp stripes outside the card
+at (12, 420) and (37, 420) pt as `#ffffff` and `#000000`, while the same two
+stripe positions inside the card, (60, 420) and (85, 420) pt, read `#48484a`
+and `#4c4d4e`: the alternating stripes have become the same dark gray average,
+with every channel within 30 of its pair. A point 4 pt inside the card's
+top-left corner is still `#000000` (the unblurred stripe), proving the rounded
+mask, and more than 3 000 near-white pixels in the label band show the
+"Vibrancy" label drawn on the contentView above the glass.
+
 ### Foundation: files, URLs and JSON
 
 `tests/foundation_io_test.m` is a Foundation-only executable. It creates

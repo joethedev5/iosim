@@ -2684,6 +2684,83 @@ fi
 "$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
 sleep 0.4
 
+# ---------- 19. UIVisualEffectView backdrop blur ----------
+# A blur card over black/white stripes captures its backdrop, box-blurs it
+# with a dark tint, keeps the rounded corners sharp and draws its content on
+# top.
+"$ROOT/tools/build_app.sh" "$ROOT/demo/BlurApp.m" "$T/BlurApp" >/dev/null
+mkdir -p "$T/BlurApp.app"
+cp "$T/BlurApp" "$T/BlurApp.app/BlurApp"
+python3 - "$T/BlurApp.app/Info.plist" <<'PY'
+import plistlib, sys
+with open(sys.argv[1], "wb") as f:
+    plistlib.dump({
+        "CFBundleIdentifier": "com.iosim.blur",
+        "CFBundleExecutable": "BlurApp",
+        "CFBundleName": "Blur",
+        "CFBundlePackageType": "APPL",
+        "CFBundleVersion": "1",
+        "CFBundleShortVersionString": "1.0",
+    }, f)
+PY
+"$ROOT/tools/iosimctl" install "$UDID" "$T/BlurApp.app" >/dev/null
+sleep 0.5
+# Thirty-second installed app: third page row 1 column 1.
+"$ROOT/tools/iosimctl" ui "$UDID" tap 154.7222 222.1667 >/dev/null
+if wait_log "[blur] ready stripes=16"; then
+    echo "ok   SpringBoard launches the blur fixture"
+else
+    echo "FAIL blur fixture launch"; fails=$((fails+1))
+fi
+sleep 0.4
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/blur.png" >/dev/null
+if out="$(python3 - "$ROOT/tools" "$T/blur.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+
+def px(x, y):
+    return pngpixel.px(rows, bpp, x * 3, y * 3)
+
+def channels(c):
+    return ((c >> 16) & 255, (c >> 8) & 255, c & 255)
+
+white_out = channels(px(12, 420))
+black_out = channels(px(37, 420))
+if not all(v > 230 for v in white_out):
+    raise SystemExit("sharp white stripe missing: %r" % (white_out,))
+if not all(v < 30 for v in black_out):
+    raise SystemExit("sharp black stripe missing: %r" % (black_out,))
+a = channels(px(60, 420))
+b = channels(px(85, 420))
+for name, c in (("a", a), ("b", b)):
+    if not all(40 <= v <= 130 for v in c):
+        raise SystemExit("blurred stripe %s out of range: %r" % (name, c))
+if any(abs(a[i] - b[i]) > 30 for i in range(3)):
+    raise SystemExit("blurred stripes not blended: %r vs %r" % (a, b))
+corner = channels(px(46, 256))
+if not all(v < 30 for v in corner):
+    raise SystemExit("rounded corner not left sharp: %r" % (corner,))
+label = 0
+for y in range(332 * 3, 368 * 3):
+    for x in range(120 * 3, 282 * 3):
+        c = pngpixel.px(rows, bpp, x, y)
+        if ((c >> 16) & 255) > 245 and ((c >> 8) & 255) > 245 and \
+                (c & 255) > 245:
+            label += 1
+if label < 200:
+    raise SystemExit("vibrancy label not over the blur: %d px" % label)
+print("ok   the card blurs its backdrop and draws its content above it")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL blur rendering"; echo "$out"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
+sleep 0.4
+
 "$ROOT/tools/iosimctl" shutdown "$UDID" >/dev/null
 
 if [ "$fails" -ne 0 ]; then

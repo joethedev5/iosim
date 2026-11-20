@@ -67,6 +67,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | Control Center: top-right drag, connectivity toggles, media, brightness/volume and utilities | ✅ |
 | UIView 2D affine transforms (translate/scale/rotate), layout callbacks, UIScrollView offsets | ✅ (basic) |
 | Layer clipping (`clipsToBounds`/`masksToBounds`), shadows and borders | ✅ |
+| UIVisualEffectView backdrop blur: capture, box blur, tint, rounded mask, contentView | ✅ |
 | Switch, slider, segmented, progress, page and activity controls in the iOS 26 glass design | ✅ |
 | Floating glass tab bar with per-item targets and content swapping | ✅ |
 | UICollectionView flow layout, multiple sections, reusable cells, selection, drag scrolling | ✅ |

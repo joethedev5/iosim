@@ -375,6 +375,27 @@ enum { UIAlertActionStyleDefault = 0, UIAlertActionStyleCancel = 1,
 - (void)stopAnimating;
 @end
 
+enum {
+    UIBlurEffectStyleExtraLight = 0,
+    UIBlurEffectStyleLight = 1,
+    UIBlurEffectStyleDark = 2,
+    UIBlurEffectStyleSystemUltraThinMaterial = 3,
+    UIBlurEffectStyleSystemThinMaterial = 4,
+    UIBlurEffectStyleSystemMaterial = 5,
+    UIBlurEffectStyleSystemThickMaterial = 6,
+    UIBlurEffectStyleSystemChromeMaterial = 7
+};
+
+@interface UIBlurEffect : NSObject
++ (UIBlurEffect *)effectWithStyle:(long)style;
+@end
+
+@interface UIVisualEffectView : UIView
+- (id)initWithEffect:(UIBlurEffect *)effect;
+- (UIBlurEffect *)effect;
+@property(readonly) UIView *contentView;
+@end
+
 @interface UIPageControl : UIView
 - (void)setNumberOfPages:(long)pages;
 - (void)setCurrentPage:(long)page;

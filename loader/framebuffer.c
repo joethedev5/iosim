@@ -348,6 +348,27 @@ void iosim_fb_paste_xrgb(const uint32_t *src)
         fb_pixels[i] = src[i];
 }
 
+/* Copy a rectangle of the current render target (the framebuffer or an
+ * offscreen pass) for backdrop effects; out-of-bounds pixels are zero. */
+void iosim_fb_capture(int x, int y, int w, int h, uint32_t *out)
+{
+    if (!fb_pixels || !out || w <= 0 || h <= 0)
+        return;
+    for (int yy = 0; yy < h; yy++)
+    {
+        int sy = y + yy;
+        for (int xx = 0; xx < w; xx++)
+        {
+            int sx = x + xx;
+            uint32_t c = 0;
+            if (sx >= 0 && sx < (int)fb_width && sy >= 0 &&
+                sy < (int)fb_height)
+                c = fb_pixels[(size_t)sy * fb_width + sx];
+            out[(size_t)yy * w + xx] = c;
+        }
+    }
+}
+
 void iosim_fb_blit_xrgb_scaled(const uint32_t *src, int sw, int sh,
                                int x, int y, int w, int h, double opacity)
 {

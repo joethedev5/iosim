@@ -103,6 +103,9 @@ extern void iosim_fb_free_offscreen(unsigned *buf);
 extern void iosim_fb_blit_rgba_scaled(int x, int y, int w, int h,
                                       const unsigned char *rgba,
                                       int sw, int sh, int stride);
+extern void iosim_fb_blit_rgba(int x, int y, int w, int h,
+                               const unsigned char *rgba, int stride);
+extern void iosim_fb_capture(int x, int y, int w, int h, unsigned *out);
 extern void iosim_fb_fill_linear_gradient_round_rect(int x, int y, int w,
                                                      int h, int radius,
                                                      unsigned start_color,
@@ -735,6 +738,36 @@ typedef enum {
 - (UIImage *)image;
 - (void)setContentMode:(int)mode;
 - (int)contentMode;
+@end
+
+enum {
+    UIBlurEffectStyleExtraLight = 0,
+    UIBlurEffectStyleLight = 1,
+    UIBlurEffectStyleDark = 2,
+    UIBlurEffectStyleSystemUltraThinMaterial = 3,
+    UIBlurEffectStyleSystemThinMaterial = 4,
+    UIBlurEffectStyleSystemMaterial = 5,
+    UIBlurEffectStyleSystemThickMaterial = 6,
+    UIBlurEffectStyleSystemChromeMaterial = 7
+};
+
+@interface UIBlurEffect : NSObject {
+@public
+    long _style;
+}
++ (UIBlurEffect *)effectWithStyle:(long)style;
+@end
+
+/* A backdrop-blurring container: its render pass captures the pixels behind
+ * it, box-blurs them with the effect's tint and draws its contentView on top. */
+@interface UIVisualEffectView : UIView {
+@public
+    UIBlurEffect *_effect;
+    UIView *_contentView;
+}
+- (id)initWithEffect:(UIBlurEffect *)effect;
+- (UIBlurEffect *)effect;
+- (UIView *)contentView;
 @end
 
 @interface UIViewController : NSObject {
@@ -4491,6 +4524,31 @@ static long datepicker_rows_for(UIDatePicker *picker, long component)
 - (int)contentMode { return _contentMode; }
 @end
 
+@implementation UIBlurEffect
++ (UIBlurEffect *)effectWithStyle:(long)style
+{
+    UIBlurEffect *effect = [[self alloc] init];
+    effect->_style = style;
+    return effect;
+}
+@end
+
+@implementation UIVisualEffectView
+- (id)initWithEffect:(UIBlurEffect *)effect
+{
+    self = [super initWithFrame:CGRectMake(0, 0, 0, 0)];
+    if (self)
+    {
+        _effect = effect;
+        _contentView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 0, 0)];
+        [self addSubview:_contentView];
+    }
+    return self;
+}
+- (UIBlurEffect *)effect { return _effect; }
+- (UIView *)contentView { return _contentView; }
+@end
+
 @implementation UIViewController
 - (id)init { return [super init]; }
 - (id)title { return _title; }
@@ -7551,6 +7609,80 @@ static void render_layer(CALayer *layer, double parentX, double parentY,
 static int g_render_offscreen;
 static UIView *g_no_transform_view;
 
+/* Separable box blur over an XRGB rectangle. Two passes approximate the
+ * Gaussian backdrop blur UIVisualEffectView applies behind its content. */
+static void blur_box_xrgb(unsigned *pix, int w, int h, int radius, int passes)
+{
+    if (!pix || w <= 0 || h <= 0 || radius < 1 || passes < 1)
+        return;
+    unsigned *tmp = malloc((unsigned long)w * h * sizeof(unsigned));
+    if (!tmp)
+        return;
+    int span = 2 * radius + 1;
+    for (int pass = 0; pass < passes; pass++)
+    {
+        for (int y = 0; y < h; y++)
+        {
+            unsigned *row = pix + (unsigned long)y * w;
+            unsigned *out = tmp + (unsigned long)y * w;
+            long r = 0, g = 0, b = 0;
+            for (int k = -radius; k <= radius; k++)
+            {
+                int x = k < 0 ? 0 : (k >= w ? w - 1 : k);
+                unsigned c = row[x];
+                r += (c >> 16) & 255;
+                g += (c >> 8) & 255;
+                b += c & 255;
+            }
+            for (int x = 0; x < w; x++)
+            {
+                out[x] = ((unsigned)(r / span) << 16) |
+                         ((unsigned)(g / span) << 8) | (unsigned)(b / span);
+                int add = x + radius + 1;
+                if (add >= w)
+                    add = w - 1;
+                int sub = x - radius;
+                if (sub < 0)
+                    sub = 0;
+                unsigned ca = row[add], cs = row[sub];
+                r += (long)((ca >> 16) & 255) - (long)((cs >> 16) & 255);
+                g += (long)((ca >> 8) & 255) - (long)((cs >> 8) & 255);
+                b += (long)(ca & 255) - (long)(cs & 255);
+            }
+        }
+        for (int x = 0; x < w; x++)
+        {
+            long r = 0, g = 0, b = 0;
+            for (int k = -radius; k <= radius; k++)
+            {
+                int y = k < 0 ? 0 : (k >= h ? h - 1 : k);
+                unsigned c = tmp[(unsigned long)y * w + x];
+                r += (c >> 16) & 255;
+                g += (c >> 8) & 255;
+                b += c & 255;
+            }
+            for (int y = 0; y < h; y++)
+            {
+                pix[(unsigned long)y * w + x] =
+                    ((unsigned)(r / span) << 16) |
+                    ((unsigned)(g / span) << 8) | (unsigned)(b / span);
+                int add = y + radius + 1;
+                if (add >= h)
+                    add = h - 1;
+                int sub = y - radius;
+                if (sub < 0)
+                    sub = 0;
+                unsigned ca = tmp[(unsigned long)add * w + x];
+                unsigned cs = tmp[(unsigned long)sub * w + x];
+                r += (long)((ca >> 16) & 255) - (long)((cs >> 16) & 255);
+                g += (long)((ca >> 8) & 255) - (long)((cs >> 8) & 255);
+                b += (long)(ca & 255) - (long)(cs & 255);
+            }
+        }
+    }
+    free(tmp);
+}
+
 static void render_view(UIView *view, double originX, double originY,
                         double scale, double parentAlpha)
 {
@@ -7663,7 +7795,8 @@ static void render_view(UIView *view, double originX, double originY,
     }
 
     if (view->_backgroundColor && view->_backgroundColor->_a > 0.001 &&
-        w > 0 && h > 0)
+        w > 0 && h > 0 &&
+        ![view isKindOfClass:[UIVisualEffectView class]])
     {
         unsigned color = color_rgb(view->_backgroundColor);
         iosim_fb_set_opacity(alpha * view->_backgroundColor->_a);
@@ -8402,6 +8535,103 @@ static void render_view(UIView *view, double originX, double originY,
             iosim_fb_fill_rect(caretX + (int)(1 * scale),
                                caretBaseline - ascent, (int)(2 * scale),
                                lineHeight, 0x426bf2);
+    }
+
+    if ([view isKindOfClass:[UIVisualEffectView class]])
+    {
+        UIVisualEffectView *ve = (UIVisualEffectView *)view;
+        if (ve->_contentView)
+            ((UIView *)ve->_contentView)->_frame =
+                CGRectMake(0, 0, frame.size.width, frame.size.height);
+        long style =
+            ve->_effect ? ve->_effect->_style : UIBlurEffectStyleLight;
+        if (w > 0 && h > 0)
+        {
+            unsigned long count = (unsigned long)w * h;
+            unsigned *cap = malloc(count * sizeof(unsigned));
+            if (cap)
+            {
+                iosim_fb_capture(x, y, w, h, cap);
+                blur_box_xrgb(cap, w, h, (int)(24 * scale + 0.5), 2);
+                unsigned tint;
+                double tint_alpha;
+                if (style == UIBlurEffectStyleDark)
+                {
+                    tint = 0x101014;
+                    tint_alpha = 0.45;
+                }
+                else if (style == UIBlurEffectStyleExtraLight)
+                {
+                    tint = 0xffffff;
+                    tint_alpha = 0.55;
+                }
+                else
+                {
+                    tint = 0xf2f2f7;
+                    tint_alpha = 0.35;
+                }
+                unsigned char *rgba = malloc(count * 4);
+                if (rgba)
+                {
+                    double radius_pt =
+                        view->_layer
+                            ? layer_key_value(view->_layer, "cornerRadius",
+                                              view->_layer->_cornerRadius)
+                            : 0.0;
+                    int rr = (int)(radius_pt * scale + 0.5);
+                    if (rr * 2 > w)
+                        rr = w / 2;
+                    if (rr * 2 > h)
+                        rr = h / 2;
+                    double cx = w / 2.0, cy = h / 2.0;
+                    double exr = w / 2.0 - rr, eyr = h / 2.0 - rr;
+                    unsigned tr = (tint >> 16) & 255;
+                    unsigned tg = (tint >> 8) & 255;
+                    unsigned tb = tint & 255;
+                    for (int yy = 0; yy < h; yy++)
+                    {
+                        unsigned char *out = rgba + (unsigned long)yy * w * 4;
+                        for (int xx = 0; xx < w; xx++)
+                        {
+                            unsigned c = cap[(unsigned long)yy * w + xx];
+                            double ir = (1.0 - tint_alpha) *
+                                            ((c >> 16) & 255) +
+                                        tr * tint_alpha;
+                            double ig = (1.0 - tint_alpha) *
+                                            ((c >> 8) & 255) +
+                                        tg * tint_alpha;
+                            double ib =
+                                (1.0 - tint_alpha) * (c & 255) + tb * tint_alpha;
+                            double px = xx + 0.5 - cx, py = yy + 0.5 - cy;
+                            double qx = __builtin_fabs(px) - exr;
+                            double qy = __builtin_fabs(py) - eyr;
+                            double axr = qx > 0 ? qx : 0;
+                            double ayr = qy > 0 ? qy : 0;
+                            double outside =
+                                __builtin_sqrt(axr * axr + ayr * ayr);
+                            double inside = qx > qy ? qx : qy;
+                            double dist =
+                                outside + (inside < 0 ? inside : 0) - rr;
+                            double cov = 0.5 - dist;
+                            unsigned a;
+                            if (cov <= 0)
+                                a = 0;
+                            else if (cov >= 1)
+                                a = 255;
+                            else
+                                a = (unsigned)(cov * 255.0 + 0.5);
+                            out[xx * 4] = (unsigned char)(ir + 0.5);
+                            out[xx * 4 + 1] = (unsigned char)(ig + 0.5);
+                            out[xx * 4 + 2] = (unsigned char)(ib + 0.5);
+                            out[xx * 4 + 3] = (unsigned char)a;
+                        }
+                    }
+                    iosim_fb_blit_rgba(x, y, w, h, rgba, w * 4);
+                    free(rgba);
+                }
+                free(cap);
+            }
+        }
     }
 
     double scrollX = 0, scrollY = 0;
