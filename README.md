@@ -28,12 +28,34 @@ runners**, combined with the public Darling and Apple dyld sources.
 | Reimplemented `UIKit.framework` / `Foundation.framework` in a runtime root | ✅ (lite) |
 | `simctl`-style device lifecycle, boot, install, launch, spawn | ✅ |
 | Scene lifecycle (`UIWindowScene`, `UISceneDelegate`) required by iOS 27 | ✅ |
-| Software framebuffer, SF font rendering, UIKit subset rendering | ✅ |
-| CoreAnimation / Mach IPC / XPC / libdispatch | 🚧 roadmap |
+| Software framebuffer, SF font rendering, UIKit view rendering | ✅ |
+| Touch hit-testing, target/action, table selection, event FIFO run loop | ✅ |
+| UIView animations (frame, alpha), CALayer backing/opacity/corner radius | ✅ |
+| CoreAnimation paths, gradients, sublayers, PNG images | ✅ |
+| Foundation collections, strings, notifications, timers, NSIndexPath | ✅ |
+| libdispatch queues, groups, semaphores; main-queue drain from UIKit | ✅ |
+| Mach ports/messages, bootstrap service registry, in-process XPC | ✅ |
+| SpringBoard-like home screen, icon grid, dock, launch overlay | ✅ |
+| UIView transforms (translation/scale), layout callbacks, UIScrollView offsets | ✅ (basic) |
 
 The test suite exercises a real Apple-toolchain-built x86_64 UIKit app, a
 Foundation app using `NSLog` with a constant `CFString`, an Objective-C app
-with its own class, and a two-image dylib app.
+with its own class, and a two-image dylib app. Three additional fixtures run
+natively: a graphics app using `CAGradientLayer`, `CAShapeLayer` and
+`UIImageView`; a `UITableView` app with a data source, reusable-style cells,
+accessories and selection; and a services test that round-trips Mach messages,
+registers a bootstrap service, uses libdispatch queues/semaphores/groups and
+sends an XPC dictionary between a listener and a client.
+
+```sh
+DYLD_ROOT_PATH=$PWD/runtime ./build/iosim-run build/binaries/services_test_x86_64
+# dispatch, Mach, bootstrap and XPC lines, then: services: done
+
+IOSIM_SHELL=1 DYLD_ROOT_PATH=$PWD/runtime IOSIM_FONT_DIR=$PWD/build/fonts/ios \
+  SIMULATOR_MAINSCREEN_WIDTH=1206 SIMULATOR_MAINSCREEN_HEIGHT=2622 \
+  ./build/iosim-run path/to/AppBinary
+# SpringBoard-like home screen; tap icons through IOSIM_EVENT_FIFO
+```
 
 **Same-app parity:** one `HelloSimApp.m` compiled by Apple clang, run on the
 real iPhone 18 Pro simulator (arm64) and natively under iosim (x86_64). The
