@@ -274,11 +274,13 @@ are covered. UITextView maps taps to byte indices, selects words on a second
 tap, clamps programmatic selectedRange and replaces/removes selected ranges;
 the renderer paints the selection highlight. CGContextClip rasterizes path
 masks and intersects active masks; framebuffer fills, strokes, glyphs and
-image blits honor them. Quadratic/cubic CGPath and CGContext curves flatten
-into 24/32 line segments; UIBezierPath exposes the same methods. CGGradient
+image blits honor them. Quadratic/cubic CGPath, CGContext and UIBezierPath
+curves flatten adaptively from the second-derivative bound (1 to 128
+segments). CGGradient
 stores multiple stops and CGContextDrawLinearGradient interpolates them
-per-pixel through clip and mask. Still missing: color management and adaptive
-curve subdivision.
+per-pixel through clip and mask; CALayer masks push 8-bit coverage for whole
+layer trees; CAGradientLayer interpolates multiple stops with explicit or
+even locations. Still missing: color management.
 
 ## 2026-11-20: CALayer masks
 
@@ -308,6 +310,22 @@ curve subdivision.
   directly with the absolute gradient axis.
 - Fixture `tests/cagradient_test.m` checks the 0.25 explicit stop, even
   spacing, and a 30-point rounded layer's clipped corner.
+
+## 2026-11-20: adaptive curve subdivision
+
+- Curve flattening moved from fixed 24/32 samples to the standard
+  second-derivative bound: a curve rendered with n lines deviates by at most
+  `max|B''| / (8 n^2)`, with `max|B''| = 6L` for cubics and `2L` for
+  quadratics (L is the larger second difference). At 0.25 points that gives
+  `n = ceil(sqrt(3L))` and `n = ceil(sqrt(L))` respectively, clamped to
+  [1, 128]. Collinear control points collapse to a single segment.
+- The shared inline helpers live in `coregraphics_lite.h` and are used by
+  `CGPathAddQuadCurveToPoint`/`CGPathAddCurveToPoint`,
+  `CGContextAddQuadCurveToPoint`/`CGContextAddCurveToPoint` and
+  `UIBezierPath`'s two curve methods, so every consumer flattens alike.
+- Fixture numbers: the 80x20-point cubic gives 20 elements, its measured
+  deviation stays inside 0.25, the quadratic gives 6, a straight quadratic
+  gives 2, and a 300x900 S-curve gives 55.
 
 ## Open directions
 

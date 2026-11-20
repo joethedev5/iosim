@@ -5162,9 +5162,11 @@ static long datepicker_rows_for(UIDatePicker *picker, long component)
 {
     double x0 = _count > 0 ? _xs[_count - 1] : 0;
     double y0 = _count > 0 ? _ys[_count - 1] : 0;
-    for (int i = 1; i <= 24; i++)
+    int steps = iosim_cg_quad_segments(x0, y0, control.x, control.y,
+                                       point.x, point.y);
+    for (int i = 1; i <= steps; i++)
     {
-        double t = (double)i / 24.0;
+        double t = (double)i / steps;
         double u = 1.0 - t;
         [self addLineToPoint:CGPointMake(
             u * u * x0 + 2 * u * t * control.x + t * t * point.x,
@@ -5176,9 +5178,12 @@ static long datepicker_rows_for(UIDatePicker *picker, long component)
 {
     double x0 = _count > 0 ? _xs[_count - 1] : 0;
     double y0 = _count > 0 ? _ys[_count - 1] : 0;
-    for (int i = 1; i <= 32; i++)
+    int steps = iosim_cg_cubic_segments(x0, y0, control1.x, control1.y,
+                                        control2.x, control2.y, point.x,
+                                        point.y);
+    for (int i = 1; i <= steps; i++)
     {
-        double t = (double)i / 32.0;
+        double t = (double)i / steps;
         double u = 1.0 - t;
         [self addLineToPoint:CGPointMake(
             u * u * u * x0 + 3 * u * u * t * control1.x +

@@ -438,8 +438,12 @@ for both standalone sublayers and a view's backing layer. Device RGB and gray
 color spaces are singletons; `CGColorCreate` converts gray components to RGB
 and `CGColorGetColorSpace` reports the originating space. Paths support
 bounding boxes, even-odd point containment, copies and rectangle
-constructors. Quadratic and cubic curve entry points sample 24/32 segments
-into the line list, and UIBezierPath exposes the same two curve methods.
+constructors. Quadratic and cubic curve entry points flatten adaptively:
+the helper shared with UIBezierPath bounds the error by `max|B''| / (8 n^2)`
+and picks `n` from the curve's second differences for a 0.25-point flatness
+tolerance, collapsing straight curves to one segment and capping sharp ones
+at 128. `CGPathApply`, `CGContextAddPath`, `CAShapeLayer` and UIBezierPath
+all consume the same flattened points.
 `CGGradient` keeps color components and locations; `CGContextDrawLinearGradient`
 projects each pixel onto the axis and interpolates the surrounding stops
 before blending through the clip and mask. `CALayer.mask` renders the mask
@@ -458,8 +462,7 @@ absent, and fills through the same multi-stop path CoreGraphics uses. Rounded
 gradient layers render into an offscreen pass, mask their corners, and
 composite back, so corner radii and layer alpha stay antialiased. Path
 clipping is supported through
-even-odd masks; color management and adaptive curve subdivision remain future
-work.
+even-odd masks; color management remains future work.
 
 UIScrollView tracks recent pointer velocity while dragging instead of
 averaging the whole gesture. A release above 50 pt/s records the deceleration

@@ -572,9 +572,10 @@ void CGContextAddQuadCurveToPoint(CGContextRef context, double cpx,
         return;
     double x0 = context->count > 0 ? context->xs[context->count - 1] : 0;
     double y0 = context->count > 0 ? context->ys[context->count - 1] : 0;
-    for (int i = 1; i <= 24; i++)
+    int steps = iosim_cg_quad_segments(x0, y0, cpx, cpy, x, y);
+    for (int i = 1; i <= steps; i++)
     {
-        double t = (double)i / 24.0;
+        double t = (double)i / steps;
         double u = 1.0 - t;
         CGContextAddLineToPoint(context,
                                 u * u * x0 + 2 * u * t * cpx + t * t * x,
@@ -591,9 +592,10 @@ void CGContextAddCurveToPoint(CGContextRef context, double cp1x, double cp1y,
         return;
     double x0 = context->count > 0 ? context->xs[context->count - 1] : 0;
     double y0 = context->count > 0 ? context->ys[context->count - 1] : 0;
-    for (int i = 1; i <= 32; i++)
+    int steps = iosim_cg_cubic_segments(x0, y0, cp1x, cp1y, cp2x, cp2y, x, y);
+    for (int i = 1; i <= steps; i++)
     {
-        double t = (double)i / 32.0;
+        double t = (double)i / steps;
         double u = 1.0 - t;
         CGContextAddLineToPoint(
             context,
@@ -1249,7 +1251,7 @@ void CGPathAddQuadCurveToPoint(CGPathRef pathRef, const void *transform,
         return;
     double x0, y0;
     cg_path_current_point(path, &x0, &y0);
-    int steps = 24;
+    int steps = iosim_cg_quad_segments(x0, y0, cpx, cpy, x, y);
     for (int i = 1; i <= steps; i++)
     {
         double t = (double)i / steps;
@@ -1270,7 +1272,7 @@ void CGPathAddCurveToPoint(CGPathRef pathRef, const void *transform,
         return;
     double x0, y0;
     cg_path_current_point(path, &x0, &y0);
-    int steps = 32;
+    int steps = iosim_cg_cubic_segments(x0, y0, cp1x, cp1y, cp2x, cp2y, x, y);
     for (int i = 1; i <= steps; i++)
     {
         double t = (double)i / steps;

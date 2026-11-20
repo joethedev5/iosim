@@ -670,8 +670,14 @@ bounding box `10,10 20x20`, contains `(15,15)`, rejects `(100,100)`, and a
 copy contains `(20,20)`. A triangle path used as `CGContextClip` admits a
 green fill at `(60,270)` inside the triangle while `(50,50)` outside stays
 the earlier red, proving the even-odd mask rather than a bounding rectangle.
-A cubic `CGPathAddCurveToPoint` produces 33 elements (move plus 32
-flattening lines) and a quadratic produces 25 (move plus 24 lines). A
+A cubic `CGPathAddCurveToPoint` from `(10,10)` to `(90,10)` with control
+points `(30,0)` and `(70,60)` produces 20 elements (move plus 19 adaptive
+lines); sampling 201 points on the true curve against the flattened polyline
+keeps the maximum deviation inside the 0.25-point tolerance. A quadratic
+produces 6 elements, a quadratic whose control point lies on the straight
+line collapses to one line (2 elements), and a large S-curve produces 55
+elements, showing the segment count follows curvature rather than a fixed
+constant. A
 red-to-blue two-stop `CGGradient` drawn into a 100x20 image context is red at
 the left edge and approximately `0x7e0081` at the midpoint, so per-pixel stop
 interpolation runs through the offscreen context.

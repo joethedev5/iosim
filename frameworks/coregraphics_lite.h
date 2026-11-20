@@ -148,4 +148,48 @@ void CGContextDrawRadialGradient(CGContextRef context, CGGradientRef gradient,
                                  CGPoint endCenter, double endRadius,
                                  unsigned options);
 
+/* Adaptive curve flattening. A curve chopped into n segments deviates from
+ * its true shape by at most max|B''| / (8 n^2); |B''| is 6 times the larger
+ * cubic second difference or 2 times the quadratic one, giving the segment
+ * counts below for a 0.25 point flatness tolerance. Straight curves
+ * degenerate to a single segment, sharp ones stay under the cap. */
+#define IOSIM_CG_FLATTEN_TOLERANCE 0.25
+#define IOSIM_CG_MAX_CURVE_SEGMENTS 128
+
+static inline int iosim_cg_cubic_segments(double x0, double y0, double x1,
+                                          double y1, double x2, double y2,
+                                          double x3, double y3)
+{
+    double d1x = x0 - 2 * x1 + x2, d1y = y0 - 2 * y1 + y2;
+    double d2x = x1 - 2 * x2 + x3, d2y = y1 - 2 * y2 + y3;
+    double l1 = __builtin_sqrt(d1x * d1x + d1y * d1y);
+    double l2 = __builtin_sqrt(d2x * d2x + d2y * d2y);
+    double l = l1 > l2 ? l1 : l2;
+    if (l <= 1e-9)
+        return 1;
+    int n = (int)__builtin_ceil(
+        __builtin_sqrt(3.0 * l / (4.0 * IOSIM_CG_FLATTEN_TOLERANCE)));
+    if (n < 1)
+        n = 1;
+    if (n > IOSIM_CG_MAX_CURVE_SEGMENTS)
+        n = IOSIM_CG_MAX_CURVE_SEGMENTS;
+    return n;
+}
+
+static inline int iosim_cg_quad_segments(double x0, double y0, double cx,
+                                         double cy, double x1, double y1)
+{
+    double dx = x0 - 2 * cx + x1, dy = y0 - 2 * cy + y1;
+    double l = __builtin_sqrt(dx * dx + dy * dy);
+    if (l <= 1e-9)
+        return 1;
+    int n = (int)__builtin_ceil(
+        __builtin_sqrt(l / (4.0 * IOSIM_CG_FLATTEN_TOLERANCE)));
+    if (n < 1)
+        n = 1;
+    if (n > IOSIM_CG_MAX_CURVE_SEGMENTS)
+        n = IOSIM_CG_MAX_CURVE_SEGMENTS;
+    return n;
+}
+
 #endif

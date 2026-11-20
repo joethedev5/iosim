@@ -13,11 +13,27 @@ static unsigned pixel(unsigned *pixels, int x, int y)
 
 static int g_element_count;
 
+static double g_points[256][2];
+static int g_point_count;
+
 static void count_element(void *info, const CGPathElement *element)
 {
     (void)info;
     (void)element;
     g_element_count++;
+}
+
+static void collect_curve_point(void *info, const CGPathElement *element)
+{
+    (void)info;
+    if (element->type != kCGPathElementMoveToPoint &&
+        element->type != kCGPathElementAddLineToPoint)
+        return;
+    if (g_point_count >= 256)
+        return;
+    g_points[g_point_count][0] = element->points[0].x;
+    g_points[g_point_count][1] = element->points[0].y;
+    g_point_count++;
 }
 
 int main(void)
@@ -136,6 +152,37 @@ int main(void)
     g_element_count = 0;
     CGPathApply(curve_path, 0, count_element);
     printf("[cg] curve elements %d\n", g_element_count);
+    g_point_count = 0;
+    CGPathApply(curve_path, 0, collect_curve_point);
+    double worst = 0;
+    for (int s = 0; s <= 200; s++)
+    {
+        double t = (double)s / 200.0, u = 1.0 - t;
+        double px = u * u * u * 10 + 3 * u * u * t * 30 +
+                    3 * u * t * t * 70 + t * t * t * 90;
+        double py = u * u * u * 10 + 0 + 3 * u * t * t * 60 +
+                    t * t * t * 10;
+        double best = 1e9;
+        for (int i = 0; i + 1 < g_point_count; i++)
+        {
+            double ax = g_points[i][0], ay = g_points[i][1];
+            double bx = g_points[i + 1][0], by = g_points[i + 1][1];
+            double dx = bx - ax, dy = by - ay;
+            double len2 = dx * dx + dy * dy;
+            double f = len2 > 0 ? ((px - ax) * dx + (py - ay) * dy) / len2
+                                : 0;
+            if (f < 0) f = 0;
+            if (f > 1) f = 1;
+            double qx = ax + f * dx - px, qy = ay + f * dy - py;
+            double d = __builtin_sqrt(qx * qx + qy * qy);
+            if (d < best)
+                best = d;
+        }
+        if (best > worst)
+            worst = best;
+    }
+    printf("[cg] curve error %d\n",
+           worst <= IOSIM_CG_FLATTEN_TOLERANCE + 0.01);
     CGPathRelease(curve_path);
     CGPathRef quad_path = CGPathCreateMutable();
     CGPathMoveToPoint(quad_path, 0, 10, 10);
@@ -144,6 +191,20 @@ int main(void)
     CGPathApply(quad_path, 0, count_element);
     printf("[cg] quad elements %d\n", g_element_count);
     CGPathRelease(quad_path);
+    CGPathRef gentle_path = CGPathCreateMutable();
+    CGPathMoveToPoint(gentle_path, 0, 0, 0);
+    CGPathAddQuadCurveToPoint(gentle_path, 0, 10, 10, 20, 20);
+    g_element_count = 0;
+    CGPathApply(gentle_path, 0, count_element);
+    printf("[cg] curve gentle %d\n", g_element_count);
+    CGPathRelease(gentle_path);
+    CGPathRef sharp_path = CGPathCreateMutable();
+    CGPathMoveToPoint(sharp_path, 0, 0, 0);
+    CGPathAddCurveToPoint(sharp_path, 0, 0, 300, 300, -300, 300, 0);
+    g_element_count = 0;
+    CGPathApply(sharp_path, 0, count_element);
+    printf("[cg] curve sharp %d\n", g_element_count);
+    CGPathRelease(sharp_path);
 
     unsigned pixels[300 * 300];
     iosim_fb_capture(0, 0, 300, 300, pixels);

@@ -3188,10 +3188,16 @@ check "[cg] pathcopy inside=1" "$out" \
     "CGPathCreateCopy duplicates path geometry"
 check "[cg] clip path inside 00ff00 outside ff0000" "$out" \
     "CGContextClip rasterizes a non-rectangular clip mask"
-check "[cg] curve elements 33" "$out" \
-    "CGPathAddCurveToPoint flattens a cubic into 32 line elements"
-check "[cg] quad elements 25" "$out" \
-    "CGPathAddQuadCurveToPoint flattens a quadratic into 24 line elements"
+check "[cg] curve elements 20" "$out" \
+    "CGPathAddCurveToPoint subdivides from the second-derivative bound"
+check "[cg] curve error 1" "$out" \
+    "the flattened cubic stays within the 0.25-point flatness tolerance"
+check "[cg] quad elements 6" "$out" \
+    "CGPathAddQuadCurveToPoint adapts its segment count"
+check "[cg] curve gentle 2" "$out" \
+    "a straight quadratic collapses to one segment"
+check "[cg] curve sharp 55" "$out" \
+    "a sharp cubic subdivides far more finely than a gentle one"
 check "[cg] gradient 1 1" "$out" \
     "CGContextDrawLinearGradient interpolates color stops across a context"
 
