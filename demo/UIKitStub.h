@@ -6,6 +6,7 @@
 __attribute__((objc_root_class))
 @interface NSObject
 + (id)alloc;
++ (Class)class;
 - (id)init;
 - (id)retain;
 - (void)release;
@@ -15,7 +16,25 @@ __attribute__((objc_root_class))
 @interface UIResponder : NSObject
 @end
 
+@class UIApplication;
+@class UISceneConfiguration;
+@class UISceneSession;
+@class UISceneConnectionOptions;
+@class UIScene;
+@class UIWindowScene;
+
 @protocol UIApplicationDelegate
+@optional
+- (UISceneConfiguration *)application:(UIApplication *)application
+    configurationForConnectingSceneSession:(UISceneSession *)session
+    options:(UISceneConnectionOptions *)options;
+@end
+
+@protocol UIWindowSceneDelegate
+@optional
+- (void)scene:(UIScene *)scene
+    willConnectToSession:(UISceneSession *)session
+    options:(UISceneConnectionOptions *)connectionOptions;
 @end
 
 @interface CALayer : NSObject
@@ -43,19 +62,39 @@ __attribute__((objc_root_class))
 @interface UIView : UIResponder
 - (id)initWithFrame:(CGRect)frame;
 @property CGRect frame;
-@property(nonatomic) UIColor *backgroundColor;
+@property(nonatomic, retain) UIColor *backgroundColor;
 @property(readonly) CALayer *layer;
 - (void)addSubview:(UIView *)view;
 @end
 
 @interface UILabel : UIView
-@property(nonatomic) id text;
-@property(nonatomic) UIColor *textColor;
-@property(nonatomic) UIFont *font;
+@property(nonatomic, retain) id text;
+@property(nonatomic, retain) UIColor *textColor;
+@property(nonatomic, retain) UIFont *font;
 @property int textAlignment;
 @end
 
+@interface UIScene : NSObject
+@end
+
+@interface UIWindowScene : UIScene
+@end
+
+@interface UISceneSession : NSObject
+@end
+
+@interface UISceneConnectionOptions : NSObject
+@end
+
+@interface UISceneConfiguration : NSObject
+- (id)initWithName:(id)name sessionRole:(id)role;
+@property(nonatomic) Class delegateClass;
+@end
+
+extern id UIWindowSceneSessionRoleApplication;
+
 @interface UIWindow : UIView
+- (id)initWithWindowScene:(UIWindowScene *)scene;
 - (void)makeKeyAndVisible;
 @end
 

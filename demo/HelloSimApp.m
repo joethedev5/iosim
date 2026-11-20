@@ -4,21 +4,45 @@
 #import "UIKitStub.h"
 #endif
 
-@interface AppDelegate : UIResponder <UIApplicationDelegate>
+@interface SceneDelegate : UIResponder <UIWindowSceneDelegate>
 @property (nonatomic, retain) UIWindow *window;
+@end
+
+@interface AppDelegate : UIResponder <UIApplicationDelegate>
 @end
 
 @implementation AppDelegate
 
-- (BOOL)application:(UIApplication *)application
-    didFinishLaunchingWithOptions:(id)launchOptions
+- (UISceneConfiguration *)application:(UIApplication *)application
+    configurationForConnectingSceneSession:(UISceneSession *)session
+    options:(UISceneConnectionOptions *)options
 {
-    (void)launchOptions;
+    (void)application;
+    (void)session;
+    (void)options;
+    UISceneConfiguration *configuration = [[UISceneConfiguration alloc]
+        initWithName:@"Default Configuration"
+         sessionRole:UIWindowSceneSessionRoleApplication];
+    configuration.delegateClass = [SceneDelegate class];
+    return configuration;
+}
+
+@end
+
+@implementation SceneDelegate
+
+- (void)scene:(UIScene *)scene
+    willConnectToSession:(UISceneSession *)session
+                 options:(UISceneConnectionOptions *)connectionOptions
+{
+    (void)session;
+    (void)connectionOptions;
 
     CGRect screen = [[UIScreen mainScreen] bounds];
     double width = screen.size.width;
 
-    self.window = [[UIWindow alloc] initWithFrame:screen];
+    self.window = [[UIWindow alloc] initWithWindowScene:(UIWindowScene *)scene];
+    self.window.frame = screen;
     self.window.backgroundColor =
         [UIColor colorWithRed:0.043 green:0.063 blue:0.125 alpha:1.0];
 
@@ -95,7 +119,6 @@
     [self.window addSubview:footer];
 
     [self.window makeKeyAndVisible];
-    return YES;
 }
 
 @end

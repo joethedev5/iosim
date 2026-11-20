@@ -15,3 +15,27 @@ __OBJC_PROTOCOL_$_UIApplicationDelegate:
     .quad 0
     .quad 0
     .quad 0
+
+    .p2align 3
+    .globl __OBJC_PROTOCOL_$_UIWindowSceneDelegate
+__OBJC_PROTOCOL_$_UIWindowSceneDelegate:
+    .quad 0
+    .quad 0
+    .quad 0
+    .quad 0
+    .quad 0
+    .quad 0
+    .quad 0
+    .quad 0
+
+    .p2align 3
+    .globl __OBJC_PROTOCOL_$_UISceneDelegate
+__OBJC_PROTOCOL_$_UISceneDelegate:
+    .quad 0
+    .quad 0
+    .quad 0
+    .quad 0
+    .quad 0
+    .quad 0
+    .quad 0
+    .quad 0

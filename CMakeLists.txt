@@ -8,6 +8,8 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE RelWithDebInfo)
 endif()
 
+find_package(Freetype REQUIRED)
+
 add_executable(iosim-run
   loader/main.c
   loader/macho.c
@@ -21,4 +23,4 @@ add_executable(iosim-run
 )
 target_include_directories(iosim-run PRIVATE loader)
 target_compile_options(iosim-run PRIVATE -Wall -Wextra -Wno-unused-parameter)
-target_link_libraries(iosim-run PRIVATE dl m z)
+target_link_libraries(iosim-run PRIVATE dl m z Freetype::Freetype)

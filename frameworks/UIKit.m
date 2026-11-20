@@ -23,9 +23,22 @@ extern void iosim_fb_fill_round_rect(int x, int y, int w, int h, int radius,
 extern void iosim_fb_text(int x, int y, int scale, unsigned color,
                           const char *text);
 extern int  iosim_fb_text_width(const char *text, int scale);
+#define IOSIM_FONT_REGULAR  0
+#define IOSIM_FONT_BOLD     1
+#define IOSIM_FONT_SEMIBOLD 2
+
+extern int  iosim_fb_font_text_width(const char *text, int style,
+                                     double size_pt, double scale);
+extern void iosim_fb_font_text(int x, int baseline_y, const char *text,
+                               int style, double size_pt, double scale,
+                               unsigned color);
+extern void iosim_fb_font_metrics(int style, double size_pt, double scale,
+                                  int *ascent, int *descent,
+                                  int *line_height);
 extern int  iosim_fb_present(const char *path);
 
 @class UIView;
+@class UIWindowScene;
 
 @interface CALayer : NSObject {
 @public
@@ -110,6 +123,7 @@ extern int  iosim_fb_present(const char *path);
 @end
 
 @interface UIWindow : UIView
+- (id)initWithWindowScene:(UIWindowScene *)scene;
 - (void)makeKeyAndVisible;
 + (UIWindow *)keyWindow;
 @end
@@ -122,6 +136,36 @@ extern int  iosim_fb_present(const char *path);
 - (void)setDelegate:(id)delegate;
 - (id)delegate;
 @end
+
+@interface UIScene : NSObject {
+@public
+    id _delegate;
+}
+- (void)setDelegate:(id)delegate;
+- (id)delegate;
+@end
+
+@interface UIWindowScene : UIScene
+@end
+
+@interface UISceneSession : NSObject
+@end
+
+@interface UISceneConnectionOptions : NSObject
+@end
+
+@interface UISceneConfiguration : NSObject {
+@public
+    id _name;
+    id _role;
+    Class _delegateClass;
+}
+- (id)initWithName:(id)name sessionRole:(id)role;
+- (Class)delegateClass;
+- (void)setDelegateClass:(Class)cls;
+@end
+
+id UIWindowSceneSessionRoleApplication = 0;
 
 extern int UIApplicationMain(int argc, char **argv, id principal,
                              id delegateName);
@@ -151,7 +195,7 @@ extern int UIApplicationMain(int argc, char **argv, id principal,
 + (UIColor *)clearColor { return [self colorWithRed:0 green:0 blue:0 alpha:0]; }
 + (UIColor *)systemBlueColor
 {
-    return [self colorWithRed:0.231 green:0.510 blue:0.965 alpha:1];
+    return [self colorWithRed:0.039 green:0.518 blue:1.0 alpha:1];
 }
 @end
 
@@ -256,6 +300,11 @@ extern int UIApplicationMain(int argc, char **argv, id principal,
 static UIWindow *g_keyWindow;
 
 @implementation UIWindow
+- (id)initWithWindowScene:(UIWindowScene *)scene
+{
+    (void)scene;
+    return [self initWithFrame:[[UIScreen mainScreen] bounds]];
+}
 - (void)makeKeyAndVisible { g_keyWindow = self; }
 + (UIWindow *)keyWindow { return g_keyWindow; }
 @end
@@ -272,6 +321,37 @@ static UIWindow *g_keyWindow;
 }
 - (void)setDelegate:(id)delegate { _delegate = delegate; }
 - (id)delegate { return _delegate; }
+@end
+
+/* ---------------------------------------------------------------- scenes */
+
+@implementation UIScene
+- (void)setDelegate:(id)delegate { _delegate = delegate; }
+- (id)delegate { return _delegate; }
+@end
+
+@implementation UIWindowScene
+@end
+
+@implementation UISceneSession
+@end
+
+@implementation UISceneConnectionOptions
+@end
+
+@implementation UISceneConfiguration
+- (id)initWithName:(id)name sessionRole:(id)role
+{
+    self = [super init];
+    if (self)
+    {
+        _name = name;
+        _role = role;
+    }
+    return self;
+}
+- (Class)delegateClass { return _delegateClass; }
+- (void)setDelegateClass:(Class)cls { _delegateClass = cls; }
 @end
 
 /* -------------------------------------------------------------- renderer */
@@ -339,23 +419,31 @@ static void render_view(UIView *view, double originX, double originY,
         if (text)
         {
             double points = label->_font ? label->_font->_size : 17.0;
-            int fontScale = (int)(points * scale / 12.0 + 0.5);
-            if (fontScale < 1)
-                fontScale = 1;
-            while (fontScale > 1 && w > 0 &&
-                   iosim_fb_text_width(text, fontScale) > w)
-                fontScale--;
-            int textWidth = iosim_fb_text_width(text, fontScale);
+            int style = label->_font && label->_font->_bold
+                            ? IOSIM_FONT_BOLD : IOSIM_FONT_REGULAR;
+            int ascent = 0, descent = 0, lineHeight = 0;
+            iosim_fb_font_metrics(style, points, scale, &ascent, &descent,
+                                  &lineHeight);
+            int textWidth = iosim_fb_font_text_width(text, style, points,
+                                                     scale);
+            while (textWidth > w && points > 8 && w > 0)
+            {
+                points -= 0.5;
+                iosim_fb_font_metrics(style, points, scale, &ascent, &descent,
+                                      &lineHeight);
+                textWidth = iosim_fb_font_text_width(text, style, points,
+                                                     scale);
+            }
             int tx = x;
             if (label->_textAlignment == 1)
                 tx = x + (w - textWidth) / 2;
             else if (label->_textAlignment == 2)
                 tx = x + w - textWidth;
-            int textHeight = 8 * fontScale;
-            int ty = y + (h - textHeight) / 2;
+            int baseline = y + (h - lineHeight) / 2 + ascent;
             unsigned color = label->_textColor ? color_rgb(label->_textColor)
                                                : 0xffffff;
-            iosim_fb_text(tx, ty, fontScale, color, text);
+            iosim_fb_font_text(tx, baseline, text, style, points, scale,
+                               color);
         }
     }
 
@@ -383,8 +471,34 @@ int UIApplicationMain(int argc, char **argv, id principal, id delegateName)
     if (delegate && [delegate respondsToSelector:launch])
         [delegate application:app didFinishLaunchingWithOptions:nil];
 
+    /* iOS 27 requires the scene lifecycle, so ask the app delegate for a
+     * scene configuration and drive the scene delegate ourselves. */
+    UISceneConfiguration *configuration = nil;
+    UISceneSession *session = [[UISceneSession alloc] init];
+    UISceneConnectionOptions *connectionOptions =
+        [[UISceneConnectionOptions alloc] init];
+    SEL configSel = @selector(application:configurationForConnectingSceneSession:options:);
+    if (delegate && [delegate respondsToSelector:configSel])
+        configuration = ((UISceneConfiguration * (*)(id, SEL, id, id, id))
+            objc_msgSend)(delegate, configSel, app, session, connectionOptions);
+
+    Class sceneClass = configuration ? [configuration delegateClass] : nil;
+    id sceneDelegate = sceneClass ? [[sceneClass alloc] init] : nil;
+    UIWindowScene *scene = [[UIWindowScene alloc] init];
+    if (sceneDelegate)
+        [scene setDelegate:sceneDelegate];
+    SEL willConnect = @selector(scene:willConnectToSession:options:);
+    if (sceneDelegate && [sceneDelegate respondsToSelector:willConnect])
+        ((void (*)(id, SEL, id, id, id))objc_msgSend)(sceneDelegate, willConnect,
+                                                      scene, session,
+                                                      connectionOptions);
+
     UIWindow *window = [UIWindow keyWindow];
     SEL windowSel = @selector(window);
+    if (!window && sceneDelegate &&
+        [sceneDelegate respondsToSelector:windowSel])
+        window = ((UIWindow * (*)(id, SEL))objc_msgSend)(sceneDelegate,
+                                                          windowSel);
     if (!window && delegate && [delegate respondsToSelector:windowSel])
         window = ((UIWindow * (*)(id, SEL))objc_msgSend)(delegate, windowSel);
     if (!window)
@@ -404,33 +518,37 @@ int UIApplicationMain(int argc, char **argv, id principal, id delegateName)
     /* Simulated device chrome: status bar, Dynamic Island, home indicator. */
     int margin = (int)(24 * scale);
     int right = fbWidth - margin;
-    iosim_fb_text(margin, (int)(14 * scale), 5, 0xffffff, "9:41");
-    int bw = (int)(26 * scale), bh = (int)(12 * scale);
+    int timeWidth = iosim_fb_font_text_width("9:41", IOSIM_FONT_SEMIBOLD,
+                                             17.0, scale);
+    iosim_fb_font_text((int)(81 * scale) - timeWidth / 2,
+                       (int)(38.3 * scale), "9:41", IOSIM_FONT_SEMIBOLD,
+                       17.0, scale, 0xffffff);
+    int bw = (int)(25 * scale), bh = (int)(12 * scale);
     int bx = right - bw - (int)(8 * scale);
-    int by = (int)(17 * scale);
-    iosim_fb_fill_round_rect(bx, by, bw, bh, (int)(3 * scale), 0xffffff);
+    int by = (int)(18 * scale);
+    iosim_fb_fill_round_rect(bx, by, bw, bh, (int)(4 * scale), 0xffffff);
     iosim_fb_fill_round_rect(bx + (int)(2 * scale), by + (int)(2 * scale),
                              bw - (int)(4 * scale), bh - (int)(4 * scale),
-                             (int)(2 * scale), 0x0b1020);
+                             (int)(3 * scale), 0x0b1020);
     iosim_fb_fill_round_rect(bx + (int)(3 * scale), by + (int)(3 * scale),
                              (int)(14 * scale), (int)(6 * scale),
-                             (int)(1 * scale), 0x22c55e);
-    iosim_fb_fill_rect(bx + bw + (int)(2 * scale), by + (int)(4 * scale),
+                             (int)(1 * scale), 0xffffff);
+    iosim_fb_fill_rect(bx + bw + (int)(2 * scale), by + (int)(5 * scale),
                        (int)(2 * scale), (int)(4 * scale), 0xffffff);
-    iosim_fb_text(right - (int)(118 * scale), (int)(15 * scale), 4, 0xffffff,
-                  "5G");
+    iosim_fb_font_text(right - (int)(118 * scale), (int)(29 * scale), "5G",
+                       IOSIM_FONT_REGULAR, 11.0, scale, 0xffffff);
     for (int i = 0; i < 4; i++)
-        iosim_fb_fill_rect(right - (int)(200 * scale) + i * (int)(15 * scale),
-                           (int)(25 * scale) - i * (int)(3 * scale),
-                           (int)(9 * scale),
-                           (int)(7 * scale) + i * (int)(3 * scale), 0xffffff);
-    iosim_fb_fill_round_rect(fbWidth / 2 - (int)(63 * scale) / 2,
-                             (int)(11 * scale), (int)(63 * scale),
-                             (int)(34 * scale), (int)(17 * scale), 0x000000);
+        iosim_fb_fill_rect(right - (int)(185 * scale) + i * (int)(12 * scale),
+                           (int)(30 * scale) - i * (int)(3 * scale),
+                           (int)(8 * scale),
+                           (int)(5 * scale) + i * (int)(3 * scale), 0xffffff);
+    iosim_fb_fill_round_rect((int)(153.7 * scale), (int)(14 * scale),
+                             (int)(94.7 * scale), (int)(36.7 * scale),
+                             (int)(18.3 * scale), 0x000000);
     iosim_fb_fill_round_rect(fbWidth / 2 - (int)(67 * scale),
                              fbHeight - (int)(16 * scale),
                              (int)(134 * scale), (int)(5 * scale),
-                             (int)(3 * scale), 0x94a3b8);
+                             (int)(3 * scale), 0xb4b8c4);
 
     const char *path = getenv("IOSIM_SCREENSHOT_PATH");
     if (path && *path)
