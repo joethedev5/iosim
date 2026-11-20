@@ -296,6 +296,59 @@ exist: `list`, `create`, `delete`, `boot`, `bootstatus`, `shutdown`, `erase`,
   model identifier and `XPC_SERVICE_NAME=UIKitApplication:...`.
 - `SIMCTL_CHILD_*` variables are forwarded to the child, matching simctl.
 
+### 2.9 Services: libdispatch, Mach and XPC
+
+The service substrate lives in `loader/services.c` and is exported through the
+same shim table as libSystem. It is process-local by design: one iosim process
+hosts the app and its services.
+
+- **libdispatch** has a main queue drained from UIKit's run loop
+  (`iosim_dispatch_drain_main`), global queues backed by detached pthreads,
+  groups, semaphores, `dispatch_once`, `dispatch_after`, and a `dispatch_main`
+  that honours Darwin's `noreturn` contract. Blocks are heap-copied when queued,
+  so stack blocks stay valid after their frame returns.
+- **Mach** ports are table entries with a mutex, condition variable and message
+  list. `mach_msg` supports send, receive or both; `bootstrap_register` and
+  `bootstrap_look_up` maintain the named service namespace.
+- **XPC** dictionaries, strings, integers, bools, data and arrays are backed by
+  a small object type. Connections are registered by service name; a send
+  invokes a peer's event handler. This models the message flow without a
+  cross-process transport.
+
+`tools/iosim-launchd` remains the per-device boot anchor and state owner.
+
+### 2.10 Graphics and UIKit rendering
+
+`loader/framebuffer.c` owns a 32-bit software framebuffer at the device's pixel
+size. The renderer composites straight-alpha fills, SDF rounded rectangles,
+circles and ellipses, anti-aliased scanline polygons, line strokes, linear
+gradients (optionally rounded), and bilinear-scaled RGBA images. PNG files are
+decoded with libpng in `loader/image.c`.
+
+`frameworks/UIKit.m` maps the object model onto those primitives:
+
+- `UIView` renders its background, its `CALayer` sublayers, then its subviews;
+  `UIScrollView` shifts child origins by `contentOffset`; `UITableView` asks its
+  data source for cells per row and draws separators and accessories.
+- `CAShapeLayer` stores a `UIBezierPath` (via `CGPath`) and draws its fill and
+  stroke; `CAGradientLayer` interpolates up to two color stops; `UIImageView`
+  blits a decoded image with aspect-fit or centered content modes.
+- Touch events from `IOSIM_EVENT_FIFO` are converted from device pixels to
+  points, hit-tested against the view tree, routed to `UIControl` actions or
+  table delegates, and followed by a re-render.
+- `UIView` animations interpolate frames and alpha; `CAAnimation` key paths
+  drive layer opacity and corner radius. Transforms apply translation and scale
+  around the view center.
+
+### 2.11 SpringBoard-like shell
+
+With `IOSIM_SHELL=1`, `UIApplicationMain` calls `run_springboard` instead of
+starting the app's scene. The shell draws the wallpaper, a 4×3 icon grid, a
+weather widget, search pill, page dots, dock and status bar with the same
+framebuffer API, and handles taps by entering a launch overlay or returning.
+It shares the device chrome and event queue with apps, so the system UI and app
+rendering exercise one pipeline.
+
 ## 3. Why this design
 
 **Why not run Apple's runtime?** Because the iOS 27 simulator runtime is

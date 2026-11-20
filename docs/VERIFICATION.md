@@ -83,11 +83,89 @@ offset on one label.
   screenshot. The captured frame contains no Dynamic Island or home indicator,
   so iosim does not draw them either.
 
+## Beyond the first app
+
+Three more fixtures use the same build path — one source, Apple clang, arm64 for
+the simulator and x86_64 for iosim.
+
+### Rendering: gradients, paths and images
+
+`demo/GraphicsApp.m` draws a two-stop `CAGradientLayer`, a filled and stroked
+`CAShapeLayer` chart built from `UIBezierPath`, and a PNG loaded through
+`UIImage imageNamed:` into a `UIImageView`. It links `QuartzCore` on both
+platforms; iosim supplies an empty framework anchor and exports the classes
+from UIKit.
+
+| Metric | Value |
+|---|---|
+| Mean absolute channel error | **<!--GRAPHICS_MEAN--> / 255** |
+| Pixels with max-channel error > 24 | **<!--GRAPHICS_BAD--> %** |
+| Geometry | layer frames, gradient direction, path vertices equal |
+| Remaining difference | glyph edges and the live status-bar clock when unpinned |
+
+The simulator capture pins the status bar to 9:41 with `simctl status_bar`, so
+the two frames share the same chrome.
+
+### UIKit: table views and interaction
+
+`demo/ListApp.m` uses a real `UITableView` data source and delegate: eight
+subtitle cells, disclosure accessories, row separators and selection. Under
+iosim, taps arrive through `IOSIM_EVENT_FIFO`; the window hit-tests the table,
+routes the tap to the row, the delegate replaces the status label, and the next
+frame renders the highlight.
+
+| Metric | Value |
+|---|---|
+| Mean absolute channel error | **<!--LIST_MEAN--> / 255** |
+| Pixels with max-channel error > 24 | **<!--LIST_BAD--> %** |
+| Text | same SFUI outlines, same per-size tracking, same cell metrics |
+
+### Services: dispatch, Mach, bootstrap and XPC
+
+`tests/services_test.m` is an Apple-clang x86_64 executable with no UI. It
+exercises:
+
+- `dispatch_async` on the main and global queues, `dispatch_after`, a
+  semaphore, a group and `dispatch_main`;
+- `mach_port_allocate`, a Mach message send/receive round trip;
+- `bootstrap_register` / `bootstrap_look_up` for a named port;
+- an XPC dictionary sent from a client connection to a listener.
+
+Captured output:
+
+```
+services: start
+dispatch: main queue block
+dispatch: delayed main block
+dispatch: global queue block
+dispatch: semaphore returned
+mach: alloc=0 send=0 recv=0 id=0x1234 value=77 text=hello mach
+group: count=1
+bootstrap: register=0 lookup=0 port=0x2 same=1
+xpc: listener event
+xpc: sent kind=ping seq=7 events=1
+dispatch: main blocks ran, hits=11 group=1
+services: done
+```
+
+`dispatch_main` follows Darwin's `noreturn` contract: our implementation never
+returns to the caller, because callers are allowed to have optimized away the
+code after it.
+
+### System UI: a SpringBoard-like shell
+
+`IOSIM_SHELL=1` switches `UIApplicationMain` to a home screen rendered with the
+same framebuffer primitives: wallpaper gradients, a 4×3 icon grid, a weather
+widget, search pill, page dots, a dock and the status bar. Tap events launch a
+placeholder overlay and a second tap returns. This is a system-UI
+reimplementation, not a launcher for separate app processes.
+
 ## Limitations
 
-This is parity for one app and the UIKit subset it uses: `UIView`, `UILabel`,
-`UIWindow`, `UIWindowScene`, `UISceneConfiguration`, `UIColor`, `UIFont`,
-`UIScreen`, `CALayer.cornerRadius`, `UIApplication` and `UIApplicationMain`.
-Scrolling, layout constraints, touch/event routing, CoreAnimation beyond a
-corner radius, CoreText shaping beyond Latin text, and the rest of the
-framework surface remain roadmap work.
+The framework surface is still a subset. UIKit layout is frame-based; Auto
+Layout constraints, text input and keyboards, multi-process app launch,
+cross-process Mach ports, Metal and video are not implemented. CoreText shaping
+is limited to the glyphs in SFUI; right-to-left and complex scripts are not
+shaped. `UIView.transform` applies translation and scale, not arbitrary
+rotation. XPC is an in-process transport. These are the remaining roadmap
+items.
