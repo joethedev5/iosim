@@ -3188,6 +3188,10 @@ check "[cg] pathcopy inside=1" "$out" \
     "CGPathCreateCopy duplicates path geometry"
 check "[cg] clip path inside 00ff00 outside ff0000" "$out" \
     "CGContextClip rasterizes a non-rectangular clip mask"
+check "[cg] curve elements 33" "$out" \
+    "CGPathAddCurveToPoint flattens a cubic into 32 line elements"
+check "[cg] quad elements 25" "$out" \
+    "CGPathAddQuadCurveToPoint flattens a quadratic into 24 line elements"
 
 "$ROOT/tools/build_app.sh" "$ROOT/tests/cgimage_layer_test.m" \
     "$T/cgimage_layer_test" >/dev/null

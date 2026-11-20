@@ -438,8 +438,10 @@ for both standalone sublayers and a view's backing layer. Device RGB and gray
 color spaces are singletons; `CGColorCreate` converts gray components to RGB
 and `CGColorGetColorSpace` reports the originating space. Paths support
 bounding boxes, even-odd point containment, copies and rectangle
-constructors. Path clipping is supported through even-odd masks; color
-management and curve flattening remain future work.
+constructors. Quadratic and cubic curve entry points sample 24/32 segments
+into the line list, and UIBezierPath exposes the same two curve methods. Path
+clipping is supported through even-odd masks; color management and adaptive
+curve subdivision remain future work.
 
 UIScrollView tracks recent pointer velocity while dragging instead of
 averaging the whole gesture. A release above 50 pt/s records the deceleration

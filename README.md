@@ -44,7 +44,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | `NSString` `sizeWithAttributes:`, `boundingRectWithSize:`, `drawAtPoint:`/`drawInRect:` wrapping through CGContext | ✅ (subset) |
 | ObjC categories from `__objc_catlist`, resolved by category symbol name | ✅ |
 | CoreAnimation paths, gradients, layer geometry/contents, sublayers (z-ordered), PNG images | ✅ |
-| CoreGraphics `CGContext` fills, strokes, ellipses, paths, mutable `CGPath` (bounding box/contains/copies), `CGColor`, device RGB/gray `CGColorSpace`, `CGImage`, rect and polygon clipping, push/pop contexts, state stack, UIView `drawRect:` and `UIGraphics` image contexts | ✅ (subset) |
+| CoreGraphics `CGContext` fills, strokes, ellipses, paths, quadratic/cubic curves, mutable `CGPath` (bounding box/contains/copies), `CGColor`, device RGB/gray `CGColorSpace`, `CGImage`, rect and polygon clipping, push/pop contexts, state stack, UIView `drawRect:` and `UIGraphics` image contexts | ✅ (subset) |
 | Foundation collections, sorting, NSPredicate filtering, NSRegularExpression, NSScanner, notifications, timers | ✅ |
 | Foundation fast enumeration (`for-in`) and indexed/keyed collection subscripting | ✅ |
 | `NSURLSession` data tasks with headers, bodies, status and response headers over a host HTTP/1.0 client, including HTTPS via OpenSSL | ✅ |

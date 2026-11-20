@@ -247,6 +247,9 @@ struct layer_anim {
 + (id)bezierPathWithOvalInRect:(CGRect)rect;
 - (void)moveToPoint:(CGPoint)point;
 - (void)addLineToPoint:(CGPoint)point;
+- (void)addQuadCurveToPoint:(CGPoint)point controlPoint:(CGPoint)control;
+- (void)addCurveToPoint:(CGPoint)point controlPoint1:(CGPoint)control1
+           controlPoint2:(CGPoint)control2;
 - (void)addArcWithCenter:(CGPoint)center radius:(double)radius
                startAngle:(double)start endAngle:(double)end
                 clockwise:(BOOL)clockwise;
@@ -5137,6 +5140,35 @@ static long datepicker_rows_for(UIDatePicker *picker, long component)
             a = start + (end - start) * t;
         [self addLineToPoint:CGPointMake(center.x + radius * __builtin_cos(a),
                                          center.y + radius * __builtin_sin(a))];
+    }
+}
+- (void)addQuadCurveToPoint:(CGPoint)point controlPoint:(CGPoint)control
+{
+    double x0 = _count > 0 ? _xs[_count - 1] : 0;
+    double y0 = _count > 0 ? _ys[_count - 1] : 0;
+    for (int i = 1; i <= 24; i++)
+    {
+        double t = (double)i / 24.0;
+        double u = 1.0 - t;
+        [self addLineToPoint:CGPointMake(
+            u * u * x0 + 2 * u * t * control.x + t * t * point.x,
+            u * u * y0 + 2 * u * t * control.y + t * t * point.y)];
+    }
+}
+- (void)addCurveToPoint:(CGPoint)point controlPoint1:(CGPoint)control1
+           controlPoint2:(CGPoint)control2
+{
+    double x0 = _count > 0 ? _xs[_count - 1] : 0;
+    double y0 = _count > 0 ? _ys[_count - 1] : 0;
+    for (int i = 1; i <= 32; i++)
+    {
+        double t = (double)i / 32.0;
+        double u = 1.0 - t;
+        [self addLineToPoint:CGPointMake(
+            u * u * u * x0 + 3 * u * u * t * control1.x +
+                3 * u * t * t * control2.x + t * t * t * point.x,
+            u * u * u * y0 + 3 * u * u * t * control1.y +
+                3 * u * t * t * control2.y + t * t * t * point.y)];
     }
 }
 - (void)closePath { _closed = 1; }

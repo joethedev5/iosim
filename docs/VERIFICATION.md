@@ -670,6 +670,8 @@ bounding box `10,10 20x20`, contains `(15,15)`, rejects `(100,100)`, and a
 copy contains `(20,20)`. A triangle path used as `CGContextClip` admits a
 green fill at `(60,270)` inside the triangle while `(50,50)` outside stays
 the earlier red, proving the even-odd mask rather than a bounding rectangle.
+A cubic `CGPathAddCurveToPoint` produces 33 elements (move plus 32
+flattening lines) and a quadratic produces 25 (move plus 24 lines).
 A 2x2 yellow `CGImage` reports its dimensions and draws scaled into a 40x40
 rectangle whose center samples `ffff00`. `UIImage CGImage` and
 `imageWithCGImage:` round-trip the 20x20 red image without changing its

@@ -551,6 +551,47 @@ void CGContextAddLineToPoint(CGContextRef context, double x, double y)
     CGContextMoveToPoint(context, x, y);
 }
 
+void CGContextAddQuadCurveToPoint(CGContextRef context, double cpx,
+                                  double cpy, double x, double y)
+{
+    if (!context)
+        context = g_current_context;
+    if (!context)
+        return;
+    double x0 = context->count > 0 ? context->xs[context->count - 1] : 0;
+    double y0 = context->count > 0 ? context->ys[context->count - 1] : 0;
+    for (int i = 1; i <= 24; i++)
+    {
+        double t = (double)i / 24.0;
+        double u = 1.0 - t;
+        CGContextAddLineToPoint(context,
+                                u * u * x0 + 2 * u * t * cpx + t * t * x,
+                                u * u * y0 + 2 * u * t * cpy + t * t * y);
+    }
+}
+
+void CGContextAddCurveToPoint(CGContextRef context, double cp1x, double cp1y,
+                              double cp2x, double cp2y, double x, double y)
+{
+    if (!context)
+        context = g_current_context;
+    if (!context)
+        return;
+    double x0 = context->count > 0 ? context->xs[context->count - 1] : 0;
+    double y0 = context->count > 0 ? context->ys[context->count - 1] : 0;
+    for (int i = 1; i <= 32; i++)
+    {
+        double t = (double)i / 32.0;
+        double u = 1.0 - t;
+        CGContextAddLineToPoint(
+            context,
+            u * u * u * x0 + 3 * u * u * t * cp1x +
+                3 * u * t * t * cp2x + t * t * t * x,
+            u * u * u * y0 + 3 * u * u * t * cp1y +
+                3 * u * t * t * cp2y + t * t * t * y);
+    }
+}
+
 void CGContextAddRect(CGContextRef context, CGRect rect)
 {
     CGContextMoveToPoint(context, rect.origin.x, rect.origin.y);
@@ -1076,6 +1117,66 @@ void CGPathAddLineToPoint(CGPathRef pathRef, const void *transform, double x,
 {
     (void)transform;
     cg_path_append((struct CGPath *)pathRef, 1, x, y);
+}
+
+static void cg_path_current_point(struct CGPath *path, double *x, double *y)
+{
+    int i = path ? path->count - 1 : -1;
+    while (i >= 0 && path->ops[i] == 2)
+        i--;
+    if (i >= 0)
+    {
+        *x = path->xs[i];
+        *y = path->ys[i];
+    }
+    else
+    {
+        *x = 0;
+        *y = 0;
+    }
+}
+
+void CGPathAddQuadCurveToPoint(CGPathRef pathRef, const void *transform,
+                               double cpx, double cpy, double x, double y)
+{
+    (void)transform;
+    struct CGPath *path = (struct CGPath *)pathRef;
+    if (!path)
+        return;
+    double x0, y0;
+    cg_path_current_point(path, &x0, &y0);
+    int steps = 24;
+    for (int i = 1; i <= steps; i++)
+    {
+        double t = (double)i / steps;
+        double u = 1.0 - t;
+        double px = u * u * x0 + 2 * u * t * cpx + t * t * x;
+        double py = u * u * y0 + 2 * u * t * cpy + t * t * y;
+        cg_path_append(path, 1, px, py);
+    }
+}
+
+void CGPathAddCurveToPoint(CGPathRef pathRef, const void *transform,
+                           double cp1x, double cp1y, double cp2x,
+                           double cp2y, double x, double y)
+{
+    (void)transform;
+    struct CGPath *path = (struct CGPath *)pathRef;
+    if (!path)
+        return;
+    double x0, y0;
+    cg_path_current_point(path, &x0, &y0);
+    int steps = 32;
+    for (int i = 1; i <= steps; i++)
+    {
+        double t = (double)i / steps;
+        double u = 1.0 - t;
+        double px = u * u * u * x0 + 3 * u * u * t * cp1x +
+                    3 * u * t * t * cp2x + t * t * t * x;
+        double py = u * u * u * y0 + 3 * u * u * t * cp1y +
+                    3 * u * t * t * cp2y + t * t * t * y;
+        cg_path_append(path, 1, px, py);
+    }
 }
 
 void CGPathAddRect(CGPathRef pathRef, const void *transform, CGRect rect)

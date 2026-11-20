@@ -51,6 +51,7 @@ int main(void)
     CGPathRef path = CGPathCreateMutable();
     CGPathAddRect(path, 0, CGRectMake(100, 220, 40, 40));
     CGPathApply(path, 0, count_element);
+    int cgpath_elements = g_element_count;
     CGContextSetRGBFillColor(context, 1, 0, 1, 1);
     CGContextBeginPath(context);
     CGContextAddPath(context, path);
@@ -129,6 +130,21 @@ int main(void)
     CGPathRelease(path_copy);
     CGPathRelease(rect_path);
 
+    CGPathRef curve_path = CGPathCreateMutable();
+    CGPathMoveToPoint(curve_path, 0, 10, 10);
+    CGPathAddCurveToPoint(curve_path, 0, 30, 0, 70, 60, 90, 10);
+    g_element_count = 0;
+    CGPathApply(curve_path, 0, count_element);
+    printf("[cg] curve elements %d\n", g_element_count);
+    CGPathRelease(curve_path);
+    CGPathRef quad_path = CGPathCreateMutable();
+    CGPathMoveToPoint(quad_path, 0, 10, 10);
+    CGPathAddQuadCurveToPoint(quad_path, 0, 50, 0, 90, 10);
+    g_element_count = 0;
+    CGPathApply(quad_path, 0, count_element);
+    printf("[cg] quad elements %d\n", g_element_count);
+    CGPathRelease(quad_path);
+
     unsigned pixels[300 * 300];
     iosim_fb_capture(0, 0, 300, 300, pixels);
     printf("[cg] rect %06x\n", pixel(pixels, 50, 50));
@@ -137,7 +153,7 @@ int main(void)
     printf("[cg] path %06x\n", pixel(pixels, 35, 170));
     printf("[cg] translate %06x\n", pixel(pixels, 15, 15));
     printf("[cg] cgpath %06x\n", pixel(pixels, 120, 240));
-    printf("[cg] cgpath elements %d\n", g_element_count);
+    printf("[cg] cgpath elements %d\n", cgpath_elements);
     printf("[cg] released %d\n", iosim_cgpath_is_valid(path));
     printf("[cg] uicolor %06x\n", pixel(pixels, 200, 240));
     printf("[cg] cgimage draw %06x\n", pixel(pixels, 190, 160));

@@ -646,6 +646,9 @@ extern int UIApplicationMain(int argc, char **argv, id principal,
 + (instancetype)bezierPath;
 - (void)moveToPoint:(CGPoint)point;
 - (void)addLineToPoint:(CGPoint)point;
+- (void)addQuadCurveToPoint:(CGPoint)point controlPoint:(CGPoint)control;
+- (void)addCurveToPoint:(CGPoint)point controlPoint1:(CGPoint)control1
+           controlPoint2:(CGPoint)control2;
 @property(readonly) id CGPath;
 @end
 
