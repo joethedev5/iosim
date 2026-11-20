@@ -2,9 +2,11 @@
 """Minimal launchd_sim stand-in.
 
 Owns the per-device runtime state while a device is booted, boots the system
-UI (SpringBoard), exposes a Unix socket for service requests, and exits
-cleanly on SIGTERM (simctl shutdown). It does not manage Mach services or XPC
-yet; it is the boot anchor that the device lifecycle is built around.
+UI (SpringBoard), owns the bootstrap service namespace, exposes a Unix socket
+for service requests, and exits cleanly on SIGTERM (simctl shutdown). The
+namespace maps registered service names to the pid that owns them; guest
+processes carry messages over abstract Unix sockets derived from the device
+UDID and the name.
 """
 
 import importlib.util
@@ -117,13 +119,49 @@ def main():
         "udid": udid,
         "name": name,
         "startedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "services": [],
+        "services": {},
     }
 
     def persist():
         state["springboardPid"] = springboard_pid
         with open(state_path, "w") as f:
             json.dump(state, f, indent=2)
+
+    def prune_services():
+        """Forget names whose registering process no longer exists."""
+        services = state["services"]
+        for svc in list(services):
+            pid = services[svc].get("pid", 0)
+            try:
+                os.kill(pid, 0)
+            except (ProcessLookupError, PermissionError):
+                if pid:
+                    del services[svc]
+
+    def register_service(name, pid):
+        prune_services()
+        services = state["services"]
+        if not name or len(name) > 88 or pid <= 0:
+            return {"ok": False, "error": "bad request"}
+        held = services.get(name)
+        if held is not None:
+            return {"ok": False, "error": "active"}
+        services[name] = {
+            "pid": pid,
+            "registeredAt": time.strftime("%Y-%m-%dT%H:%M:%SZ",
+                                          time.gmtime()),
+        }
+        persist()
+        print(f"launchd_sim: service {name} registered by pid {pid}",
+              flush=True)
+        return {"ok": True}
+
+    def lookup_service(name):
+        prune_services()
+        held = state["services"].get(name)
+        if held is None:
+            return {"ok": False, "error": "unknown service"}
+        return {"ok": True, "pid": held.get("pid", 0)}
 
     persist()
     print(f"launchd_sim: booting {name} ({udid}) pid={os.getpid()}", flush=True)
@@ -156,7 +194,13 @@ def main():
             if cmd == "ping":
                 resp = {"ok": True, "pid": os.getpid()}
             elif cmd == "status":
+                prune_services()
                 resp = {"ok": True, "state": state}
+            elif cmd == "service_register":
+                resp = register_service(str(req.get("name", "")),
+                                        int(req.get("pid", 0) or 0))
+            elif cmd == "service_lookup":
+                resp = lookup_service(str(req.get("name", "")))
             elif cmd == "shutdown":
                 resp = {"ok": True}
                 running = False

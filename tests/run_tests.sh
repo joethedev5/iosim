@@ -614,6 +614,58 @@ else
     echo "FAIL page back-swipe"; fails=$((fails+1))
 fi
 
+# ---------- 10. cross-process Mach services ----------
+# launchd owns the bootstrap namespace; two independent guest processes find
+# each other through it and exchange a Mach message over the service port.
+obj "$ROOT/tests/mach_cross_test.c" "$T/mach_cross.o"
+exe "$T/mach_cross" "$T/mach_cross.o"
+MSVC="$T/mach-service.log"
+rm -f "$MSVC"
+"$ROOT/tools/iosimctl" spawn "$UDID" "$T/mach_cross" service > "$MSVC" 2>&1 &
+svc_job=$!
+i=0
+while [ "$i" -lt 50 ]; do
+    grep -Fq -- "service: registered=" "$MSVC" 2>/dev/null && break
+    sleep 0.1
+    i=$((i+1))
+done
+if grep -Fq -- "service: registered=0" "$MSVC" 2>/dev/null; then
+    echo "ok   a guest process registers a bootstrap service"
+else
+    echo "FAIL bootstrap registration"; cat "$MSVC"; fails=$((fails+1))
+fi
+out="$("$ROOT/tools/iosimctl" spawn "$UDID" "$T/mach_cross" conflict 2>&1 | tail -1)"
+check "conflict: result=1103" "$out" \
+    "a second registration of the same name reports service active"
+out="$("$ROOT/tools/iosimctl" spawn "$UDID" "$T/mach_cross" client 2>&1)"
+check "client: sent=0" "$out" \
+    "a second process looks up the service and sends a message"
+i=0
+while [ "$i" -lt 80 ]; do
+    grep -Fq -- "service: received" "$MSVC" 2>/dev/null && break
+    sleep 0.1
+    i=$((i+1))
+done
+if grep -Fq -- "service: received id=0x1234 value=91 text=hello across processes" \
+    "$MSVC" 2>/dev/null; then
+    echo "ok   mach_msg carries the payload across the process boundary"
+else
+    echo "FAIL cross-process mach_msg"; cat "$MSVC"; fails=$((fails+1))
+fi
+wait "$svc_job" 2>/dev/null || true
+out="$("$ROOT/tools/iosimctl" spawn "$UDID" "$T/mach_cross" register 2>&1 | tail -1)"
+check "register: result=0" "$out" \
+    "the name is released when its registering process exits"
+out="$("$ROOT/tools/iosimctl" spawn "$UDID" "$T/mach_cross" probe 2>&1 | tail -1)"
+check "probe: unknown lookup=1102" "$out" \
+    "an unregistered bootstrap name is unknown"
+if grep -q "service com.iosim.cross.mach registered by pid" \
+    "$IOSIM_HOME/Devices/$UDID/logs/launchd_sim.log" 2>/dev/null; then
+    echo "ok   launchd owns the registered service name"
+else
+    echo "note: launchd log not captured at the expected path"
+fi
+
 "$ROOT/tools/iosimctl" shutdown "$UDID" >/dev/null
 
 if [ "$fails" -ne 0 ]; then

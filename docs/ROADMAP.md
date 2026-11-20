@@ -17,7 +17,9 @@ usable simulator is ordered by dependency, not by visible payoff.
   sources on top of a Linux event loop.
 - `os_log`/`os_signpost` proper payload decoding.
 - `libxpc` + bootstrap namespace, then a `launchd_sim` that actually manages
-  jobs over a Mach/XPC transport.
+  jobs over a Mach/XPC transport. *(Progress: `launchd_sim` owns the bootstrap
+  namespace and Mach messages cross guest processes; XPC object transport and
+  launchd job management remain.)*
 
 Exit criterion: a Darwin `Foundation` binary linked against our
 `libsystem_kernel` and `libdispatch` can create threads, synchronize, read

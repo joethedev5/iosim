@@ -1,13 +1,20 @@
 /* Host implementations of the Darwin service substrate used by simulator
- * binaries: libdispatch, Mach ports/messages, bootstrap registration and a
- * minimal XPC transport. All queues are process-local, which is enough for
- * an app and a service hosted by the same iosim process. */
+ * binaries: libdispatch, Mach ports/messages, the launchd bootstrap namespace
+ * and a minimal XPC transport. Dispatch queues are process-local; bootstrap
+ * names and Mach messages are shared across guest processes through launchd
+ * and abstract Unix sockets. */
 #define _GNU_SOURCE
+#include <errno.h>
+#include <fcntl.h>
+#include <poll.h>
 #include <pthread.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 #include <time.h>
 #include <unistd.h>
 #include "services.h"
@@ -295,6 +302,12 @@ struct mach_port_s {
     struct mach_msg_node *head, *tail;
     pthread_mutex_t lock;
     pthread_cond_t cond;
+    /* Cross-process rights: a service receive port owns a listening Unix
+     * socket; a send port obtained from bootstrap_look_up owns a connected
+     * one. -1 means the port is process-local only. */
+    int listen_fd;
+    int peer_fd;
+    char service[96];
 };
 static struct mach_port_s ports[MAX_PORTS];
 static int port_counter = 2;
@@ -311,9 +324,10 @@ static struct mach_port_s *port_get(uint32_t name)
     return &ports[name];
 }
 
-int mach_port_allocate(uint32_t task, uint32_t right, uint32_t *name)
+/* Allocate a fresh local port name, optionally backed by a connected peer
+ * socket. Caller holds no locks; the name space is process-local. */
+static uint32_t port_new(int peer_fd)
 {
-    (void)task; (void)right;
     pthread_mutex_lock(&ports_lock);
     if (port_counter >= MAX_PORTS)
         port_counter = 2;
@@ -322,7 +336,17 @@ int mach_port_allocate(uint32_t task, uint32_t right, uint32_t *name)
     ports[p].head = ports[p].tail = NULL;
     pthread_mutex_init(&ports[p].lock, NULL);
     pthread_cond_init(&ports[p].cond, NULL);
+    ports[p].listen_fd = -1;
+    ports[p].peer_fd = peer_fd;
+    ports[p].service[0] = 0;
     pthread_mutex_unlock(&ports_lock);
+    return p;
+}
+
+int mach_port_allocate(uint32_t task, uint32_t right, uint32_t *name)
+{
+    (void)task; (void)right;
+    uint32_t p = port_new(-1);
     if (name)
         *name = p;
     return 0;
@@ -353,6 +377,7 @@ typedef struct {
 
 #define MACH_SEND_MSG 0x1
 #define MACH_RCV_MSG 0x2
+#define MACH_RCV_TIMEOUT 0x100
 
 int mach_msg(mach_msg_header_t *msg, uint32_t option, uint32_t send_size,
              uint32_t rcv_size, uint32_t rcv_name, uint32_t timeout,
@@ -364,6 +389,15 @@ int mach_msg(mach_msg_header_t *msg, uint32_t option, uint32_t send_size,
         struct mach_port_s *p = port_get(msg->msgh_remote_port);
         if (!p)
             return 0x10000002; /* MACH_SEND_INVALID_DEST */
+        if (p->peer_fd >= 0)
+        {
+            /* The destination lives in another guest process: the message
+             * travels as one datagram on a connected Unix socket. */
+            ssize_t n = send(p->peer_fd, msg, send_size, MSG_NOSIGNAL);
+            if (n != (ssize_t)send_size)
+                return 0x10000002;
+            return 0;
+        }
         struct mach_msg_node *node = calloc(1, sizeof(*node));
         node->data = malloc(send_size);
         memcpy(node->data, msg, send_size);
@@ -380,8 +414,32 @@ int mach_msg(mach_msg_header_t *msg, uint32_t option, uint32_t send_size,
         if (!p)
             return 0x10004002; /* MACH_RCV_INVALID_NAME */
         pthread_mutex_lock(&p->lock);
-        while (!p->head)
-            pthread_cond_wait(&p->cond, &p->lock);
+        if ((option & MACH_RCV_TIMEOUT) && timeout > 0)
+        {
+            struct timespec deadline;
+            clock_gettime(CLOCK_REALTIME, &deadline);
+            deadline.tv_sec += timeout / 1000;
+            deadline.tv_nsec += (long)(timeout % 1000) * 1000000L;
+            if (deadline.tv_nsec >= 1000000000L)
+            {
+                deadline.tv_sec += 1;
+                deadline.tv_nsec -= 1000000000L;
+            }
+            while (!p->head)
+            {
+                if (pthread_cond_timedwait(&p->cond, &p->lock, &deadline) ==
+                    ETIMEDOUT)
+                    break;
+            }
+            if (!p->head)
+            {
+                pthread_mutex_unlock(&p->lock);
+                return 0x10004003; /* MACH_RCV_TIMED_OUT */
+            }
+        }
+        else
+            while (!p->head)
+                pthread_cond_wait(&p->cond, &p->lock);
         struct mach_msg_node *node = p->head;
         p->head = node->next;
         if (!p->head) p->tail = NULL;
@@ -400,15 +458,331 @@ int mach_msg_receive(mach_msg_header_t *msg)
     return mach_msg(msg, MACH_RCV_MSG, 0, msg->msgh_size, msg->msgh_local_port, 0, 0);
 }
 
-/* Service registry (the bootstrap namespace). */
+/* ------------------------------------------------------ bootstrap namespace
+ *
+ * launchd_sim owns the namespace: a registration is a name and the pid that
+ * registered it. On top of that, each registered Mach receive port owns an
+ * abstract-namespace Unix socket (Linux) whose address both processes derive
+ * from the device UDID and the service name. A lookup in another process
+ * connects to that socket and returns a send port; mach_msg on it writes one
+ * datagram, which a reader thread in the service process turns back into a
+ * message on the registered port's queue.
+ *
+ * When no launchd is reachable (a direct iosim-run invocation), registration
+ * and lookup fall back to a process-local registry. */
+
+#define SVC_NAME_MAX 88
+#define SVC_ADDR_MAX 108
+#define SVC_FRAME_MAX 65536
+#define SVC_MAX_CLIENTS 32
+
 struct service { char name[128]; uint32_t port; };
 static struct service services[128];
 static int service_count;
 static pthread_mutex_t services_lock = PTHREAD_MUTEX_INITIALIZER;
 
+static uint32_t fnv1a32(const char *s)
+{
+    uint32_t h = 2166136261u;
+    while (*s)
+    {
+        h ^= (unsigned char)*s++;
+        h *= 16777619u;
+    }
+    return h;
+}
+
+static const char *simulator_udid(void)
+{
+    const char *u = getenv("SIMULATOR_UDID");
+    return u && *u ? u : NULL;
+}
+
+/* Abstract socket address shared by every process on the same device. */
+static int service_address(const char *name, char *out, size_t cap)
+{
+    const char *udid = simulator_udid();
+    if (!udid || !name || strlen(name) > SVC_NAME_MAX || cap < SVC_ADDR_MAX)
+        return -1;
+    snprintf(out, cap, "iosim-svc:%08x:%s", fnv1a32(udid), name);
+    return 0;
+}
+
+static socklen_t service_sockaddr(const char *address, struct sockaddr_un *sun)
+{
+    size_t len = strlen(address);
+    memset(sun, 0, sizeof(*sun));
+    sun->sun_family = AF_UNIX;
+    sun->sun_path[0] = 0; /* abstract namespace */
+    memcpy(sun->sun_path + 1, address, len);
+    return (socklen_t)(offsetof(struct sockaddr_un, sun_path) + 1 + len);
+}
+
+static int launchd_call(const char *request, char *reply, size_t cap)
+{
+    const char *udid = simulator_udid();
+    if (!udid)
+        return -1;
+    char path[128];
+    snprintf(path, sizeof(path), "/tmp/iosim-launchd-%s.sock", udid);
+    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (fd < 0)
+        return -1;
+    struct sockaddr_un sun;
+    if (strlen(path) >= sizeof(sun.sun_path))
+    {
+        close(fd);
+        return -1;
+    }
+    memset(&sun, 0, sizeof(sun));
+    sun.sun_family = AF_UNIX;
+    strcpy(sun.sun_path, path);
+    if (connect(fd, (struct sockaddr *)&sun, sizeof(sun)) != 0)
+    {
+        close(fd);
+        return -1;
+    }
+    size_t len = strlen(request);
+    if (write(fd, request, len) != (ssize_t)len)
+    {
+        close(fd);
+        return -1;
+    }
+    size_t used = 0;
+    while (used + 1 < cap)
+    {
+        ssize_t n = read(fd, reply + used, cap - 1 - used);
+        if (n <= 0)
+            break;
+        used += (size_t)n;
+        if (memchr(reply, '\n', used))
+            break;
+    }
+    close(fd);
+    reply[used] = 0;
+    return 0;
+}
+
+/* Service names come from apps, so the JSON request must stay well formed. */
+static void json_escape(const char *in, char *out, size_t cap)
+{
+    size_t o = 0;
+    for (const char *p = in; *p && o + 7 < cap; p++)
+    {
+        unsigned char c = (unsigned char)*p;
+        if (c == '"' || c == '\\')
+        {
+            out[o++] = '\\';
+            out[o++] = (char)c;
+        }
+        else if (c < 0x20)
+            o += (size_t)snprintf(out + o, cap - o, "\\u%04x", c);
+        else
+            out[o++] = (char)c;
+    }
+    out[o] = 0;
+}
+
+/* 0 registered, 1103 service active, 1 no launchd, -1 protocol error. */
+static int launchd_register_service(const char *name)
+{
+    char esc[256];
+    char req[512], reply[512];
+    json_escape(name, esc, sizeof(esc));
+    snprintf(req, sizeof(req),
+             "{\"cmd\": \"service_register\", \"name\": \"%s\", \"pid\": %d}\n",
+             esc, (int)getpid());
+    if (launchd_call(req, reply, sizeof(reply)) != 0)
+        return 1;
+    if (strstr(reply, "\"ok\": true"))
+        return 0;
+    if (strstr(reply, "active"))
+        return 1103; /* BOOTSTRAP_SERVICE_ACTIVE */
+    return -1;
+}
+
+/* 0 known, 1102 unknown, -1 no launchd. */
+static int launchd_lookup_service(const char *name)
+{
+    char esc[256];
+    char req[512], reply[512];
+    json_escape(name, esc, sizeof(esc));
+    snprintf(req, sizeof(req),
+             "{\"cmd\": \"service_lookup\", \"name\": \"%s\"}\n", esc);
+    if (launchd_call(req, reply, sizeof(reply)) != 0)
+        return -1;
+    return strstr(reply, "\"ok\": true") ? 0 : 1102;
+}
+
+static void mach_port_enqueue(uint32_t name, const void *bytes, uint32_t size)
+{
+    struct mach_msg_node *node = calloc(1, sizeof(*node));
+    if (!node)
+        return;
+    node->data = malloc(size ? size : 1);
+    if (!node->data)
+    {
+        free(node);
+        return;
+    }
+    memcpy(node->data, bytes, size);
+    node->size = size;
+    struct mach_port_s *p = &ports[name];
+    pthread_mutex_lock(&p->lock);
+    if (p->tail)
+        p->tail->next = node;
+    else
+        p->head = node;
+    p->tail = node;
+    pthread_cond_broadcast(&p->cond);
+    pthread_mutex_unlock(&p->lock);
+}
+
+/* Accepts connections from senders in other processes and turns each
+ * datagram into a queued Mach message on the service port. */
+static void *service_reader(void *arg)
+{
+    uint32_t name = (uint32_t)(uintptr_t)arg;
+    struct mach_port_s *p = &ports[name];
+    int clients[SVC_MAX_CLIENTS];
+    int nclients = 0;
+    struct pollfd fds[SVC_MAX_CLIENTS + 1];
+    unsigned char frame[SVC_FRAME_MAX];
+
+    for (;;)
+    {
+        fds[0].fd = p->listen_fd;
+        fds[0].events = POLLIN;
+        for (int i = 0; i < nclients; i++)
+        {
+            fds[i + 1].fd = clients[i];
+            fds[i + 1].events = POLLIN;
+        }
+        if (poll(fds, (nfds_t)(nclients + 1), -1) < 0)
+        {
+            if (errno == EINTR)
+                continue;
+            return NULL;
+        }
+        if (fds[0].revents & POLLIN)
+        {
+            for (;;)
+            {
+                int c = accept(p->listen_fd, NULL, NULL);
+                if (c < 0)
+                    break;
+                if (nclients < SVC_MAX_CLIENTS)
+                {
+                    int fl = fcntl(c, F_GETFL, 0);
+                    fcntl(c, F_SETFL, fl | O_NONBLOCK);
+                    clients[nclients++] = c;
+                }
+                else
+                    close(c);
+            }
+        }
+        for (int i = 0; i < nclients; i++)
+        {
+            if (!(fds[i + 1].revents & (POLLIN | POLLHUP | POLLERR)))
+                continue;
+            int removed = 0;
+            for (;;)
+            {
+                ssize_t r = recv(clients[i], frame, sizeof(frame), MSG_DONTWAIT);
+                if (r > 0)
+                    mach_port_enqueue(name, frame, (uint32_t)r);
+                else if (r < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
+                    break;
+                else
+                {
+                    close(clients[i]);
+                    clients[i] = clients[--nclients];
+                    removed = 1;
+                    break;
+                }
+            }
+            if (removed)
+                i--;
+        }
+    }
+    return NULL;
+}
+
+/* Turn an existing local port into a registered service endpoint. */
+static int port_listen(uint32_t name, const char *service)
+{
+    char address[SVC_ADDR_MAX];
+    if (service_address(service, address, sizeof(address)) != 0)
+        return -1;
+    int fd = socket(AF_UNIX, SOCK_SEQPACKET, 0);
+    if (fd < 0)
+        return -1;
+    struct sockaddr_un sun;
+    socklen_t slen = service_sockaddr(address, &sun);
+    fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
+    if (bind(fd, (struct sockaddr *)&sun, slen) != 0)
+    {
+        int e = errno;
+        close(fd);
+        return e == EADDRINUSE ? 1103 : -1;
+    }
+    if (listen(fd, 8) != 0)
+    {
+        close(fd);
+        return -1;
+    }
+    struct mach_port_s *p = port_get(name);
+    if (!p)
+    {
+        close(fd);
+        return -1;
+    }
+    pthread_mutex_lock(&ports_lock);
+    p->listen_fd = fd;
+    snprintf(p->service, sizeof(p->service), "%s", service);
+    pthread_mutex_unlock(&ports_lock);
+    pthread_t thread;
+    if (pthread_create(&thread, NULL, service_reader,
+                       (void *)(uintptr_t)name) != 0)
+        return -1;
+    pthread_detach(thread);
+    return 0;
+}
+
+/* Connect to another process's service and return a send port for it. */
+static int port_connect(const char *service, uint32_t *out)
+{
+    char address[SVC_ADDR_MAX];
+    if (service_address(service, address, sizeof(address)) != 0)
+        return 1102;
+    int fd = socket(AF_UNIX, SOCK_SEQPACKET, 0);
+    if (fd < 0)
+        return 1102;
+    struct sockaddr_un sun;
+    socklen_t slen = service_sockaddr(address, &sun);
+    if (connect(fd, (struct sockaddr *)&sun, slen) != 0)
+    {
+        close(fd);
+        return 1102;
+    }
+    *out = port_new(fd);
+    return 0;
+}
+
 int bootstrap_register(uint32_t bp, const char *name, uint32_t port)
 {
     (void)bp;
+    if (!name || !port || strlen(name) > SVC_NAME_MAX)
+        return 1102;
+    int launched = launchd_register_service(name);
+    if (launched == 1103)
+        return 1103;
+    if (launched == 0)
+    {
+        int lr = port_listen(port, name);
+        if (lr == 1103)
+            return 1103;
+    }
     pthread_mutex_lock(&services_lock);
     if (service_count < 128)
     {
@@ -419,9 +793,12 @@ int bootstrap_register(uint32_t bp, const char *name, uint32_t port)
     pthread_mutex_unlock(&services_lock);
     return 0;
 }
+
 int bootstrap_look_up(uint32_t bp, const char *name, uint32_t *port)
 {
     (void)bp;
+    if (!name || !port || strlen(name) > SVC_NAME_MAX)
+        return 1102;
     pthread_mutex_lock(&services_lock);
     for (int i = 0; i < service_count; i++)
     {
@@ -433,7 +810,10 @@ int bootstrap_look_up(uint32_t bp, const char *name, uint32_t *port)
         }
     }
     pthread_mutex_unlock(&services_lock);
-    return 1102; /* BOOTSTRAP_UNKNOWN_SERVICE */
+    /* Another process may have registered it with launchd. */
+    if (launchd_lookup_service(name) != 0)
+        return 1102; /* BOOTSTRAP_UNKNOWN_SERVICE */
+    return port_connect(name, port) == 0 ? 0 : 1102;
 }
 
 /* ---------------------------------------------------------------- XPC */

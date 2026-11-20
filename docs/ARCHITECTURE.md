@@ -360,8 +360,8 @@ exist: `list`, `create`, `delete`, `boot`, `bootstatus`, `shutdown`, `erase`,
 ### 2.9 Services: libdispatch, Mach and XPC
 
 The service substrate lives in `loader/services.c` and is exported through the
-same shim table as libSystem. It is process-local by design: one iosim process
-hosts the app and its services.
+same shim table as libSystem. Dispatch is process-local; Mach message
+transport and the bootstrap namespace are shared across the device.
 
 - **libdispatch** has a main queue drained from UIKit's run loop
   (`iosim_dispatch_drain_main`), global queues backed by detached pthreads,
@@ -369,14 +369,29 @@ hosts the app and its services.
   that honours Darwin's `noreturn` contract. Blocks are heap-copied when queued,
   so stack blocks stay valid after their frame returns.
 - **Mach** ports are table entries with a mutex, condition variable and message
-  list. `mach_msg` supports send, receive or both; `bootstrap_register` and
-  `bootstrap_look_up` maintain the named service namespace.
+  list. `mach_msg` supports send, receive or both, and receive honours
+  `MACH_RCV_TIMEOUT` with a real `pthread_cond_timedwait` deadline.
+  `bootstrap_register` hands the name to launchd_sim, which owns the namespace:
+  it records the name and the registering pid and rejects a second live
+  registration with `BOOTSTRAP_SERVICE_ACTIVE` (1103); names whose process has
+  exited are pruned on the next request. A registered receive port also owns a
+  listening `AF_UNIX` `SOCK_SEQPACKET` socket in the Linux abstract namespace,
+  addressed by `iosim-svc:<FNV-1a(UDID)>:<name>` so every process on the device
+  derives the same address without a filesystem rendezvous. A per-service
+  reader thread accepts senders and turns each datagram back into a message on
+  the port's queue.
+  `bootstrap_look_up` returns the local port when this process registered the
+  name, and otherwise asks launchd, connects to the service's address and
+  returns a send port backed by that connection; `mach_msg` on it writes one
+  datagram, which is the send right. Unknown names return 1102.
 - **XPC** dictionaries, strings, integers, bools, data and arrays are backed by
   a small object type. Connections are registered by service name; a send
-  invokes a peer's event handler. This models the message flow without a
-  cross-process transport.
+  invokes a peer's event handler. This models the message flow in-process;
+  carrying XPC objects between processes is the next step on top of the Mach
+  transport above.
 
-`tools/iosim-launchd` remains the per-device boot anchor and state owner.
+`tools/iosim-launchd` is the per-device boot anchor, state owner and bootstrap
+namespace server.
 
 ### 2.10 Graphics and UIKit rendering
 
