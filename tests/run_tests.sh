@@ -1871,6 +1871,82 @@ check "xpc service: received kind=ping seq=7 flag=1 blob=4" "$(cat "$XLOG")" \
     "the dictionary arrives as a rebuilt XPC object in the other process"
 wait "$xpc_job" 2>/dev/null || true
 
+# ---------- 12. launchd on-demand and RunAtLoad jobs ----------
+# A LaunchDaemon plist installs a job whose MachServices name is not running
+# until a client looks it up; launchd_sim starts the job, the job registers
+# its service, and the client's XPC request receives a reply.
+"$CC" -target "$TARGET" -ffreestanding -fPIC -O1 -fblocks \
+    -c "$ROOT/tests/launchd_job_test.c" -o "$T/launchd_job.o"
+exe "$T/launchd_job" "$T/launchd_job.o"
+python3 - "$T/launchd_job" "$T/ondemand.plist" com.iosim.launchd.job \
+    com.iosim.launchd.echo 0 <<'PY'
+import plistlib, sys
+binary, out, label, service, run_at_load = sys.argv[1:6]
+with open(out, "wb") as f:
+    plistlib.dump({
+        "Label": label,
+        "ProgramArguments": [binary, "job", service],
+        "MachServices": {service: True},
+        "RunAtLoad": run_at_load == "1",
+    }, f)
+PY
+"$ROOT/tools/iosimctl" launchd-load "$UDID" "$T/ondemand.plist" >/dev/null
+JOBLOG="$IOSIM_HOME/Devices/$UDID/logs/com.iosim.launchd.job.log"
+if [ ! -f "$JOBLOG" ] || ! grep -Fq -- "launchd job: ready" "$JOBLOG"; then
+    echo "ok   an on-demand job waits until its Mach service is looked up"
+else
+    echo "FAIL on-demand job started early"; fails=$((fails+1))
+fi
+out="$("$ROOT/tools/iosimctl" spawn "$UDID" "$T/launchd_job" client \
+    com.iosim.launchd.echo 2>&1)"
+check "launchd client: reply kind=pong seq=42" "$out" \
+    "a lookup starts the on-demand job and its XPC reply arrives"
+i=0
+while [ "$i" -lt 50 ]; do
+    grep -Fq -- "launchd job: replied" "$JOBLOG" 2>/dev/null && break
+    sleep 0.1
+    i=$((i+1))
+done
+if grep -Fq -- "launchd job: ready name=com.iosim.launchd.echo" \
+    "$JOBLOG" 2>/dev/null; then
+    echo "ok   the started job registers its Mach service and serves the request"
+else
+    echo "FAIL launchd job log"; cat "$JOBLOG" 2>/dev/null || true
+    fails=$((fails+1))
+fi
+python3 - "$T/launchd_job" "$T/runatload.plist" com.iosim.launchd.runjob \
+    com.iosim.launchd.run 1 <<'PY'
+import plistlib, sys
+binary, out, label, service, run_at_load = sys.argv[1:6]
+with open(out, "wb") as f:
+    plistlib.dump({
+        "Label": label,
+        "ProgramArguments": [binary, "job", service],
+        "MachServices": {service: True},
+        "RunAtLoad": run_at_load == "1",
+    }, f)
+PY
+"$ROOT/tools/iosimctl" launchd-load "$UDID" "$T/runatload.plist" >/dev/null
+RUNLOG="$IOSIM_HOME/Devices/$UDID/logs/com.iosim.launchd.runjob.log"
+i=0
+while [ "$i" -lt 50 ]; do
+    grep -Fq -- "launchd job: ready name=com.iosim.launchd.run" \
+        "$RUNLOG" 2>/dev/null && break
+    sleep 0.1
+    i=$((i+1))
+done
+if grep -Fq -- "launchd job: ready name=com.iosim.launchd.run" \
+    "$RUNLOG" 2>/dev/null; then
+    echo "ok   a RunAtLoad job starts when launchd loads it"
+else
+    echo "FAIL RunAtLoad job"; cat "$RUNLOG" 2>/dev/null || true
+    fails=$((fails+1))
+fi
+out="$("$ROOT/tools/iosimctl" spawn "$UDID" "$T/launchd_job" client \
+    com.iosim.launchd.run 2>&1)"
+check "launchd client: reply kind=pong seq=42" "$out" \
+    "the RunAtLoad job's Mach service answers a client"
+
 "$ROOT/tools/iosimctl" shutdown "$UDID" >/dev/null
 
 if [ "$fails" -ne 0 ]; then

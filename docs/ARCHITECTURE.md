@@ -457,6 +457,16 @@ transport and the bootstrap namespace are shared across the device.
   the bytes cross a process boundary. Plain `xpc_connection_create`
   connections keep an in-process shortcut for fixtures that wire both sides in
   one process. Handlers are heap-copied so stack blocks stay valid.
+- **launchd jobs** are plists in the device's `Library/LaunchDaemons`
+  (`Label`, `ProgramArguments`, `MachServices`, `RunAtLoad`, `KeepAlive`,
+  `EnvironmentVariables`). launchd_sim scans them at boot and on
+  `iosimctl launchd-load`, starts RunAtLoad jobs under the loader with the
+  device environment, and tracks their pids. A lookup of a MachServices name
+  with no live registration starts the owning job and reports `starting`; the
+  guest-side lookup retries across that window, then connects to the service
+  socket once the job registers it (also retrying while the socket binds).
+  Dead jobs are pruned, KeepAlive jobs are restarted, and shutdown terminates
+  every job.
 - **UIPasteboard** is a device-level service without a daemon: the general
   pasteboard is an XML property list at
   `$SIMULATOR_SHARED_RESOURCES_DIRECTORY/var/run/pasteboard.plist`, and each

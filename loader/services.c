@@ -655,7 +655,10 @@ static int launchd_register_service(const char *name)
     return -1;
 }
 
-/* 0 known, 1102 unknown, -1 no launchd. */
+/* 0 known, 1102 unknown, -1 no launchd. A LaunchDaemon job whose
+ * MachServices name is looked up starts on demand; launchd reports
+ * "starting" until the job's process has registered the name, so retry
+ * across that window (the lookup blocks like the real bootstrap server). */
 static int launchd_lookup_service(const char *name)
 {
     char esc[256];
@@ -663,9 +666,17 @@ static int launchd_lookup_service(const char *name)
     json_escape(name, esc, sizeof(esc));
     snprintf(req, sizeof(req),
              "{\"cmd\": \"service_lookup\", \"name\": \"%s\"}\n", esc);
-    if (launchd_call(req, reply, sizeof(reply)) != 0)
-        return -1;
-    return strstr(reply, "\"ok\": true") ? 0 : 1102;
+    for (int attempt = 0; attempt < 120; attempt++)
+    {
+        if (launchd_call(req, reply, sizeof(reply)) != 0)
+            return -1;
+        if (strstr(reply, "\"ok\": true"))
+            return 0;
+        if (!strstr(reply, "starting"))
+            return 1102;
+        usleep(50000);
+    }
+    return 1102;
 }
 
 static void mach_port_enqueue(uint32_t name, const void *bytes, uint32_t size)
@@ -876,7 +887,15 @@ int bootstrap_look_up(uint32_t bp, const char *name, uint32_t *port)
     /* Another process may have registered it with launchd. */
     if (launchd_lookup_service(name) != 0)
         return 1102; /* BOOTSTRAP_UNKNOWN_SERVICE */
-    return port_connect(name, port) == 0 ? 0 : 1102;
+    /* The registration is recorded before the service socket is bound, so a
+     * freshly started job may need a moment before connect succeeds. */
+    for (int attempt = 0; attempt < 100; attempt++)
+    {
+        if (port_connect(name, port) == 0)
+            return 0;
+        usleep(20000);
+    }
+    return 1102;
 }
 
 /* ---------------------------------------------------------------- XPC */

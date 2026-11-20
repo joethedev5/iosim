@@ -13,6 +13,8 @@ import importlib.util
 from importlib.machinery import SourceFileLoader
 import json
 import os
+from pathlib import Path
+import plistlib
 import select
 import signal
 import socket
@@ -22,6 +24,9 @@ import time
 
 running = True
 springboard_pid = None
+# LaunchDaemon jobs by label and the context needed to start them.
+jobs = {}
+job_ctx = {}
 
 
 def load_ctl():
@@ -48,6 +53,148 @@ def stop_springboard():
         except ProcessLookupError:
             pass
         springboard_pid = None
+
+
+# ----------------------------------------------------------- launchd jobs
+#
+# A device's Library/LaunchDaemons holds job plists shaped like the real
+# launchd ones: Label, ProgramArguments, MachServices, RunAtLoad, KeepAlive
+# and EnvironmentVariables. RunAtLoad jobs start when launchd starts or when
+# the job is loaded; a MachServices name that is looked up starts its job on
+# demand. Every job is a normal guest process under the loader, so it gets the
+# device environment and can register its own Mach service.
+
+def pid_alive(pid):
+    if not pid or pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
+def job_log_path(device_dir, label):
+    safe = "".join(c if c.isalnum() or c in ".-_" else "_" for c in label)
+    return os.path.join(device_dir, "logs", safe + ".log")
+
+
+def resolve_job_program(program, job):
+    path = Path(program)
+    if path.is_absolute():
+        if path.exists():
+            return str(path)
+        runtime = job_ctx["ctl"].runtime_root() / program.lstrip("/")
+        if runtime.exists():
+            return str(runtime)
+        return str(path)
+    return str(Path(job["plist"]).parent / program)
+
+
+def start_job(job):
+    ctx = job_ctx
+    if not ctx:
+        return
+    cmd = [ctx["ctl"].loader_path()]
+    for p in ctx["dev"].get("dylibPaths", []):
+        cmd += ["--dylib-path", p]
+    cmd.append(resolve_job_program(job["program"][0], job))
+    cmd += job["program"][1:]
+    env = ctx["ctl"].device_environment(ctx["udid"], ctx["dev"])
+    env.update(job.get("environment", {}))
+    log_path = job_log_path(ctx["device_dir"], job["label"])
+    log = open(log_path, "ab")
+    proc = subprocess.Popen(cmd, env=env, stdout=log, stderr=log,
+                            start_new_session=True, cwd=ctx["device_dir"])
+    log.close()
+    job["pid"] = proc.pid
+    job["lastStart"] = time.monotonic()
+    print(f"launchd_sim: job {job['label']} started pid={proc.pid}",
+          flush=True)
+
+
+def parse_job(path):
+    with open(path, "rb") as f:
+        pl = plistlib.load(f)
+    label = str(pl.get("Label") or Path(path).stem)
+    if not label or "/" in label:
+        raise ValueError("bad job label")
+    if pl.get("ProgramArguments"):
+        program = [str(a) for a in pl["ProgramArguments"]]
+    elif pl.get("Program"):
+        program = [str(pl["Program"])]
+    else:
+        raise ValueError("missing ProgramArguments")
+    mach = pl.get("MachServices") or {}
+    services = [str(k) for k in mach.keys()] if isinstance(mach, dict) else []
+    env = pl.get("EnvironmentVariables") or {}
+    return {
+        "label": label,
+        "plist": str(path),
+        "program": program,
+        "machServices": services,
+        "runAtLoad": bool(pl.get("RunAtLoad", False)),
+        "keepAlive": pl.get("KeepAlive") is True,
+        "environment": {str(k): str(v) for k, v in env.items()},
+        "pid": 0,
+        "lastStart": 0.0,
+    }
+
+
+def scan_jobs(device_dir):
+    found = {}
+    daemons = Path(device_dir) / "Library" / "LaunchDaemons"
+    if not daemons.is_dir():
+        return found
+    for path in sorted(daemons.glob("*.plist")):
+        try:
+            job = parse_job(path)
+        except Exception as exc:
+            print(f"launchd_sim: bad job plist {path.name}: {exc}",
+                  flush=True)
+            continue
+        found[job["label"]] = job
+    return found
+
+
+def prune_jobs():
+    for job in jobs.values():
+        if job["pid"] and not pid_alive(job["pid"]):
+            job["pid"] = 0
+            if job["keepAlive"] and \
+                    time.monotonic() - job.get("lastStart", 0.0) > 1.0:
+                start_job(job)
+
+
+def load_job_into_runtime(path):
+    job = parse_job(path)
+    jobs[job["label"]] = job
+    print(f"launchd_sim: job {job['label']} loaded", flush=True)
+    if job["runAtLoad"]:
+        start_job(job)
+    return {"ok": True, "label": job["label"]}
+
+
+def job_for_service(name):
+    for job in jobs.values():
+        if name in job["machServices"]:
+            return job
+    return None
+
+
+def stop_jobs():
+    for job in jobs.values():
+        pid = job.get("pid", 0)
+        if not pid:
+            continue
+        try:
+            os.killpg(pid, signal.SIGCONT)
+            os.killpg(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        job["pid"] = 0
 
 
 def boot_springboard(ctl, device_dir, udid, name):
@@ -159,17 +306,33 @@ def main():
     def lookup_service(name):
         prune_services()
         held = state["services"].get(name)
-        if held is None:
+        if held is not None and pid_alive(held.get("pid", 0)):
+            return {"ok": True, "pid": held.get("pid", 0)}
+        prune_jobs()
+        job = job_for_service(name)
+        if job is None:
             return {"ok": False, "error": "unknown service"}
-        return {"ok": True, "pid": held.get("pid", 0)}
+        if not pid_alive(job["pid"]):
+            start_job(job)
+        # The client retries while the job starts and registers the name.
+        return {"ok": False, "error": "starting"}
 
     persist()
     print(f"launchd_sim: booting {name} ({udid}) pid={os.getpid()}", flush=True)
 
+    ctl = load_ctl()
+    dev = ctl.load_state().get("devices", {}).get(udid) or {}
+    job_ctx.update({"ctl": ctl, "udid": udid, "dev": dev,
+                    "device_dir": device_dir})
+    jobs.update(scan_jobs(device_dir))
+
     try:
-        boot_springboard(load_ctl(), device_dir, udid, name)
+        boot_springboard(ctl, device_dir, udid, name)
     except Exception as exc:  # keep the boot anchor alive regardless
         print(f"launchd_sim: SpringBoard boot failed: {exc}", flush=True)
+    for job in list(jobs.values()):
+        if job["runAtLoad"]:
+            start_job(job)
     persist()
 
     while running:
@@ -195,12 +358,27 @@ def main():
                 resp = {"ok": True, "pid": os.getpid()}
             elif cmd == "status":
                 prune_services()
-                resp = {"ok": True, "state": state}
+                prune_jobs()
+                resp = {"ok": True, "state": state,
+                        "jobs": [{"label": j["label"], "pid": j["pid"],
+                                  "services": j["machServices"]}
+                                 for j in jobs.values()]}
             elif cmd == "service_register":
                 resp = register_service(str(req.get("name", "")),
                                         int(req.get("pid", 0) or 0))
             elif cmd == "service_lookup":
                 resp = lookup_service(str(req.get("name", "")))
+            elif cmd == "job_load":
+                try:
+                    resp = load_job_into_runtime(str(req.get("path", "")))
+                except Exception as exc:
+                    resp = {"ok": False, "error": str(exc)}
+            elif cmd == "job_list":
+                prune_jobs()
+                resp = {"ok": True,
+                        "jobs": [{"label": j["label"], "pid": j["pid"],
+                                  "services": j["machServices"]}
+                                 for j in jobs.values()]}
             elif cmd == "shutdown":
                 resp = {"ok": True}
                 running = False
@@ -211,6 +389,7 @@ def main():
             except OSError:
                 pass
 
+    stop_jobs()
     stop_springboard()
     try:
         os.unlink(sock_path)

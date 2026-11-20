@@ -51,6 +51,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | libdispatch queues, groups, semaphores; main-queue drain from UIKit | ✅ |
 | Mach ports/messages, launchd bootstrap namespace, cross-process messaging | ✅ |
 | XPC peer connections, async/sync request-reply and serialized dictionaries across processes | ✅ |
+| launchd_sim LaunchDaemon plists: RunAtLoad, on-demand MachServices jobs, KeepAlive | ✅ |
 | UIPasteboard general pasteboard shared across processes, with changeCount | ✅ |
 | SpringBoard system UI: measured iOS 26 home screen, installed apps, real app launching | ✅ |
 | Real app suspension: home stops the process, the icon resumes it in place | ✅ |
@@ -88,9 +89,11 @@ a keyframe animation pulses a layer; and a services test that round-trips Mach
 messages, registers a bootstrap service, uses libdispatch
 queues/semaphores/groups and sends an XPC dictionary between a listener and a
 client; a cross-process fixture where XPC clients reach a listener peer and
-receive both an async and a synchronous reply, and another where one guest
-process registers a Mach service with launchd and another looks it up and
-delivers a message over it.
+receive both an async and a synchronous reply; launchd jobs installed from
+LaunchDaemon plists, one started on demand by a MachServices lookup and one
+on RunAtLoad, both answering XPC clients; and another where one guest process
+registers a Mach service with launchd and another looks it up and delivers a
+message over it.
 
 ```sh
 DYLD_ROOT_PATH=$PWD/runtime ./build/iosim-run build/binaries/services_test_x86_64
@@ -111,6 +114,7 @@ tools/iosimctl ui $UDID key a                    # hardware key, appends to the 
 tools/iosimctl ui $UDID backspace                # deletes backward
 tools/iosimctl ui $UDID swipe 300 700 60 200 0.25  # down/moves/up in one call
 tools/iosimctl ui $UDID home                     # scene backgrounds, home returns
+tools/iosimctl launchd-load $UDID MyJob.plist    # install + load a LaunchDaemon job
 tools/iosimctl shutdown $UDID
 
 # The same SpringBoard binary can be run directly for UI work:

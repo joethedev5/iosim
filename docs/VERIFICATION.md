@@ -638,6 +638,20 @@ dictionary back as the reply. The client prints
 decoder bounds depth, dictionary counts, key and value lengths before
 allocating, because the bytes cross a process boundary.
 
+### Services: launchd on-demand jobs
+
+`tests/launchd_job_test.c` is both the job and the client. The suite writes
+two LaunchDaemon plists through `iosimctl launchd-load`: one with
+`RunAtLoad = false` and `MachServices = {com.iosim.launchd.echo}`, and one
+with `RunAtLoad = true`. The on-demand job has no log before a client looks
+the name up; the client's XPC request then starts the job, which registers
+the service and prints `launchd job: ready
+name=com.iosim.launchd.echo`, receives `kind=ping seq=41`, replies, and
+exits. The client prints `launchd client: reply kind=pong seq=42`. The
+RunAtLoad job is already serving when launchd loads it and answers the same
+exchange. This exercises the plist job model, on-demand MachServices
+naming, and the XPC reply transport together.
+
 ### System UI: SpringBoard, measured and real
 
 `IOSIM_SHELL=1` switches `UIApplicationMain` to the home screen, and

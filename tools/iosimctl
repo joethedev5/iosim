@@ -15,6 +15,7 @@ import os
 import plistlib
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import time
@@ -567,6 +568,53 @@ def cmd_spawn(args):
     return run_child(udid, dev, [args.binary] + args.args, console=True, log_name="spawn")
 
 
+def launchd_request(udid, req, timeout=10.0):
+    """Send one JSON command to the device's launchd_sim control socket."""
+    path = f"/tmp/iosim-launchd-{udid}.sock"
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        s.settimeout(timeout)
+        s.connect(path)
+        s.sendall((json.dumps(req) + "\n").encode())
+        data = b""
+        while not data.endswith(b"\n"):
+            chunk = s.recv(65536)
+            if not chunk:
+                break
+            data += chunk
+    finally:
+        s.close()
+    return json.loads(data.decode() or "{}")
+
+
+def cmd_launchd_load(args):
+    plist_path = Path(args.plist)
+    try:
+        with open(plist_path, "rb") as f:
+            pl = plistlib.load(f)
+    except Exception as exc:
+        die(f"cannot read job plist: {exc}")
+    label = str(pl.get("Label") or plist_path.stem)
+    with StateLock():
+        state = load_state()
+        udid, dev = find_device(state, args.device)
+        daemons = device_dir(udid) / "Library" / "LaunchDaemons"
+        daemons.mkdir(parents=True, exist_ok=True)
+        dest = daemons / f"{label}.plist"
+        shutil.copyfile(plist_path, dest)
+    if dev["state"] != "Booted":
+        print(label)
+        return 0
+    try:
+        resp = launchd_request(udid, {"cmd": "job_load", "path": str(dest)})
+    except OSError as exc:
+        die(f"launchd request failed: {exc}")
+    if not resp.get("ok"):
+        die(f"launchd job load failed: {resp.get('error', 'unknown error')}")
+    print(f"loaded {resp.get('label', label)}")
+    return 0
+
+
 def cmd_getenv(args):
     state = load_state()
     udid, dev = find_device(state, args.device)
@@ -766,6 +814,12 @@ def main():
     p.add_argument("binary")
     p.add_argument("args", nargs=argparse.REMAINDER)
     p.set_defaults(func=cmd_spawn)
+
+    p = sub.add_parser("launchd-load",
+                       help="install a LaunchDaemon job plist and load it")
+    p.add_argument("device")
+    p.add_argument("plist")
+    p.set_defaults(func=cmd_launchd_load)
 
     p = sub.add_parser("getenv")
     p.add_argument("device")
