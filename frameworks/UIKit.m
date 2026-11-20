@@ -47,6 +47,8 @@ extern int  iosim_foundation_tick(void);
 extern int  iosim_dispatch_drain_main(void);
 extern const char *iosim_string_cstr(id string);
 extern int  strcmp(const char *a, const char *b);
+extern unsigned long strlen(const char *s);
+extern void *memcpy(void *dst, const void *src, unsigned long n);
 extern int  snprintf(char *buf, unsigned long size, const char *fmt, ...);
 extern int  iosim_png_load(const char *path, unsigned char **out_rgba,
                            int *out_width, int *out_height);
@@ -249,6 +251,107 @@ extern id kCAMediaTimingFunctionEaseInEaseOut;
 @interface UIResponder : NSObject
 @end
 
+enum {
+    NSLayoutAttributeNotAnAttribute = 0,
+    NSLayoutAttributeLeft = 1,
+    NSLayoutAttributeRight = 2,
+    NSLayoutAttributeTop = 3,
+    NSLayoutAttributeBottom = 4,
+    NSLayoutAttributeLeading = 5,
+    NSLayoutAttributeTrailing = 6,
+    NSLayoutAttributeWidth = 7,
+    NSLayoutAttributeHeight = 8,
+    NSLayoutAttributeCenterX = 9,
+    NSLayoutAttributeCenterY = 10,
+    NSLayoutAttributeLastBaseline = 11,
+    NSLayoutAttributeFirstBaseline = 12
+};
+
+enum {
+    NSLayoutRelationLessThanOrEqual = -1,
+    NSLayoutRelationEqual = 0,
+    NSLayoutRelationGreaterThanOrEqual = 1
+};
+
+@class NSLayoutAnchor;
+@class NSLayoutConstraint;
+@class NSLayoutDimension;
+@class UILayoutGuide;
+
+@interface NSLayoutConstraint : NSObject {
+@public
+    id _firstItem;
+    id _secondItem;
+    long _firstAttribute;
+    long _secondAttribute;
+    long _relation;
+    double _multiplier;
+    double _constant;
+    double _priority;
+    BOOL _active;
+}
++ (id)constraintWithItem:(id)firstItem attribute:(long)firstAttribute
+                relatedBy:(long)relation toItem:(id)secondItem
+               attribute:(long)secondAttribute multiplier:(double)multiplier
+                constant:(double)constant;
++ (void)activateConstraints:(id)constraints;
++ (void)deactivateConstraints:(id)constraints;
+- (void)setActive:(BOOL)active;
+- (BOOL)isActive;
+- (void)setPriority:(double)priority;
+- (double)priority;
+- (void)setConstant:(double)constant;
+- (double)constant;
+@end
+
+@interface NSLayoutAnchor : NSObject {
+@public
+    id _item;
+    long _attribute;
+}
+- (id)initWithItem:(id)item attribute:(long)attribute;
+- (id)constraintEqualToAnchor:(NSLayoutAnchor *)anchor;
+- (id)constraintEqualToAnchor:(NSLayoutAnchor *)anchor constant:(double)c;
+- (id)constraintGreaterThanOrEqualToAnchor:(NSLayoutAnchor *)anchor;
+- (id)constraintGreaterThanOrEqualToAnchor:(NSLayoutAnchor *)anchor constant:(double)c;
+- (id)constraintLessThanOrEqualToAnchor:(NSLayoutAnchor *)anchor;
+- (id)constraintLessThanOrEqualToAnchor:(NSLayoutAnchor *)anchor constant:(double)c;
+@end
+
+@interface NSLayoutDimension : NSLayoutAnchor
+- (id)constraintEqualToConstant:(double)c;
+- (id)constraintGreaterThanOrEqualToConstant:(double)c;
+- (id)constraintLessThanOrEqualToConstant:(double)c;
+- (id)constraintEqualToAnchor:(NSLayoutAnchor *)anchor multiplier:(double)m;
+- (id)constraintEqualToAnchor:(NSLayoutAnchor *)anchor multiplier:(double)m
+                     constant:(double)c;
+@end
+
+@interface UILayoutGuide : NSObject {
+@public
+    id _owningView;
+    double _topInset;
+    double _bottomInset;
+    double _leftInset;
+    double _rightInset;
+}
+- (id)owningView;
+- (double)layoutFrameX;
+- (double)layoutFrameY;
+- (double)layoutFrameWidth;
+- (double)layoutFrameHeight;
+- (NSLayoutAnchor *)leadingAnchor;
+- (NSLayoutAnchor *)trailingAnchor;
+- (NSLayoutAnchor *)leftAnchor;
+- (NSLayoutAnchor *)rightAnchor;
+- (NSLayoutAnchor *)topAnchor;
+- (NSLayoutAnchor *)bottomAnchor;
+- (NSLayoutAnchor *)centerXAnchor;
+- (NSLayoutAnchor *)centerYAnchor;
+- (NSLayoutDimension *)widthAnchor;
+- (NSLayoutDimension *)heightAnchor;
+@end
+
 @interface UIView : UIResponder {
 @public
     CGRect _frame;
@@ -266,6 +369,11 @@ extern id kCAMediaTimingFunctionEaseInEaseOut;
     id _superview;
     BOOL _needsLayout;
     CGAffineTransform _transform;
+    BOOL _translatesAutoresizingMaskIntoConstraints;
+    id _constraints[32];
+    int _constraintCount;
+    UILayoutGuide *_safeAreaGuide;
+    BOOL _needsConstraintsUpdate;
 }
 - (id)initWithFrame:(CGRect)frame;
 - (CGRect)frame;
@@ -288,6 +396,27 @@ extern id kCAMediaTimingFunctionEaseInEaseOut;
 - (void)layoutSubviews;
 - (void)setNeedsLayout;
 - (void)layoutIfNeeded;
+- (void)setNeedsUpdateConstraints;
+- (void)updateConstraints;
+- (void)updateConstraintsIfNeeded;
+- (BOOL)translatesAutoresizingMaskIntoConstraints;
+- (void)setTranslatesAutoresizingMaskIntoConstraints:(BOOL)value;
+- (NSArray *)constraints;
+- (void)addConstraint:(NSLayoutConstraint *)constraint;
+- (void)removeConstraint:(NSLayoutConstraint *)constraint;
+- (NSLayoutAnchor *)leadingAnchor;
+- (NSLayoutAnchor *)trailingAnchor;
+- (NSLayoutAnchor *)leftAnchor;
+- (NSLayoutAnchor *)rightAnchor;
+- (NSLayoutAnchor *)topAnchor;
+- (NSLayoutAnchor *)bottomAnchor;
+- (NSLayoutAnchor *)centerXAnchor;
+- (NSLayoutAnchor *)centerYAnchor;
+- (NSLayoutDimension *)widthAnchor;
+- (NSLayoutDimension *)heightAnchor;
+- (UILayoutGuide *)safeAreaLayoutGuide;
+- (CGSize)sizeThatFits:(CGSize)size;
+- (CGSize)intrinsicContentSize;
 + (void)animateWithDuration:(double)duration animations:(void (^)(void))animations;
 + (void)animateWithDuration:(double)duration animations:(void (^)(void))animations
                  completion:(void (^)(BOOL finished))completion;
@@ -316,6 +445,7 @@ extern id kCAMediaTimingFunctionEaseInEaseOut;
 - (void)setNumberOfLines:(int)n;
 - (int)numberOfLines;
 - (CGSize)intrinsicContentSize;
+- (CGSize)sizeThatFits:(CGSize)size;
 @end
 
 @interface UIImageView : UIView {
@@ -778,6 +908,314 @@ int iosim_animations_active(void)
 @implementation UIResponder
 @end
 
+/* ------------------------------------------------------- auto layout */
+
+#define MAX_ACTIVE_CONSTRAINTS 256
+static NSLayoutConstraint *g_activeConstraints[MAX_ACTIVE_CONSTRAINTS];
+static int g_activeConstraintCount;
+
+static NSLayoutConstraint *make_layout_constraint(id item1, long attr1,
+                                                  long relation, id item2,
+                                                  long attr2, double multiplier,
+                                                  double constant)
+{
+    NSLayoutConstraint *c = [[NSLayoutConstraint alloc] init];
+    c->_firstItem = item1;
+    c->_firstAttribute = attr1;
+    c->_relation = relation;
+    c->_secondItem = item2;
+    c->_secondAttribute = attr2;
+    c->_multiplier = multiplier;
+    c->_constant = constant;
+    c->_priority = 1000.0;
+    return c;
+}
+
+@implementation NSLayoutConstraint
++ (id)constraintWithItem:(id)firstItem attribute:(long)firstAttribute
+                relatedBy:(long)relation toItem:(id)secondItem
+               attribute:(long)secondAttribute multiplier:(double)multiplier
+                constant:(double)constant
+{
+    return make_layout_constraint(firstItem, firstAttribute, relation,
+                                  secondItem, secondAttribute, multiplier,
+                                  constant);
+}
++ (void)activateConstraints:(id)constraints
+{
+    if (!constraints)
+        return;
+    unsigned long n = [constraints count];
+    for (unsigned long i = 0; i < n; i++)
+        [(NSLayoutConstraint *)[constraints objectAtIndex:i] setActive:YES];
+}
++ (void)deactivateConstraints:(id)constraints
+{
+    if (!constraints)
+        return;
+    unsigned long n = [constraints count];
+    for (unsigned long i = 0; i < n; i++)
+        [(NSLayoutConstraint *)[constraints objectAtIndex:i] setActive:NO];
+}
+- (void)setActive:(BOOL)active
+{
+    if (active == _active)
+        return;
+    if (active)
+    {
+        if (g_activeConstraintCount < MAX_ACTIVE_CONSTRAINTS)
+            g_activeConstraints[g_activeConstraintCount++] = self;
+    }
+    else
+    {
+        for (int i = 0; i < g_activeConstraintCount; i++)
+            if (g_activeConstraints[i] == self)
+            {
+                for (int j = i; j + 1 < g_activeConstraintCount; j++)
+                    g_activeConstraints[j] = g_activeConstraints[j + 1];
+                g_activeConstraintCount--;
+                break;
+            }
+    }
+    _active = active;
+}
+- (BOOL)isActive { return _active; }
+- (void)setPriority:(double)priority { _priority = priority; }
+- (double)priority { return _priority; }
+- (void)setConstant:(double)constant { _constant = constant; }
+- (double)constant { return _constant; }
+@end
+
+@implementation NSLayoutAnchor
+- (id)initWithItem:(id)item attribute:(long)attribute
+{
+    self = [super init];
+    if (self)
+    {
+        _item = item;
+        _attribute = attribute;
+    }
+    return self;
+}
+- (id)constraintEqualToAnchor:(NSLayoutAnchor *)anchor
+{
+    return make_layout_constraint(_item, _attribute, NSLayoutRelationEqual,
+                                  anchor->_item, anchor->_attribute, 1.0, 0.0);
+}
+- (id)constraintEqualToAnchor:(NSLayoutAnchor *)anchor constant:(double)c
+{
+    return make_layout_constraint(_item, _attribute, NSLayoutRelationEqual,
+                                  anchor->_item, anchor->_attribute, 1.0, c);
+}
+- (id)constraintGreaterThanOrEqualToAnchor:(NSLayoutAnchor *)anchor
+{
+    return make_layout_constraint(_item, _attribute,
+                                  NSLayoutRelationGreaterThanOrEqual,
+                                  anchor->_item, anchor->_attribute, 1.0, 0.0);
+}
+- (id)constraintGreaterThanOrEqualToAnchor:(NSLayoutAnchor *)anchor
+                                 constant:(double)c
+{
+    return make_layout_constraint(_item, _attribute,
+                                  NSLayoutRelationGreaterThanOrEqual,
+                                  anchor->_item, anchor->_attribute, 1.0, c);
+}
+- (id)constraintLessThanOrEqualToAnchor:(NSLayoutAnchor *)anchor
+{
+    return make_layout_constraint(_item, _attribute,
+                                  NSLayoutRelationLessThanOrEqual,
+                                  anchor->_item, anchor->_attribute, 1.0, 0.0);
+}
+- (id)constraintLessThanOrEqualToAnchor:(NSLayoutAnchor *)anchor
+                              constant:(double)c
+{
+    return make_layout_constraint(_item, _attribute,
+                                  NSLayoutRelationLessThanOrEqual,
+                                  anchor->_item, anchor->_attribute, 1.0, c);
+}
+@end
+
+@implementation NSLayoutDimension
+- (id)constraintEqualToConstant:(double)c
+{
+    return make_layout_constraint(_item, _attribute, NSLayoutRelationEqual,
+                                  nil, NSLayoutAttributeNotAnAttribute,
+                                  0.0, c);
+}
+- (id)constraintGreaterThanOrEqualToConstant:(double)c
+{
+    return make_layout_constraint(_item, _attribute,
+                                  NSLayoutRelationGreaterThanOrEqual, nil,
+                                  NSLayoutAttributeNotAnAttribute, 0.0, c);
+}
+- (id)constraintLessThanOrEqualToConstant:(double)c
+{
+    return make_layout_constraint(_item, _attribute,
+                                  NSLayoutRelationLessThanOrEqual, nil,
+                                  NSLayoutAttributeNotAnAttribute, 0.0, c);
+}
+- (id)constraintEqualToAnchor:(NSLayoutAnchor *)anchor multiplier:(double)m
+{
+    return make_layout_constraint(_item, _attribute, NSLayoutRelationEqual,
+                                  anchor->_item, anchor->_attribute, m, 0.0);
+}
+- (id)constraintEqualToAnchor:(NSLayoutAnchor *)anchor multiplier:(double)m
+                     constant:(double)c
+{
+    return make_layout_constraint(_item, _attribute, NSLayoutRelationEqual,
+                                  anchor->_item, anchor->_attribute, m, c);
+}
+@end
+
+@implementation UILayoutGuide
+- (id)owningView { return _owningView; }
+- (double)layoutFrameX { return 0; }
+- (double)layoutFrameY { return 0; }
+- (double)layoutFrameWidth { return 0; }
+- (double)layoutFrameHeight { return 0; }
+- (NSLayoutAnchor *)leadingAnchor
+{
+    return [[NSLayoutAnchor alloc] initWithItem:self
+                                      attribute:NSLayoutAttributeLeading];
+}
+- (NSLayoutAnchor *)trailingAnchor
+{
+    return [[NSLayoutAnchor alloc] initWithItem:self
+                                      attribute:NSLayoutAttributeTrailing];
+}
+- (NSLayoutAnchor *)leftAnchor
+{
+    return [[NSLayoutAnchor alloc] initWithItem:self
+                                      attribute:NSLayoutAttributeLeft];
+}
+- (NSLayoutAnchor *)rightAnchor
+{
+    return [[NSLayoutAnchor alloc] initWithItem:self
+                                      attribute:NSLayoutAttributeRight];
+}
+- (NSLayoutAnchor *)topAnchor
+{
+    return [[NSLayoutAnchor alloc] initWithItem:self
+                                      attribute:NSLayoutAttributeTop];
+}
+- (NSLayoutAnchor *)bottomAnchor
+{
+    return [[NSLayoutAnchor alloc] initWithItem:self
+                                      attribute:NSLayoutAttributeBottom];
+}
+- (NSLayoutAnchor *)centerXAnchor
+{
+    return [[NSLayoutAnchor alloc] initWithItem:self
+                                      attribute:NSLayoutAttributeCenterX];
+}
+- (NSLayoutAnchor *)centerYAnchor
+{
+    return [[NSLayoutAnchor alloc] initWithItem:self
+                                      attribute:NSLayoutAttributeCenterY];
+}
+- (NSLayoutDimension *)widthAnchor
+{
+    return [[NSLayoutDimension alloc] initWithItem:self
+                                         attribute:NSLayoutAttributeWidth];
+}
+- (NSLayoutDimension *)heightAnchor
+{
+    return [[NSLayoutDimension alloc] initWithItem:self
+                                         attribute:NSLayoutAttributeHeight];
+}
+@end
+
+static void iosim_layout_apply(UIView *root);
+
+#define IOSIM_MAX_WRAP_LINES 64
+
+/* Greedy word wrap over UTF-8 text, measuring with the framebuffer font.
+ * Explicit newlines always start a new line. Returns the line count. */
+static int wrap_text_lines(const char *text, int style, double points,
+                           double scale, int maxWidth,
+                           char lines[][256], int maxLines)
+{
+    if (!text || !*text)
+        return 0;
+    if (maxLines <= 0 || maxLines > IOSIM_MAX_WRAP_LINES)
+        maxLines = IOSIM_MAX_WRAP_LINES;
+    int count = 0;
+    const char *p = text;
+    char line[256];
+    int lineLen = 0;
+    line[0] = 0;
+    while (*p && count < maxLines)
+    {
+        if (*p == '\n')
+        {
+            memcpy(lines[count], line, (unsigned long)lineLen);
+            lines[count][lineLen] = 0;
+            count++;
+            lineLen = 0;
+            line[0] = 0;
+            p++;
+            continue;
+        }
+        if (*p == ' ' || *p == '\t' || *p == '\r')
+        {
+            p++;
+            continue;
+        }
+        char word[256];
+        int wl = 0;
+        while (*p && *p != ' ' && *p != '\t' && *p != '\r' && *p != '\n' &&
+               wl < 255)
+            word[wl++] = *p++;
+        word[wl] = 0;
+        if (wl == 0)
+        {
+            p++;
+            continue;
+        }
+        char cand[256];
+        int cl = lineLen;
+        if (cl + (cl ? 1 : 0) + wl >= 256)
+        {
+            memcpy(lines[count], line, (unsigned long)lineLen);
+            lines[count][lineLen] = 0;
+            count++;
+            lineLen = 0;
+            line[0] = 0;
+            if (count >= maxLines)
+                break;
+            cl = 0;
+        }
+        memcpy(cand, line, (unsigned long)cl);
+        if (cl)
+            cand[cl++] = ' ';
+        memcpy(cand + cl, word, (unsigned long)wl + 1);
+        cl += wl;
+        int width = iosim_fb_font_text_width(cand, style, points, scale);
+        if (maxWidth > 0 && lineLen > 0 && width > maxWidth)
+        {
+            memcpy(lines[count], line, (unsigned long)lineLen);
+            lines[count][lineLen] = 0;
+            count++;
+            if (count >= maxLines)
+                break;
+            memcpy(line, word, (unsigned long)wl + 1);
+            lineLen = wl;
+        }
+        else
+        {
+            memcpy(line, cand, (unsigned long)cl + 1);
+            lineLen = cl;
+        }
+    }
+    if (count < maxLines && lineLen > 0)
+    {
+        memcpy(lines[count], line, (unsigned long)lineLen + 1);
+        count++;
+    }
+    return count;
+}
+
+
 @implementation UIView
 - (id)initWithFrame:(CGRect)frame
 {
@@ -790,6 +1228,7 @@ int iosim_animations_active(void)
         _layer = [[CALayer alloc] init];
         _layer->_frame = CGRectMake(0, 0, frame.size.width, frame.size.height);
         _transform = CGAffineTransformIdentityValue();
+        _translatesAutoresizingMaskIntoConstraints = YES;
     }
     return self;
 }
@@ -862,11 +1301,127 @@ int iosim_animations_active(void)
 - (void)setNeedsLayout { _needsLayout = YES; }
 - (void)layoutIfNeeded
 {
+    UIView *root = self;
+    while (root->_superview)
+        root = (UIView *)root->_superview;
+    iosim_layout_apply(root);
     if (_needsLayout)
     {
         _needsLayout = NO;
         [self layoutSubviews];
     }
+}
+- (void)setNeedsUpdateConstraints
+{
+    _needsConstraintsUpdate = YES;
+    _needsLayout = YES;
+}
+- (void)updateConstraints { }
+- (void)updateConstraintsIfNeeded { _needsConstraintsUpdate = NO; }
+- (BOOL)translatesAutoresizingMaskIntoConstraints
+{
+    return _translatesAutoresizingMaskIntoConstraints;
+}
+- (void)setTranslatesAutoresizingMaskIntoConstraints:(BOOL)value
+{
+    _translatesAutoresizingMaskIntoConstraints = value;
+}
+- (NSArray *)constraints
+{
+    return [NSArray arrayWithObjects:_constraints count:(unsigned long)_constraintCount];
+}
+- (void)addConstraint:(NSLayoutConstraint *)constraint
+{
+    if (!constraint)
+        return;
+    if (_constraintCount < 32)
+        _constraints[_constraintCount++] = constraint;
+    [constraint setActive:YES];
+    _needsLayout = YES;
+}
+- (void)removeConstraint:(NSLayoutConstraint *)constraint
+{
+    for (int i = 0; i < _constraintCount; i++)
+        if (_constraints[i] == constraint)
+        {
+            for (int j = i; j + 1 < _constraintCount; j++)
+                _constraints[j] = _constraints[j + 1];
+            _constraintCount--;
+            break;
+        }
+    [constraint setActive:NO];
+}
+- (NSLayoutAnchor *)leadingAnchor
+{
+    return [[NSLayoutAnchor alloc] initWithItem:self
+                                      attribute:NSLayoutAttributeLeading];
+}
+- (NSLayoutAnchor *)trailingAnchor
+{
+    return [[NSLayoutAnchor alloc] initWithItem:self
+                                      attribute:NSLayoutAttributeTrailing];
+}
+- (NSLayoutAnchor *)leftAnchor
+{
+    return [[NSLayoutAnchor alloc] initWithItem:self
+                                      attribute:NSLayoutAttributeLeft];
+}
+- (NSLayoutAnchor *)rightAnchor
+{
+    return [[NSLayoutAnchor alloc] initWithItem:self
+                                      attribute:NSLayoutAttributeRight];
+}
+- (NSLayoutAnchor *)topAnchor
+{
+    return [[NSLayoutAnchor alloc] initWithItem:self
+                                      attribute:NSLayoutAttributeTop];
+}
+- (NSLayoutAnchor *)bottomAnchor
+{
+    return [[NSLayoutAnchor alloc] initWithItem:self
+                                      attribute:NSLayoutAttributeBottom];
+}
+- (NSLayoutAnchor *)centerXAnchor
+{
+    return [[NSLayoutAnchor alloc] initWithItem:self
+                                      attribute:NSLayoutAttributeCenterX];
+}
+- (NSLayoutAnchor *)centerYAnchor
+{
+    return [[NSLayoutAnchor alloc] initWithItem:self
+                                      attribute:NSLayoutAttributeCenterY];
+}
+- (NSLayoutDimension *)widthAnchor
+{
+    return [[NSLayoutDimension alloc] initWithItem:self
+                                         attribute:NSLayoutAttributeWidth];
+}
+- (NSLayoutDimension *)heightAnchor
+{
+    return [[NSLayoutDimension alloc] initWithItem:self
+                                         attribute:NSLayoutAttributeHeight];
+}
+- (UILayoutGuide *)safeAreaLayoutGuide
+{
+    if (!_safeAreaGuide)
+    {
+        _safeAreaGuide = [[UILayoutGuide alloc] init];
+        _safeAreaGuide->_owningView = self;
+        const char *top = getenv("IOSIM_SAFE_TOP");
+        const char *bottom = getenv("IOSIM_SAFE_BOTTOM");
+        _safeAreaGuide->_topInset = top ? atof(top) : 59.0;
+        _safeAreaGuide->_bottomInset = bottom ? atof(bottom) : 34.0;
+    }
+    return _safeAreaGuide;
+}
+- (CGSize)sizeThatFits:(CGSize)size
+{
+    (void)size;
+    return CGSizeMake(_frame.size.width, _frame.size.height);
+}
+- (CGSize)intrinsicContentSize
+{
+    return CGSizeMake(-1, -1);
 }
 - (BOOL)pointInside:(CGPoint)point
 {
@@ -918,6 +1473,13 @@ int iosim_animations_active(void)
 @end
 
 @implementation UILabel
+- (id)initWithFrame:(CGRect)frame
+{
+    self = [super initWithFrame:frame];
+    if (self)
+        _numberOfLines = 1;
+    return self;
+}
 - (void)setText:(id)text { _text = text; }
 - (id)text { return _text; }
 - (void)setTextColor:(UIColor *)color { _textColor = color; }
@@ -945,6 +1507,30 @@ int iosim_animations_active(void)
     iosim_fb_font_metrics(style, points, scale, &ascent, &descent,
                           &lineHeight);
     return CGSizeMake(width / scale, lineHeight / scale);
+}
+- (CGSize)sizeThatFits:(CGSize)size
+{
+    const char *text = iosim_string_cstr(_text);
+    if (!text || _numberOfLines == 1 || size.width <= 0)
+        return [self intrinsicContentSize];
+    double points = _font ? _font->_size : 17.0;
+    int style = _font && _font->_bold ? IOSIM_FONT_BOLD : IOSIM_FONT_REGULAR;
+    double scale = [[UIScreen mainScreen] scale];
+    char lines[IOSIM_MAX_WRAP_LINES][256];
+    int maxLines = _numberOfLines > 1 ? _numberOfLines : IOSIM_MAX_WRAP_LINES;
+    int n = wrap_text_lines(text, style, points, scale,
+                            (int)(size.width * scale + 0.5), lines, maxLines);
+    int ascent = 0, descent = 0, lineHeight = 0;
+    iosim_fb_font_metrics(style, points, scale, &ascent, &descent,
+                          &lineHeight);
+    int maxWidth = 0;
+    for (int i = 0; i < n; i++)
+    {
+        int w = iosim_fb_font_text_width(lines[i], style, points, scale);
+        if (w > maxWidth)
+            maxWidth = w;
+    }
+    return CGSizeMake(maxWidth / scale, (double)n * lineHeight / scale);
 }
 @end
 
@@ -1447,6 +2033,7 @@ int iosim_animations_active(void)
     _title = title;
     _titleLabel->_text = title;
 }
+- (UILabel *)titleLabel { return _titleLabel; }
 - (void)setTitleColor:(UIColor *)color forState:(unsigned long)state
 {
     (void)state;
@@ -1801,6 +2388,410 @@ static double layer_key_value(CALayer *layer, const char *key, double base)
 }
 
 
+/* -------------------------------------------------------- auto layout */
+
+#define MAX_LAYOUT_VIEWS 96
+
+struct layout_entry {
+    UIView *view;
+    int fixed;
+    int lockW, lockH;
+    double x, y, w, h;
+};
+
+static struct layout_entry *layout_find(struct layout_entry *entries, int count,
+                                        id item)
+{
+    if (!item)
+        return 0;
+    for (int i = 0; i < count; i++)
+        if ((id)entries[i].view == item)
+            return &entries[i];
+    return 0;
+}
+
+static UILayoutGuide *layout_guide(id item)
+{
+    if (item && [item isKindOfClass:[UILayoutGuide class]])
+        return (UILayoutGuide *)item;
+    return 0;
+}
+
+static double *layout_var_ptr(struct layout_entry *entries, int vi)
+{
+    struct layout_entry *e = &entries[vi / 4];
+    switch (vi % 4)
+    {
+    case 0: return &e->x;
+    case 1: return &e->y;
+    case 2: return &e->w;
+    default: return &e->h;
+    }
+}
+
+static int layout_var_free(struct layout_entry *entries, int vi)
+{
+    struct layout_entry *e = &entries[vi / 4];
+    if (e->fixed)
+        return 0;
+    if ((vi % 4) == 2 && e->lockW)
+        return 0;
+    if ((vi % 4) == 3 && e->lockH)
+        return 0;
+    return 1;
+}
+
+/* Express an anchor as a linear form over the entries' x, y, w, h slots,
+ * plus a constant offset (used by layout guides and baselines). */
+static void layout_form(struct layout_entry *entries, int count, id item,
+                        long attribute, double *coeff, double *offset)
+{
+    for (int i = 0; i < count * 4; i++)
+        coeff[i] = 0;
+    *offset = 0;
+    if (!item || attribute == NSLayoutAttributeNotAnAttribute)
+        return;
+    UILayoutGuide *guide = layout_guide(item);
+    UIView *owner = guide ? (UIView *)guide->_owningView : (UIView *)item;
+    int index = -1;
+    for (int i = 0; i < count; i++)
+        if (entries[i].view == owner)
+        {
+            index = i;
+            break;
+        }
+    if (index < 0)
+        return;
+    double *c = coeff + index * 4;
+    double leftInset = guide ? guide->_leftInset : 0;
+    double rightInset = guide ? guide->_rightInset : 0;
+    double topInset = guide ? guide->_topInset : 0;
+    double bottomInset = guide ? guide->_bottomInset : 0;
+    switch (attribute)
+    {
+    case NSLayoutAttributeLeft:
+    case NSLayoutAttributeLeading:
+        c[0] = 1;
+        *offset = leftInset;
+        break;
+    case NSLayoutAttributeRight:
+    case NSLayoutAttributeTrailing:
+        c[0] = 1;
+        c[2] = 1;
+        *offset = -rightInset;
+        break;
+    case NSLayoutAttributeTop:
+        c[1] = 1;
+        *offset = topInset;
+        break;
+    case NSLayoutAttributeBottom:
+        c[1] = 1;
+        c[3] = 1;
+        *offset = -bottomInset;
+        break;
+    case NSLayoutAttributeWidth:
+        c[2] = 1;
+        *offset = -(leftInset + rightInset);
+        break;
+    case NSLayoutAttributeHeight:
+        c[3] = 1;
+        *offset = -(topInset + bottomInset);
+        break;
+    case NSLayoutAttributeCenterX:
+        c[0] = 1;
+        c[2] = 0.5;
+        *offset = (leftInset - rightInset) / 2;
+        break;
+    case NSLayoutAttributeCenterY:
+        c[1] = 1;
+        c[3] = 0.5;
+        *offset = (topInset - bottomInset) / 2;
+        break;
+    case NSLayoutAttributeFirstBaseline:
+    case NSLayoutAttributeLastBaseline:
+        c[1] = 1;
+        c[3] = 0.5;
+        if (!guide && [owner isKindOfClass:[UILabel class]])
+        {
+            UILabel *label = (UILabel *)owner;
+            double points = label->_font ? label->_font->_size : 17.0;
+            int style = label->_font && label->_font->_bold
+                            ? IOSIM_FONT_BOLD : IOSIM_FONT_REGULAR;
+            double scale = [[UIScreen mainScreen] scale];
+            int ascent = 0, descent = 0, lineHeight = 0;
+            iosim_fb_font_metrics(style, points, scale, &ascent, &descent,
+                                  &lineHeight);
+            *offset = ascent / scale - lineHeight / scale / 2;
+        }
+        else
+            c[3] = 0.8;
+        break;
+    }
+}
+
+static void layout_apply_constraint(struct layout_entry *entries, int count,
+                                    NSLayoutConstraint *c)
+{
+    if (!c || !c->_active || c->_firstAttribute == NSLayoutAttributeNotAnAttribute)
+        return;
+    UIView *owner1 = layout_guide(c->_firstItem)
+                         ? (UIView *)((UILayoutGuide *)c->_firstItem)->_owningView
+                         : (UIView *)c->_firstItem;
+    if (!layout_find(entries, count, owner1))
+        return;
+    if (c->_secondItem && c->_secondAttribute != NSLayoutAttributeNotAnAttribute)
+    {
+        UIView *owner2 = layout_guide(c->_secondItem)
+                             ? (UIView *)((UILayoutGuide *)c->_secondItem)->_owningView
+                             : (UIView *)c->_secondItem;
+        if (!layout_find(entries, count, owner2))
+            return;
+    }
+
+    double f1[MAX_LAYOUT_VIEWS * 4], f2[MAX_LAYOUT_VIEWS * 4];
+    double off1 = 0, off2 = 0;
+    layout_form(entries, count, c->_firstItem, c->_firstAttribute, f1, &off1);
+    if (c->_secondItem)
+        layout_form(entries, count, c->_secondItem, c->_secondAttribute, f2,
+                    &off2);
+    else
+        for (int i = 0; i < count * 4; i++)
+            f2[i] = 0;
+
+    double a[MAX_LAYOUT_VIEWS * 4];
+    double rhs = c->_constant - off1;
+    if (c->_secondItem)
+        rhs += c->_multiplier * off2;
+    for (int i = 0; i < count * 4; i++)
+        a[i] = f1[i] - (c->_secondItem ? c->_multiplier * f2[i] : 0);
+
+    double value = 0, norm = 0;
+    for (int i = 0; i < count * 4; i++)
+    {
+        if (a[i] == 0)
+            continue;
+        value += a[i] * (*layout_var_ptr(entries, i));
+        if (layout_var_free(entries, i))
+            norm += a[i] * a[i];
+    }
+    if (norm <= 0)
+        return;
+    double residual = value - rhs;
+    int violates = 0;
+    if (c->_relation == NSLayoutRelationEqual)
+        violates = __builtin_fabs(residual) > 0.0005;
+    else if (c->_relation == NSLayoutRelationGreaterThanOrEqual)
+        violates = residual < -0.0005;
+    else
+        violates = residual > 0.0005;
+    if (!violates)
+        return;
+
+    double step = c->_priority / 1000.0;
+    if (step > 1)
+        step = 1;
+    if (step <= 0)
+        return;
+    double correction = -residual * step / norm;
+    for (int i = 0; i < count * 4; i++)
+    {
+        if (a[i] == 0 || !layout_var_free(entries, i))
+            continue;
+        double *var = layout_var_ptr(entries, i);
+        *var += correction * a[i];
+        struct layout_entry *e = &entries[i / 4];
+        if (e->w < 0)
+            e->w = 0;
+        if (e->h < 0)
+            e->h = 0;
+    }
+}
+
+static int layout_has_attribute(UIView *view, long attribute)
+{
+    for (int i = 0; i < g_activeConstraintCount; i++)
+    {
+        NSLayoutConstraint *c = g_activeConstraints[i];
+        if (!c || !c->_active)
+            continue;
+        if (c->_firstItem == view && c->_firstAttribute == attribute)
+            return 1;
+        if (c->_secondItem == view && c->_secondAttribute == attribute)
+            return 1;
+    }
+    return 0;
+}
+
+static CGSize layout_intrinsic_size(UIView *view, struct layout_entry *e)
+{
+    CGSize size = [view intrinsicContentSize];
+    if ([view isKindOfClass:[UILabel class]])
+    {
+        UILabel *label = (UILabel *)view;
+        if (label->_numberOfLines != 1 && label->_text)
+        {
+            const char *text = iosim_string_cstr(label->_text);
+            double points = label->_font ? label->_font->_size : 17.0;
+            int style = label->_font && label->_font->_bold
+                            ? IOSIM_FONT_BOLD : IOSIM_FONT_REGULAR;
+            double scale = [[UIScreen mainScreen] scale];
+            char lines[IOSIM_MAX_WRAP_LINES][256];
+            int maxLines = label->_numberOfLines > 1
+                               ? label->_numberOfLines : IOSIM_MAX_WRAP_LINES;
+            int n = wrap_text_lines(text, style, points, scale,
+                                    (int)(e->w * scale + 0.5), lines,
+                                    maxLines);
+            int ascent = 0, descent = 0, lineHeight = 0;
+            iosim_fb_font_metrics(style, points, scale, &ascent, &descent,
+                                  &lineHeight);
+            if (n > 0)
+                size.height = (double)n * lineHeight / scale;
+        }
+    }
+    return size;
+}
+
+static int layout_first_item_attribute(UIView *view, long attribute)
+{
+    for (int i = 0; i < g_activeConstraintCount; i++)
+    {
+        NSLayoutConstraint *c = g_activeConstraints[i];
+        if (c && c->_active && c->_firstItem == view &&
+            c->_firstAttribute == attribute)
+            return 1;
+    }
+    return 0;
+}
+
+/* Decide which dimensions are fixed by intrinsic size rather than by
+ * constraints. A width is intrinsic unless there is a width constraint or
+ * both horizontal edges are pinned by constraints on this view; the same
+ * rule applies to height. */
+static void layout_init_locks(struct layout_entry *entries, int count)
+{
+    for (int i = 0; i < count; i++)
+    {
+        struct layout_entry *e = &entries[i];
+        e->lockW = e->lockH = 0;
+        if (e->fixed)
+            continue;
+        UIView *view = e->view;
+        CGSize intrinsic = [view intrinsicContentSize];
+        int hasW = layout_has_attribute(view, NSLayoutAttributeWidth);
+        int hasH = layout_has_attribute(view, NSLayoutAttributeHeight);
+        int leading = layout_first_item_attribute(view, NSLayoutAttributeLeading) ||
+                      layout_first_item_attribute(view, NSLayoutAttributeLeft);
+        int trailing = layout_first_item_attribute(view, NSLayoutAttributeTrailing) ||
+                       layout_first_item_attribute(view, NSLayoutAttributeRight);
+        int top = layout_first_item_attribute(view, NSLayoutAttributeTop);
+        int bottom = layout_first_item_attribute(view, NSLayoutAttributeBottom);
+        if (!hasW && !(leading && trailing) && intrinsic.width > 0)
+        {
+            e->lockW = 1;
+            if (e->w <= 0)
+                e->w = intrinsic.width;
+        }
+        if (!hasH && !(top && bottom) && intrinsic.height > 0)
+        {
+            e->lockH = 1;
+            if (e->h <= 0)
+                e->h = intrinsic.height;
+        }
+    }
+}
+
+static void layout_apply_intrinsic(struct layout_entry *entries, int count,
+                                   struct layout_entry *e)
+{
+    if (!e->lockW && !e->lockH)
+        return;
+    CGSize intrinsic = layout_intrinsic_size(e->view, e);
+    if (e->lockW && intrinsic.width > 0)
+        e->w = intrinsic.width;
+    if (e->lockH && intrinsic.height > 0)
+        e->h = intrinsic.height;
+    if (e->w < 0)
+        e->w = 0;
+    if (e->h < 0)
+        e->h = 0;
+}
+
+static void layout_collect(UIView *view, struct layout_entry *entries,
+                           int *count, double parentX, double parentY)
+{
+    if (!view || *count >= MAX_LAYOUT_VIEWS)
+        return;
+    struct layout_entry *e = &entries[*count];
+    e->view = view;
+    e->x = parentX + view->_frame.origin.x;
+    e->y = parentY + view->_frame.origin.y;
+    e->w = view->_frame.size.width;
+    e->h = view->_frame.size.height;
+    e->fixed = view->_translatesAutoresizingMaskIntoConstraints ? 1 : 0;
+    (*count)++;
+    for (int i = 0; i < view->_subviewCount; i++)
+    {
+        struct layout_entry *child;
+        (void)child;
+        layout_collect((UIView *)view->_subviews[i], entries, count, e->x,
+                       e->y);
+    }
+}
+
+static void layout_write(UIView *view, struct layout_entry *entries, int count)
+{
+    struct layout_entry *e = layout_find(entries, count, view);
+    if (!e)
+        return;
+    if (view->_superview && !e->fixed)
+    {
+        struct layout_entry *parent =
+            layout_find(entries, count, view->_superview);
+        if (parent)
+            [view setFrame:CGRectMake(e->x - parent->x, e->y - parent->y,
+                                      e->w, e->h)];
+    }
+    for (int i = 0; i < view->_subviewCount; i++)
+        layout_write((UIView *)view->_subviews[i], entries, count);
+}
+
+static void iosim_layout_apply(UIView *root)
+{
+    if (!root || g_activeConstraintCount == 0)
+        return;
+    struct layout_entry entries[MAX_LAYOUT_VIEWS];
+    int count = 0;
+    layout_collect(root, entries, &count, 0, 0);
+    if (count == 0)
+        return;
+    layout_init_locks(entries, count);
+    for (int iter = 0; iter < 240; iter++)
+    {
+        for (int i = 0; i < g_activeConstraintCount; i++)
+            layout_apply_constraint(entries, count, g_activeConstraints[i]);
+        if ((iter & 1) == 0)
+            for (int i = 0; i < count; i++)
+                if (!entries[i].fixed)
+                    layout_apply_intrinsic(entries, count, &entries[i]);
+    }
+    if (getenv("IOSIM_DEBUG_LAYOUT"))
+    {
+        for (int i = 0; i < count; i++)
+        {
+            UIView *v = entries[i].view;
+            const char *cls = "UIView";
+            if ([v isKindOfClass:[UILabel class]])
+                cls = "UILabel";
+            else if ([v isKindOfClass:[UIButton class]])
+                cls = "UIButton";
+            printf("[layout] %s fixed=%d x=%.1f y=%.1f w=%.1f h=%.1f\n",
+                   cls, entries[i].fixed, entries[i].x, entries[i].y,
+                   entries[i].w, entries[i].h);
+        }
+    }
+    layout_write(root, entries, count);
+}
+
 static void render_shape_path(UIBezierPath *path, int x, int y, int w, int h,
                               double scale, UIColor *fill, UIColor *stroke,
                               double lineWidth)
@@ -1956,6 +2947,9 @@ static void render_view(UIView *view, double originX, double originY,
 {
     if (!view || view->_hidden)
         return;
+
+    if (view == (UIView *)g_keyWindow)
+        iosim_layout_apply(view);
 
     if (view->_needsLayout)
     {
@@ -2141,26 +3135,51 @@ static void render_view(UIView *view, double originX, double originY,
             int ascent = 0, descent = 0, lineHeight = 0;
             iosim_fb_font_metrics(style, points, scale, &ascent, &descent,
                                   &lineHeight);
-            int textWidth = iosim_fb_font_text_width(text, style, points,
-                                                     scale);
-            while (textWidth > w && points > 8 && w > 0)
-            {
-                points -= 0.5;
-                iosim_fb_font_metrics(style, points, scale, &ascent, &descent,
-                                      &lineHeight);
-                textWidth = iosim_fb_font_text_width(text, style, points,
-                                                     scale);
-            }
-            int tx = x;
-            if (label->_textAlignment == 1)
-                tx = x + (w - textWidth) / 2;
-            else if (label->_textAlignment == 2)
-                tx = x + w - textWidth;
-            int baseline = y + (h - lineHeight) / 2 + ascent;
             unsigned color = label->_textColor ? color_rgb(label->_textColor)
                                                : 0xffffff;
-            iosim_fb_font_text(tx, baseline, text, style, points, scale,
-                               color);
+            if (label->_numberOfLines != 1 && w > 0)
+            {
+                char lines[IOSIM_MAX_WRAP_LINES][256];
+                int maxLines = label->_numberOfLines > 1
+                                   ? label->_numberOfLines
+                                   : IOSIM_MAX_WRAP_LINES;
+                int n = wrap_text_lines(text, style, points, scale, w, lines,
+                                        maxLines);
+                int startY = y + (h - n * lineHeight) / 2;
+                for (int i = 0; i < n; i++)
+                {
+                    int lw = iosim_fb_font_text_width(lines[i], style, points,
+                                                      scale);
+                    int tx = x;
+                    if (label->_textAlignment == 1)
+                        tx = x + (w - lw) / 2;
+                    else if (label->_textAlignment == 2)
+                        tx = x + w - lw;
+                    iosim_fb_font_text(tx, startY + i * lineHeight + ascent,
+                                       lines[i], style, points, scale, color);
+                }
+            }
+            else
+            {
+                int textWidth = iosim_fb_font_text_width(text, style, points,
+                                                         scale);
+                while (textWidth > w && points > 8 && w > 0)
+                {
+                    points -= 0.5;
+                    iosim_fb_font_metrics(style, points, scale, &ascent,
+                                          &descent, &lineHeight);
+                    textWidth = iosim_fb_font_text_width(text, style, points,
+                                                         scale);
+                }
+                int tx = x;
+                if (label->_textAlignment == 1)
+                    tx = x + (w - textWidth) / 2;
+                else if (label->_textAlignment == 2)
+                    tx = x + w - textWidth;
+                int baseline = y + (h - lineHeight) / 2 + ascent;
+                iosim_fb_font_text(tx, baseline, text, style, points, scale,
+                                   color);
+            }
         }
     }
 

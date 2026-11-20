@@ -65,6 +65,44 @@ __attribute__((objc_root_class))
 
 @class NSArray;
 @class NSString;
+@class NSLayoutConstraint;
+@class NSLayoutAnchor;
+@class NSLayoutDimension;
+@class UILayoutGuide;
+
+@interface NSLayoutConstraint : NSObject
++ (id)constraintWithItem:(id)firstItem attribute:(long)firstAttribute
+                relatedBy:(long)relation toItem:(id)secondItem
+               attribute:(long)secondAttribute multiplier:(double)multiplier
+                constant:(double)constant;
++ (void)activateConstraints:(NSArray *)constraints;
+- (void)setActive:(BOOL)active;
+- (void)setPriority:(double)priority;
+@end
+
+@interface NSLayoutAnchor : NSObject
+- (NSLayoutConstraint *)constraintEqualToAnchor:(NSLayoutAnchor *)anchor;
+- (NSLayoutConstraint *)constraintEqualToAnchor:(NSLayoutAnchor *)anchor
+                                       constant:(double)c;
+- (NSLayoutConstraint *)constraintGreaterThanOrEqualToAnchor:
+    (NSLayoutAnchor *)anchor;
+- (NSLayoutConstraint *)constraintLessThanOrEqualToAnchor:
+    (NSLayoutAnchor *)anchor;
+@end
+
+@interface NSLayoutDimension : NSLayoutAnchor
+- (NSLayoutConstraint *)constraintEqualToConstant:(double)c;
+- (NSLayoutConstraint *)constraintGreaterThanOrEqualToConstant:(double)c;
+@end
+
+@interface UILayoutGuide : NSObject
+@property(readonly) NSLayoutAnchor *leadingAnchor;
+@property(readonly) NSLayoutAnchor *trailingAnchor;
+@property(readonly) NSLayoutAnchor *topAnchor;
+@property(readonly) NSLayoutAnchor *bottomAnchor;
+@property(readonly) NSLayoutAnchor *centerXAnchor;
+@property(readonly) NSLayoutAnchor *centerYAnchor;
+@end
 
 @interface UIView : UIResponder
 - (id)initWithFrame:(CGRect)frame;
@@ -74,6 +112,16 @@ __attribute__((objc_root_class))
 @property(nonatomic, retain) UIColor *backgroundColor;
 @property(readonly) CALayer *layer;
 - (void)addSubview:(UIView *)view;
+@property BOOL translatesAutoresizingMaskIntoConstraints;
+@property(readonly) NSLayoutAnchor *leadingAnchor;
+@property(readonly) NSLayoutAnchor *trailingAnchor;
+@property(readonly) NSLayoutAnchor *topAnchor;
+@property(readonly) NSLayoutAnchor *bottomAnchor;
+@property(readonly) NSLayoutAnchor *centerXAnchor;
+@property(readonly) NSLayoutAnchor *centerYAnchor;
+@property(readonly) NSLayoutDimension *widthAnchor;
+@property(readonly) NSLayoutDimension *heightAnchor;
+@property(readonly) UILayoutGuide *safeAreaLayoutGuide;
 + (void)animateWithDuration:(double)duration animations:(void (^)(void))animations;
 @end
 
@@ -82,6 +130,7 @@ __attribute__((objc_root_class))
 @property(nonatomic, retain) UIColor *textColor;
 @property(nonatomic, retain) UIFont *font;
 @property int textAlignment;
+@property int numberOfLines;
 @end
 
 @interface UIViewController : NSObject
@@ -113,6 +162,7 @@ enum {
 + (id)buttonWithType:(int)type;
 - (void)setTitle:(id)title forState:(unsigned long)state;
 - (void)setTitleColor:(UIColor *)color forState:(unsigned long)state;
+@property(readonly) UILabel *titleLabel;
 @end
 
 @interface UIScene : NSObject
