@@ -13,7 +13,7 @@ void iosim_fb_fill_round_rect(int x, int y, int w, int h, int radius,
                               uint32_t color);
 void iosim_fb_fill_circle(int cx, int cy, int radius, uint32_t color);
 void iosim_fb_set_opacity(double opacity);
-void iosim_fb_push_clip(int x, int y, int w, int h);
+int iosim_fb_push_clip(int x, int y, int w, int h);
 void iosim_fb_pop_clip(void);
 void iosim_fb_text(int x, int y, int scale, uint32_t color, const char *text);
 int  iosim_fb_text_width(const char *text, int scale);

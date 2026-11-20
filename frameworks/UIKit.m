@@ -42,7 +42,7 @@ extern void iosim_fb_font_metrics(int style, double size_pt, double scale,
 extern int  iosim_fb_present(const char *path);
 extern int  iosim_event_next(int *type, int *x, int *y);
 extern void iosim_fb_set_opacity(double opacity);
-extern void iosim_fb_push_clip(int x, int y, int w, int h);
+extern int iosim_fb_push_clip(int x, int y, int w, int h);
 extern void iosim_fb_pop_clip(void);
 extern double iosim_now(void);
 extern int  iosim_foundation_tick(void);
@@ -739,6 +739,7 @@ enum {
     BOOL _scrollEnabled;
     BOOL _showsVerticalScrollIndicator;
     BOOL _bounces;
+    id _delegate;
 }
 - (CGSize)contentSize;
 - (void)setContentSize:(CGSize)size;
@@ -747,6 +748,8 @@ enum {
 - (void)setContentOffset:(CGPoint)offset animated:(BOOL)animated;
 - (BOOL)isScrollEnabled;
 - (void)setScrollEnabled:(BOOL)enabled;
+- (void)setDelegate:(id)delegate;
+- (id)delegate;
 - (BOOL)showsVerticalScrollIndicator;
 - (void)setShowsVerticalScrollIndicator:(BOOL)shows;
 @end
@@ -816,7 +819,6 @@ enum {
 @interface UITableView : UIScrollView {
 @public
     id _dataSource;
-    id _delegate;
     double _rowHeight;
     long _selectedRow;
     long _style;
@@ -1753,6 +1755,13 @@ static int wrap_text_lines(const char *text, int style, double points,
 @end
 
 @implementation UILabel
+- (id)init
+{
+    self = [super init];
+    if (self)
+        _numberOfLines = 1;
+    return self;
+}
 - (id)initWithFrame:(CGRect)frame
 {
     self = [super initWithFrame:frame];
@@ -2557,6 +2566,8 @@ static UITextField *g_firstResponder;
     return self;
 }
 - (CGSize)contentSize { return _contentSize; }
+- (void)setDelegate:(id)delegate { _delegate = delegate; }
+- (id)delegate { return _delegate; }
 - (void)setContentSize:(CGSize)size { _contentSize = size; }
 - (CGPoint)contentOffset { return _contentOffset; }
 - (void)setContentOffset:(CGPoint)offset { _contentOffset = offset; }
@@ -2816,6 +2827,9 @@ static double clamp_scroll(double value, double low, double high)
         _dragScroll->_contentOffset =
             CGPointMake(clamp_scroll(nx, -30, maxX + 30),
                         clamp_scroll(ny, -30, maxY + 30));
+        if (_dragScroll->_delegate && [_dragScroll->_delegate respondsToSelector:
+                @selector(scrollViewDidScroll:)])
+            [_dragScroll->_delegate scrollViewDidScroll:_dragScroll];
         if (getenv("IOSIM_DEBUG_TOUCH"))
             printf("[touch] move offset=%.1f,%.1f max=%.1f,%.1f\n",
                    _dragScroll->_contentOffset.x,
@@ -3692,10 +3706,7 @@ static void render_view(UIView *view, double originX, double originY,
     int clipped = 0;
     if ((view->_clipsToBounds || (view->_layer && view->_layer->_masksToBounds) ||
          [view isKindOfClass:[UIScrollView class]]) && w > 0 && h > 0)
-    {
-        iosim_fb_push_clip(x, y, w, h);
-        clipped = 1;
-    }
+        clipped = iosim_fb_push_clip(x, y, w, h);
 
     if (view->_layer && view->_layer->_shadowOpacity > 0.001 &&
         w > 0 && h > 0)

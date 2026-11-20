@@ -149,6 +149,21 @@ the runtime solves the constraint system with a projection solver over x, y,
 width and height, locks dimensions that are intrinsic rather than constrained,
 and writes the resulting frames before rendering.
 
+### Text input and the software keyboard
+
+`demo/TextInputApp.m` creates a `UITextField`, focuses it in `viewDidAppear`,
+and lets the runtime build the keyboard. iosim draws the QWERTY layout (letter
+rows, shift, delete, numeric layer, space and return) or a numeric keypad when
+the field's `keyboardType` selects one, with the same framebuffer primitives as
+app content. Tapping a key inserts text; `key`/`backspace` records on the event
+FIFO do the same without a keyboard.
+
+The keyboard's field and caret alignment match the real simulator frame within
+2.4/255 over the app's upper region. A full-frame keyboard comparison is not
+part of the automated metric because the reference simulator shows Apple's
+one-time slide-to-type tutorial over the first keyboard presentation; the
+fixture's own top region is measured instead.
+
 ### Services: dispatch, Mach, bootstrap and XPC
 
 `tests/services_test.m` is an Apple-clang x86_64 executable with no UI. It

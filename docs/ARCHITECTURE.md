@@ -340,7 +340,30 @@ decoded with libpng in `loader/image.c`.
   drive layer opacity and corner radius. Transforms apply translation and scale
   around the view center.
 
-### 2.11 SpringBoard-like shell
+### 2.11 Auto Layout, gestures and text input
+
+`NSLayoutConstraint`, `NSLayoutAnchor`, `NSLayoutDimension` and layout guides
+are registered by the same runtime. Before rendering, `iosim_layout_apply`
+collects active constraints, expresses each anchor as a linear form over the
+x/y/width/height of its view, and runs a projection (Kaczmarz) relaxation over
+the system. Dimensions with no explicit size constraint are locked to the
+view's intrinsic size; multiline labels recompute their wrapped height from
+their solved width. Safe-area guides contribute the measured iPhone 18 Pro
+insets (62 pt top, 34 pt bottom).
+
+Touches from `IOSIM_EVENT_FIFO` include tap, down, move and up records.
+UIScrollView drags update `contentOffset` with a rubber-band clamp; tap, pan
+and swipe `UIGestureRecognizer` subclasses deliver target actions. The
+framebuffer has an intersection clip stack, used by scroll views and
+`clipsToBounds`/`masksToBounds`, so content cannot paint outside its host.
+
+`UITextField` participates in the responder chain. A focused field draws its
+placeholder or text, secure bullets and a caret, and `UITextField` edits from
+keyboard taps or `key`/`backspace` FIFO records. When a field is first
+responder, `UIApplicationMain` paints a QWERTY keyboard over the app frame
+with the same framebuffer primitives used for everything else.
+
+### 2.12 SpringBoard-like shell
 
 With `IOSIM_SHELL=1`, `UIApplicationMain` calls `run_springboard` instead of
 starting the app's scene. The shell draws the wallpaper, a 4×3 icon grid, a

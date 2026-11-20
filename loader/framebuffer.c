@@ -27,10 +27,10 @@ static void fb_clip_reset(void)
     fb_clip_rects[0][3] = (int)fb_height;
 }
 
-void iosim_fb_push_clip(int x, int y, int w, int h)
+int iosim_fb_push_clip(int x, int y, int w, int h)
 {
     if (fb_clip_depth + 1 >= FB_MAX_CLIP)
-        return;
+        return 0;
     int *cur = fb_clip_rects[fb_clip_depth];
     int *next = fb_clip_rects[fb_clip_depth + 1];
     next[0] = x > cur[0] ? x : cur[0];
@@ -40,6 +40,7 @@ void iosim_fb_push_clip(int x, int y, int w, int h)
     next[2] = x1 > next[0] ? x1 : next[0];
     next[3] = y1 > next[1] ? y1 : next[1];
     fb_clip_depth++;
+    return 1;
 }
 
 void iosim_fb_pop_clip(void)
