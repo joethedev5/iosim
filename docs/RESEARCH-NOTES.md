@@ -277,10 +277,11 @@ masks and intersects active masks; framebuffer fills, strokes, glyphs and
 image blits honor them. Quadratic/cubic CGPath, CGContext and UIBezierPath
 curves flatten adaptively from the second-derivative bound (1 to 128
 segments). CGGradient
-stores multiple stops and CGContextDrawLinearGradient interpolates them
-per-pixel through clip and mask; CALayer masks push 8-bit coverage for whole
-layer trees; CAGradientLayer interpolates multiple stops with explicit or
-even locations. Still missing: color management.
+stores multiple stops with alpha and CGContextDrawLinearGradient interpolates
+them per-pixel through clip and mask; CALayer masks push 8-bit coverage for
+whole layer trees; CAGradientLayer interpolates multiple stops with explicit
+or even locations, including clear-to-opaque fade masks. Still missing: color
+management.
 
 ## 2026-11-20: CALayer masks
 
@@ -326,6 +327,19 @@ even locations. Still missing: color management.
 - Fixture numbers: the 80x20-point cubic gives 20 elements, its measured
   deviation stays inside 0.25, the quadratic gives 6, a straight quadratic
   gives 2, and a 300x900 S-curve gives 55.
+
+## 2026-11-20: gradient alpha stops and soft masks
+
+- `iosim_fb_fill_gradient_stops_alpha` interpolates an 8-bit alpha per stop
+  alongside the color and blends each pixel with that coverage, multiplying
+  into the layer opacity and active clip mask. The old opaque entry point
+  forwards with a NULL alpha array.
+- `CGContextDrawLinearGradient` now passes the alpha component of each
+  `CGGradient` stop through; `CAGradientLayer` reads alpha from `CGColorRef`
+  or `UIColor` entries, so a clear-to-opaque gradient works both as a visible
+  fade and as a mask (the mask pass copies the offscreen alpha channel).
+- Fixtures: `[cg] gradient fade 1 1` (opaque red to white backdrop) and the
+  cagradient fade-mask layer (red, half blend `0x840810`, background).
 
 ## Open directions
 

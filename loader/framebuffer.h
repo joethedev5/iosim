@@ -44,6 +44,13 @@ void iosim_fb_fill_gradient_stops(int x, int y, int w, int h,
                                   const uint32_t *colors,
                                   const double *locations, int count,
                                   double ax, double ay, double bx, double by);
+/* Same as above with an 8-bit alpha per stop; NULL alphas means opaque. */
+void iosim_fb_fill_gradient_stops_alpha(int x, int y, int w, int h,
+                                        const uint32_t *colors,
+                                        const uint8_t *alphas,
+                                        const double *locations, int count,
+                                        double ax, double ay, double bx,
+                                        double by);
 void iosim_fb_fill_linear_gradient_round_rect(int x, int y, int w, int h,
                                               int radius,
                                               uint32_t start_color,

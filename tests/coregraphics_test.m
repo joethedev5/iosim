@@ -244,6 +244,27 @@ int main(void)
                middle[2] > 110 && middle[2] < 145);
     iosim_cg_end_image(gradient_context);
     CGGradientRelease(gradient);
+
+    double fade_components[8] = { 1, 0, 0, 1, 1, 0, 0, 0 };
+    CGGradientRef fade = CGGradientCreateWithColorComponents(
+        gradient_space, fade_components, gradient_locations, 2);
+    CGContextRef fade_context = iosim_cg_begin_image(100, 20, 1.0);
+    CGContextSetRGBFillColor(fade_context, 1, 1, 1, 1);
+    CGContextFillRect(fade_context, CGRectMake(0, 0, 100, 20));
+    CGContextDrawLinearGradient(fade_context, fade,
+                                CGPointMake(0, 0), CGPointMake(100, 0), 0);
+    unsigned char *fade_rgba = 0;
+    int fade_w = 0, fade_h = 0;
+    iosim_cg_image_data(fade_context, &fade_rgba, &fade_w, &fade_h);
+    unsigned char *fade_left = fade_rgba + (0 * fade_w + 0) * 4;
+    unsigned char *fade_right = fade_rgba + (0 * fade_w + 95) * 4;
+    printf("[cg] gradient fade %d %d\n",
+           fade_left[0] > 240 && fade_left[1] < 15 &&
+               fade_left[2] < 15,
+           fade_right[0] > 230 && fade_right[1] > 230 &&
+               fade_right[2] > 230);
+    iosim_cg_end_image(fade_context);
+    CGGradientRelease(fade);
     CGColorSpaceRelease(gradient_space);
     return 0;
 }

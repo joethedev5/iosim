@@ -42,6 +42,13 @@ extern void iosim_fb_fill_gradient_stops(int x, int y, int w, int h,
                                          const double *locations, int count,
                                          double ax, double ay, double bx,
                                          double by);
+extern void iosim_fb_fill_gradient_stops_alpha(int x, int y, int w, int h,
+                                               const unsigned *colors,
+                                               const unsigned char *alphas,
+                                               const double *locations,
+                                               int count, double ax,
+                                               double ay, double bx,
+                                               double by);
 extern void *iosim_fb_begin_offscreen(unsigned width, unsigned height);
 extern unsigned *iosim_fb_end_offscreen(void *state, int *out_w, int *out_h);
 extern unsigned *iosim_fb_offscreen_pixels(void *state, int *out_w,
@@ -1104,8 +1111,14 @@ void CGContextDrawLinearGradient(CGContextRef context, CGGradientRef gradientRef
     if (!context || !gradient || gradient->count < 2)
         return;
     unsigned *colors = malloc(sizeof(unsigned) * gradient->count);
-    if (!colors)
+    unsigned char *alphas =
+        malloc(sizeof(unsigned char) * gradient->count);
+    if (!colors || !alphas)
+    {
+        free(colors);
+        free(alphas);
         return;
+    }
     for (unsigned i = 0; i < gradient->count; i++)
     {
         const double *c = gradient->components + i * 4;
@@ -1113,16 +1126,18 @@ void CGContextDrawLinearGradient(CGContextRef context, CGGradientRef gradientRef
         int g = (int)(cg_clamp(c[1]) * 255.0 + 0.5);
         int b = (int)(cg_clamp(c[2]) * 255.0 + 0.5);
         colors[i] = ((unsigned)r << 16) | ((unsigned)g << 8) | (unsigned)b;
+        alphas[i] = (unsigned char)(cg_clamp(c[3]) * 255.0 + 0.5);
     }
     double ax, ay, bx, by;
     cg_transform(context, start.x, start.y, &ax, &ay);
     cg_transform(context, end.x, end.y, &bx, &by);
     iosim_fb_set_opacity(context->base_alpha * context->state.alpha);
-    iosim_fb_fill_gradient_stops(context->x, context->y, context->w,
-                                 context->h, colors, gradient->locations,
-                                 (int)gradient->count, ax, ay, bx, by);
+    iosim_fb_fill_gradient_stops_alpha(
+        context->x, context->y, context->w, context->h, colors, alphas,
+        gradient->locations, (int)gradient->count, ax, ay, bx, by);
     iosim_fb_set_opacity(1.0);
     free(colors);
+    free(alphas);
 }
 
 void CGContextDrawRadialGradient(CGContextRef context, CGGradientRef gradientRef,

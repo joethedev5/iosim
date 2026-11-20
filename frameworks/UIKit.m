@@ -100,6 +100,13 @@ extern void iosim_fb_fill_gradient_stops(int x, int y, int w, int h,
                                          const double *locations, int count,
                                          double ax, double ay, double bx,
                                          double by);
+extern void iosim_fb_fill_gradient_stops_alpha(int x, int y, int w, int h,
+                                               const unsigned *colors,
+                                               const unsigned char *alphas,
+                                               const double *locations,
+                                               int count, double ax,
+                                               double ay, double bx,
+                                               double by);
 extern void *iosim_fb_begin_offscreen(unsigned width, unsigned height);
 extern unsigned *iosim_fb_end_offscreen(void *state, int *out_w, int *out_h);
 extern void iosim_fb_stroke_circle(int cx, int cy, int radius, int thickness,
@@ -8300,6 +8307,18 @@ static unsigned gradient_entry_rgb(id value)
     return color_rgb((UIColor *)value);
 }
 
+static unsigned char gradient_entry_alpha(id value)
+{
+    double a = 1.0;
+    if (value && iosim_cgcolor_is_valid((CGColorRef)value))
+        a = CGColorGetAlpha((CGColorRef)value);
+    else if (value)
+        a = ((UIColor *)value)->_a;
+    if (a < 0) a = 0;
+    if (a > 1) a = 1;
+    return (unsigned char)(a * 255.0 + 0.5);
+}
+
 static double curve_value(double t, int curve)
 {
     if (t < 0)
@@ -9111,14 +9130,16 @@ static void render_layer(CALayer *layer, double parentX, double parentY,
         {
             enum { MAX_STOPS = 32 };
             unsigned colors[MAX_STOPS];
+            unsigned char alphas[MAX_STOPS];
             double locations[MAX_STOPS];
             int count = total < MAX_STOPS ? (int)total : MAX_STOPS;
             long loc_count = g->_locations ? (long)g->_locations->_count : 0;
             int explicit_locations = loc_count == total;
             for (int i = 0; i < count; i++)
             {
-                colors[i] = gradient_entry_rgb(
-                    [g->_colors objectAtIndex:i]);
+                id entry = [g->_colors objectAtIndex:i];
+                colors[i] = gradient_entry_rgb(entry);
+                alphas[i] = gradient_entry_alpha(entry);
                 if (explicit_locations)
                     locations[i] = number_value(
                         [g->_locations objectAtIndex:i], 0.0);
@@ -9126,19 +9147,15 @@ static void render_layer(CALayer *layer, double parentX, double parentY,
                     locations[i] = total > 1 ? (double)i / (double)(total - 1)
                                              : 0.0;
             }
-            if (count == 1)
-            {
-                iosim_fb_fill_rect(x, y, w, h, colors[0]);
-            }
-            else if (layer->_cornerRadius > 0)
+            if (layer->_cornerRadius > 0)
             {
                 int radius = (int)(layer->_cornerRadius * scale + 0.5);
                 void *state = iosim_fb_begin_offscreen((unsigned)w,
                                                        (unsigned)h);
                 if (state)
                 {
-                    iosim_fb_fill_gradient_stops(
-                        0, 0, w, h, colors, locations, count,
+                    iosim_fb_fill_gradient_stops_alpha(
+                        0, 0, w, h, colors, alphas, locations, count,
                         g->_startPoint.x * w, g->_startPoint.y * h,
                         g->_endPoint.x * w, g->_endPoint.y * h);
                     iosim_fb_mask_round_rect(0, 0, w, h, radius);
@@ -9154,8 +9171,8 @@ static void render_layer(CALayer *layer, double parentX, double parentY,
             }
             else
             {
-                iosim_fb_fill_gradient_stops(
-                    x, y, w, h, colors, locations, count,
+                iosim_fb_fill_gradient_stops_alpha(
+                    x, y, w, h, colors, alphas, locations, count,
                     x + g->_startPoint.x * w, y + g->_startPoint.y * h,
                     x + g->_endPoint.x * w, y + g->_endPoint.y * h);
             }

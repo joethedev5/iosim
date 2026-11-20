@@ -444,9 +444,10 @@ and picks `n` from the curve's second differences for a 0.25-point flatness
 tolerance, collapsing straight curves to one segment and capping sharp ones
 at 128. `CGPathApply`, `CGContextAddPath`, `CAShapeLayer` and UIBezierPath
 all consume the same flattened points.
-`CGGradient` keeps color components and locations; `CGContextDrawLinearGradient`
-projects each pixel onto the axis and interpolates the surrounding stops
-before blending through the clip and mask. `CALayer.mask` renders the mask
+`CGGradient` keeps color components, locations and alpha per stop;
+`CGContextDrawLinearGradient` projects each pixel onto the axis and
+interpolates the surrounding stops, including their alpha, before blending
+through the clip and mask. `CALayer.mask` renders the mask
 layer into an offscreen pass, copies its alpha channel into an 8-bit
 coverage mask positioned at the masked layer's origin, and pushes it onto the
 framebuffer mask stack for the duration of the layer (or view) render, so
@@ -456,9 +457,11 @@ nested masks and partial-alpha masks their expected cumulative effect.
 Masks on standalone layers and on view backing layers are applied; a mask on
 a view that is also rendered through the rotation offscreen path is not
 folded into the rotated composite. `CAGradientLayer` carries the full color
-array plus optional `locations`; the renderer builds stop values from
-`CGColorRef` or `UIColor` entries, spaces them evenly when locations are
-absent, and fills through the same multi-stop path CoreGraphics uses. Rounded
+array plus optional `locations`; the renderer builds stop values and alpha
+from `CGColorRef` or `UIColor` entries, spaces them evenly when locations are
+absent, and fills through the same multi-stop path CoreGraphics uses. A
+gradient whose stops fade to transparent therefore works as a soft mask over
+the layer tree, not just as a visible fill. Rounded
 gradient layers render into an offscreen pass, mask their corners, and
 composite back, so corner radii and layer alpha stay antialiased. Path
 clipping is supported through

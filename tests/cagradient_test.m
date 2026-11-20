@@ -74,6 +74,22 @@ extern void exit(int status);
     rounded.endPoint = CGPointMake(1.0, 0.5);
     [root.layer addSublayer:rounded];
 
+    /* A gradient mask fading from opaque to transparent. */
+    CALayer *fadeStrip = [[CALayer alloc] init];
+    fadeStrip.frame = CGRectMake(30, 520, 240, 60);
+    fadeStrip.backgroundColor =
+        [UIColor colorWithRed:1.0 green:0.0 blue:0.0 alpha:1.0];
+    CAGradientLayer *fadeMask = [[CAGradientLayer alloc] init];
+    fadeMask.frame = CGRectMake(0, 0, 240, 60);
+    fadeMask.colors = @[
+        (id)[UIColor colorWithRed:0.0 green:0.0 blue:0.0 alpha:1.0].CGColor,
+        (id)[UIColor colorWithRed:0.0 green:0.0 blue:0.0 alpha:0.0].CGColor,
+    ];
+    fadeMask.startPoint = CGPointMake(0.0, 0.5);
+    fadeMask.endPoint = CGPointMake(1.0, 0.5);
+    fadeStrip.mask = fadeMask;
+    [root.layer addSublayer:fadeStrip];
+
     printf("[grad] colors %lu locations %lu\n",
            (unsigned long)[explicit.colors count],
            (unsigned long)[explicit.locations count]);

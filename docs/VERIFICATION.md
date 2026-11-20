@@ -680,7 +680,11 @@ elements, showing the segment count follows curvature rather than a fixed
 constant. A
 red-to-blue two-stop `CGGradient` drawn into a 100x20 image context is red at
 the left edge and approximately `0x7e0081` at the midpoint, so per-pixel stop
-interpolation runs through the offscreen context.
+interpolation runs through the offscreen context. A second gradient whose
+alpha falls from 1 to 0 is drawn over a white rectangle: the left pixel stays
+red because the first stop is opaque, while the right pixel is white again
+(`[cg] gradient fade 1 1`), proving alpha is interpolated per stop rather than
+ignored.
 A 2x2 yellow `CGImage` reports its dimensions and draws scaled into a 40x40
 rectangle whose center samples `ffff00`. `UIImage CGImage` and
 `imageWithCGImage:` round-trip the 20x20 red image without changing its
@@ -699,7 +703,10 @@ red/green/blue gradient with locations 0/0.25/1 (green at `(115,130)`), the
 same colors with default even spacing vertically (yellow at `(180,285)`), and
 a rounded 30-point layer. The PNG is green at the rounded layer's center and
 keeps the background outside its corner, proving multi-stop interpolation,
-both location modes, `CGColorRef` entries and the offscreen rounded path.
+both location modes, `CGColorRef` entries and the offscreen rounded path. A
+fourth layer is masked by a gradient fading from opaque black to transparent:
+the PNG is red at `(45,550)`, a `0x840810` half blend at `(150,550)` and
+background at `(255,550)`, proving gradient alpha drives the layer mask.
 `tests/draw_rect_test.m` runs a real `UIApplicationMain` scene with a custom
 `DrawView`; its `drawRect:`paints four shapes, writes a PNG and exits. The suite samples the PNG at
 `(60,180)` red, `(250,190)` green, `(20,300)` blue stroke and `(90,455)`

@@ -3200,6 +3200,8 @@ check "[cg] curve sharp 55" "$out" \
     "a sharp cubic subdivides far more finely than a gentle one"
 check "[cg] gradient 1 1" "$out" \
     "CGContextDrawLinearGradient interpolates color stops across a context"
+check "[cg] gradient fade 1 1" "$out" \
+    "gradient alpha stops fade from opaque red to reveal the white backdrop"
 
 "$ROOT/tools/build_app.sh" "$ROOT/tests/cgimage_layer_test.m" \
     "$T/cgimage_layer_test" >/dev/null
@@ -3316,6 +3318,15 @@ if not (g > 220 and r < 40 and b < 40):
 r, g, b = rgb(34, 384)
 if not (r < 40 and g < 40 and b < 60):
     raise SystemExit("rounded gradient corner is not clipped: %02x%02x%02x" % (r, g, b))
+r, g, b = rgb(45, 550)
+if not (r > 200 and g < 60 and b < 60):
+    raise SystemExit("fade mask start is not opaque red: %02x%02x%02x" % (r, g, b))
+r, g, b = rgb(150, 550)
+if not (100 < r < 180 and g < 50 and b < 60):
+    raise SystemExit("fade mask midpoint is not a half blend: %02x%02x%02x" % (r, g, b))
+r, g, b = rgb(255, 550)
+if not (r < 40 and g < 40 and b < 60):
+    raise SystemExit("fade mask end is not transparent: %02x%02x%02x" % (r, g, b))
 print("ok   CAGradientLayer interpolates explicit and even-spaced stops")
 PY
 )"; then
