@@ -10,6 +10,18 @@ void iosim_objc_dump(void);
 
 void *objc_lookup_imp(void *obj, void *sel);
 void *objc_msgSend(void *self, void *sel, ...);
+void *objc_msgSendSuper2(void *super_ptr, void *sel, ...);
+void *objc_msgSend_stret(void *stret_addr, void *self, void *sel, ...);
+void *objc_lookup_super_imp(void *super_ptr, void *sel);
+void *iosim_objc_alloc(void *cls);
+void *iosim_objc_class_of(void *obj);
+void *iosim_objc_superclass(void *cls);
+int   iosim_objc_is_kind_of(void *obj, void *cls);
+int   iosim_objc_responds(void *obj, void *sel);
+void  objc_setProperty_nonatomic(void *self, void *sel, void *value, long offset);
+void  objc_setProperty_nonatomic_copy(void *self, void *sel, void *value, long offset);
+void  objc_setProperty_atomic(void *self, void *sel, void *value, long offset);
+void  objc_setProperty_atomic_copy(void *self, void *sel, void *value, long offset);
 void *objc_alloc_init(void *cls);
 void *objc_alloc(void *cls);
 void *objc_autoreleasePoolPush(void);

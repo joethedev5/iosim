@@ -185,6 +185,7 @@ def device_environment(udid, dev, bundle_id=None, data_home=None):
             "IPHONE_SHARED_RESOURCES_DIRECTORY": str(dd / "data"),
             "SIMULATOR_HOST_HOME": str(Path.home()),
             "SIMULATOR_LOG_ROOT": str(dd / "logs"),
+            "IOSIM_SCREENSHOT_PATH": str(dd / "data" / "var" / "run" / "framebuffer.png"),
             "SIMULATOR_BOOT_TIME": str(int(time.time())),
             "SIMULATOR_MEMORY_WARNINGS": str(dd / "data" / "var" / "run" / "memory_warning_simulation"),
             "SIMULATOR_ROOT": str(root),
@@ -526,6 +527,22 @@ def cmd_get_app_container(args):
     return 0
 
 
+def cmd_io(args):
+    state = load_state()
+    udid, dev = find_device(state, args.device)
+    require_booted(dev)
+    if args.operation != "screenshot":
+        die(f"unsupported io operation: {args.operation}")
+    src = device_dir(udid) / "data" / "var" / "run" / "framebuffer.png"
+    if not src.exists():
+        die("no framebuffer captured yet; launch an app that renders")
+    dest = Path(args.path)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(src, dest)
+    print(f"Wrote screenshot to: {dest}")
+    return 0
+
+
 def cmd_listapps(args):
     state = load_state()
     udid, dev = find_device(state, args.device)
@@ -614,6 +631,12 @@ def main():
     p.add_argument("bundle_id")
     p.add_argument("container", nargs="?", default="data", choices=["data", "bundle"])
     p.set_defaults(func=cmd_get_app_container)
+
+    p = sub.add_parser("io")
+    p.add_argument("device")
+    p.add_argument("operation", choices=["screenshot"])
+    p.add_argument("path")
+    p.set_defaults(func=cmd_io)
 
     p = sub.add_parser("listapps")
     p.add_argument("device")

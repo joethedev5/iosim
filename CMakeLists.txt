@@ -16,8 +16,9 @@ add_executable(iosim-run
   loader/shims.c
   loader/context.c
   loader/objc_runtime.c
+  loader/framebuffer.c
   loader/start.S
 )
 target_include_directories(iosim-run PRIVATE loader)
 target_compile_options(iosim-run PRIVATE -Wall -Wextra -Wno-unused-parameter)
-target_link_libraries(iosim-run PRIVATE dl)
+target_link_libraries(iosim-run PRIVATE dl m z)

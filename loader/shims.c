@@ -2,6 +2,7 @@
 #include "shims.h"
 #include "macho.h"
 #include "objc_runtime.h"
+#include "framebuffer.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -325,7 +326,26 @@ static const struct iosim_shim shims[] = {
     SHIM_ALIAS("NSLog", NSLog),
     SHIM_ALIAS("UIApplicationMain", UIApplicationMain),
     SHIM_ALIAS("__CFConstantStringClassReference", CFConstantStringClassReference),
+    SHIM_DIRECT(iosim_fb_begin),
+    SHIM_DIRECT(iosim_fb_release),
+    SHIM_DIRECT(iosim_fb_clear),
+    SHIM_DIRECT(iosim_fb_fill_rect),
+    SHIM_DIRECT(iosim_fb_fill_round_rect),
+    SHIM_DIRECT(iosim_fb_text),
+    SHIM_DIRECT(iosim_fb_text_width),
+    SHIM_DIRECT(iosim_fb_present),
     SHIM_DIRECT(objc_msgSend),
+    SHIM_DIRECT(objc_msgSendSuper2),
+    SHIM_DIRECT(objc_msgSend_stret),
+    SHIM_DIRECT(iosim_objc_alloc),
+    SHIM_DIRECT(iosim_objc_class_of),
+    SHIM_DIRECT(iosim_objc_superclass),
+    SHIM_DIRECT(iosim_objc_is_kind_of),
+    SHIM_DIRECT(iosim_objc_responds),
+    SHIM_DIRECT(objc_setProperty_nonatomic),
+    SHIM_DIRECT(objc_setProperty_nonatomic_copy),
+    SHIM_DIRECT(objc_setProperty_atomic),
+    SHIM_DIRECT(objc_setProperty_atomic_copy),
     SHIM_DIRECT(objc_alloc_init),
     SHIM_DIRECT(objc_alloc),
     SHIM_DIRECT(objc_autoreleasePoolPush),

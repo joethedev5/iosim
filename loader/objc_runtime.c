@@ -1,4 +1,5 @@
 #define _GNU_SOURCE
+#include "objc_runtime.h"
 #include "macho.h"
 
 #include <stdio.h>
@@ -166,6 +167,20 @@ static uint32_t class_instance_size(struct objc_class_min *cls)
                         : (uint32_t)sizeof(void *);
     struct class_ro_min *ro = class_ro(cls);
 
+    if (!cls->superclass && ro && ro->ivars)
+    {
+        /* A root class that declares an explicit isa ivar starts its layout
+         * at offset 0, exactly like Apple's NSObject. */
+        const struct ivar_list_min *list = ro->ivars;
+        uint32_t entsize = list->entsize ? list->entsize : 32;
+        if (entsize < sizeof(struct ivar_min))
+            entsize = sizeof(struct ivar_min);
+        const struct ivar_min *first =
+            (const struct ivar_min *)((const uint8_t *)list + sizeof(*list));
+        if (first->name && strcmp(first->name, "isa") == 0)
+            base = 0;
+    }
+
     if (ro && ro->ivars)
     {
         const struct ivar_list_min *list = ro->ivars;
@@ -179,13 +194,18 @@ static uint32_t class_instance_size(struct objc_class_min *cls)
                 (const struct ivar_min *)(p + (size_t)i * entsize);
             uint32_t alignment = iv->alignment ? (1u << iv->alignment) : 1u;
             base = align_up(base, alignment);
+            if (getenv("IOSIM_OBJC_DEBUG"))
+                fprintf(stderr,
+                        "objc: ivar %s.%s entsize=%u align=%u size=%u -> %u\n",
+                        ro_name(ro), iv->name ? iv->name : "?",
+                        entsize, alignment, iv->size, base);
             if (iv->offset)
                 *iv->offset = base;
             base += iv->size;
         }
     }
 
-    uint32_t size = align_up(base, 16);
+    uint32_t size = align_up(base, 8);
     if (entry)
         entry->instance_size = size;
     return size;
@@ -259,6 +279,108 @@ static struct class_entry *find_class_entry(void *ptr)
     return NULL;
 }
 
+void *objc_lookup_super_imp(void *super_ptr, void *sel)
+{
+    struct objc_super_min {
+        void *receiver;
+        void *super_class;
+    };
+    struct objc_super_min *sup = super_ptr;
+    if (!sup || !sel)
+    {
+        fprintf(stderr, "objc: invalid objc_super or selector\n");
+        _exit(1);
+    }
+    /* msgSendSuper2 passes the class that defined the method; lookup starts
+     * at its superclass. */
+    struct objc_class_min *cls = (struct objc_class_min *)sup->super_class;
+    if (cls)
+        cls = (struct objc_class_min *)cls->superclass;
+    void *imp = lookup_instance_method(cls, (const char *)sel);
+    if (getenv("IOSIM_OBJC_DEBUG"))
+        fprintf(stderr, "objc: super receiver=%p class=%p sel=%s -> %p\n",
+                sup->receiver, sup->super_class, (const char *)sel, imp);
+    if (!imp)
+    {
+        fprintf(stderr, "objc: super lookup failed for selector %s\n",
+                (const char *)sel);
+        _exit(1);
+    }
+    return imp;
+}
+
+void *iosim_objc_alloc(void *cls)
+{
+    return objc_alloc(cls);
+}
+
+void *iosim_objc_class_of(void *obj)
+{
+    return (obj && *(void **)obj) ? *(void **)obj : NULL;
+}
+
+void *iosim_objc_superclass(void *cls)
+{
+    return cls ? ((struct objc_class_min *)cls)->superclass : NULL;
+}
+
+int iosim_objc_is_kind_of(void *obj, void *cls)
+{
+    if (!obj || !cls)
+        return 0;
+    struct objc_class_min *c = (struct objc_class_min *)(*(void **)obj);
+    for (int depth = 0; c && depth < 64; depth++)
+    {
+        if (c == cls)
+            return 1;
+        c = (struct objc_class_min *)c->superclass;
+    }
+    return 0;
+}
+
+static void set_property(void *self, void *value, long offset)
+{
+    if (self && offset >= (long)sizeof(void *))
+        *(void **)((char *)self + offset) = value;
+}
+
+void objc_setProperty_nonatomic(void *self, void *sel, void *value, long offset)
+{
+    (void)sel;
+    set_property(self, value, offset);
+}
+
+void objc_setProperty_nonatomic_copy(void *self, void *sel, void *value,
+                                     long offset)
+{
+    (void)sel;
+    set_property(self, value, offset);
+}
+
+void objc_setProperty_atomic(void *self, void *sel, void *value, long offset)
+{
+    (void)sel;
+    set_property(self, value, offset);
+}
+
+void objc_setProperty_atomic_copy(void *self, void *sel, void *value,
+                                  long offset)
+{
+    (void)sel;
+    set_property(self, value, offset);
+}
+
+int iosim_objc_responds(void *obj, void *sel)
+{
+    if (!obj || !sel)
+        return 0;
+    struct class_entry *ce = find_class_entry(obj);
+    if (ce)
+        return lookup_class_method(ce->cls, (const char *)sel) != NULL;
+    return lookup_instance_method((struct objc_class_min *)(*(void **)obj),
+                                  (const char *)sel) != NULL;
+}
+
 void *objc_lookup_imp(void *obj, void *sel)
 {
     if (!obj || !sel)
@@ -269,14 +391,27 @@ void *objc_lookup_imp(void *obj, void *sel)
     const char *name = (const char *)sel;
 
     struct class_entry *ce = find_class_entry(obj);
+    void *imp = NULL;
+    struct objc_class_min *cls = NULL;
     if (ce)
-        return lookup_class_method(ce->cls, name);
-
+        imp = lookup_class_method(ce->cls, name);
+    else
+    {
+        cls = (struct objc_class_min *)(*(void **)obj);
+        imp = lookup_instance_method(cls, name);
+    }
+    if (!imp)
+    {
+        struct class_ro_min *ro = ce ? class_ro(ce->cls) : class_ro(cls);
+        fprintf(stderr,
+                "objc: no IMP for '%s' on %p (class %p %s, %s receiver)\n",
+                name, obj, ce ? (void *)ce->cls : (void *)cls,
+                ro ? ro_name(ro) : "?", ce ? "class" : "instance");
+        _exit(1);
+    }
     if (getenv("IOSIM_OBJC_DEBUG"))
-        fprintf(stderr, "objc: msgSend obj=%p isa=%p sel=%s\n",
-                obj, *(void **)obj, name);
-    struct objc_class_min *cls = (struct objc_class_min *)(*(void **)obj);
-    return lookup_instance_method(cls, name);
+        fprintf(stderr, "objc: msgSend obj=%p sel=%s -> %p\n", obj, name, imp);
+    return imp;
 }
 
 void *objc_alloc_init(void *class_ptr)
@@ -318,6 +453,9 @@ void *objc_alloc(void *class_ptr)
     void *obj = calloc(1, size);
     if (obj)
         *(void **)obj = cls;
+    if (getenv("IOSIM_OBJC_DEBUG"))
+        fprintf(stderr, "objc: alloc class=%p (%s) size=%zu obj=%p\n",
+                class_ptr, ro_name(class_ro(cls)), size, obj);
     return obj;
 }
 

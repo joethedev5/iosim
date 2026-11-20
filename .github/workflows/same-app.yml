@@ -1,0 +1,111 @@
+name: same-app
+on:
+  workflow_dispatch:
+jobs:
+  build-run:
+    runs-on: xcode-27
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the same source for arm64 and x86_64
+        run: |
+          set -e
+          mkdir -p out artifact
+          SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
+          echo "$SDK" > out/sdk.txt
+          CFLAGS="-mios-simulator-version-min=18.0 -isysroot $SDK -O1 -fno-objc-arc -Wno-deprecated-declarations -I demo"
+          xcrun clang -arch arm64 $CFLAGS -framework UIKit -framework Foundation \
+            demo/HelloSimApp.m -o HelloSim_arm64 2> out/build-arm64.err
+          xcrun clang -arch x86_64 $CFLAGS -framework UIKit -framework Foundation \
+            demo/HelloSimApp.m -o HelloSim_x86_64 2> out/build-x86_64.err
+          file HelloSim_arm64 HelloSim_x86_64 > out/file.txt
+          for f in HelloSim_arm64 HelloSim_x86_64; do
+            echo "===== $f" >> out/otool.txt
+            otool -hv "$f" >> out/otool.txt 2>&1
+            otool -l "$f" | grep -A5 -E 'LC_BUILD_VERSION' >> out/otool.txt 2>&1
+            otool -L "$f" >> out/otool.txt 2>&1
+          done
+          cat out/file.txt
+
+      - name: Package the arm64 app bundle
+        run: |
+          set -e
+          mkdir -p HelloSim.app
+          cp HelloSim_arm64 HelloSim.app/HelloSim
+          cat > HelloSim.app/Info.plist <<'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>CFBundleExecutable</key><string>HelloSim</string>
+            <key>CFBundleIdentifier</key><string>com.iosim.hellosim</string>
+            <key>CFBundleName</key><string>HelloSim</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>CFBundleShortVersionString</key><string>1.0</string>
+            <key>CFBundleVersion</key><string>1</string>
+            <key>MinimumOSVersion</key><string>18.0</string>
+            <key>UIDeviceFamily</key><array><integer>1</integer></array>
+            <key>LSRequiresIPhoneOS</key><true/>
+            <key>UILaunchScreen</key><dict/>
+            <key>UISupportedInterfaceOrientations</key>
+            <array><string>UIInterfaceOrientationPortrait</string></array>
+          </dict></plist>
+          PLIST
+          plutil -lint HelloSim.app/Info.plist
+          codesign --force --sign - --timestamp=none HelloSim.app 2> out/codesign.err || true
+          codesign -dv HelloSim.app > out/codesign.txt 2>&1 || true
+
+      - name: Boot simulator, install and launch the app
+        run: |
+          set +e
+          xcrun simctl list devices available -j > out/devices.json
+          UDID=$(python3 - <<'PY'
+          import json
+          d = json.load(open('out/devices.json'))['devices']
+          best = None
+          for rt, devs in d.items():
+              if '.iOS-' not in rt:
+                  continue
+              for dev in devs:
+                  if dev.get('isAvailable', True) and dev['name'].startswith('iPhone'):
+                      score = (rt, dev['name'] == 'iPhone 18 Pro')
+                      if best is None or score > best[0]:
+                          best = (score, dev['udid'], dev['name'], rt)
+          if best:
+              print(best[1])
+          PY
+          )
+          echo "UDID=$UDID" > out/boot.txt
+          if [ -n "$UDID" ]; then
+            xcrun simctl boot "$UDID" >> out/boot.txt 2>&1
+            xcrun simctl bootstatus "$UDID" -b >> out/boot.txt 2>&1
+            xcrun simctl install "$UDID" HelloSim.app >> out/boot.txt 2>&1
+            xcrun simctl launch "$UDID" com.iosim.hellosim > out/launch.txt 2>&1
+            sleep 6
+            xcrun simctl io "$UDID" screenshot out/real-sim.png >> out/boot.txt 2>&1
+            xcrun simctl spawn "$UDID" ps aux > out/ps.txt 2>&1
+            xcrun simctl spawn "$UDID" log show --last 3m --style compact \
+              --predicate 'process == "HelloSim" OR eventMessage CONTAINS "HelloSim"' \
+              > out/app-log.txt 2>&1
+            xcrun simctl terminate "$UDID" com.iosim.hellosim >> out/boot.txt 2>&1
+            xcrun simctl shutdown "$UDID" >> out/boot.txt 2>&1
+          fi
+          tail -30 out/boot.txt
+          cat out/launch.txt
+
+      - name: Collect artifacts
+        run: |
+          set +e
+          tar czf artifact/HelloSim.app.tgz HelloSim.app
+          cp HelloSim_arm64 HelloSim_x86_64 artifact/
+          cp out/real-sim.png artifact/ 2>/dev/null
+          cp -R out artifact/out
+          tar czf same-app.tgz -C artifact .
+          du -sh same-app.tgz
+          ls -la artifact
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: same-app
+          path: same-app.tgz
+          retention-days: 7

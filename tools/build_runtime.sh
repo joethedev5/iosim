@@ -24,19 +24,28 @@ mkdir -p "$B" \
   "$OUT/System/Library/CoreServices"
 
 build_dylib() {
-  src="$1"; out="$2"; install="$3"
-  obj="$B/$(basename "$src" .c).o"
-  "$CC" -target "$SDK_TARGET" -ffreestanding -fPIC -O2 -c "$src" -o "$obj"
+  src="$1"; out="$2"; install="$3"; shift 3
+  obj="$B/$(basename "$src" | sed 's/\.[cm]$//').o"
+  case "$src" in
+    *.m) objcflags="-fobjc-runtime=ios-18.0 -fno-objc-arc" ;;
+    *)   objcflags="" ;;
+  esac
+  "$CC" -target "$SDK_TARGET" -ffreestanding -fPIC -O2 $objcflags \
+    -I "$ROOT/frameworks" -c "$src" -o "$obj"
   "$LD64" -arch x86_64 -platform_version ios-simulator 18.0 18.0 \
-    -dylib -install_name "$install" -o "$out" "$obj" -undefined dynamic_lookup
+    -dylib -install_name "$install" -o "$out" "$obj" "$@" -undefined dynamic_lookup
 }
 
-build_dylib "$ROOT/frameworks/UIKit.c" \
-  "$OUT/System/Library/Frameworks/UIKit.framework/UIKit" \
-  /System/Library/Frameworks/UIKit.framework/UIKit
-build_dylib "$ROOT/frameworks/Foundation.c" \
+build_dylib "$ROOT/frameworks/Foundation.m" \
   "$OUT/System/Library/Frameworks/Foundation.framework/Foundation" \
-  /System/Library/Frameworks/Foundation.framework/Foundation
+  /System/Library/Frameworks/Foundation.framework/Foundation ""
+
+"$CC" -target "$SDK_TARGET" -ffreestanding -fPIC -c "$ROOT/frameworks/protocol_export.s" -o "$B/protocol_export.o"
+
+build_dylib "$ROOT/frameworks/UIKit.m" \
+  "$OUT/System/Library/Frameworks/UIKit.framework/UIKit" \
+  /System/Library/Frameworks/UIKit.framework/UIKit \
+  "$OUT/System/Library/Frameworks/Foundation.framework/Foundation" "$B/protocol_export.o"
 
 # Dependency anchors: real runtime layout, empty implementations for now.
 "$CC" -target "$SDK_TARGET" -ffreestanding -fPIC -c "$ROOT/frameworks/empty.c" -o "$B/empty.o"

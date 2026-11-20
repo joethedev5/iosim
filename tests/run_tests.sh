@@ -166,6 +166,34 @@ PY
 "$ROOT/tools/iosimctl" install "$UDID" "$T/TestApp.app" >/dev/null
 out="$("$ROOT/tools/iosimctl" launch --console "$UDID" com.iosim.fixture)"
 check "hello from iosim fixture" "$out" "install + launch through iosimctl"
+
+# Framebuffer rendering + io screenshot through the device manager.
+mkdir -p "$T/UIKitApp.app"
+cp "$T/uikit_app" "$T/UIKitApp.app/UIKitApp"
+python3 - "$T/UIKitApp.app/Info.plist" <<'PY'
+import plistlib, sys
+with open(sys.argv[1], "wb") as f:
+    plistlib.dump({
+        "CFBundleIdentifier": "com.iosim.uikit",
+        "CFBundleExecutable": "UIKitApp",
+        "CFBundleName": "UIKitApp",
+        "CFBundlePackageType": "APPL",
+        "CFBundleVersion": "1",
+        "CFBundleShortVersionString": "1.0",
+    }, f)
+PY
+"$ROOT/tools/iosimctl" install "$UDID" "$T/UIKitApp.app" >/dev/null
+out="$("$ROOT/tools/iosimctl" launch --console "$UDID" com.iosim.uikit 2>&1)"
+check "UIApplicationMain argc=1" "$out" "UIKit app renders through iosimctl"
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/screen.png" >/dev/null
+python3 - "$T/screen.png" <<'PY'
+import struct, sys
+data = open(sys.argv[1], "rb").read()
+assert data[:8] == b"\x89PNG\r\n\x1a\n", "not a PNG"
+w, h = struct.unpack(">II", data[16:24])
+assert (w, h) == (1206, 2622), (w, h)
+print(f"ok   framebuffer screenshot {w}x{h}")
+PY
 out="$(SIMCTL_CHILD_IOSIM_TEST=1 "$ROOT/tools/iosimctl" spawn "$UDID" "$T/objc_test")"
 check "objc greet world count=7" "$out" "simctl spawn equivalent"
 "$ROOT/tools/iosimctl" shutdown "$UDID" >/dev/null
