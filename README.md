@@ -43,6 +43,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | Foundation collections, strings, notifications, timers, NSIndexPath | ✅ |
 | `NSFileManager`, `NSData` file I/O, `NSURL`, `NSJSONSerialization` | ✅ |
 | `NSPropertyListSerialization` and persistent `NSUserDefaults` domains | ✅ |
+| `NSKeyedArchiver`/`NSKeyedUnarchiver` keyed archives with custom `NSCoding` classes | ✅ |
 | App bundle resources: `NSBundle` lookup and `UIImage imageNamed:` PNGs | ✅ |
 | libdispatch queues, groups, semaphores; main-queue drain from UIKit | ✅ |
 | Mach ports/messages, launchd bootstrap namespace, cross-process messaging | ✅ |

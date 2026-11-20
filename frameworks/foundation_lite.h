@@ -230,6 +230,18 @@ __attribute__((objc_root_class))
 - (BOOL)isEqualToData:(id)other;
 @end
 
+@interface NSMutableData : NSData {
+@public
+    unsigned long _capacity;
+}
++ (id)dataWithCapacity:(unsigned long)capacity;
+- (id)initWithCapacity:(unsigned long)capacity;
+- (void)appendBytes:(const void *)bytes length:(unsigned long)length;
+- (void)appendData:(id)data;
+- (void *)mutableBytes;
+- (void)setLength:(unsigned long)length;
+@end
+
 @interface NSURL : NSObject {
 @public
     id _string;
@@ -355,6 +367,72 @@ enum {
 
 @interface NSNull : NSObject
 + (id)null;
+@end
+
+/* Keyed archiving. The archive is an XML property list shaped like
+ * Foundation's: $archiver, $version, $top and a $objects table of values,
+ * class descriptions and object dictionaries that refer to each other by
+ * CF$UID entries. Custom classes take part by implementing NSCoding. */
+
+@class NSCoder;
+
+@protocol NSCoding
+- (void)encodeWithCoder:(NSCoder *)coder;
+- (id)initWithCoder:(NSCoder *)coder;
+@end
+
+@protocol NSSecureCoding <NSCoding>
++ (BOOL)supportsSecureCoding;
+@end
+
+@interface NSCoder : NSObject
+- (void)encodeObject:(id)object forKey:(id)key;
+- (void)encodeInteger:(long)value forKey:(id)key;
+- (void)encodeInt:(int)value forKey:(id)key;
+- (void)encodeBool:(BOOL)value forKey:(id)key;
+- (void)encodeFloat:(float)value forKey:(id)key;
+- (void)encodeDouble:(double)value forKey:(id)key;
+- (BOOL)containsValueForKey:(id)key;
+- (id)decodeObjectForKey:(id)key;
+- (long)decodeIntegerForKey:(id)key;
+- (int)decodeIntForKey:(id)key;
+- (BOOL)decodeBoolForKey:(id)key;
+- (float)decodeFloatForKey:(id)key;
+- (double)decodeDoubleForKey:(id)key;
+@end
+
+@interface NSKeyedArchiver : NSCoder {
+@public
+    id _objects;
+    id _top;
+    id _current;
+    id _out;
+    id _classMap;
+}
++ (id)archivedDataWithRootObject:(id)rootObject;
++ (id)archivedDataWithRootObject:(id)rootObject
+             requiringSecureCoding:(BOOL)requiringSecureCoding
+                             error:(id *)error;
++ (BOOL)archiveRootObject:(id)rootObject toFile:(id)path;
+- (id)initForWritingWithMutableData:(id)data;
+- (void)finishEncoding;
+@end
+
+@interface NSKeyedUnarchiver : NSCoder {
+@public
+    id _objects;
+    id _top;
+    id _current;
+    id *_resolved;
+    unsigned char *_state;
+    unsigned long _objectCount;
+}
++ (id)unarchiveObjectWithData:(id)data;
++ (id)unarchiveObjectWithFile:(id)path;
++ (id)unarchivedObjectOfClass:(Class)cls fromData:(id)data
+                        error:(id *)error;
+- (id)initForReadingWithData:(id)data;
+- (void)finishDecoding;
 @end
 
 void NSLog(id format, ...);

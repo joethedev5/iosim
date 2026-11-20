@@ -214,6 +214,46 @@ else
     echo "FAIL defaults plist"; echo "$out"; fails=$((fails+1))
 fi
 
+# ---------- 4d. NSKeyedArchiver writes and reads a keyed archive ----------
+"$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
+    -ffreestanding -O1 -I "$ROOT/frameworks" \
+    -c "$ROOT/tests/keyed_test.m" -o "$T/keyed.o"
+"$LD64" -arch x86_64 -platform_version $PLATFORM -e _main -o "$T/keyed" \
+    "$T/keyed.o" \
+    "$ROOT/runtime/System/Library/Frameworks/Foundation.framework/Foundation" \
+    -undefined dynamic_lookup
+KEY_HOME="$T/keyed-home"
+rm -rf "$KEY_HOME"
+mkdir -p "$KEY_HOME"
+out="$(cd "$KEY_HOME" && HOME="$KEY_HOME" DYLD_ROOT_PATH="$ROOT/runtime" \
+    "$RUN" "$T/keyed" write 2>&1)"
+check "keyed: round name=Ada age=36 score=97.5 tags=2 items=2 enabled=1 blob=4 when=1700000000 class=Profile" \
+    "$out" "NSKeyedArchiver round-trips a custom NSCoding object"
+out="$(cd "$KEY_HOME" && HOME="$KEY_HOME" DYLD_ROOT_PATH="$ROOT/runtime" \
+    "$RUN" "$T/keyed" read 2>&1)"
+check "keyed: read name=Ada age=36 score=97.5 tags=2 items=2 enabled=1 blob=4 when=1700000000 class=Profile" \
+    "$out" "a second process decodes the keyed archive"
+if out="$(python3 - "$KEY_HOME/keyed-archive.plist" <<'PY'
+import plistlib, sys
+with open(sys.argv[1], "rb") as f:
+    d = plistlib.load(f)
+assert d["$archiver"] == "NSKeyedArchiver", d.get("$archiver")
+assert d["$version"] == 100000, d.get("$version")
+objs = d["$objects"]
+root = objs[d["$top"]["root"]["CF$UID"]]
+assert isinstance(root, dict) and "$class" in root, root
+classes = objs[root["$class"]["CF$UID"]]
+assert classes["$classname"] == "NSMutableDictionary", classes
+assert any(isinstance(o, dict) and o.get("$classname") == "Profile"
+           for o in objs), "no Profile class entry"
+print("ok   the archive is a keyed-archive property list with CF$UID refs")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL keyed archive plist"; echo "$out"; fails=$((fails+1))
+fi
+
 # ---------- 5. UIKit-lite framework dylib ----------
 cat > "$T/uikit_app.c" <<'EOF'
 extern int printf(const char *fmt, ...);

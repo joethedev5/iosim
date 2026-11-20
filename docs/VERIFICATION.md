@@ -409,6 +409,20 @@ arrays, strings, integers, reals, booleans, data and dates. Strings are
 XML-escaped on the way out and unescaped on the way in; the parser bounds
 nesting depth and only accepts well-formed tags.
 
+### Foundation: keyed archives
+
+`tests/keyed_test.m` defines a `Profile` class that implements `NSCoding` and
+archives a root dictionary holding it, a string array, a boolean, four bytes
+of data and a date — first in one process with `NSKeyedArchiver`, then in a
+second process with `NSKeyedUnarchiver`. Both report the decoded identity:
+`name=Ada age=36 score=97.5 tags=2 items=2 enabled=1 blob=4
+when=1700000000 class=Profile`. The custom class was therefore rebuilt
+through `initWithCoder:`, not left as a plain dictionary. Python's `plistlib`
+parses the file as a genuine keyed archive: `$archiver` is `NSKeyedArchiver`,
+`$version` is 100000, `$objects` holds the value table and class descriptions
+(`$classname` `Profile`, `$classes` chain), and `$top`/`$objects` refer to
+entries through `CF$UID` dictionaries — the shape Foundation writes.
+
 ### UIKit: app bundle resources
 
 `demo/ResourceApp.m` is installed as a real `.app` with a 4 x 4 red `dot.png`

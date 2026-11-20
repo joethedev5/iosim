@@ -50,6 +50,7 @@ struct cf_constant_string {
 };
 
 extern void *objc_getClass(const char *name);
+extern const char *class_getName(void *cls);
 extern char *getenv(const char *name);
 
 
@@ -1303,6 +1304,71 @@ static void defaults_path(char *out, unsigned long cap)
 - (id)description
 {
     return [NSString stringWithFormat:@"<NSData: %lu bytes>", _length];
+}
+@end
+
+@implementation NSMutableData
++ (id)dataWithCapacity:(unsigned long)capacity
+{
+    return [[self alloc] initWithCapacity:capacity];
+}
+- (id)initWithCapacity:(unsigned long)capacity
+{
+    self = [super init];
+    if (self)
+    {
+        _capacity = capacity < 16 ? 16 : capacity;
+        _bytes = malloc(_capacity + 1);
+        if (!_bytes)
+            _capacity = 0;
+        else
+            ((char *)_bytes)[0] = 0;
+    }
+    return self;
+}
+- (void)appendBytes:(const void *)bytes length:(unsigned long)length
+{
+    if (!bytes || !length)
+        return;
+    if (_length + length > _capacity)
+    {
+        unsigned long capacity = _capacity ? _capacity : 16;
+        while (capacity < _length + length)
+            capacity *= 2;
+        void *grown = realloc(_bytes, capacity + 1);
+        if (!grown)
+            return;
+        _bytes = grown;
+        _capacity = capacity;
+    }
+    memcpy((char *)_bytes + _length, bytes, length);
+    _length += length;
+    ((char *)_bytes)[_length] = 0;
+}
+- (void)appendData:(id)data
+{
+    if (data)
+        [self appendBytes:[data bytes] length:[data length]];
+}
+- (void *)mutableBytes { return _bytes; }
+- (void)setLength:(unsigned long)length
+{
+    if (length > _capacity)
+    {
+        unsigned long capacity = _capacity ? _capacity : 16;
+        while (capacity < length)
+            capacity *= 2;
+        void *grown = realloc(_bytes, capacity + 1);
+        if (!grown)
+            return;
+        _bytes = grown;
+        _capacity = capacity;
+    }
+    if (_bytes && length > _length)
+        memset((char *)_bytes + _length, 0, length - _length);
+    _length = length;
+    if (_bytes)
+        ((char *)_bytes)[_length] = 0;
 }
 @end
 
@@ -2813,4 +2879,522 @@ static id plist_parse_value(struct plist_state *p, int depth)
 - (BOOL)isEqual:(id)other { return other == self; }
 - (unsigned long)hash { return 0; }
 - (id)description { return @"<null>"; }
+@end
+
+/* ------------------------------------------------------ keyed archiving */
+
+@implementation NSCoder
+- (void)encodeObject:(id)object forKey:(id)key { (void)object; (void)key; }
+- (void)encodeInteger:(long)value forKey:(id)key { (void)value; (void)key; }
+- (void)encodeInt:(int)value forKey:(id)key { (void)value; (void)key; }
+- (void)encodeBool:(BOOL)value forKey:(id)key { (void)value; (void)key; }
+- (void)encodeFloat:(float)value forKey:(id)key { (void)value; (void)key; }
+- (void)encodeDouble:(double)value forKey:(id)key { (void)value; (void)key; }
+- (BOOL)containsValueForKey:(id)key { (void)key; return NO; }
+- (id)decodeObjectForKey:(id)key { (void)key; return nil; }
+- (long)decodeIntegerForKey:(id)key { (void)key; return 0; }
+- (int)decodeIntForKey:(id)key { (void)key; return 0; }
+- (BOOL)decodeBoolForKey:(id)key { (void)key; return NO; }
+- (float)decodeFloatForKey:(id)key { (void)key; return 0; }
+- (double)decodeDoubleForKey:(id)key { (void)key; return 0; }
+@end
+
+/* A UID reference in the archive plist: <dict><key>CF$UID</key><integer>N
+ * </integer></dict>, the same shape Foundation writes. */
+static id keyed_uid(long index)
+{
+    NSMutableDictionary *ref = [NSMutableDictionary dictionary];
+    [ref setObject:[NSNumber numberWithInteger:index] forKey:@"CF$UID"];
+    return ref;
+}
+
+static long keyed_uid_value(id value)
+{
+    if (!value || ![value isKindOfClass:[NSDictionary class]])
+        return -1;
+    NSDictionary *ref = (NSDictionary *)value;
+    if ([ref count] != 1)
+        return -1;
+    id index = [ref objectForKey:@"CF$UID"];
+    if (!index || ![index isKindOfClass:[NSNumber class]])
+        return -1;
+    return [index integerValue];
+}
+
+/* Append a class description ("$classname" plus its "$classes" chain) to
+ * $objects once per name and return its index. */
+static long keyed_class(NSKeyedArchiver *archiver, const char *name,
+                        const char *superName)
+{
+    NSString *key = [NSString stringWithUTF8String:name];
+    id known = [archiver->_classMap objectForKey:key];
+    if (known)
+        return [known integerValue];
+    NSMutableArray *chain = [NSMutableArray array];
+    [chain addObject:key];
+    if (superName && *superName && strcmp(superName, name) != 0 &&
+        strcmp(superName, "NSObject") != 0)
+        [chain addObject:[NSString stringWithUTF8String:superName]];
+    [chain addObject:@"NSObject"];
+    NSMutableDictionary *entry = [NSMutableDictionary dictionary];
+    [entry setObject:key forKey:@"$classname"];
+    [entry setObject:chain forKey:@"$classes"];
+    long index = (long)[archiver->_objects count];
+    [archiver->_objects addObject:entry];
+    [archiver->_classMap setObject:[NSNumber numberWithInteger:index]
+                            forKey:key];
+    return index;
+}
+
+static id keyed_archive_object(NSKeyedArchiver *archiver, id object);
+static long keyed_find(NSKeyedArchiver *archiver, id object)
+{
+    unsigned long count = [archiver->_objects count];
+    for (unsigned long i = 1; i < count; i++)
+        if ([archiver->_objects objectAtIndex:i] == object)
+            return (long)i;
+    return -1;
+}
+
+static id keyed_append(NSKeyedArchiver *archiver, id entry)
+{
+    long index = (long)[archiver->_objects count];
+    [archiver->_objects addObject:entry];
+    return keyed_uid(index);
+}
+
+static id keyed_archive_object(NSKeyedArchiver *archiver, id object)
+{
+    if (!object)
+        return keyed_uid(0);
+    long found = keyed_find(archiver, object);
+    if (found >= 0)
+        return keyed_uid(found);
+
+    /* Strings, numbers, data and dates live directly in $objects. */
+    if ([object isKindOfClass:[NSString class]] ||
+        [object isKindOfClass:[NSNumber class]] ||
+        [object isKindOfClass:[NSData class]] ||
+        [object isKindOfClass:[NSDate class]])
+        return keyed_append(archiver, object);
+
+    if ([object isKindOfClass:[NSNull class]])
+    {
+        NSMutableDictionary *entry = [NSMutableDictionary dictionary];
+        [entry setObject:keyed_uid(keyed_class(archiver, "NSNull", "NSObject"))
+                  forKey:@"$class"];
+        return keyed_append(archiver, entry);
+    }
+
+    if ([object isKindOfClass:[NSArray class]])
+    {
+        const char *name =
+            [object isKindOfClass:[NSMutableArray class]] ? "NSMutableArray"
+                                                          : "NSArray";
+        NSMutableDictionary *entry = [NSMutableDictionary dictionary];
+        [entry setObject:keyed_uid(keyed_class(archiver, name, "NSArray"))
+                  forKey:@"$class"];
+        NSMutableArray *refs = [NSMutableArray array];
+        [entry setObject:refs forKey:@"NS.objects"];
+        /* Reserve the entry before encoding children so cycles resolve. */
+        id ref = keyed_append(archiver, entry);
+        NSArray *array = (NSArray *)object;
+        for (unsigned long i = 0; i < [array count]; i++)
+            [refs addObject:keyed_archive_object(archiver,
+                                                 [array objectAtIndex:i])];
+        return ref;
+    }
+
+    if ([object isKindOfClass:[NSDictionary class]])
+    {
+        const char *name = [object isKindOfClass:[NSMutableDictionary class]]
+                               ? "NSMutableDictionary"
+                               : "NSDictionary";
+        NSMutableDictionary *entry = [NSMutableDictionary dictionary];
+        [entry setObject:keyed_uid(keyed_class(archiver, name, "NSDictionary"))
+                  forKey:@"$class"];
+        NSMutableArray *keyRefs = [NSMutableArray array];
+        NSMutableArray *valueRefs = [NSMutableArray array];
+        [entry setObject:keyRefs forKey:@"NS.keys"];
+        [entry setObject:valueRefs forKey:@"NS.objects"];
+        id ref = keyed_append(archiver, entry);
+        NSDictionary *dict = (NSDictionary *)object;
+        NSArray *keys = [dict allKeys];
+        for (unsigned long i = 0; i < [keys count]; i++)
+        {
+            id key = [keys objectAtIndex:i];
+            [keyRefs addObject:keyed_archive_object(archiver, key)];
+            [valueRefs addObject:keyed_archive_object(
+                                     archiver, [dict objectForKey:key])];
+        }
+        return ref;
+    }
+
+    if ([object isKindOfClass:[NSSet class]])
+    {
+        const char *name = [object isKindOfClass:[NSMutableSet class]]
+                               ? "NSMutableSet"
+                               : "NSSet";
+        NSMutableDictionary *entry = [NSMutableDictionary dictionary];
+        [entry setObject:keyed_uid(keyed_class(archiver, name, "NSSet"))
+                  forKey:@"$class"];
+        NSMutableArray *refs = [NSMutableArray array];
+        [entry setObject:refs forKey:@"NS.objects"];
+        id ref = keyed_append(archiver, entry);
+        NSArray *items = [(NSSet *)object allObjects];
+        for (unsigned long i = 0; i < [items count]; i++)
+            [refs addObject:keyed_archive_object(archiver,
+                                                 [items objectAtIndex:i])];
+        return ref;
+    }
+
+    /* Any other object encodes through NSCoding: the entry collects the
+     * keys encodeWithCoder: writes while it is the current container. */
+    void *cls = iosim_objc_class_of(object);
+    const char *name = cls ? class_getName(cls) : 0;
+    if (!name || !*name)
+        return keyed_uid(0);
+    void *super = iosim_objc_superclass(cls);
+    const char *superName = super ? class_getName(super) : 0;
+    NSMutableDictionary *entry = [NSMutableDictionary dictionary];
+    [entry setObject:keyed_uid(keyed_class(archiver, name, superName))
+              forKey:@"$class"];
+    id ref = keyed_append(archiver, entry);
+    if ([object respondsToSelector:@selector(encodeWithCoder:)])
+    {
+        id saved = archiver->_current;
+        archiver->_current = entry;
+        [object encodeWithCoder:archiver];
+        archiver->_current = saved;
+    }
+    return ref;
+}
+
+@implementation NSKeyedArchiver
+- (id)initForWritingWithMutableData:(id)data
+{
+    self = [super init];
+    if (self)
+    {
+        _out = data;
+        _objects = [NSMutableArray array];
+        [_objects addObject:@"$null"];
+        _top = [NSMutableDictionary dictionary];
+        _classMap = [NSMutableDictionary dictionary];
+    }
+    return self;
+}
+- (id)init
+{
+    return [self initForWritingWithMutableData:[NSMutableData data]];
+}
+- (void)encodeObject:(id)object forKey:(id)key
+{
+    if (!key)
+        return;
+    id target = _current ? _current : _top;
+    [target setObject:keyed_archive_object(self, object) forKey:key];
+}
+- (void)encodeInteger:(long)value forKey:(id)key
+{
+    if (key)
+        [(id)(_current ? _current : _top)
+            setObject:[NSNumber numberWithInteger:value]
+            forKey:key];
+}
+- (void)encodeInt:(int)value forKey:(id)key
+{
+    [self encodeInteger:(long)value forKey:key];
+}
+- (void)encodeBool:(BOOL)value forKey:(id)key
+{
+    if (key)
+        [(id)(_current ? _current : _top)
+            setObject:[NSNumber numberWithBool:value]
+            forKey:key];
+}
+- (void)encodeFloat:(float)value forKey:(id)key
+{
+    [self encodeDouble:(double)value forKey:key];
+}
+- (void)encodeDouble:(double)value forKey:(id)key
+{
+    if (key)
+        [(id)(_current ? _current : _top)
+            setObject:[NSNumber numberWithDouble:value]
+            forKey:key];
+}
+- (void)finishEncoding
+{
+    NSMutableDictionary *archive = [NSMutableDictionary dictionary];
+    [archive setObject:@"NSKeyedArchiver" forKey:@"$archiver"];
+    [archive setObject:[NSNumber numberWithInteger:100000] forKey:@"$version"];
+    [archive setObject:_top ? _top : [NSMutableDictionary dictionary]
+                forKey:@"$top"];
+    [archive setObject:_objects ? _objects : [NSMutableArray array]
+                forKey:@"$objects"];
+    id data = [NSPropertyListSerialization
+        dataWithPropertyList:archive format:NSPropertyListXMLFormat_v1_0
+        options:0 error:0];
+    if (!data)
+        return;
+    if (_out)
+        [_out appendData:data];
+    else
+        _out = data;
+}
++ (id)archivedDataWithRootObject:(id)rootObject
+{
+    NSMutableData *out = [NSMutableData data];
+    NSKeyedArchiver *archiver =
+        [[self alloc] initForWritingWithMutableData:out];
+    [archiver encodeObject:rootObject forKey:@"root"];
+    [archiver finishEncoding];
+    return out;
+}
++ (id)archivedDataWithRootObject:(id)rootObject
+             requiringSecureCoding:(BOOL)requiringSecureCoding
+                             error:(id *)error
+{
+    (void)requiringSecureCoding;
+    (void)error;
+    return [self archivedDataWithRootObject:rootObject];
+}
++ (BOOL)archiveRootObject:(id)rootObject toFile:(id)path
+{
+    id data = [self archivedDataWithRootObject:rootObject];
+    return data ? [data writeToFile:path atomically:YES] : NO;
+}
+@end
+
+static id keyed_resolve(NSKeyedUnarchiver *unarchiver, long index)
+{
+    if (index <= 0 || (unsigned long)index >= unarchiver->_objectCount)
+        return nil;
+    if (unarchiver->_state[index] == 2)
+        return unarchiver->_resolved[index];
+    if (unarchiver->_state[index] == 1)
+        return unarchiver->_resolved[index];
+
+    id entry = [unarchiver->_objects objectAtIndex:(unsigned long)index];
+    if (!entry)
+        return nil;
+    if ([entry isKindOfClass:[NSString class]] ||
+        [entry isKindOfClass:[NSNumber class]] ||
+        [entry isKindOfClass:[NSData class]] ||
+        [entry isKindOfClass:[NSDate class]])
+    {
+        unarchiver->_state[index] = 2;
+        unarchiver->_resolved[index] = entry;
+        return entry;
+    }
+    if (![entry isKindOfClass:[NSDictionary class]])
+    {
+        unarchiver->_state[index] = 2;
+        unarchiver->_resolved[index] = entry;
+        return entry;
+    }
+
+    long indirect = keyed_uid_value(entry);
+    if (indirect >= 0)
+    {
+        id value = keyed_resolve(unarchiver, indirect);
+        unarchiver->_state[index] = 2;
+        unarchiver->_resolved[index] = value;
+        return value;
+    }
+
+    long classIndex = keyed_uid_value([entry objectForKey:@"$class"]);
+    id classEntry =
+        classIndex > 0 && (unsigned long)classIndex < unarchiver->_objectCount
+            ? [unarchiver->_objects objectAtIndex:(unsigned long)classIndex]
+            : nil;
+    id className = [classEntry isKindOfClass:[NSDictionary class]]
+                       ? [(NSDictionary *)classEntry objectForKey:@"$classname"]
+                       : nil;
+    const char *name = iosim_string_cstr(className);
+
+    if (strcmp(name, "NSNull") == 0)
+    {
+        id value = [NSNull null];
+        unarchiver->_state[index] = 2;
+        unarchiver->_resolved[index] = value;
+        return value;
+    }
+    if (strcmp(name, "NSArray") == 0 || strcmp(name, "NSMutableArray") == 0)
+    {
+        NSMutableArray *array = [NSMutableArray array];
+        unarchiver->_state[index] = 1;
+        unarchiver->_resolved[index] = array;
+        id refs = [entry objectForKey:@"NS.objects"];
+        for (unsigned long i = 0; refs && i < [refs count]; i++)
+        {
+            long ref = keyed_uid_value([refs objectAtIndex:i]);
+            id value = ref >= 0 ? keyed_resolve(unarchiver, ref)
+                                : [refs objectAtIndex:i];
+            [array addObject:value ? value : [NSNull null]];
+        }
+        unarchiver->_state[index] = 2;
+        return array;
+    }
+    if (strcmp(name, "NSDictionary") == 0 ||
+        strcmp(name, "NSMutableDictionary") == 0)
+    {
+        NSMutableDictionary *dict = [NSMutableDictionary dictionary];
+        unarchiver->_state[index] = 1;
+        unarchiver->_resolved[index] = dict;
+        id keyRefs = [entry objectForKey:@"NS.keys"];
+        id valueRefs = [entry objectForKey:@"NS.objects"];
+        for (unsigned long i = 0; keyRefs && valueRefs && i < [keyRefs count] &&
+                                   i < [valueRefs count]; i++)
+        {
+            long keyRef = keyed_uid_value([keyRefs objectAtIndex:i]);
+            long valueRef = keyed_uid_value([valueRefs objectAtIndex:i]);
+            id key = keyRef >= 0 ? keyed_resolve(unarchiver, keyRef)
+                                 : [keyRefs objectAtIndex:i];
+            id value = valueRef >= 0 ? keyed_resolve(unarchiver, valueRef)
+                                     : [valueRefs objectAtIndex:i];
+            if (key)
+                [dict setObject:value ? value : [NSNull null] forKey:key];
+        }
+        unarchiver->_state[index] = 2;
+        return dict;
+    }
+    if (strcmp(name, "NSSet") == 0 || strcmp(name, "NSMutableSet") == 0)
+    {
+        NSMutableSet *set = [NSMutableSet set];
+        unarchiver->_state[index] = 1;
+        unarchiver->_resolved[index] = set;
+        id refs = [entry objectForKey:@"NS.objects"];
+        for (unsigned long i = 0; refs && i < [refs count]; i++)
+        {
+            long ref = keyed_uid_value([refs objectAtIndex:i]);
+            id value = ref >= 0 ? keyed_resolve(unarchiver, ref)
+                                : [refs objectAtIndex:i];
+            if (value)
+                [set addObject:value];
+        }
+        unarchiver->_state[index] = 2;
+        return set;
+    }
+
+    Class cls = (Class)objc_getClass(name);
+    if (!cls)
+        return nil;
+    id object = [cls alloc];
+    unarchiver->_state[index] = 1;
+    unarchiver->_resolved[index] = object;
+    if ([object respondsToSelector:@selector(initWithCoder:)])
+    {
+        id saved = unarchiver->_current;
+        unarchiver->_current = entry;
+        id decoded = [object initWithCoder:unarchiver];
+        unarchiver->_current = saved;
+        if (decoded)
+            object = decoded;
+    }
+    unarchiver->_state[index] = 2;
+    unarchiver->_resolved[index] = object;
+    return object;
+}
+
+@implementation NSKeyedUnarchiver
+- (id)initForReadingWithData:(id)data
+{
+    self = [super init];
+    if (!self)
+        return nil;
+    id plist = [NSPropertyListSerialization
+        propertyListWithData:data options:0 format:0 error:0];
+    if (!plist || ![plist isKindOfClass:[NSDictionary class]])
+        return nil;
+    id objects = [plist objectForKey:@"$objects"];
+    if (!objects || ![objects isKindOfClass:[NSArray class]])
+        return nil;
+    _objects = objects;
+    _top = [plist objectForKey:@"$top"];
+    _objectCount = [objects count];
+    _resolved = calloc(_objectCount ? _objectCount : 1, sizeof(id));
+    _state = calloc(_objectCount ? _objectCount : 1, 1);
+    if (!_resolved || !_state)
+        return nil;
+    return self;
+}
+- (BOOL)containsValueForKey:(id)key
+{
+    id container = _current ? _current : _top;
+    return key && container &&
+           [(NSDictionary *)container objectForKey:key] != nil;
+}
+- (id)decodeObjectForKey:(id)key
+{
+    id container = _current ? _current : _top;
+    if (!key || !container)
+        return nil;
+    id value = [(NSDictionary *)container objectForKey:key];
+    if (!value)
+        return nil;
+    long ref = keyed_uid_value(value);
+    if (ref >= 0)
+        return keyed_resolve(self, ref);
+    return value;
+}
+- (long)decodeIntegerForKey:(id)key
+{
+    id value = [self decodeObjectForKey:key];
+    return value && [value respondsToSelector:@selector(integerValue)]
+               ? [value integerValue]
+               : 0;
+}
+- (int)decodeIntForKey:(id)key
+{
+    return (int)[self decodeIntegerForKey:key];
+}
+- (BOOL)decodeBoolForKey:(id)key
+{
+    id value = [self decodeObjectForKey:key];
+    return value && [value respondsToSelector:@selector(boolValue)]
+               ? [value boolValue]
+               : NO;
+}
+- (float)decodeFloatForKey:(id)key
+{
+    return (float)[self decodeDoubleForKey:key];
+}
+- (double)decodeDoubleForKey:(id)key
+{
+    id value = [self decodeObjectForKey:key];
+    return value && [value respondsToSelector:@selector(doubleValue)]
+               ? [value doubleValue]
+               : 0;
+}
+- (void)finishDecoding { }
++ (id)unarchiveObjectWithData:(id)data
+{
+    if (!data)
+        return nil;
+    NSKeyedUnarchiver *unarchiver =
+        [[self alloc] initForReadingWithData:data];
+    if (!unarchiver)
+        return nil;
+    id object = [unarchiver decodeObjectForKey:@"root"];
+    [unarchiver finishDecoding];
+    return object;
+}
++ (id)unarchiveObjectWithFile:(id)path
+{
+    return [self unarchiveObjectWithData:[NSData dataWithContentsOfFile:path]];
+}
++ (id)unarchivedObjectOfClass:(Class)cls fromData:(id)data error:(id *)error
+{
+    id object = [self unarchiveObjectWithData:data];
+    if (cls && object && ![object isKindOfClass:cls])
+    {
+        if (error)
+            *error = [NSError errorWithDomain:@"NSCocoaErrorDomain" code:4864
+                                       userInfo:nil];
+        return nil;
+    }
+    return object;
+}
 @end

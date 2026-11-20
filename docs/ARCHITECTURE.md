@@ -299,6 +299,16 @@ this runtime) and the parser rejects truncated or malformed input.
 `NSUserDefaults` persists a domain to
 `$HOME/Library/Preferences/<bundle-id>.plist`.
 
+`NSKeyedArchiver` builds the same keyed-archive structure Foundation uses: an
+XML plist with `$archiver`, `$version`, `$top` and a `$objects` table, where
+class descriptions record `$classname`/`$classes` and every object reference
+is a `CF$UID` entry. Strings, numbers, data and dates sit directly in the
+table; arrays, dictionaries and sets store reference lists; any other object
+takes part through `NSCoding` (`encodeWithCoder:`/`initWithCoder:`), with its
+entry reserved before its children so cycles resolve. `NSKeyedUnarchiver`
+rebuilds objects lazily and allocates custom classes by name through the ObjC
+runtime; `NSMutableData` backs incremental archive output.
+
 Bundle resources follow the executable: when a guest image lives inside
 `Foo.app`, the loader exports `IOSIM_BUNDLE_DIR=Foo.app` (derived from the real
 executable path, so an app launched by SpringBoard does not inherit the system
