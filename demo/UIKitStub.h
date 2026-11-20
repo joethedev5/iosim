@@ -38,6 +38,7 @@ __attribute__((objc_root_class))
 @end
 
 @interface CALayer : NSObject
+@property CGRect frame;
 @property double cornerRadius;
 @property double opacity;
 - (void)addSublayer:(CALayer *)layer;
@@ -49,6 +50,7 @@ __attribute__((objc_root_class))
 + (UIColor *)whiteColor;
 + (UIColor *)blackColor;
 + (UIColor *)systemBlueColor;
+@property(readonly) id CGColor;
 @end
 
 @interface UIFont : NSObject
@@ -148,12 +150,13 @@ extern int UIApplicationMain(int argc, char **argv, id principal,
 + (instancetype)bezierPath;
 - (void)moveToPoint:(CGPoint)point;
 - (void)addLineToPoint:(CGPoint)point;
+@property(readonly) id CGPath;
 @end
 
 @interface CAShapeLayer : CALayer
-@property(nonatomic, retain) UIBezierPath *path;
-@property(nonatomic, retain) UIColor *fillColor;
-@property(nonatomic, retain) UIColor *strokeColor;
+@property(nonatomic, retain) id path;
+@property(nonatomic, retain) id fillColor;
+@property(nonatomic, retain) id strokeColor;
 @property double lineWidth;
 @end
 
@@ -165,6 +168,59 @@ extern int UIApplicationMain(int argc, char **argv, id principal,
 
 @interface UIImage : NSObject
 + (UIImage *)imageNamed:(NSString *)name;
+@end
+
+@interface NSArray : NSObject
++ (id)arrayWithObjects:(const id *)objects count:(unsigned long)count;
+@property(readonly) unsigned long count;
+- (id)objectAtIndex:(unsigned long)index;
+@end
+
+@class UITableView, UITableViewCell, NSIndexPath;
+
+@protocol UITableViewDataSource
+- (long)tableView:(UITableView *)tableView numberOfRowsInSection:(long)section;
+- (UITableViewCell *)tableView:(UITableView *)tableView
+         cellForRowAtIndexPath:(NSIndexPath *)indexPath;
+@end
+
+@protocol UITableViewDelegate
+- (void)tableView:(UITableView *)tableView
+    didSelectRowAtIndexPath:(NSIndexPath *)indexPath;
+@end
+
+enum {
+    UITableViewCellStyleDefault = 0,
+    UITableViewCellStyleValue1 = 1,
+    UITableViewCellStyleValue2 = 2,
+    UITableViewCellStyleSubtitle = 3,
+    UITableViewCellAccessoryNone = 0,
+    UITableViewCellAccessoryDisclosureIndicator = 1,
+    UITableViewCellAccessoryDetailDisclosureButton = 2,
+    UITableViewCellAccessoryCheckmark = 3,
+    UITableViewStylePlain = 0
+};
+
+@interface NSIndexPath : NSObject
++ (id)indexPathForRow:(long)row inSection:(long)section;
+@property(readonly) long row;
+@property(readonly) long section;
+@end
+
+@interface UITableViewCell : UIView
+- (id)initWithStyle:(long)style reuseIdentifier:(id)identifier;
+@property(readonly) UILabel *textLabel;
+@property(readonly) UILabel *detailTextLabel;
+@property long accessoryType;
+@end
+
+@interface UITableView : UIView
+- (id)initWithFrame:(CGRect)frame style:(long)style;
+@property(nonatomic, retain) id dataSource;
+@property(nonatomic, retain) id delegate;
+@property double rowHeight;
+- (void)reloadData;
+- (id)dequeueReusableCellWithIdentifier:(id)identifier;
 @end
 
 @interface UIImageView : UIView

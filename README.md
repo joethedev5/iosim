@@ -74,7 +74,18 @@ cmake --build build
 ./tests/run_tests.sh
 ```
 
-Run a binary directly:
+Build a demo without an Apple SDK, using the stub UIKit header and the same
+Mach-O toolchain as the runtime:
+
+```sh
+./tools/build_app.sh demo/ListApp.m build/ListApp
+DYLD_ROOT_PATH=$PWD/runtime IOSIM_FONT_DIR=$PWD/build/fonts/ios \
+  SIMULATOR_MAINSCREEN_WIDTH=1206 SIMULATOR_MAINSCREEN_HEIGHT=2622 \
+  SIMULATOR_MAINSCREEN_SCALE=3.0 IOSIM_SCREENSHOT_PATH=$PWD/build/list.png \
+  ./build/iosim-run build/ListApp
+```
+
+Run any binary directly:
 
 ```sh
 DYLD_ROOT_PATH=$PWD/runtime ./build/iosim-run -v path/to/AppBinary
