@@ -219,6 +219,26 @@ print(f"ok   framebuffer screenshot {w}x{h}")
 PY
 out="$(SIMCTL_CHILD_IOSIM_TEST=1 "$ROOT/tools/iosimctl" spawn "$UDID" "$T/objc_test")"
 check "objc greet world count=7" "$out" "simctl spawn equivalent"
+
+# The booted SpringBoard launches the installed app from its icon and returns
+# home when the system asks the app to background. UIKitApp is the second
+# installed app: grid slot 8, row 2 column 0 (62.1667, 322.5 pt).
+SBLOG="$IOSIM_HOME/Devices/$UDID/logs/springboard.log"
+"$ROOT/tools/iosimctl" ui "$UDID" tap 62.1667 322.5 >/dev/null
+sleep 1
+if grep -q "launching UIKitApp" "$SBLOG" 2>/dev/null; then
+    echo "ok   SpringBoard launches an installed app from its icon"
+else
+    echo "FAIL SpringBoard launch"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
+sleep 1
+if grep -q "backgrounded by the system" "$SBLOG" 2>/dev/null; then
+    echo "ok   home background the app and returns to the home screen"
+else
+    echo "FAIL SpringBoard home"; fails=$((fails+1))
+fi
+
 "$ROOT/tools/iosimctl" shutdown "$UDID" >/dev/null
 
 if [ "$fails" -ne 0 ]; then

@@ -287,14 +287,25 @@ exist: `list`, `create`, `delete`, `boot`, `bootstatus`, `shutdown`, `erase`,
 
 - Device state lives in a JSON device set under `IOSIM_HOME`.
 - `boot` starts `tools/iosim-launchd`, a small `launchd_sim` stand-in that owns
-  the device runtime socket/state and exits on `shutdown`.
-- `install` copies an `.app` into the device bundle container and records its
-  `Info.plist` metadata.
+  the device runtime socket/state and exits on `shutdown`. It then boots the
+  system UI: `runtime/System/Library/CoreServices/SpringBoard.app/SpringBoard`
+  runs through the loader with the device environment, `IOSIM_SHELL=1`, the
+  event FIFO and a generated app manifest. SpringBoard renders the home screen
+  into the device framebuffer; `io screenshot` waits for that frame. On
+  shutdown launchd terminates the SpringBoard process group.
+- `install` copies an `.app` into the device bundle container, records its
+  `Info.plist` metadata and install order, rewrites the SpringBoard manifest,
+  and sends an `apps` event so a running home screen reloads. `uninstall`
+  does the same in reverse.
 - `launch` runs the app through `iosim-run` with the captured simulator
   environment, a per-app data container (`HOME`, `TMPDIR`,
   `CFFIXED_USER_HOME`, `_DYLD_CLOSURE_HOME`), `DYLD_ROOT_PATH`, screen geometry,
   model identifier and `XPC_SERVICE_NAME=UIKitApplication:...`.
 - `SIMCTL_CHILD_*` variables are forwarded to the child, matching simctl.
+- `ui <device> tap x y | home | apps` injects a system UI event into the
+  device event FIFO. `tap` takes point coordinates and scales them to pixels.
+  The frontmost process reads the stream: at home SpringBoard hit-tests icons,
+  while an app receives touches, keys and the `home` background request.
 
 ### 2.9 Services: libdispatch, Mach and XPC
 
@@ -383,14 +394,44 @@ measured opacities. The soft fills rely on the framebuffer's opacity clamp:
 for translucent rounded rects and circles, interior coverage is bounded by the
 current opacity instead of taking the opaque fast path.
 
-### 2.12 SpringBoard-like shell
+### 2.12 SpringBoard system UI
 
 With `IOSIM_SHELL=1`, `UIApplicationMain` calls `run_springboard` instead of
-starting the app's scene. The shell draws the wallpaper, a 4×3 icon grid, a
-weather widget, search pill, page dots, dock and status bar with the same
-framebuffer API, and handles taps by entering a launch overlay or returning.
-It shares the device chrome and event queue with apps, so the system UI and app
-rendering exercise one pipeline.
+starting the app's scene. The system UI is a real executable of its own,
+`SpringBoard.app/SpringBoard`; launchd boots it with the device environment,
+and it shares the framebuffer, font stack and event stream with apps.
+
+The home screen is a measured reconstruction of the iOS 27 iPhone 18 Pro
+screen, not a stylized imitation: a 402 pt wide 4×4 grid at a 92.5556 pt pitch
+with 64 pt icons and 12 pt labels, the 366×89 pt dock with its two apps, the
+search pill and the status bar. The wallpaper is a 48×104 color field sampled
+from a real capture with the UI regions masked out and diffused, upscaled
+bilinearly at draw time; the dock and search glass are sampled fields as well.
+Icon masks are circular rounded rects with a 22.37 % corner radius. The generic
+app icon reproduces the measured wireframe: a white face with a soft bottom
+shade, a square grid of 1 px #9a9a9a hairlines clipped by the face, a 2 px
+#cdcdcd crosshair, three concentric circles (the central cell's inscribed and
+circumscribed circles and the square's inscribed circle) and the square's
+diagonals.
+
+App enumeration is real. `tools/iosimctl` writes a manifest of installed
+bundles, in install order, with display name, executable, bundle identifier and
+data container. SpringBoard loads that manifest, draws the stock system apps
+plus every installed app (generic placeholder artwork until a bundle carries an
+icon), and hit-tests taps against the same grid. Tapping an installed app
+closes the UI's event stream, forks the loader with the app executable, waits
+for the app to exit and repaints the home screen. The child runs the app's own
+`main` → `UIApplicationMain` → scene lifecycle, with its `HOME` moved to the
+bundle's data container and `XPC_SERVICE_NAME` set, and writes the same shared
+framebuffer. `home` is delivered as a system event (type 7): the app runs
+`sceneWillResignActive:` and `sceneDidEnterBackground:` and terminates, and
+SpringBoard resumes with a freshly rendered home screen. `apps` (type 8)
+reloads the manifest and redraws when an install changes the app set.
+
+Stock system apps (Fitness, Watch, Reminders, Files, Preview, Utilities,
+Contacts, Safari, Messages) are drawn from measured vector artwork. Their
+Apple executables are not part of this runtime, so tapping one reports that no
+executable is installed rather than faking a launch.
 
 ## 3. Why this design
 
@@ -433,3 +474,7 @@ Python for iteration speed.
 - The dyld shared cache is not parsed; each dylib is loaded from disk.
 - Class method dispatch covers the common path; message forwarding, associated
   objects, ARC entry points and exceptions are pending.
+- The SpringBoard grid is a single page with 16 slots. There is no paging, app
+  switcher or suspension snapshots; a backgrounded app is terminated. Stock
+  system apps are display icons without executables, and a directly launched
+  app alongside a running SpringBoard is not coordinated through launchd.

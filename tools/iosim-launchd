@@ -1,21 +1,34 @@
 #!/usr/bin/env python3
 """Minimal launchd_sim stand-in.
 
-Owns the per-device runtime state while a device is booted, exposes a Unix
-socket for service requests, and exits cleanly on SIGTERM (simctl shutdown).
-It does not manage Mach services or XPC yet; it is the boot anchor that the
-device lifecycle is built around.
+Owns the per-device runtime state while a device is booted, boots the system
+UI (SpringBoard), exposes a Unix socket for service requests, and exits
+cleanly on SIGTERM (simctl shutdown). It does not manage Mach services or XPC
+yet; it is the boot anchor that the device lifecycle is built around.
 """
 
+import importlib.util
+from importlib.machinery import SourceFileLoader
 import json
 import os
 import select
 import signal
 import socket
+import subprocess
 import sys
 import time
 
 running = True
+springboard_pid = None
+
+
+def load_ctl():
+    here = os.path.dirname(os.path.abspath(__file__))
+    loader = SourceFileLoader("iosimctl", os.path.join(here, "iosimctl"))
+    spec = importlib.util.spec_from_loader("iosimctl", loader)
+    mod = importlib.util.module_from_spec(spec)
+    loader.exec_module(mod)
+    return mod
 
 
 def on_term(signum, frame):
@@ -23,14 +36,65 @@ def on_term(signum, frame):
     running = False
 
 
+def stop_springboard():
+    global springboard_pid
+    if springboard_pid:
+        try:
+            os.killpg(springboard_pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        springboard_pid = None
+
+
+def boot_springboard(ctl, device_dir, udid, name):
+    """Start the system UI with the apps installed on this device."""
+    global springboard_pid
+    state = ctl.load_state()
+    dev = state["devices"].get(udid)
+    if dev is None:
+        print("launchd_sim: device not in state; skipping SpringBoard",
+              flush=True)
+        return
+    manifest = ctl.write_springboard_manifest(udid, dev)
+    sb = ctl.runtime_root() / "System" / "Library" / "CoreServices" / \
+        "SpringBoard.app" / "SpringBoard"
+    if not sb.exists():
+        print("launchd_sim: SpringBoard not built (tools/build_runtime.sh)",
+              flush=True)
+        return
+    var_run = os.path.join(device_dir, "var", "run")
+    fifo = ctl.event_fifo_path(udid)
+    if not fifo.exists():
+        os.mkfifo(str(fifo))
+    env = ctl.device_environment(udid, dev)
+    env["IOSIM_SHELL"] = "1"
+    env["IOSIM_SHELL_APPS"] = str(manifest)
+    env["IOSIM_EVENT_FIFO"] = str(fifo)
+    cmd = [ctl.loader_path()]
+    for p in dev.get("dylibPaths", []):
+        cmd += ["--dylib-path", p]
+    cmd += [str(sb)]
+    log_path = os.path.join(device_dir, "logs", "springboard.log")
+    log = open(log_path, "ab")
+    proc = subprocess.Popen(cmd, env=env, stdout=log, stderr=log,
+                            start_new_session=True, cwd=os.path.dirname(device_dir))
+    springboard_pid = proc.pid
+    log.close()
+    print(f"launchd_sim: SpringBoard started pid={proc.pid}", flush=True)
+
+
 def main():
+    global running
     if len(sys.argv) < 4:
         print("usage: iosim-launchd <device-dir> <udid> <name>", file=sys.stderr)
         return 2
     device_dir, udid, name = sys.argv[1], sys.argv[2], sys.argv[3]
     var_run = os.path.join(device_dir, "var", "run")
     os.makedirs(var_run, exist_ok=True)
-    sock_path = os.path.join(var_run, "launchd.sock")
+    os.makedirs(os.path.join(device_dir, "logs"), exist_ok=True)
+    # AF_UNIX paths are limited to 108 bytes; the device set path can be
+    # longer than that, so the control socket lives under /tmp.
+    sock_path = f"/tmp/iosim-launchd-{udid}.sock"
     state_path = os.path.join(var_run, "launchd.json")
     try:
         os.unlink(sock_path)
@@ -55,11 +119,18 @@ def main():
     }
 
     def persist():
+        state["springboardPid"] = springboard_pid
         with open(state_path, "w") as f:
             json.dump(state, f, indent=2)
 
     persist()
     print(f"launchd_sim: booting {name} ({udid}) pid={os.getpid()}", flush=True)
+
+    try:
+        boot_springboard(load_ctl(), device_dir, udid, name)
+    except Exception as exc:  # keep the boot anchor alive regardless
+        print(f"launchd_sim: SpringBoard boot failed: {exc}", flush=True)
+    persist()
 
     while running:
         try:
@@ -94,6 +165,7 @@ def main():
             except OSError:
                 pass
 
+    stop_springboard()
     try:
         os.unlink(sock_path)
     except FileNotFoundError:

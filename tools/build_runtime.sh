@@ -61,5 +61,32 @@ do
     -dylib -install_name "$install" -o "$OUT$out" "$B/empty.o" -undefined dynamic_lookup
 done
 
+# SpringBoard: the system UI executable, booted by launchd.
+SB_DIR="$OUT/System/Library/CoreServices/SpringBoard.app"
+mkdir -p "$SB_DIR"
+"$CC" -target "$SDK_TARGET" -ffreestanding -fPIC -O2 \
+  -fobjc-runtime=ios-18.0 -fno-objc-arc -fblocks -I "$ROOT/demo" \
+  -c "$ROOT/demo/SpringBoard.m" -o "$B/SpringBoard.o"
+"$LD64" -arch x86_64 -platform_version ios-simulator 18.0 18.0 \
+  -o "$SB_DIR/SpringBoard" "$B/SpringBoard.o" \
+  "$OUT/System/Library/Frameworks/Foundation.framework/Foundation" \
+  "$OUT/System/Library/Frameworks/UIKit.framework/UIKit" \
+  "$OUT/System/Library/Frameworks/QuartzCore.framework/QuartzCore" \
+  -undefined dynamic_lookup
+if [ ! -f "$SB_DIR/Info.plist" ]; then
+  cat > "$SB_DIR/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>CFBundleExecutable</key><string>SpringBoard</string>
+  <key>CFBundleIdentifier</key><string>com.apple.springboard</string>
+  <key>CFBundleName</key><string>SpringBoard</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>1.0</string>
+  <key>CFBundleVersion</key><string>1</string>
+</dict></plist>
+PLIST
+fi
+
 echo "runtime root: $OUT"
 find "$OUT" -type f | sort

@@ -12,6 +12,11 @@ void iosim_fb_fill_rect(int x, int y, int w, int h, uint32_t color);
 void iosim_fb_fill_round_rect(int x, int y, int w, int h, int radius,
                               uint32_t color);
 void iosim_fb_fill_circle(int cx, int cy, int radius, uint32_t color);
+void iosim_fb_stroke_circle(int cx, int cy, int radius, int thickness,
+                            uint32_t color);
+void iosim_fb_fill_squircle(int x, int y, int w, int h, uint32_t color);
+void iosim_fb_fill_squircle_gradient(int x, int y, int w, int h,
+                                     uint32_t top, uint32_t bottom);
 void iosim_fb_set_opacity(double opacity);
 int iosim_fb_push_clip(int x, int y, int w, int h);
 void iosim_fb_pop_clip(void);
@@ -55,3 +60,18 @@ void iosim_fb_font_metrics(int style, double size_pt, double scale,
                            int *ascent, int *descent, int *line_height);
 
 #endif
+
+/* Offscreen targets for transformed content. Pixels are premultiplied
+ * ARGB while an offscreen target is active. */
+void *iosim_fb_begin_offscreen(unsigned width, unsigned height);
+uint32_t *iosim_fb_end_offscreen(void *state, int *out_w, int *out_h);
+void iosim_fb_free_offscreen(uint32_t *buf);
+void iosim_fb_paste_xrgb(const uint32_t *src);
+void iosim_fb_fill_field(int x, int y, int w, int h, int radius,
+                         const uint32_t *grid, int gw, int gh);
+void iosim_fb_blit_xrgb_scaled(const uint32_t *src, int sw, int sh,
+                               int x, int y, int w, int h,
+                               double opacity);
+void iosim_fb_blit_affine(const uint32_t *src, int sw, int sh,
+                          double fa, double fb, double fc, double fd,
+                          double ftx, double fty, double opacity);

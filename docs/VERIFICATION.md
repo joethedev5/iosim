@@ -286,13 +286,66 @@ services: done
 returns to the caller, because callers are allowed to have optimized away the
 code after it.
 
-### System UI: a SpringBoard-like shell
+### System UI: SpringBoard, measured and real
 
-`IOSIM_SHELL=1` switches `UIApplicationMain` to a home screen rendered with the
-same framebuffer primitives: wallpaper gradients, a 4×3 icon grid, a weather
-widget, search pill, page dots, a dock and the status bar. Tap events launch a
-placeholder overlay and a second tap returns. This is a system-UI
-reimplementation, not a launcher for separate app processes.
+`IOSIM_SHELL=1` switches `UIApplicationMain` to the home screen, and
+`tools/build_runtime.sh` builds that home screen as its own executable,
+`SpringBoard.app/SpringBoard`. launchd boots it as a real process when a device
+starts. The layout is measured from the iOS 27 iPhone 18 Pro home screen:
+
+- 402 × 874 pt screen, 24 pt side margin, four columns at a 92.5556 pt pitch
+  (centres 62.1667 / 154.7222 / 247.2778 / 339.8333 pt), row centres
+  121.8333 / 222.1667 / 322.5 / 422.8333 pt.
+- 64 pt icons, 12 pt white labels with the baseline 48.1 pt below the icon
+  centre, dock at 18..384 × 761.333..850.333 pt with a 44.5 pt radius, search
+  pill at 164.333..237.333 × 704..733 pt.
+- The wallpaper is a 48 × 104 field sampled from a real capture with icons,
+  labels, the dock, the search pill and the status bar masked out and the holes
+  diffused; the dock and search glass are 8 × 3 and 4 × 2 sampled fields. The
+  runtime upscales them bilinearly, so the satin folds and their blurred
+  shadows come from measurement rather than a hand-painted gradient.
+- Icon masks are circular rounded rects (radius 22.37 % of the side). The
+  generic app icon is the measured wireframe: white face with a bottom shade,
+  1 px #9a9a9a grid clipped by the face, a 2 px #cdcdcd crosshair, circles of
+  36 px, 50 px and 84 px, and the square's diagonals.
+
+Against the real simulator's home screen (same device, same installed apps,
+same status bar), the full-frame parity is:
+
+| Region | Mean error (0–255) |
+|---|---|
+| Whole screen | 9.55 |
+| Status bar | 3.97 |
+| Search pill | 4.23 |
+| Placeholder app icon | 5.8 |
+| Demo apps (placeholder art) | 4.8–13.9 |
+| Stock icons (Fitness, Watch, …) | 15.1–47.6 |
+| Dock | 18.3 |
+
+11.99 % of pixels fall outside the 24/255 tolerance, concentrated in the stock
+system-app artwork, whose hand-drawn vector art is the remaining gap; the
+wallpaper-only bands stay around 4/255.
+
+The system UI is not a mock launcher. The boot flow is exercised end to end:
+
+```sh
+tools/iosimctl create "Phone" com.iosim.SimDeviceType.iPhone-18-Pro   # UDID
+tools/iosimctl boot $UDID              # launchd starts SpringBoard
+tools/iosimctl io $UDID screenshot home0.png
+tools/iosimctl install $UDID HelloSim.app
+tools/iosimctl io $UDID screenshot home1.png   # the app icon appears
+tools/iosimctl ui $UDID tap 339.8 222.2        # tap the icon (points)
+tools/iosimctl io $UDID screenshot app.png     # the app rendered itself
+tools/iosimctl ui $UDID home
+tools/iosimctl io $UDID screenshot home2.png   # back on the measured home
+```
+
+`app.png` from the SpringBoard launch matches the same app captured directly
+and the real iOS capture (Controls: 0.22/255 against the direct iosim capture,
+0.70/255 against the real simulator). `home2.png` is byte-identical to
+`home1.png`: the app ran its scene background lifecycle and SpringBoard
+repainted the same measured home screen. Installing while booted sends the
+`apps` event, and the icon appears without a reboot.
 
 ## Limitations
 
@@ -300,9 +353,10 @@ The framework surface is still a subset. Auto Layout supports equality and
 inequality anchors with priorities evaluated by relaxation, intrinsic sizing
 and guides, but not the full Cassowary solver or every UIKit layout API.
 Text input is a single-line `UITextField` with a QWERTY keyboard; UITextView,
-multitap gestures and selection handles are not implemented. Multi-process app
-launch and cross-process Mach ports remain out of scope for the current
-single-process substrate. CoreText shaping is limited to the glyphs in SFUI;
+multitap gestures and selection handles are not implemented. Cross-process Mach ports and
+XPC remain in-process, the SpringBoard grid is a single 16-slot page with no
+paging or app switcher, a backgrounded app is terminated rather than suspended,
+and stock system apps have no executables in this runtime. CoreText shaping is limited to the glyphs in SFUI;
 right-to-left and complex scripts are not shaped. `UIView.transform` applies
 translation and scale, not arbitrary rotation. XPC is an in-process transport.
 Metal and video remain unimplemented.

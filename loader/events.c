@@ -10,6 +10,15 @@
 
 static int event_fd = -1;
 
+void iosim_event_close(void)
+{
+    if (event_fd >= 0)
+    {
+        close(event_fd);
+        event_fd = -1;
+    }
+}
+
 int iosim_event_next(int *type, int *x, int *y)
 {
     if (event_fd < 0)
@@ -48,6 +57,20 @@ int iosim_event_next(int *type, int *x, int *y)
     int px, py;
     if (strncmp(line, "quit", 4) == 0)
         return 0;
+    if (strncmp(line, "home", 4) == 0)
+    {
+        *type = 7;
+        *x = 0;
+        *y = 0;
+        return 1;
+    }
+    if (strncmp(line, "apps", 4) == 0)
+    {
+        *type = 8;
+        *x = 0;
+        *y = 0;
+        return 1;
+    }
     if (sscanf(line, "tap %d %d", &px, &py) == 2)
     {
         *type = 1;

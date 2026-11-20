@@ -10,6 +10,7 @@
 #include "foundation_lite.h"
 
 extern int printf(const char *fmt, ...);
+extern int fflush(void *stream);
 extern int fprintf(void *stream, const char *fmt, ...);
 extern void *stderr;
 extern char *getenv(const char *name);
@@ -66,6 +67,14 @@ extern void iosim_fb_fill_linear_gradient(int x, int y, int w, int h,
                                           unsigned end_color,
                                           double sx, double sy,
                                           double ex, double ey);
+extern void *iosim_fb_begin_offscreen(unsigned width, unsigned height);
+extern unsigned *iosim_fb_end_offscreen(void *state, int *out_w, int *out_h);
+extern void iosim_fb_stroke_circle(int cx, int cy, int radius, int thickness,
+                                   unsigned color);
+extern void iosim_fb_blit_affine(const unsigned *src, int sw, int sh,
+                                 double fa, double fb, double fc, double fd,
+                                 double ftx, double fty, double opacity);
+extern void iosim_fb_free_offscreen(unsigned *buf);
 extern void iosim_fb_blit_rgba_scaled(int x, int y, int w, int h,
                                       const unsigned char *rgba,
                                       int sw, int sh, int stride);
@@ -3998,6 +4007,9 @@ static void render_layer(CALayer *layer, double parentX, double parentY,
     iosim_fb_set_opacity(1.0);
 }
 
+static int g_render_offscreen;
+static UIView *g_no_transform_view;
+
 static void render_view(UIView *view, double originX, double originY,
                         double scale, double parentAlpha)
 {
@@ -4027,8 +4039,37 @@ static void render_view(UIView *view, double originX, double originY,
     if (h < 0) h = 0;
 
     CGAffineTransform tf = view->_transform;
-    if (tf.a != 1.0 || tf.b != 0.0 || tf.c != 0.0 || tf.d != 1.0 ||
-        tf.tx != 0.0 || tf.ty != 0.0)
+    int rotated = (tf.b != 0.0 || tf.c != 0.0);
+    if (rotated && view != g_no_transform_view && w > 0 && h > 0)
+    {
+        /* A rotated view is rendered into an offscreen pass and then
+         * composited with the affine transform around its center. */
+        void *state = iosim_fb_begin_offscreen((unsigned)w, (unsigned)h);
+        if (state)
+        {
+            UIView *saved = g_no_transform_view;
+            g_no_transform_view = view;
+            g_render_offscreen++;
+            render_view(view, -frame.origin.x, -frame.origin.y, scale, 1.0);
+            g_render_offscreen--;
+            g_no_transform_view = saved;
+            int bw = 0, bh = 0;
+            unsigned *buf = iosim_fb_end_offscreen(state, &bw, &bh);
+            if (buf)
+            {
+                double cx = w / 2.0, cy = h / 2.0;
+                double ftx = x + cx - (tf.a * cx + tf.c * cy) + tf.tx * scale;
+                double fty = y + cy - (tf.b * cx + tf.d * cy) + tf.ty * scale;
+                iosim_fb_blit_affine(buf, bw, bh, tf.a, tf.b, tf.c, tf.d,
+                                     ftx, fty, parentAlpha);
+                iosim_fb_free_offscreen(buf);
+            }
+            return;
+        }
+    }
+    if (!g_render_offscreen &&
+        (tf.a != 1.0 || tf.b != 0.0 || tf.c != 0.0 || tf.d != 1.0 ||
+         tf.tx != 0.0 || tf.ty != 0.0))
     {
         double sx = __builtin_sqrt(tf.a * tf.a + tf.b * tf.b);
         double sy = __builtin_sqrt(tf.c * tf.c + tf.d * tf.d);
@@ -5380,322 +5421,573 @@ static int keyboard_handle_tap(int px, int py, int fbW, int fbH,
 
 /* -------------------------------------------------------- springboard UI *//* -------------------------------------------------------- springboard UI */
 
-static const char *shell_names[12] = {
-    "Calendar", "Photos", "Camera", "Mail", "Maps", "Weather",
-    "Clock", "Notes", "Settings", "App Store", "Files", "Health"
+/* ----------------------------------------------------------- SpringBoard */
+
+#include "shell_wallpaper.h"
+
+extern void *malloc(unsigned long size);
+extern void free(void *ptr);
+extern void iosim_fb_paste_xrgb(const unsigned *pixels);
+extern void iosim_fb_fill_field(int x, int y, int w, int h, int radius,
+                                const unsigned *grid, int gw, int gh);
+extern void iosim_fb_fill_squircle(int x, int y, int w, int h, unsigned color);
+extern void iosim_fb_fill_squircle_gradient(int x, int y, int w, int h,
+                                            unsigned top, unsigned bottom);
+extern void iosim_fb_blit_xrgb_scaled(const unsigned *src, int sw, int sh,
+                                      int x, int y, int w, int h,
+                                      double opacity);
+extern int open(const char *path, int flags, ...);
+extern long read(int fd, void *buf, unsigned long count);
+extern int close(int fd);
+extern int iosim_spawn_app(const char *exe, const char *bundle, const char *home);
+extern int iosim_spawn_wait(int pid);
+extern void iosim_event_close(void);
+
+#define SHELL_MAX_APPS 40
+
+struct shell_app {
+    char name[64];
+    char exe[512];
+    char bundle[128];
+    char home[384];
+    int stock;   /* artwork id, -1 for the generic placeholder */
+    int dock;
 };
 
-static void shell_tile(int x, int y, int size, unsigned top, unsigned bottom,
-                       double scale, int radius)
+static struct shell_app g_shell_apps[SHELL_MAX_APPS];
+static int g_shell_app_count;
+static unsigned *g_shell_wallpaper;
+static int g_shell_wallpaper_w, g_shell_wallpaper_h;
+
+/* Measured layout on the 402 pt iPhone 18 Pro home screen. */
+#define SHELL_ICON_PT   64.0
+#define SHELL_MARGIN_PT (30.0 + 1.0 / 6.0)
+#define SHELL_PITCH_PT  92.5556
+
+static const double shell_row_center[4] = {
+    121.8333, 222.1667, 322.5, 422.8333
+};
+
+static unsigned shell_wallpaper_cell(int gx, int gy)
 {
-    iosim_fb_fill_linear_gradient_round_rect(x, y, size, size,
-                                             (int)(radius * scale), top,
-                                             bottom, 0.5, 0.0, 0.5, 1.0);
+    if (gx < 0) gx = 0;
+    if (gx >= SHELL_WALLPAPER_W) gx = SHELL_WALLPAPER_W - 1;
+    if (gy < 0) gy = 0;
+    if (gy >= SHELL_WALLPAPER_H) gy = SHELL_WALLPAPER_H - 1;
+    return shell_wallpaper_grid[gy * SHELL_WALLPAPER_W + gx];
 }
 
-static void shell_glyph(int index, int x, int y, int size, double scale)
+static void shell_wallpaper_build(int w, int h)
 {
-    int cx = x + size / 2, cy = y + size / 2;
-    double u = size / 60.0;
-    switch (index)
+    if (g_shell_wallpaper && g_shell_wallpaper_w == w &&
+        g_shell_wallpaper_h == h)
+        return;
+    free(g_shell_wallpaper);
+    g_shell_wallpaper = (unsigned *)malloc((unsigned long)w * h * 4);
+    if (!g_shell_wallpaper)
+        return;
+    g_shell_wallpaper_w = w;
+    g_shell_wallpaper_h = h;
+    for (int y = 0; y < h; y++)
     {
-    case 0: /* Calendar */
-        iosim_fb_font_text(cx - (int)(13 * u), cy + (int)(8 * u), "20",
-                           IOSIM_FONT_REGULAR, 22, scale, 0x111111);
-        break;
-    case 1: /* Photos */
-    {
-        static const unsigned petals[8] = {
-            0xffd60a, 0xff9f0a, 0xff453a, 0xbf5af2,
-            0x0a84ff, 0x64d2ff, 0x30d158, 0xff2d55
-        };
-        for (int i = 0; i < 8; i++)
+        double fy = (y + 0.5) * SHELL_WALLPAPER_H / h - 0.5;
+        int y0 = (int)__builtin_floor(fy);
+        double ty = fy - y0;
+        unsigned *row = g_shell_wallpaper + (unsigned long)y * w;
+        for (int x = 0; x < w; x++)
         {
-            double a = 2 * 3.14159265358979323846 * i / 8.0;
-            iosim_fb_fill_circle((int)(cx + __builtin_cos(a) * size * 0.18),
-                                 (int)(cy + __builtin_sin(a) * size * 0.18),
-                                 (int)(size * 0.125), petals[i]);
+            double fx = (x + 0.5) * SHELL_WALLPAPER_W / w - 0.5;
+            int x0 = (int)__builtin_floor(fx);
+            double tx = fx - x0;
+            unsigned c00 = shell_wallpaper_cell(x0, y0);
+            unsigned c10 = shell_wallpaper_cell(x0 + 1, y0);
+            unsigned c01 = shell_wallpaper_cell(x0, y0 + 1);
+            unsigned c11 = shell_wallpaper_cell(x0 + 1, y0 + 1);
+            unsigned r = (unsigned)((((c00 >> 16) & 0xFF) * (1 - tx) +
+                                     ((c10 >> 16) & 0xFF) * tx) * (1 - ty) +
+                                    (((c01 >> 16) & 0xFF) * (1 - tx) +
+                                     ((c11 >> 16) & 0xFF) * tx) * ty + 0.5);
+            unsigned g = (unsigned)((((c00 >> 8) & 0xFF) * (1 - tx) +
+                                     ((c10 >> 8) & 0xFF) * tx) * (1 - ty) +
+                                    (((c01 >> 8) & 0xFF) * (1 - tx) +
+                                     ((c11 >> 8) & 0xFF) * tx) * ty + 0.5);
+            unsigned b = (unsigned)(((c00 & 0xFF) * (1 - tx) +
+                                     (c10 & 0xFF) * tx) * (1 - ty) +
+                                    ((c01 & 0xFF) * (1 - tx) +
+                                     (c11 & 0xFF) * tx) * ty + 0.5);
+            row[x] = (r << 16) | (g << 8) | b;
         }
-        iosim_fb_fill_circle(cx, cy, (int)(size * 0.06), 0xffffff);
-        break;
-    }
-    case 2: /* Camera */
-        iosim_fb_fill_circle(cx, cy, (int)(size * 0.29), 0x1c1c1e);
-        iosim_fb_fill_circle(cx, cy, (int)(size * 0.20), 0x0a84ff);
-        iosim_fb_fill_circle(cx - (int)(size * 0.05),
-                             cy - (int)(size * 0.05), (int)(size * 0.05),
-                             0xffffff);
-        break;
-    case 3: /* Mail */
-        iosim_fb_fill_round_rect(x + (int)(size * 0.18), y + (int)(size * 0.30),
-                                 (int)(size * 0.64), (int)(size * 0.40),
-                                 (int)(size * 0.06), 0xffffff);
-        iosim_fb_draw_line(x + (int)(size * 0.18), y + (int)(size * 0.30),
-                           cx, y + (int)(size * 0.55), (int)(2 * u), 0x2f8cff);
-        iosim_fb_draw_line(cx, y + (int)(size * 0.55),
-                           x + (int)(size * 0.82), y + (int)(size * 0.30),
-                           (int)(2 * u), 0x2f8cff);
-        break;
-    case 4: /* Maps */
-        iosim_fb_draw_line(x + (int)(size * 0.05), y + (int)(size * 0.68),
-                           x + (int)(size * 0.95), y + (int)(size * 0.32),
-                           (int)(5 * u), 0xffffff);
-        iosim_fb_draw_line(x + (int)(size * 0.30), y + (int)(size * 0.05),
-                           x + (int)(size * 0.58), y + (int)(size * 0.95),
-                           (int)(3 * u), 0xffd60a);
-        iosim_fb_fill_circle(x + (int)(size * 0.62), y + (int)(size * 0.40),
-                             (int)(size * 0.09), 0xff453a);
-        break;
-    case 5: /* Weather */
-        iosim_fb_fill_circle(x + (int)(size * 0.34), y + (int)(size * 0.36),
-                             (int)(size * 0.15), 0xffd60a);
-        iosim_fb_fill_circle(x + (int)(size * 0.45), y + (int)(size * 0.60),
-                             (int)(size * 0.16), 0xffffff);
-        iosim_fb_fill_circle(x + (int)(size * 0.62), y + (int)(size * 0.60),
-                             (int)(size * 0.20), 0xffffff);
-        iosim_fb_fill_round_rect(x + (int)(size * 0.30),
-                                 y + (int)(size * 0.58),
-                                 (int)(size * 0.48), (int)(size * 0.18),
-                                 (int)(size * 0.09), 0xffffff);
-        break;
-    case 6: /* Clock */
-    {
-        for (int i = 0; i < 48; i++)
-        {
-            double a = 2 * 3.14159265358979323846 * i / 48.0;
-            double x0 = cx + __builtin_cos(a) * size * 0.37;
-            double y0 = cy + __builtin_sin(a) * size * 0.37;
-            iosim_fb_fill_circle((int)x0, (int)y0, (int)(1.6 * u), 0xffffff);
-        }
-        iosim_fb_draw_line(cx, cy, cx, cy - (int)(size * 0.24),
-                           (int)(3 * u), 0xffffff);
-        iosim_fb_draw_line(cx, cy, cx + (int)(size * 0.18), cy,
-                           (int)(3 * u), 0xffffff);
-        break;
-    }
-    case 7: /* Notes */
-        iosim_fb_fill_rect(x + (int)(size * 0.16), y + (int)(size * 0.12),
-                           (int)(size * 0.68), (int)(size * 0.13), 0xffd60a);
-        for (int i = 0; i < 3; i++)
-            iosim_fb_fill_round_rect(x + (int)(size * 0.20),
-                                     y + (int)(size * (0.40 + i * 0.13)),
-                                     (int)(size * 0.60), (int)(3 * u),
-                                     (int)(1.5 * u), 0xc7c7cc);
-        break;
-    case 8: /* Settings */
-    {
-        iosim_fb_fill_circle(cx, cy, (int)(size * 0.19), 0xffffff);
-        iosim_fb_fill_circle(cx, cy, (int)(size * 0.10), 0x636366);
-        for (int i = 0; i < 8; i++)
-        {
-            double a = 2 * 3.14159265358979323846 * i / 8.0;
-            iosim_fb_draw_line((int)(cx + __builtin_cos(a) * size * 0.24),
-                               (int)(cy + __builtin_sin(a) * size * 0.24),
-                               (int)(cx + __builtin_cos(a) * size * 0.36),
-                               (int)(cy + __builtin_sin(a) * size * 0.36),
-                               (int)(7 * u), 0xffffff);
-        }
-        break;
-    }
-    case 9: /* App Store */
-        iosim_fb_font_text(cx - (int)(9 * u), cy + (int)(9 * u), "A",
-                           IOSIM_FONT_SEMIBOLD, 22, scale, 0xffffff);
-        break;
-    case 10: /* Files */
-        iosim_fb_fill_round_rect(x + (int)(size * 0.16),
-                                 y + (int)(size * 0.28),
-                                 (int)(size * 0.68), (int)(size * 0.46),
-                                 (int)(size * 0.07), 0x0a84ff);
-        iosim_fb_fill_round_rect(x + (int)(size * 0.16),
-                                 y + (int)(size * 0.20),
-                                 (int)(size * 0.34), (int)(size * 0.18),
-                                 (int)(size * 0.05), 0x0a84ff);
-        break;
-    case 11: /* Health */
-    {
-        iosim_fb_fill_circle(cx - (int)(size * 0.10),
-                             cy - (int)(size * 0.06), (int)(size * 0.14),
-                             0xff2d55);
-        iosim_fb_fill_circle(cx + (int)(size * 0.10),
-                             cy - (int)(size * 0.06), (int)(size * 0.14),
-                             0xff2d55);
-        double xs[3] = {cx - (double)(size * 0.22), cx + (double)(size * 0.22),
-                        cx};
-        double ys[3] = {cy - (double)(size * 0.02), cy - (double)(size * 0.02),
-                        cy + (double)(size * 0.24)};
-        iosim_fb_fill_polygon(xs, ys, 3, 0xff2d55);
-        break;
-    }
     }
 }
 
-static void shell_draw(int fbWidth, int fbHeight, double scale, int launched)
+static void shell_copy(char *dst, int cap, const char *src)
 {
-    iosim_fb_clear(0x05070d);
-    iosim_fb_fill_linear_gradient(0, 0, fbWidth, fbHeight, 0x1c3f78, 0x05070d,
-                                  0.3, 0.0, 0.7, 1.0);
-    iosim_fb_set_opacity(0.10);
-    iosim_fb_fill_circle((int)(70 * scale), (int)(210 * scale),
-                         (int)(175 * scale), 0x3f8cff);
-    iosim_fb_fill_circle((int)(360 * scale), (int)(640 * scale),
-                         (int)(165 * scale), 0x8e5cff);
-    iosim_fb_set_opacity(1.0);
-
-    int icon = (int)(60 * scale);
-    int step = (int)(87 * scale);
-    int left = (int)(40.5 * scale);
-    for (int i = 0; i < 12; i++)
-    {
-        int row = i / 4, col = i % 4;
-        int x = left + col * step;
-        int y = (int)((116 + row * 98) * scale);
-        unsigned top = 0x2c2c2e, bottom = 0x1c1c1e;
-        switch (i)
+    int i = 0;
+    if (src)
+        while (src[i] && i < cap - 1)
         {
-        case 0: top = 0xffffff; bottom = 0xe9e9ee; break;
-        case 1: top = 0xffffff; bottom = 0xf2f2f7; break;
-        case 2: top = 0x4a4a4c; bottom = 0x1c1c1e; break;
-        case 3: top = 0x2f8cff; bottom = 0x0a64d8; break;
-        case 4: top = 0xa8e0a0; bottom = 0x6fc3ff; break;
-        case 5: top = 0x2f9bff; bottom = 0x0a5bd6; break;
-        case 6: top = 0x2c2c2e; bottom = 0x000000; break;
-        case 7: top = 0xffffff; bottom = 0xf7f7f7; break;
-        case 8: top = 0x8e8e93; bottom = 0x48484a; break;
-        case 9: top = 0x1e9bff; bottom = 0x0a64d8; break;
-        case 10: top = 0xffffff; bottom = 0xf0f0f5; break;
-        case 11: top = 0xffffff; bottom = 0xf8f8fa; break;
+            dst[i] = src[i];
+            i++;
         }
-        shell_tile(x, y, icon, top, bottom, scale, 14);
-        shell_glyph(i, x, y, icon, scale);
-        const char *name = shell_names[i];
-        int tw = iosim_fb_font_text_width(name, IOSIM_FONT_REGULAR, 11,
-                                          scale);
-        iosim_fb_font_text(x + icon / 2 - tw / 2,
-                           y + icon + (int)(16 * scale), name,
-                           IOSIM_FONT_REGULAR, 11, scale, 0xffffff);
+    dst[i] = 0;
+}
+
+static void shell_add_app(const char *name, const char *exe, const char *bundle,
+                          const char *home, int stock, int dock)
+{
+    if (g_shell_app_count >= SHELL_MAX_APPS)
+        return;
+    struct shell_app *a = &g_shell_apps[g_shell_app_count++];
+    shell_copy(a->name, (int)sizeof(a->name), name);
+    shell_copy(a->exe, (int)sizeof(a->exe), exe);
+    shell_copy(a->bundle, (int)sizeof(a->bundle), bundle);
+    shell_copy(a->home, (int)sizeof(a->home), home);
+    a->stock = stock;
+    a->dock = dock;
+}
+
+static void shell_load_apps(void)
+{
+    static const char *defaults[] = {
+        "HelloSim", "GraphicsApp", "ListApp", "AutoLayout",
+        "TextInput", "Alert", "NumberPad", "Controls"
+    };
+    g_shell_app_count = 0;
+    shell_add_app("Fitness", "", "", "", 0, 0);
+    shell_add_app("Watch", "", "", "", 1, 0);
+    shell_add_app("Reminders", "", "", "", 2, 0);
+    shell_add_app("Files", "", "", "", 3, 0);
+    shell_add_app("Preview", "", "", "", 4, 0);
+    shell_add_app("Utilities", "", "", "", 5, 0);
+    shell_add_app("Contacts", "", "", "", 6, 0);
+
+    const char *manifest = getenv("IOSIM_SHELL_APPS");
+    int loaded = 0;
+    if (manifest && *manifest)
+    {
+        int fd = open(manifest, 0);
+        if (fd >= 0)
+        {
+            static char buf[16384];
+            long n = read(fd, buf, sizeof(buf) - 1);
+            close(fd);
+            if (n > 0)
+            {
+                buf[n] = 0;
+                long i = 0;
+                while (i < n)
+                {
+                    long start = i;
+                    while (i < n && buf[i] != '\n')
+                        i++;
+                    long end = i;
+                    if (i < n)
+                        i++;
+                    while (start < end && (buf[start] == ' ' ||
+                                           buf[start] == '\r'))
+                        start++;
+                    if (start >= end || buf[start] == '#')
+                        continue;
+                    /* name|executable|bundle-id|data-home */
+                    char fields[4][512];
+                    int nf = 0;
+                    long j = start;
+                    while (nf < 4)
+                    {
+                        long fs = j;
+                        while (j < end && buf[j] != '|')
+                            j++;
+                        long fe = j, k = 0;
+                        while (fs < fe && k < 511)
+                            fields[nf][k++] = buf[fs++];
+                        fields[nf][k] = 0;
+                        nf++;
+                        if (j < end)
+                            j++;
+                        else
+                            break;
+                    }
+                    if (fields[0][0])
+                    {
+                        shell_add_app(fields[0], nf > 1 ? fields[1] : "",
+                                      nf > 2 ? fields[2] : "",
+                                      nf > 3 ? fields[3] : "", -1, 0);
+                        loaded = 1;
+                    }
+                }
+            }
+        }
     }
+    if (!loaded)
+        for (unsigned i = 0; i < sizeof(defaults) / sizeof(defaults[0]); i++)
+            shell_add_app(defaults[i], "", "", "", -1, 0);
 
-    /* Weather-style widget. */
-    int wx = (int)(24 * scale), wy = (int)(430 * scale);
-    int ww = fbWidth - (int)(48 * scale), wh = (int)(144 * scale);
-    iosim_fb_fill_linear_gradient_round_rect(wx, wy, ww, wh,
-                                             (int)(20 * scale), 0x2f6fe0,
-                                             0x173a7a, 0.0, 0.0, 1.0, 1.0);
-    iosim_fb_font_text(wx + (int)(18 * scale), wy + (int)(30 * scale),
-                       "Cupertino", IOSIM_FONT_SEMIBOLD, 15, scale, 0xffffff);
-    iosim_fb_font_text(wx + (int)(16 * scale), wy + (int)(92 * scale), "68\xc2\xb0",
-                       IOSIM_FONT_REGULAR, 44, scale, 0xffffff);
-    iosim_fb_font_text(wx + (int)(150 * scale), wy + (int)(92 * scale), "Sunny",
-                       IOSIM_FONT_REGULAR, 16, scale, 0xeaf2ff);
-    iosim_fb_font_text(wx + (int)(150 * scale), wy + (int)(112 * scale),
-                       "H:71\xc2\xb0  L:52\xc2\xb0", IOSIM_FONT_REGULAR, 14,
-                       scale, 0xeaf2ff);
+    shell_add_app("Safari", "", "", "", 7, 1);
+    shell_add_app("Messages", "", "", "", 8, 1);
+}
 
-    /* Search pill and page dots. */
-    iosim_fb_set_opacity(0.16);
-    iosim_fb_fill_round_rect((int)(94 * scale), (int)(716 * scale),
-                             (int)(214 * scale), (int)(32 * scale),
-                             (int)(16 * scale), 0xffffff);
+static void shell_label(const char *name, int cx, int baseline, double scale)
+{
+    int tw = iosim_fb_font_text_width(name, IOSIM_FONT_REGULAR, 12, scale);
+    int x = cx - tw / 2;
+    iosim_fb_font_text(x, baseline, name, IOSIM_FONT_REGULAR, 12, scale,
+                       0xffffff);
+}
+
+static void shell_ring(int cx, int cy, int radius, int thickness,
+                       unsigned color)
+{
     iosim_fb_set_opacity(1.0);
-    int sw = iosim_fb_font_text_width("Search", IOSIM_FONT_REGULAR, 14, scale);
-    iosim_fb_font_text((int)(201 * scale) - sw / 2, (int)(737 * scale),
-                       "Search", IOSIM_FONT_REGULAR, 14, scale, 0x3a4150);
-    iosim_fb_fill_circle((int)(188 * scale), (int)(697 * scale),
-                         (int)(3.5 * scale), 0xffffff);
-    iosim_fb_fill_circle((int)(214 * scale), (int)(697 * scale),
-                         (int)(3.5 * scale), 0x6b7485);
+    iosim_fb_fill_circle(cx, cy, radius, color);
+    iosim_fb_fill_circle(cx, cy, radius - thickness, 0x000000);
+}
 
-    /* Dock. */
-    iosim_fb_set_opacity(0.12);
-    iosim_fb_fill_round_rect((int)(12 * scale), (int)(752 * scale),
-                             fbWidth - (int)(24 * scale),
-                             (int)(96 * scale), (int)(30 * scale), 0xffffff);
-    iosim_fb_set_opacity(1.0);
-    int dockIcon = (int)(58 * scale);
-    int dockLeft = (int)(34 * scale);
-    int dockStep = (int)(92 * scale);
-    static const unsigned dockTop[4] = {0x4cd964, 0x0a84ff, 0x33d158, 0xfa5c78};
-    static const unsigned dockBottom[4] = {0x22a94a, 0x0064d8, 0x0f9d3a, 0xb03050};
+/* Extent of the icon face (a rounded rect of side s and corner radius r)
+ * along the column or row c, as continuous coordinates. */
+static void shell_face_span(int s, int r, int c, double *lo, double *hi)
+{
+    double t = c + 0.5;
+    *lo = 0;
+    *hi = s;
+    if (t < r)
+        *lo = r - __builtin_sqrt((double)r * r - (r - t) * (r - t));
+    if (t > s - r)
+        *hi = s - r + __builtin_sqrt((double)r * r - (t - (s - r)) * (t - (s - r)));
+}
+
+/* The measured placeholder: a white face with a square grid of hairlines
+ * (inset 12 px, at 60 and 131 px, border at 179 px on a 192 px icon), a
+ * 2 px light crosshair through the middle, three concentric circles and
+ * the square's diagonals. All lines are clipped by the face. */
+static void shell_placeholder_icon(int x, int y, int s, double scale)
+{
+    (void)scale;
+    int r = (int)(s * 0.2237 + 0.5);
+    iosim_fb_fill_linear_gradient_round_rect(x, y, s, s, r, 0xffffff, 0xededed,
+                                             0.0, 0.62, 0.0, 1.0);
+    int u = s / 192;
+    if (u < 1) u = 1;
+    int th = u;
+    unsigned line = 0x9a9a9a;
+    int m0 = 12 * u, m1 = 60 * u, m2 = 131 * u, m3 = 179 * u;
+    int mid = 96 * u;
+    int cols[4] = {m0, m1, m2, m3};
     for (int i = 0; i < 4; i++)
     {
-        int x = dockLeft + i * dockStep, y = (int)(772 * scale);
-        shell_tile(x, y, dockIcon, dockTop[i], dockBottom[i], scale, 14);
-        if (i == 0)
+        double lo, hi;
+        shell_face_span(s, r, cols[i], &lo, &hi);
+        if (lo < m0) lo = m0;
+        if (hi > m3 + 1) hi = m3 + 1;
+        iosim_fb_fill_rect(x + cols[i], y + (int)(lo + 0.5), th,
+                           (int)(hi - lo + 0.5), line);
+        shell_face_span(s, r, cols[i], &lo, &hi);
+        if (lo < m0) lo = m0;
+        if (hi > m3 + 1) hi = m3 + 1;
+        iosim_fb_fill_rect(x + (int)(lo + 0.5), y + cols[i],
+                           (int)(hi - lo + 0.5), th, line);
+    }
+    double lo, hi;
+    shell_face_span(s, r, mid - 1, &lo, &hi);
+    iosim_fb_fill_rect(x + mid - 1, y + (int)(lo + 0.5), 2,
+                       (int)(hi - lo + 0.5), 0xcdcdcd);
+    shell_face_span(s, r, mid - 1, &lo, &hi);
+    iosim_fb_fill_rect(x + (int)(lo + 0.5), y + mid - 1,
+                       (int)(hi - lo + 0.5), 2, 0xcdcdcd);
+    int cx = x + mid, cy = y + mid;
+    iosim_fb_stroke_circle(cx, cy, 36 * u, th, line);
+    iosim_fb_stroke_circle(cx, cy, 50 * u, th, line);
+    iosim_fb_stroke_circle(cx, cy, 84 * u, th, line);
+    iosim_fb_draw_line(x + m0 + 1, y + m0 + 1, x + m3, y + m3, th, line);
+    iosim_fb_draw_line(x + m3, y + m0 + 1, x + m0 + 1, y + m3, th, line);
+}
+
+static void shell_stock_icon(int kind, int x, int y, int s, double scale)
+{
+    int cx = x + s / 2, cy = y + s / 2;
+    int r = (int)(s * 0.2237 + 0.5);
+    (void)scale;
+    switch (kind)
+    {
+    case 0: /* Fitness: activity rings on black */
+        iosim_fb_fill_round_rect(x, y, s, s, r, 0x050506);
+        iosim_fb_stroke_circle(cx, cy, (int)(s * 0.345), (int)(s * 0.085),
+                               0xff2d55);
+        iosim_fb_stroke_circle(cx, cy, (int)(s * 0.225), (int)(s * 0.070),
+                               0x9dff00);
+        iosim_fb_stroke_circle(cx, cy, (int)(s * 0.115), (int)(s * 0.055),
+                               0x00e5ff);
+        iosim_fb_fill_circle(cx, cy, (int)(s * 0.045), 0x0a2018);
+        break;
+    case 1: /* Watch */
+    {
+        iosim_fb_fill_round_rect(x, y, s, s, r, 0x050506);
+        int ww = (int)(s * 0.46), wh = (int)(s * 0.64);
+        int wr = (int)(s * 0.17);
+        int wx = cx - ww / 2, wy = cy - wh / 2;
+        iosim_fb_fill_round_rect(wx, wy, ww, wh, wr, 0xb9b9bd);
+        iosim_fb_fill_round_rect(wx + (int)(s * 0.035),
+                                 wy + (int)(s * 0.035),
+                                 ww - (int)(s * 0.07),
+                                 wh - (int)(s * 0.07), wr, 0x0a0a0b);
+        iosim_fb_fill_circle(wx - (int)(s * 0.03), cy, (int)(s * 0.035),
+                             0xb9b9bd);
+        iosim_fb_fill_circle(wx - (int)(s * 0.03), cy, (int)(s * 0.018),
+                             0x0a0a0b);
+        break;
+    }
+    case 2: /* Reminders */
+    {
+        iosim_fb_fill_linear_gradient_round_rect(x, y, s, s, r, 0xffffff, 0xf1f1f1,
+                                              0.0, 0.0, 0.0, 1.0);
+        static const unsigned dots[3] = {0x0a84ff, 0xff453a, 0xff9f0a};
+        for (int i = 0; i < 3; i++)
         {
-            iosim_fb_fill_circle(x + dockIcon / 2, y + dockIcon / 2,
-                                 (int)(dockIcon * 0.24), 0xffffff);
+            int dy = y + (int)(s * (0.27 + i * 0.23));
+            int dx = x + (int)(s * 0.24);
+            iosim_fb_fill_circle(dx, dy, (int)(s * 0.062), dots[i]);
+            iosim_fb_fill_circle(dx, dy, (int)(s * 0.030), 0xf7f7f7);
+            iosim_fb_fill_round_rect(x + (int)(s * 0.36),
+                                     dy - (int)(s * 0.012),
+                                     (int)(s * 0.42), (int)(s * 0.024),
+                                     (int)(s * 0.012), 0xcfcfd4);
         }
-        else if (i == 1)
+        break;
+    }
+    case 3: /* Files */
+    {
+        iosim_fb_fill_linear_gradient_round_rect(x, y, s, s, r, 0xffffff, 0xf4f4f4,
+                                              0.0, 0.0, 0.0, 1.0);
+        iosim_fb_fill_round_rect(x + (int)(s * 0.16),
+                                 y + (int)(s * 0.30),
+                                 (int)(s * 0.68), (int)(s * 0.44),
+                                 (int)(s * 0.06), 0x1e7bf0);
+        iosim_fb_fill_round_rect(x + (int)(s * 0.18),
+                                 y + (int)(s * 0.34),
+                                 (int)(s * 0.64), (int)(s * 0.42),
+                                 (int)(s * 0.055), 0x3aa0ff);
+        iosim_fb_fill_round_rect(x + (int)(s * 0.22),
+                                 y + (int)(s * 0.30),
+                                 (int)(s * 0.26), (int)(s * 0.10),
+                                 (int)(s * 0.04), 0x1e7bf0);
+        iosim_fb_fill_round_rect(x + (int)(s * 0.24),
+                                 y + (int)(s * 0.33),
+                                 (int)(s * 0.50), (int)(s * 0.07),
+                                 (int)(s * 0.025), 0xe9f4ff);
+        break;
+    }
+    case 4: /* Preview */
+    {
+        iosim_fb_fill_linear_gradient_round_rect(x, y, s, s, r, 0xfbfbfb, 0xe9e9ec,
+                                              0.0, 0.0, 0.0, 1.0);
+        iosim_fb_fill_linear_gradient_round_rect(x + (int)(s * 0.12),
+                                                 y + (int)(s * 0.12),
+                                                 (int)(s * 0.60),
+                                                 (int)(s * 0.40),
+                                                 (int)(s * 0.06), 0xff9ad5,
+                                                 0x7cc7ff, 0.0, 0.0, 1.0,
+                                                 1.0);
+        int lx = x + (int)(s * 0.65), ly = y + (int)(s * 0.66);
+        iosim_fb_fill_circle(lx, ly, (int)(s * 0.255), 0x1b1b1d);
+        iosim_fb_set_opacity(0.9);
+        iosim_fb_fill_circle(lx, ly, (int)(s * 0.225), 0x2b2b2e);
+        iosim_fb_set_opacity(1.0);
+        iosim_fb_stroke_circle(lx, ly, (int)(s * 0.215), (int)(s * 0.03),
+                               0x9a9aa0);
+        iosim_fb_fill_circle(lx, ly, (int)(s * 0.115), 0x0b0b0c);
+        iosim_fb_fill_circle(lx - (int)(s * 0.05),
+                             ly - (int)(s * 0.05), (int)(s * 0.022),
+                             0xf1f1f4);
+        break;
+    }
+    case 5: /* Utilities folder */
+    {
+        iosim_fb_fill_linear_gradient_round_rect(x, y, s, s, r, 0x8a6a4e, 0x55402d,
+                                              0.0, 0.0, 0.0, 1.0);
+        iosim_fb_fill_linear_gradient_round_rect(x + (int)(s * 0.16),
+                                                 y + (int)(s * 0.22),
+                                                 (int)(s * 0.24),
+                                                 (int)(s * 0.24),
+                                                 (int)(s * 0.055), 0xb06bff,
+                                                 0x6a3ff0, 0.0, 0.0, 0.7,
+                                                 1.0);
+        iosim_fb_fill_round_rect(x + (int)(s * 0.54),
+                                 y + (int)(s * 0.22),
+                                 (int)(s * 0.24), (int)(s * 0.24),
+                                 (int)(s * 0.055), 0x1d2b22);
+        iosim_fb_fill_round_rect(x + (int)(s * 0.60),
+                                 y + (int)(s * 0.30),
+                                 (int)(s * 0.12), (int)(s * 0.03),
+                                 (int)(s * 0.015), 0xffd60a);
+        iosim_fb_set_opacity(0.10);
+        iosim_fb_fill_round_rect(x, y, s, s, r, 0xffffff);
+        iosim_fb_set_opacity(1.0);
+        break;
+    }
+    case 6: /* Contacts */
+    {
+        iosim_fb_fill_linear_gradient_round_rect(x, y, s, s, r, 0xd8d6d1, 0xbfbdb8,
+                                              0.0, 0.0, 0.0, 1.0);
+        iosim_fb_fill_round_rect(x + (int)(s * 0.80), y,
+                                 (int)(s * 0.20), s, (int)(s * 0.10),
+                                 0x0a84ff);
+        iosim_fb_fill_rect(x + (int)(s * 0.80), y + (int)(s * 0.33),
+                           (int)(s * 0.20), (int)(s * 0.34), 0xff9f0a);
+        iosim_fb_fill_round_rect(x + (int)(s * 0.80),
+                                 y + (int)(s * 0.66),
+                                 (int)(s * 0.20), (int)(s * 0.34),
+                                 (int)(s * 0.10), 0x30d158);
+        iosim_fb_fill_circle(cx - (int)(s * 0.04),
+                             y + (int)(s * 0.38), (int)(s * 0.115),
+                             0x9d9c98);
+        iosim_fb_fill_ellipse(cx - (int)(s * 0.04),
+                              y + (int)(s * 0.66), (int)(s * 0.19),
+                              (int)(s * 0.13), 0x9d9c98);
+        break;
+    }
+    case 7: /* Safari */
+    {
+        iosim_fb_fill_linear_gradient_round_rect(x, y, s, s, r, 0xffffff, 0xf2f2f2,
+                                              0.0, 0.0, 0.0, 1.0);
+        iosim_fb_fill_circle(cx, cy, (int)(s * 0.365), 0x1aa7ff);
+        iosim_fb_set_opacity(0.55);
+        for (int i = 0; i < 36; i++)
         {
-            iosim_fb_fill_circle(x + dockIcon / 2, y + dockIcon / 2,
-                                 (int)(dockIcon * 0.32), 0xffffff);
-            iosim_fb_fill_circle(x + dockIcon / 2, y + dockIcon / 2,
-                                 (int)(dockIcon * 0.27), 0x0a84ff);
-            iosim_fb_fill_polygon(
-                (double[]){x + dockIcon * 0.5, x + dockIcon * 0.68,
-                           x + dockIcon * 0.5},
-                (double[]){y + dockIcon * 0.5, y + dockIcon * 0.5,
-                           y + dockIcon * 0.30}, 3, 0xff453a);
+            double a = i * 10.0 * 3.14159265358979323846 / 180.0;
+            double c = __builtin_cos(a), sn = __builtin_sin(a);
+            iosim_fb_draw_line((int)(cx + c * s * 0.305),
+                               (int)(cy + sn * s * 0.305),
+                               (int)(cx + c * s * 0.335),
+                               (int)(cy + sn * s * 0.335),
+                               (int)(1.0 * scale + 0.5), 0xcdeeff);
         }
-        else if (i == 2)
-        {
-            iosim_fb_fill_round_rect(x + (int)(dockIcon * 0.16),
-                                     y + (int)(dockIcon * 0.20),
-                                     (int)(dockIcon * 0.68),
-                                     (int)(dockIcon * 0.52),
-                                     (int)(dockIcon * 0.26), 0xffffff);
-        }
-        else
-        {
-            int nx = x + (int)(dockIcon * 0.60), ny = y + (int)(dockIcon * 0.30);
-            iosim_fb_draw_line(nx, ny, nx, y + (int)(dockIcon * 0.66),
-                               (int)(3 * scale), 0xffffff);
-            iosim_fb_fill_circle(nx, y + (int)(dockIcon * 0.66),
-                                 (int)(dockIcon * 0.08), 0xffffff);
-            iosim_fb_fill_circle(x + (int)(dockIcon * 0.32),
-                                 y + (int)(dockIcon * 0.54),
-                                 (int)(dockIcon * 0.10), 0xffffff);
-        }
+        iosim_fb_set_opacity(1.0);
+        double nxs[3] = {(double)cx + s * 0.02, (double)cx - s * 0.10,
+                         (double)cx + s * 0.09};
+        double nys[3] = {(double)cy - s * 0.02, (double)cy + s * 0.10,
+                         (double)cy - s * 0.09};
+        iosim_fb_fill_polygon(nxs, nys, 3, 0xff3b30);
+        double wxs[3] = {(double)cx - s * 0.02, (double)cx + s * 0.10,
+                         (double)cx - s * 0.09};
+        double wys[3] = {(double)cy + s * 0.02, (double)cy - s * 0.10,
+                         (double)cy + s * 0.09};
+        iosim_fb_fill_polygon(wxs, wys, 3, 0xf7f7f7);
+        iosim_fb_fill_circle(cx, cy, (int)(s * 0.028), 0xff3b30);
+        break;
+    }
+    case 8: /* Messages */
+    {
+        iosim_fb_fill_linear_gradient_round_rect(x, y, s, s, r, 0x35dd4f, 0x22c93c,
+                                              0.0, 0.0, 0.0, 1.0);
+        iosim_fb_fill_ellipse(cx, cy - (int)(s * 0.02),
+                              (int)(s * 0.245), (int)(s * 0.185),
+                              0xf5fff6);
+        double txs[3] = {(double)cx - s * 0.22, (double)cx - s * 0.10,
+                         (double)cx - s * 0.26};
+        double tys[3] = {(double)cy + s * 0.08, (double)cy + s * 0.16,
+                         (double)cy + s * 0.26};
+        iosim_fb_fill_polygon(txs, tys, 3, 0xf5fff6);
+        break;
+    }
+    default:
+        shell_placeholder_icon(x, y, s, scale);
+        break;
+    }
+}
+
+static void shell_draw(int fbWidth, int fbHeight, double scale)
+{
+    shell_wallpaper_build(fbWidth, fbHeight);
+    if (g_shell_wallpaper)
+        iosim_fb_paste_xrgb(g_shell_wallpaper);
+    else
+        iosim_fb_clear(0x05070d);
+
+    double W = fbWidth / scale;
+    double pitch = (W - 2 * SHELL_MARGIN_PT - SHELL_ICON_PT) / 3.0;
+    int s = (int)(SHELL_ICON_PT * scale + 0.5);
+    int grid_index = 0;
+    for (int i = 0; i < g_shell_app_count; i++)
+    {
+        struct shell_app *a = &g_shell_apps[i];
+        if (a->dock)
+            continue;
+        if (grid_index >= 16)
+            break;
+        int col = grid_index % 4, row = grid_index / 4;
+        int cx = (int)((SHELL_MARGIN_PT + SHELL_ICON_PT / 2 + col * pitch) *
+                       scale + 0.5);
+        int cy = (int)(shell_row_center[row] * scale + 0.5);
+        shell_stock_icon(a->stock, cx - s / 2, cy - s / 2, s, scale);
+        int baseline = cy + s / 2 + (int)(16.1 * scale + 0.5);
+        shell_label(a->name, cx, baseline, scale);
+        grid_index++;
     }
 
-    iosim_fb_set_opacity(0.85);
-    iosim_fb_fill_round_rect((int)(134 * scale), (int)(856 * scale),
-                             (int)(134 * scale), (int)(5 * scale),
-                             (int)(2.5 * scale), 0xffffff);
-    iosim_fb_set_opacity(1.0);
+    /* Dock glass and its two apps. */
+    int dx = (int)(18.0 * scale + 0.5), dy = (int)(761.3333 * scale + 0.5);
+    int dw = (int)(366.0 * scale + 0.5), dh = (int)(89.0 * scale + 0.5);
+    int dr = (int)(44.5 * scale + 0.5);
+    iosim_fb_fill_field(dx, dy, dw, dh, dr, shell_dock_grid, SHELL_DOCK_W,
+                        SHELL_DOCK_H);
+    int dock_center_y = (int)((806.0) * scale + 0.5);
+    int dock_left = (int)((201.0 - 47.2) * scale + 0.5);
+    int dock_right = (int)((201.0 + 47.2) * scale + 0.5);
+    for (int i = 0; i < g_shell_app_count; i++)
+    {
+        struct shell_app *a = &g_shell_apps[i];
+        if (!a->dock)
+            continue;
+        int cx = (a->stock == 7) ? dock_left : dock_right;
+        shell_stock_icon(a->stock, cx - s / 2, dock_center_y - s / 2, s,
+                         scale);
+    }
+
+    /* Search pill above the dock. */
+    int sx = (int)(164.3333 * scale + 0.5);
+    int sy = (int)(704.0 * scale + 0.5);
+    int sw = (int)(73.0 * scale + 0.5);
+    int sh = (int)(29.0 * scale + 0.5);
+    int sr = (int)(14.5 * scale + 0.5);
+    iosim_fb_fill_field(sx, sy, sw, sh, sr, shell_search_grid,
+                        SHELL_SEARCH_W, SHELL_SEARCH_H);
+    int mx = sx + (int)(12 * scale), my = sy + sh / 2;
+    iosim_fb_stroke_circle(mx, my, (int)(4.5 * scale),
+                           (int)(1.4 * scale + 0.5), 0xd6d3de);
+    iosim_fb_draw_line(mx + (int)(3 * scale), my + (int)(3 * scale),
+                       mx + (int)(6 * scale), my + (int)(6 * scale),
+                       (int)(1.4 * scale + 0.5), 0xd6d3de);
+    int swidth = iosim_fb_font_text_width("Search", IOSIM_FONT_REGULAR, 13,
+                                          scale);
+    iosim_fb_font_text(sx + (sw - swidth) / 2 + (int)(7 * scale),
+                       my + (int)(5 * scale), "Search", IOSIM_FONT_REGULAR,
+                       13, scale, 0xd8d5e0);
 
     draw_device_chrome(fbWidth, scale);
-    for (int i = 0; i < 4; i++)
-        iosim_fb_fill_round_rect((int)((277.0 + i * 5.667) * scale + 0.5),
-                                 (int)((33.0 - i * 2.333) * scale + 0.5),
-                                 (int)(3.33 * scale + 0.5),
-                                 (int)((6.333 + i * 2.333) * scale + 0.5),
-                                 (int)(1.0 * scale), 0xffffff);
+}
 
-    if (launched >= 0 && launched < 12)
+static void shell_launch(int index, int fbWidth, int fbHeight, double scale,
+                         const char *path)
+{
+    struct shell_app *a = &g_shell_apps[index];
+    if (!a->exe[0])
     {
-        iosim_fb_set_opacity(0.62);
-        iosim_fb_fill_rect(0, 0, fbWidth, fbHeight, 0x000000);
-        iosim_fb_set_opacity(1.0);
-        int cx = fbWidth / 2, cy = (int)(400 * scale);
-        int cardW = (int)(300 * scale), cardH = (int)(330 * scale);
-        iosim_fb_fill_round_rect(cx - cardW / 2, cy - cardH / 2, cardW, cardH,
-                                 (int)(26 * scale), 0x1c1c1e);
-        int big = (int)(96 * scale);
-        shell_tile(cx - big / 2, cy - cardH / 2 + (int)(40 * scale), big,
-                   0x2f8cff, 0x0a64d8, scale, 20);
-        shell_glyph(launched, cx - big / 2,
-                    cy - cardH / 2 + (int)(40 * scale), big, scale);
-        int nw = iosim_fb_font_text_width(shell_names[launched],
-                                          IOSIM_FONT_SEMIBOLD, 24, scale);
-        iosim_fb_font_text(cx - nw / 2, cy + (int)(30 * scale),
-                           shell_names[launched], IOSIM_FONT_SEMIBOLD, 24,
-                           scale, 0xffffff);
-        const char *hint = "Tap anywhere to return";
-        int hw = iosim_fb_font_text_width(hint, IOSIM_FONT_REGULAR, 14, scale);
-        iosim_fb_font_text(cx - hw / 2, cy + (int)(66 * scale), hint,
-                           IOSIM_FONT_REGULAR, 14, scale, 0x9aa5b8);
+        printf("[SpringBoard] %s is a system app with no executable in this "
+               "runtime\n", a->name);
+        fflush(0);
+        return;
     }
+    printf("[SpringBoard] launching %s (%s)\n", a->name, a->exe);
+    fflush(0);
+    iosim_event_close();
+    int pid = iosim_spawn_app(a->exe, a->bundle, a->home);
+    if (pid > 0)
+        iosim_spawn_wait(pid);
+    else
+        printf("[SpringBoard] launch failed for %s\n", a->name);
+    fflush(0);
+    shell_draw(fbWidth, fbHeight, scale);
+    if (path && *path)
+        iosim_fb_present(path);
 }
 
 static int run_springboard(void)
@@ -5713,64 +6005,67 @@ static int run_springboard(void)
     if (iosim_fb_begin((unsigned)fbWidth, (unsigned)fbHeight) != 0)
         return 1;
 
-    int launched = -1;
-    shell_draw(fbWidth, fbHeight, scale, launched);
+    shell_load_apps();
+    shell_draw(fbWidth, fbHeight, scale);
     const char *path = getenv("IOSIM_SCREENSHOT_PATH");
     if (path && *path)
         iosim_fb_present(path);
-    printf("[SpringBoard-lite] home screen rendered at %.1fx\n", scale);
+    printf("[SpringBoard] home screen rendered at %.1fx\n", scale);
+    fflush(0);
 
     const char *fifo = getenv("IOSIM_EVENT_FIFO");
     if (!fifo || !*fifo)
         return 0;
 
+    double W = fbWidth / scale;
+    double pitch = (W - 2 * SHELL_MARGIN_PT - SHELL_ICON_PT) / 3.0;
     int type = 0, x = 0, y = 0, r;
     while ((r = iosim_event_next(&type, &x, &y)) != 0)
     {
+        if (r == 1 && type == 8)
+        {
+            /* The set of installed apps changed: rebuild the home screen. */
+            shell_load_apps();
+            shell_draw(fbWidth, fbHeight, scale);
+            if (path && *path)
+                iosim_fb_present(path);
+            continue;
+        }
         if (r != 1 || type != 1)
             continue;
         double px = x / scale, py = y / scale;
-        int changed = 0;
-        if (launched >= 0)
+        int hit = -1, slot = 0;
+        for (int i = 0; i < g_shell_app_count && hit < 0; i++)
         {
-            launched = -1;
-            changed = 1;
+            if (g_shell_apps[i].dock)
+                continue;
+            if (slot >= 16)
+                break;
+            int col = slot % 4, row = slot / 4;
+            double cx = SHELL_MARGIN_PT + SHELL_ICON_PT / 2 + col * pitch;
+            double cy = shell_row_center[row];
+            if (px >= cx - 34 && px < cx + 34 && py >= cy - 34 &&
+                py < cy + 50)
+                hit = i;
+            slot++;
         }
-        else
+        if (hit < 0 && px >= 201.0 - 80 && px < 201.0 + 80 &&
+            py >= 806.0 - 44 && py < 806.0 + 44)
         {
-            int icon = 60, step = 87, left = 40;
-            for (int i = 0; i < 12; i++)
+            int dock_index = 0;
+            for (int i = 0; i < g_shell_app_count && hit < 0; i++)
             {
-                int gx = left + (i % 4) * step;
-                int gy = 116 + (i / 4) * 98;
-                if (px >= gx && px < gx + icon && py >= gy && py < gy + icon)
-                {
-                    launched = i;
-                    changed = 1;
-                    printf("[SpringBoard-lite] launch %s\n", shell_names[i]);
-                    break;
-                }
-            }
-            if (!changed)
-            {
-                for (int i = 0; i < 4; i++)
-                {
-                    int gx = 34 + i * 92, gy = 772;
-                    if (px >= gx && px < gx + 58 && py >= gy && py < gy + 58)
-                    {
-                        launched = i;
-                        changed = 1;
-                        printf("[SpringBoard-lite] dock launch %d\n", i);
-                        break;
-                    }
-                }
+                if (!g_shell_apps[i].dock)
+                    continue;
+                double cx = dock_index == 0 ? 201.0 - 47.2 : 201.0 + 47.2;
+                if (px >= cx - 34 && px < cx + 34 && py >= 806.0 - 34 &&
+                    py < 806.0 + 34)
+                    hit = i;
+                dock_index++;
             }
         }
-        if (!changed)
-            continue;
-        shell_draw(fbWidth, fbHeight, scale, launched);
-        if (path && *path)
-            iosim_fb_present(path);
+        if (hit >= 0)
+            shell_launch(hit, fbWidth, fbHeight, scale, path);
     }
     return 0;
 }
@@ -6057,6 +6352,10 @@ int UIApplicationMain(int argc, char **argv, id principal, id delegateName)
         ((void (*)(id, SEL, id, id, id))objc_msgSend)(sceneDelegate, willConnect,
                                                       scene, session,
                                                       connectionOptions);
+    SEL didBecomeActive = @selector(sceneDidBecomeActive:);
+    if (sceneDelegate && [sceneDelegate respondsToSelector:didBecomeActive])
+        ((void (*)(id, SEL, id))objc_msgSend)(sceneDelegate, didBecomeActive,
+                                              scene);
 
     UIWindow *window = [UIWindow keyWindow];
     SEL windowSel = @selector(window);
@@ -6156,6 +6455,24 @@ int UIApplicationMain(int argc, char **argv, id principal, id delegateName)
             {
                 [window dispatchTouchUpX:x y:y];
                 redraw = 1;
+            }
+            else if (r == 1 && type == 7)
+            {
+                /* The system asked the app to background: run the scene
+                 * lifecycle and terminate, as a suspended app would be
+                 * reclaimed by the runtime. */
+                SEL willResign = @selector(sceneWillResignActive:);
+                SEL didEnter = @selector(sceneDidEnterBackground:);
+                if (sceneDelegate &&
+                    [sceneDelegate respondsToSelector:willResign])
+                    ((void (*)(id, SEL, id))objc_msgSend)(
+                        sceneDelegate, willResign, scene);
+                if (sceneDelegate &&
+                    [sceneDelegate respondsToSelector:didEnter])
+                    ((void (*)(id, SEL, id))objc_msgSend)(
+                        sceneDelegate, didEnter, scene);
+                printf("[UIKit-lite] backgrounded by the system\n");
+                break;
             }
             if (iosim_foundation_tick())
                 redraw = 1;

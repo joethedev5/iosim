@@ -41,7 +41,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | Foundation collections, strings, notifications, timers, NSIndexPath | ✅ |
 | libdispatch queues, groups, semaphores; main-queue drain from UIKit | ✅ |
 | Mach ports/messages, bootstrap service registry, in-process XPC | ✅ |
-| SpringBoard-like home screen, icon grid, dock, launch overlay | ✅ |
+| SpringBoard system UI: measured iOS 26 home screen, installed apps, real app launching | ✅ |
 | UIView transforms (translation/scale), layout callbacks, UIScrollView offsets | ✅ (basic) |
 | Layer clipping (`clipsToBounds`/`masksToBounds`), shadows and borders | ✅ |
 | Switch, slider, segmented, progress, page and activity controls in the iOS 26 glass design | ✅ |
@@ -62,10 +62,21 @@ sends an XPC dictionary between a listener and a client.
 DYLD_ROOT_PATH=$PWD/runtime ./build/iosim-run build/binaries/services_test_x86_64
 # dispatch, Mach, bootstrap and XPC lines, then: services: done
 
+# The system UI is a real process: launchd boots SpringBoard, SpringBoard
+# enumerates the apps installed on the device and launches them on tap.
+tools/iosimctl create "Phone" com.iosim.SimDeviceType.iPhone-18-Pro   # -> UDID
+tools/iosimctl boot $UDID
+tools/iosimctl install $UDID MyApp.app
+tools/iosimctl io $UDID screenshot home.png      # SpringBoard home screen
+tools/iosimctl ui $UDID tap 339.8 222.2          # point coordinates
+tools/iosimctl io $UDID screenshot app.png       # the app's own frame
+tools/iosimctl ui $UDID home                     # scene backgrounds, home returns
+tools/iosimctl shutdown $UDID
+
+# The same SpringBoard binary can be run directly for UI work:
 IOSIM_SHELL=1 DYLD_ROOT_PATH=$PWD/runtime IOSIM_FONT_DIR=$PWD/build/fonts/ios \
   SIMULATOR_MAINSCREEN_WIDTH=1206 SIMULATOR_MAINSCREEN_HEIGHT=2622 \
-  ./build/iosim-run path/to/AppBinary
-# SpringBoard-like home screen; tap icons through IOSIM_EVENT_FIFO
+  ./build/iosim-run runtime/System/Library/CoreServices/SpringBoard.app/SpringBoard
 ```
 
 **Same-app parity:** one `HelloSimApp.m` compiled by Apple clang, run on the

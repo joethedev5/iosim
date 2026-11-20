@@ -11,6 +11,30 @@
 
 static uint32_t *fb_pixels;
 static double fb_opacity = 1.0;
+
+/* Offscreen targets store premultiplied ARGB so the result can be
+ * composited with an arbitrary affine transform. In the normal (screen)
+ * buffer the alpha byte is unused. */
+static int fb_alpha;
+
+static inline uint32_t fb_full(uint32_t color)
+{
+    return fb_alpha ? (0xFF000000u | color) : color;
+}
+
+static inline uint32_t fb_pack(uint32_t dst, unsigned r, unsigned g,
+                               unsigned b, unsigned a)
+{
+    uint32_t rgb = (r << 16) | (g << 8) | b;
+    if (!fb_alpha)
+        return rgb;
+    unsigned da = dst >> 24;
+    unsigned oa = a + (unsigned)((da * (255u - a) + 127) / 255);
+    if (oa > 255)
+        oa = 255;
+    return (oa << 24) | rgb;
+}
+static void fb_blend_pixel(int x, int y, uint32_t color, double coverage);
 static unsigned fb_width;
 static unsigned fb_height;
 
@@ -76,6 +100,407 @@ void iosim_fb_release(void)
     fb_width = fb_height = 0;
 }
 
+/* --------------------------------------------------- offscreen targets */
+
+#define FB_STATE_STACK 4
+
+struct fb_saved_state {
+    uint32_t *pixels;
+    unsigned width, height;
+    int clip_depth;
+    int clip[FB_MAX_CLIP][4];
+    double opacity;
+};
+
+static struct fb_saved_state *fb_saved[FB_STATE_STACK];
+static int fb_saved_depth;
+
+void *iosim_fb_begin_offscreen(unsigned width, unsigned height)
+{
+    if (fb_saved_depth >= FB_STATE_STACK || width == 0 || height == 0 ||
+        width > 4096 || height > 4096)
+        return NULL;
+    struct fb_saved_state *st = calloc(1, sizeof *st);
+    if (!st)
+        return NULL;
+    st->pixels = fb_pixels;
+    st->width = fb_width;
+    st->height = fb_height;
+    st->clip_depth = fb_clip_depth;
+    for (int i = 0; i < FB_MAX_CLIP; i++)
+        for (int k = 0; k < 4; k++)
+            st->clip[i][k] = fb_clip_rects[i][k];
+    st->opacity = fb_opacity;
+    uint32_t *buf = calloc((size_t)width * height, sizeof(uint32_t));
+    if (!buf)
+    {
+        free(st);
+        return NULL;
+    }
+    fb_saved[fb_saved_depth++] = st;
+    fb_pixels = buf;
+    fb_width = width;
+    fb_height = height;
+    fb_clip_reset();
+    fb_opacity = 1.0;
+    fb_alpha = 1;
+    return st;
+}
+
+uint32_t *iosim_fb_end_offscreen(void *state, int *out_w, int *out_h)
+{
+    if (!state || fb_saved_depth <= 0)
+        return NULL;
+    struct fb_saved_state *st = fb_saved[--fb_saved_depth];
+    uint32_t *buf = fb_pixels;
+    if (out_w) *out_w = (int)fb_width;
+    if (out_h) *out_h = (int)fb_height;
+    fb_pixels = st->pixels;
+    fb_width = st->width;
+    fb_height = st->height;
+    fb_clip_depth = st->clip_depth;
+    for (int i = 0; i < FB_MAX_CLIP; i++)
+        for (int k = 0; k < 4; k++)
+            fb_clip_rects[i][k] = st->clip[i][k];
+    fb_opacity = st->opacity;
+    fb_alpha = fb_saved_depth > 0 ? 1 : 0;
+    free(st);
+    return buf;
+}
+
+void iosim_fb_free_offscreen(uint32_t *buf)
+{
+    free(buf);
+}
+
+static uint32_t field_sample(const uint32_t *grid, int gw, int gh,
+                             double u, double v)
+{
+    double fx = u * gw - 0.5, fy = v * gh - 0.5;
+    int x0 = (int)__builtin_floor(fx), y0 = (int)__builtin_floor(fy);
+    double tx = fx - x0, ty = fy - y0;
+    int x1 = x0 + 1, y1 = y0 + 1;
+    if (x0 < 0) x0 = 0;
+    if (x0 >= gw) x0 = gw - 1;
+    if (x1 < 0) x1 = 0;
+    if (x1 >= gw) x1 = gw - 1;
+    if (y0 < 0) y0 = 0;
+    if (y0 >= gh) y0 = gh - 1;
+    if (y1 < 0) y1 = 0;
+    if (y1 >= gh) y1 = gh - 1;
+    uint32_t c00 = grid[y0 * gw + x0], c10 = grid[y0 * gw + x1];
+    uint32_t c01 = grid[y1 * gw + x0], c11 = grid[y1 * gw + x1];
+    unsigned r = (unsigned)((((c00 >> 16) & 0xFF) * (1 - tx) +
+                             ((c10 >> 16) & 0xFF) * tx) * (1 - ty) +
+                            (((c01 >> 16) & 0xFF) * (1 - tx) +
+                             ((c11 >> 16) & 0xFF) * tx) * ty + 0.5);
+    unsigned g = (unsigned)((((c00 >> 8) & 0xFF) * (1 - tx) +
+                             ((c10 >> 8) & 0xFF) * tx) * (1 - ty) +
+                            (((c01 >> 8) & 0xFF) * (1 - tx) +
+                             ((c11 >> 8) & 0xFF) * tx) * ty + 0.5);
+    unsigned b = (unsigned)(((c00 & 0xFF) * (1 - tx) + (c10 & 0xFF) * tx) *
+                                (1 - ty) +
+                            ((c01 & 0xFF) * (1 - tx) + (c11 & 0xFF) * tx) *
+                                ty + 0.5);
+    return (r << 16) | (g << 8) | b;
+}
+
+/* Apple's icon mask is a continuous-corner squircle; a superellipse with
+ * exponent 5 matches the captured boundary to a fraction of a pixel. */
+static double squircle_coverage(double u, double v, double rx)
+{
+    double au = __builtin_fabs(u), av = __builtin_fabs(v);
+    double au2 = au * au, av2 = av * av;
+    double sum = au2 * au2 * au + av2 * av2 * av;
+    double d = (sum - 1.0) * rx / 5.0;
+    return 0.5 - d;
+}
+
+void iosim_fb_fill_squircle(int x, int y, int w, int h, uint32_t color)
+{
+    if (!fb_pixels || w <= 0 || h <= 0)
+        return;
+    double cx = x + w / 2.0, cy = y + h / 2.0;
+    double rx = w / 2.0, ry = h / 2.0;
+    int fg_r = (color >> 16) & 0xFF, fg_g = (color >> 8) & 0xFF,
+        fg_b = color & 0xFF;
+    for (int yy = y; yy < y + h; yy++)
+    {
+        if (yy < fb_clip_y0() || yy >= fb_clip_y1())
+            continue;
+        uint32_t *row = fb_pixels + (size_t)yy * fb_width;
+        double v = (yy + 0.5 - cy) / ry;
+        for (int xx = x; xx < x + w; xx++)
+        {
+            if (xx < fb_clip_x0() || xx >= fb_clip_x1())
+                continue;
+            double u = (xx + 0.5 - cx) / rx;
+            double coverage = squircle_coverage(u, v, rx) * fb_opacity;
+            if (coverage <= 0)
+                continue;
+            if (coverage > fb_opacity)
+                coverage = fb_opacity;
+            if (coverage >= 1)
+            {
+                row[xx] = fb_full(color);
+                continue;
+            }
+            unsigned a = (unsigned)(coverage * 255.0 + 0.5);
+            uint32_t dst = row[xx];
+            unsigned r = (fg_r * a + ((dst >> 16) & 0xFF) * (255 - a) + 127) / 255;
+            unsigned g = (fg_g * a + ((dst >> 8) & 0xFF) * (255 - a) + 127) / 255;
+            unsigned b = (fg_b * a + (dst & 0xFF) * (255 - a) + 127) / 255;
+            row[xx] = fb_pack(dst, r, g, b, a);
+        }
+    }
+}
+
+void iosim_fb_fill_squircle_gradient(int x, int y, int w, int h,
+                                     uint32_t top, uint32_t bottom)
+{
+    if (!fb_pixels || w <= 0 || h <= 0)
+        return;
+    double cx = x + w / 2.0, cy = y + h / 2.0;
+    double rx = w / 2.0, ry = h / 2.0;
+    int tr = (top >> 16) & 0xFF, tg = (top >> 8) & 0xFF, tb = top & 0xFF;
+    int br = (bottom >> 16) & 0xFF, bg2 = (bottom >> 8) & 0xFF,
+        bb = bottom & 0xFF;
+    for (int yy = y; yy < y + h; yy++)
+    {
+        if (yy < fb_clip_y0() || yy >= fb_clip_y1())
+            continue;
+        uint32_t *row = fb_pixels + (size_t)yy * fb_width;
+        double v = (yy + 0.5 - cy) / ry;
+        double t = (yy + 0.5 - y) / h;
+        if (t < 0) t = 0;
+        if (t > 1) t = 1;
+        unsigned fr = (unsigned)(tr + (br - tr) * t + 0.5);
+        unsigned fg = (unsigned)(tg + (bg2 - tg) * t + 0.5);
+        unsigned fb = (unsigned)(tb + (bb - tb) * t + 0.5);
+        for (int xx = x; xx < x + w; xx++)
+        {
+            if (xx < fb_clip_x0() || xx >= fb_clip_x1())
+                continue;
+            double u = (xx + 0.5 - cx) / rx;
+            double coverage = squircle_coverage(u, v, rx) * fb_opacity;
+            if (coverage <= 0)
+                continue;
+            if (coverage > fb_opacity)
+                coverage = fb_opacity;
+            if (coverage >= 1)
+            {
+                row[xx] = fb_full((fr << 16) | (fg << 8) | fb);
+                continue;
+            }
+            unsigned a = (unsigned)(coverage * 255.0 + 0.5);
+            uint32_t dst = row[xx];
+            unsigned r = (fr * a + ((dst >> 16) & 0xFF) * (255 - a) + 127) / 255;
+            unsigned g = (fg * a + ((dst >> 8) & 0xFF) * (255 - a) + 127) / 255;
+            unsigned b = (fb * a + (dst & 0xFF) * (255 - a) + 127) / 255;
+            row[xx] = fb_pack(dst, r, g, b, a);
+        }
+    }
+}
+
+void iosim_fb_fill_field(int x, int y, int w, int h, int radius,
+                         const uint32_t *grid, int gw, int gh)
+{
+    if (!fb_pixels || !grid || gw <= 0 || gh <= 0 || w <= 0 || h <= 0)
+        return;
+    if (radius > w / 2) radius = w / 2;
+    if (radius > h / 2) radius = h / 2;
+    double cx = x + w / 2.0, cy = y + h / 2.0;
+    double ex = w / 2.0 - radius, ey = h / 2.0 - radius;
+    for (int yy = y; yy < y + h; yy++)
+    {
+        double py = yy + 0.5 - cy;
+        double qy = __builtin_fabs(py) - ey;
+        for (int xx = x; xx < x + w; xx++)
+        {
+            if (xx < fb_clip_x0() || xx >= fb_clip_x1() ||
+                yy < fb_clip_y0() || yy >= fb_clip_y1())
+                continue;
+            double px = xx + 0.5 - cx;
+            double qx = __builtin_fabs(px) - ex;
+            double ax = qx > 0 ? qx : 0, ay = qy > 0 ? qy : 0;
+            double outside = __builtin_sqrt(ax * ax + ay * ay);
+            double inside = qx > qy ? qx : qy;
+            double d = outside + (inside < 0 ? inside : 0) - radius;
+            double coverage = 0.5 - d;
+            if (coverage <= 0)
+                continue;
+            if (coverage > 1)
+                coverage = 1;
+            uint32_t c = field_sample(grid, gw, gh, (xx + 0.5 - x) / w,
+                                      (yy + 0.5 - y) / h);
+            fb_blend_pixel(xx, yy, c, coverage);
+        }
+    }
+}
+
+void iosim_fb_paste_xrgb(const uint32_t *src)
+{
+    if (!fb_pixels || !src)
+        return;
+    size_t n = (size_t)fb_width * fb_height;
+    for (size_t i = 0; i < n; i++)
+        fb_pixels[i] = src[i];
+}
+
+void iosim_fb_blit_xrgb_scaled(const uint32_t *src, int sw, int sh,
+                               int x, int y, int w, int h, double opacity)
+{
+    if (!fb_pixels || !src || sw <= 0 || sh <= 0 || w <= 0 || h <= 0)
+        return;
+    if (w == sw && h == sh)
+    {
+        for (int yy = 0; yy < h; yy++)
+        {
+            int dy = y + yy;
+            if (dy < fb_clip_y0() || dy >= fb_clip_y1())
+                continue;
+            uint32_t *row = fb_pixels + (size_t)dy * fb_width;
+            const uint32_t *srow = src + (size_t)yy * sw;
+            for (int xx = 0; xx < w; xx++)
+            {
+                int dx = x + xx;
+                if (dx < fb_clip_x0() || dx >= fb_clip_x1())
+                    continue;
+                row[dx] = srow[xx];
+            }
+        }
+        return;
+    }
+    for (int yy = 0; yy < h; yy++)
+    {
+        int dy = y + yy;
+        if (dy < fb_clip_y0() || dy >= fb_clip_y1())
+            continue;
+        double fy = ((yy + 0.5) * sh / h) - 0.5;
+        int y0 = (int)__builtin_floor(fy);
+        double ty = fy - y0;
+        int y0c = y0 < 0 ? 0 : (y0 >= sh ? sh - 1 : y0);
+        int y1c = y0 + 1 < 0 ? 0 : (y0 + 1 >= sh ? sh - 1 : y0 + 1);
+        uint32_t *row = fb_pixels + (size_t)dy * fb_width;
+        for (int xx = 0; xx < w; xx++)
+        {
+            int dx = x + xx;
+            if (dx < fb_clip_x0() || dx >= fb_clip_x1())
+                continue;
+            double fx = ((xx + 0.5) * sw / w) - 0.5;
+            int x0 = (int)__builtin_floor(fx);
+            double tx = fx - x0;
+            int x0c = x0 < 0 ? 0 : (x0 >= sw ? sw - 1 : x0);
+            int x1c = x0 + 1 < 0 ? 0 : (x0 + 1 >= sw ? sw - 1 : x0 + 1);
+            uint32_t p00 = src[(size_t)y0c * sw + x0c];
+            uint32_t p10 = src[(size_t)y0c * sw + x1c];
+            uint32_t p01 = src[(size_t)y1c * sw + x0c];
+            uint32_t p11 = src[(size_t)y1c * sw + x1c];
+            unsigned r = (unsigned)((((p00 >> 16) & 0xFF) * (1 - tx) + ((p10 >> 16) & 0xFF) * tx) * (1 - ty) + (((p01 >> 16) & 0xFF) * (1 - tx) + ((p11 >> 16) & 0xFF) * tx) * ty + 0.5);
+            unsigned g = (unsigned)((((p00 >> 8) & 0xFF) * (1 - tx) + ((p10 >> 8) & 0xFF) * tx) * (1 - ty) + (((p01 >> 8) & 0xFF) * (1 - tx) + ((p11 >> 8) & 0xFF) * tx) * ty + 0.5);
+            unsigned b = (unsigned)(((p00 & 0xFF) * (1 - tx) + (p10 & 0xFF) * tx) * (1 - ty) + ((p01 & 0xFF) * (1 - tx) + (p11 & 0xFF) * tx) * ty + 0.5);
+            if (opacity < 0.999)
+            {
+                uint32_t dst = row[dx];
+                r = (unsigned)(r * opacity + ((dst >> 16) & 0xFF) * (1 - opacity) + 0.5);
+                g = (unsigned)(g * opacity + ((dst >> 8) & 0xFF) * (1 - opacity) + 0.5);
+                b = (unsigned)(b * opacity + (dst & 0xFF) * (1 - opacity) + 0.5);
+            }
+            row[dx] = (r << 16) | (g << 8) | b;
+        }
+    }
+}
+
+void iosim_fb_blit_affine(const uint32_t *src, int sw, int sh,
+                          double fa, double fb, double fc, double f_d,
+                          double ftx, double fty, double opacity)
+{
+    if (!fb_pixels || !src || sw <= 0 || sh <= 0 || opacity <= 0)
+        return;
+    double det = fa * f_d - fb * fc;
+    if (__builtin_fabs(det) < 1e-12)
+        return;
+    /* Inverse of the forward affine, for destination -> source lookups. */
+    double ia = f_d / det, ib = -fb / det;
+    double ic = -fc / det, id = fa / det;
+    double itx = -(ia * ftx + ic * fty);
+    double ity = -(ib * ftx + id * fty);
+    double corners_x[4] = {0, sw, 0, sw};
+    double corners_y[4] = {0, 0, sh, sh};
+    double minx = 1e18, maxx = -1e18, miny = 1e18, maxy = -1e18;
+    for (int i = 0; i < 4; i++)
+    {
+        double X = fa * corners_x[i] + fc * corners_y[i] + ftx;
+        double Y = fb * corners_x[i] + f_d * corners_y[i] + fty;
+        if (X < minx) minx = X;
+        if (X > maxx) maxx = X;
+        if (Y < miny) miny = Y;
+        if (Y > maxy) maxy = Y;
+    }
+    int x0 = (int)__builtin_floor(minx), x1 = (int)__builtin_ceil(maxx);
+    int y0 = (int)__builtin_floor(miny), y1 = (int)__builtin_ceil(maxy);
+    if (x0 < 0) x0 = 0;
+    if (y0 < 0) y0 = 0;
+    if (x1 > (int)fb_width) x1 = (int)fb_width;
+    if (y1 > (int)fb_height) y1 = (int)fb_height;
+    for (int y = y0; y < y1; y++)
+    {
+        if (y < fb_clip_y0() || y >= fb_clip_y1())
+            continue;
+        uint32_t *row = fb_pixels + (size_t)y * fb_width;
+        double Y = y + 0.5;
+        for (int x = x0; x < x1; x++)
+        {
+            if (x < fb_clip_x0() || x >= fb_clip_x1())
+                continue;
+            double X = x + 0.5;
+            double u = ia * X + ic * Y + itx - 0.5;
+            double v = ib * X + id * Y + ity - 0.5;
+            if (u < -1.0 || v < -1.0 || u > sw || v > sh)
+                continue;
+            int u0 = (int)__builtin_floor(u), v0 = (int)__builtin_floor(v);
+            double tu = u - u0, tv = v - v0;
+            int u1 = u0 + 1, v1 = v0 + 1;
+            int u0c = u0 < 0 ? 0 : (u0 >= sw ? sw - 1 : u0);
+            int u1c = u1 < 0 ? 0 : (u1 >= sw ? sw - 1 : u1);
+            int v0c = v0 < 0 ? 0 : (v0 >= sh ? sh - 1 : v0);
+            int v1c = v1 < 0 ? 0 : (v1 >= sh ? sh - 1 : v1);
+            uint32_t p00 = src[(size_t)v0c * sw + u0c];
+            uint32_t p10 = src[(size_t)v0c * sw + u1c];
+            uint32_t p01 = src[(size_t)v1c * sw + u0c];
+            uint32_t p11 = src[(size_t)v1c * sw + u1c];
+            double w00 = (1 - tu) * (1 - tv), w10 = tu * (1 - tv);
+            double w01 = (1 - tu) * tv, w11 = tu * tv;
+            double sa = ((p00 >> 24) & 0xFF) * w00 + ((p10 >> 24) & 0xFF) * w10 +
+                        ((p01 >> 24) & 0xFF) * w01 + ((p11 >> 24) & 0xFF) * w11;
+            if (sa <= 0.5)
+                continue;
+            double sr = ((p00 >> 16) & 0xFF) * w00 + ((p10 >> 16) & 0xFF) * w10 +
+                        ((p01 >> 16) & 0xFF) * w01 + ((p11 >> 16) & 0xFF) * w11;
+            double sg = ((p00 >> 8) & 0xFF) * w00 + ((p10 >> 8) & 0xFF) * w10 +
+                        ((p01 >> 8) & 0xFF) * w01 + ((p11 >> 8) & 0xFF) * w11;
+            double sb = (p00 & 0xFF) * w00 + (p10 & 0xFF) * w10 +
+                        (p01 & 0xFF) * w01 + (p11 & 0xFF) * w11;
+            double f = (sa / 255.0) * opacity;
+            uint32_t dst = row[x];
+            unsigned dr = (dst >> 16) & 0xFF, dg = (dst >> 8) & 0xFF,
+                     db = dst & 0xFF;
+            unsigned r = (unsigned)(sr * f + dr * (1 - f) + 0.5);
+            unsigned g = (unsigned)(sg * f + dg * (1 - f) + 0.5);
+            unsigned b = (unsigned)(sb * f + db * (1 - f) + 0.5);
+            if (fb_alpha)
+            {
+                unsigned da = dst >> 24;
+                unsigned oa = (unsigned)(sa * opacity + da * (1 - f) + 0.5);
+                if (oa > 255) oa = 255;
+                row[x] = (oa << 24) | (r << 16) | (g << 8) | b;
+            }
+            else
+                row[x] = (r << 16) | (g << 8) | b;
+        }
+    }
+}
+
 void iosim_fb_set_opacity(double opacity)
 {
     if (opacity < 0)
@@ -123,7 +548,7 @@ void iosim_fb_fill_rect(int x, int y, int w, int h, uint32_t color)
         {
             uint32_t *row = fb_pixels + (size_t)yy * fb_width;
             for (int xx = x0; xx < x1; xx++)
-                row[xx] = color;
+                row[xx] = fb_full(color);
         }
         return;
     }
@@ -139,7 +564,7 @@ void iosim_fb_fill_rect(int x, int y, int w, int h, uint32_t color)
             unsigned r = (fr * fa + ((dst >> 16) & 0xFF) * (255 - fa) + 127) / 255;
             unsigned g = (fg * fa + ((dst >> 8) & 0xFF) * (255 - fa) + 127) / 255;
             unsigned b = (fb * fa + (dst & 0xFF) * (255 - fa) + 127) / 255;
-            row[xx] = (r << 16) | (g << 8) | b;
+            row[xx] = fb_pack(dst, r, g, b, fa);
         }
     }
 }
@@ -190,7 +615,7 @@ void iosim_fb_fill_round_rect(int x, int y, int w, int h, int radius,
                 coverage = fb_opacity;
             if (coverage >= 1)
             {
-                row[xx] = color;
+                row[xx] = fb_full(color);
                 continue;
             }
             unsigned a = (unsigned)(coverage * 255.0 + 0.5);
@@ -198,7 +623,7 @@ void iosim_fb_fill_round_rect(int x, int y, int w, int h, int radius,
             unsigned r = (fg_r * a + ((dst >> 16) & 0xFF) * (255 - a) + 127) / 255;
             unsigned g = (fg_g * a + ((dst >> 8) & 0xFF) * (255 - a) + 127) / 255;
             unsigned b = (fg_b * a + (dst & 0xFF) * (255 - a) + 127) / 255;
-            row[xx] = (r << 16) | (g << 8) | b;
+            row[xx] = fb_pack(dst, r, g, b, a);
         }
     }
 }
@@ -230,7 +655,7 @@ void iosim_fb_fill_circle(int cx, int cy, int radius, uint32_t color)
                 coverage = fb_opacity;
             if (coverage >= 1)
             {
-                row[x] = color;
+                row[x] = fb_full(color);
                 continue;
             }
             unsigned a = (unsigned)(coverage * 255.0 + 0.5);
@@ -238,7 +663,7 @@ void iosim_fb_fill_circle(int cx, int cy, int radius, uint32_t color)
             unsigned r = (fg_r * a + ((dst >> 16) & 0xFF) * (255 - a) + 127) / 255;
             unsigned g = (fg_g * a + ((dst >> 8) & 0xFF) * (255 - a) + 127) / 255;
             unsigned b = (fg_b * a + (dst & 0xFF) * (255 - a) + 127) / 255;
-            row[x] = (r << 16) | (g << 8) | b;
+            row[x] = fb_pack(dst, r, g, b, a);
         }
     }
 }
@@ -854,7 +1279,7 @@ void iosim_fb_font_text(int x, int baseline_y, const char *text, int style,
                 unsigned r = (fg_r * a + dr * (255 - a) + 127) / 255;
                 unsigned g = (fg_g * a + dg * (255 - a) + 127) / 255;
                 unsigned b = (fg_b * a + db * (255 - a) + 127) / 255;
-                dst[xx] = (r << 16) | (g << 8) | b;
+                dst[xx] = fb_pack(d, r, g, b, a);
             }
         }
         pen += slot->advance.x;
@@ -897,7 +1322,7 @@ static void fb_blend_pixel(int x, int y, uint32_t color, double coverage)
     uint32_t *row = fb_pixels + (size_t)y * fb_width;
     if (coverage >= 0.999)
     {
-        row[x] = color;
+        row[x] = fb_full(color);
         return;
     }
     unsigned a = (unsigned)(coverage * 255.0 + 0.5);
@@ -905,7 +1330,7 @@ static void fb_blend_pixel(int x, int y, uint32_t color, double coverage)
     unsigned r = (((color >> 16) & 0xFF) * a + ((dst >> 16) & 0xFF) * (255 - a) + 127) / 255;
     unsigned g = (((color >> 8) & 0xFF) * a + ((dst >> 8) & 0xFF) * (255 - a) + 127) / 255;
     unsigned b = ((color & 0xFF) * a + (dst & 0xFF) * (255 - a) + 127) / 255;
-    row[x] = (r << 16) | (g << 8) | b;
+    row[x] = fb_pack(dst, r, g, b, a);
 }
 
 void iosim_fb_draw_line(int x0, int y0, int x1, int y1, int thickness,
@@ -937,6 +1362,50 @@ void iosim_fb_draw_line(int x0, int y0, int x1, int y1, int thickness,
     }
 }
 
+void iosim_fb_stroke_circle(int cx, int cy, int radius, int thickness,
+                            uint32_t color)
+{
+    if (!fb_pixels || radius <= 0 || thickness <= 0)
+        return;
+    double half = thickness / 2.0;
+    int range = radius + (int)(half + 2.0);
+    int x0 = cx - range, x1 = cx + range + 1;
+    int y0 = cy - range, y1 = cy + range + 1;
+    if (x0 < fb_clip_x0()) x0 = fb_clip_x0();
+    if (y0 < fb_clip_y0()) y0 = fb_clip_y0();
+    if (x1 > fb_clip_x1()) x1 = fb_clip_x1();
+    if (y1 > fb_clip_y1()) y1 = fb_clip_y1();
+    int fg_r = (color >> 16) & 0xFF, fg_g = (color >> 8) & 0xFF,
+        fg_b = color & 0xFF;
+    for (int y = y0; y < y1; y++)
+    {
+        uint32_t *row = fb_pixels + (size_t)y * fb_width;
+        double dy = y + 0.5 - cy;
+        for (int x = x0; x < x1; x++)
+        {
+            double dx = x + 0.5 - cx;
+            double d = __builtin_fabs(__builtin_sqrt(dx * dx + dy * dy) -
+                                      radius) - half;
+            double coverage = (0.5 - d) * fb_opacity;
+            if (coverage <= 0)
+                continue;
+            if (coverage > fb_opacity)
+                coverage = fb_opacity;
+            if (coverage >= 1)
+            {
+                row[x] = fb_full(color);
+                continue;
+            }
+            unsigned a = (unsigned)(coverage * 255.0 + 0.5);
+            uint32_t dst = row[x];
+            unsigned r = (fg_r * a + ((dst >> 16) & 0xFF) * (255 - a) + 127) / 255;
+            unsigned g = (fg_g * a + ((dst >> 8) & 0xFF) * (255 - a) + 127) / 255;
+            unsigned b = (fg_b * a + (dst & 0xFF) * (255 - a) + 127) / 255;
+            row[x] = fb_pack(dst, r, g, b, a);
+        }
+    }
+}
+
 void iosim_fb_fill_ellipse(int cx, int cy, int rx, int ry, uint32_t color)
 {
     if (rx <= 0 || ry <= 0)
@@ -965,7 +1434,7 @@ void iosim_fb_fill_ellipse(int cx, int cy, int rx, int ry, uint32_t color)
             uint32_t *row = fb_pixels + (size_t)y * fb_width;
             if (coverage >= 1)
             {
-                row[x] = color;
+                row[x] = fb_full(color);
                 continue;
             }
             unsigned a = (unsigned)(coverage * 255.0 + 0.5);
@@ -973,7 +1442,7 @@ void iosim_fb_fill_ellipse(int cx, int cy, int rx, int ry, uint32_t color)
             unsigned r = (fg_r * a + ((dst >> 16) & 0xFF) * (255 - a) + 127) / 255;
             unsigned g = (fg_g * a + ((dst >> 8) & 0xFF) * (255 - a) + 127) / 255;
             unsigned b = (fg_b * a + (dst & 0xFF) * (255 - a) + 127) / 255;
-            row[x] = (r << 16) | (g << 8) | b;
+            row[x] = fb_pack(dst, r, g, b, a);
         }
     }
 }
@@ -1123,7 +1592,7 @@ void iosim_fb_blit_rgba(int x, int y, int w, int h, const uint8_t *rgba,
             unsigned r = (((fg >> 16) & 0xFF) * ia + ((dst >> 16) & 0xFF) * (255 - ia) + 127) / 255;
             unsigned g = (((fg >> 8) & 0xFF) * ia + ((dst >> 8) & 0xFF) * (255 - ia) + 127) / 255;
             unsigned b = ((fg & 0xFF) * ia + (dst & 0xFF) * (255 - ia) + 127) / 255;
-            row[dx] = (r << 16) | (g << 8) | b;
+            row[dx] = fb_pack(dst, r, g, b, ia);
         }
     }
 }
@@ -1182,7 +1651,7 @@ void iosim_fb_blit_rgba_scaled(int x, int y, int w, int h,
             unsigned r = ((unsigned)(c[0] + 0.5) * ia + ((dst >> 16) & 0xFF) * (255 - ia) + 127) / 255;
             unsigned g = ((unsigned)(c[1] + 0.5) * ia + ((dst >> 8) & 0xFF) * (255 - ia) + 127) / 255;
             unsigned b = ((unsigned)(c[2] + 0.5) * ia + (dst & 0xFF) * (255 - ia) + 127) / 255;
-            row[dx] = (r << 16) | (g << 8) | b;
+            row[dx] = fb_pack(dst, r, g, b, ia);
         }
     }
 }

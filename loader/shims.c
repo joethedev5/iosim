@@ -17,6 +17,61 @@
 #include <math.h>
 #include <time.h>
 #include <stdarg.h>
+#include <limits.h>
+#include <sys/wait.h>
+
+/* ---------- launching apps from the system UI ---------- */
+
+int iosim_spawn_app(const char *exe, const char *bundle, const char *home)
+{
+    if (!exe || !*exe)
+        return -1;
+    char self[PATH_MAX];
+    ssize_t n = readlink("/proc/self/exe", self, sizeof(self) - 1);
+    if (n <= 0)
+        return -1;
+    self[n] = 0;
+    pid_t pid = fork();
+    if (pid < 0)
+        return -1;
+    if (pid == 0)
+    {
+        /* The child is an app launch, not another SpringBoard. */
+        unsetenv("IOSIM_SHELL");
+        unsetenv("IOSIM_SHELL_APPS");
+        if (bundle && *bundle)
+        {
+            char name[600];
+            snprintf(name, sizeof(name), "UIKitApplication:%s[%d]", bundle,
+                     (int)getpid());
+            setenv("XPC_SERVICE_NAME", name, 1);
+        }
+        if (home && *home)
+        {
+            char tmp[PATH_MAX + 16];
+            setenv("HOME", home, 1);
+            setenv("CFFIXED_USER_HOME", home, 1);
+            snprintf(tmp, sizeof(tmp), "%s/tmp", home);
+            setenv("TMPDIR", tmp, 1);
+        }
+        execl(self, self, exe, (char *)0);
+        _exit(127);
+    }
+    return (int)pid;
+}
+
+int iosim_spawn_wait(int pid)
+{
+    int status = 0;
+    if (pid <= 0)
+        return -1;
+    while (waitpid(pid, &status, 0) < 0)
+    {
+        if (errno != EINTR)
+            return -1;
+    }
+    return status;
+}
 
 void  *objc_opt_class(void *obj);
 double iosim_now(void);
@@ -360,6 +415,9 @@ static const struct iosim_shim shims[] = {
     SHIM_DIRECT(iosim_fb_fill_rect),
     SHIM_DIRECT(iosim_fb_fill_round_rect),
     SHIM_DIRECT(iosim_fb_fill_circle),
+    SHIM_DIRECT(iosim_fb_stroke_circle),
+    SHIM_DIRECT(iosim_fb_fill_squircle),
+    SHIM_DIRECT(iosim_fb_fill_squircle_gradient),
     SHIM_DIRECT(iosim_fb_draw_line),
     SHIM_DIRECT(iosim_fb_fill_ellipse),
     SHIM_DIRECT(iosim_fb_fill_polygon),
@@ -367,6 +425,9 @@ static const struct iosim_shim shims[] = {
     SHIM_DIRECT(iosim_fb_fill_linear_gradient_round_rect),
     SHIM_DIRECT(iosim_fb_blit_rgba),
     SHIM_DIRECT(iosim_fb_blit_rgba_scaled),
+    SHIM_DIRECT(iosim_fb_paste_xrgb),
+    SHIM_DIRECT(iosim_fb_fill_field),
+    SHIM_DIRECT(iosim_fb_blit_xrgb_scaled),
     SHIM_DIRECT(iosim_fb_width),
     SHIM_DIRECT(iosim_fb_height),
     SHIM_DIRECT(iosim_png_load),
@@ -381,6 +442,9 @@ static const struct iosim_shim shims[] = {
     SHIM_DIRECT(iosim_fb_font_metrics),
     SHIM_DIRECT(iosim_fb_present),
     SHIM_DIRECT(iosim_event_next),
+    SHIM_DIRECT(iosim_event_close),
+    SHIM_DIRECT(iosim_spawn_app),
+    SHIM_DIRECT(iosim_spawn_wait),
     SHIM_DIRECT(iosim_dispatch_drain_main),
     SHIM_DIRECT(_Block_copy),
     SHIM_DIRECT(_Block_release),

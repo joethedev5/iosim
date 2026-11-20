@@ -109,6 +109,7 @@ __attribute__((objc_root_class))
 - (CGRect)bounds;
 @property CGRect frame;
 @property double alpha;
+@property CGAffineTransform transform;
 @property(nonatomic, retain) UIColor *backgroundColor;
 @property(readonly) CALayer *layer;
 - (void)addSubview:(UIView *)view;

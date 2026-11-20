@@ -240,6 +240,60 @@ def run_child(udid, dev, argv, console=False, log_name="spawn",
     return proc.pid
 
 
+def app_display_name(app):
+    """The name SpringBoard shows under an installed app's icon."""
+    info_path = Path(app["path"]) / "Info.plist"
+    try:
+        with open(info_path, "rb") as f:
+            info = plistlib.load(f)
+    except Exception:
+        info = {}
+    return (info.get("CFBundleDisplayName") or info.get("CFBundleName")
+            or Path(app["path"]).stem)
+
+
+def springboard_manifest_path(udid):
+    return device_dir(udid) / "var" / "run" / "springboard-apps.txt"
+
+
+def write_springboard_manifest(udid, dev):
+    """Describe the installed apps for SpringBoard, in install order."""
+    dd = device_dir(udid)
+    run = dd / "var" / "run"
+    run.mkdir(parents=True, exist_ok=True)
+    apps = dev.get("apps", {})
+    ordered = sorted(apps.items(), key=lambda kv: (kv[1].get("seq", 0), kv[0]))
+    lines = []
+    for bundle_id, app in ordered:
+        exe = str(Path(app["path"]) / app["executable"])
+        home = dd / "data" / "Containers" / "Data" / "Application" / bundle_id
+        home.mkdir(parents=True, exist_ok=True)
+        lines.append("|".join([app_display_name(app), exe, bundle_id, str(home)]))
+    path = springboard_manifest_path(udid)
+    path.write_text("\n".join(lines) + ("\n" if lines else ""))
+    return path
+
+
+def event_fifo_path(udid):
+    return device_dir(udid) / "var" / "run" / "events.fifo"
+
+
+def notify_ui(udid, line):
+    """Send a system UI event to the frontmost process, if any."""
+    fifo = event_fifo_path(udid)
+    if not fifo.exists():
+        return False
+    try:
+        fd = os.open(str(fifo), os.O_WRONLY | os.O_NONBLOCK)
+    except OSError:
+        return False
+    try:
+        os.write(fd, (line + "\n").encode())
+    finally:
+        os.close(fd)
+    return True
+
+
 # ---------- commands ----------
 
 
@@ -358,6 +412,11 @@ def cmd_boot(args):
             return 0
         make_runtime_tree()
         dd = device_dir(udid)
+        fb = dd / "data" / "var" / "run" / "framebuffer.png"
+        try:
+            fb.unlink()
+        except FileNotFoundError:
+            pass
         launchd = Path(__file__).resolve().parent / "iosim-launchd"
         log = open(dd / "logs" / "launchd_sim.log", "ab")
         proc = subprocess.Popen(
@@ -433,8 +492,12 @@ def cmd_install(args):
         if dest.exists():
             shutil.rmtree(dest)
         shutil.copytree(src, dest)
-        dev["apps"][bundle_id] = {"path": str(dest), "executable": exe}
+        dev["appSeq"] = dev.get("appSeq", 0) + 1
+        dev["apps"][bundle_id] = {"path": str(dest), "executable": exe,
+                                  "seq": dev["appSeq"]}
+        write_springboard_manifest(udid, dev)
         save_state(state)
+    notify_ui(udid, "apps")
     print(f"Installed {bundle_id} on {udid}")
     return 0
 
@@ -447,7 +510,9 @@ def cmd_uninstall(args):
         if not app:
             die(f"app not installed: {args.bundle_id}")
         shutil.rmtree(Path(app["path"]).parent, ignore_errors=True)
+        write_springboard_manifest(udid, dev)
         save_state(state)
+    notify_ui(udid, "apps")
     return 0
 
 
@@ -534,8 +599,12 @@ def cmd_io(args):
     if args.operation != "screenshot":
         die(f"unsupported io operation: {args.operation}")
     src = device_dir(udid) / "data" / "var" / "run" / "framebuffer.png"
+    for _ in range(100):
+        if src.exists():
+            break
+        time.sleep(0.1)
     if not src.exists():
-        die("no framebuffer captured yet; launch an app that renders")
+        die("no framebuffer captured yet; the system UI has not rendered")
     dest = Path(args.path)
     dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(src, dest)
@@ -548,6 +617,26 @@ def cmd_listapps(args):
     udid, dev = find_device(state, args.device)
     for bundle_id, app in sorted(dev.get("apps", {}).items()):
         print(f"{bundle_id}\t{app['path']}")
+    return 0
+
+
+def cmd_ui(args):
+    state = load_state()
+    udid, dev = find_device(state, args.device)
+    require_booted(dev)
+    scale = SCREEN.get(dev["deviceType"], (1206, 2622, 3.0))[2]
+    if args.action == "tap":
+        if len(args.coords) != 2:
+            die("usage: iosimctl ui <device> tap <x> <y>")
+        x, y = args.coords
+        line = f"tap {int(round(x * scale))} {int(round(y * scale))}"
+    elif args.action == "home":
+        line = "home"
+    else:
+        line = "apps"
+    if not notify_ui(udid, line):
+        die("no system UI is listening on the device event stream")
+    print(f"sent {line}")
     return 0
 
 
@@ -641,6 +730,12 @@ def main():
     p = sub.add_parser("listapps")
     p.add_argument("device")
     p.set_defaults(func=cmd_listapps)
+
+    p = sub.add_parser("ui", help="inject a system UI event")
+    p.add_argument("device")
+    p.add_argument("action", choices=["tap", "home", "apps"])
+    p.add_argument("coords", nargs="*", type=float)
+    p.set_defaults(func=cmd_ui)
 
     args = ap.parse_args()
     return args.func(args)
