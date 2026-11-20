@@ -3164,6 +3164,15 @@ else
     echo "FAIL CoreGraphics drawRect"; echo "$out"; fails=$((fails+1))
 fi
 
+# ---------- 35. UIGraphics image contexts ----------
+"$ROOT/tools/build_app.sh" "$ROOT/tests/uigraphics_test.m" \
+    "$T/uigraphics_test" >/dev/null
+out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/uigraphics_test" 2>&1)"
+check "[uig] size 20 20 red 255 0 0 255" "$out" \
+    "UIGraphicsBeginImageContextWithOptions renders at the requested scale"
+check "[uig] drawn 255 0 0 255" "$out" \
+    "UIImage drawInRect: composites into another image context"
+
 if [ "$fails" -ne 0 ]; then
     echo "$fails test(s) failed" >&2
     exit 1

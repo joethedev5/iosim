@@ -646,7 +646,12 @@ extern int UIApplicationMain(int argc, char **argv, id principal,
 @property CGPoint endPoint;
 @end
 
-@interface UIImage : NSObject
+@interface UIImage : NSObject {
+@public
+    unsigned char *_rgba;
+    int _width;
+    int _height;
+}
 + (UIImage *)imageNamed:(NSString *)name;
 - (int)width;
 - (int)height;
@@ -815,6 +820,18 @@ enum {
 - (BOOL)isEditing;
 - (void)deleteRowsAtIndexPaths:(NSArray *)indexPaths
            withRowAnimation:(long)animation;
+@end
+
+void UIGraphicsBeginImageContextWithOptions(CGSize size, BOOL opaque,
+                                            double scale);
+void UIGraphicsBeginImageContext(CGSize size);
+CGContextRef UIGraphicsGetCurrentContext(void);
+UIImage *UIGraphicsGetImageFromCurrentImageContext(void);
+void UIGraphicsEndImageContext(void);
+
+@interface UIImage (Drawing)
+- (void)drawInRect:(CGRect)rect;
+- (void)drawAtPoint:(CGPoint)point;
 @end
 
 @interface UIImageView : UIView

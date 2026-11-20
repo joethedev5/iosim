@@ -16,6 +16,13 @@ extern void iosim_fb_draw_line(int x0, int y0, int x1, int y1, int thickness,
 extern void iosim_fb_fill_polygon(const double *xs, const double *ys,
                                   int count, unsigned color);
 extern void iosim_fb_set_opacity(double opacity);
+extern void iosim_fb_blit_rgba_scaled(int x, int y, int w, int h,
+                                      const unsigned char *rgba,
+                                      int source_w, int source_h,
+                                      int source_stride);
+extern void *iosim_fb_begin_offscreen(unsigned width, unsigned height);
+extern unsigned *iosim_fb_end_offscreen(void *state, int *out_w, int *out_h);
+extern void iosim_fb_free_offscreen(unsigned *buf);
 
 #define CG_MAX_POINTS 512
 #define CG_MAX_STATES 8
@@ -44,6 +51,9 @@ struct CGContext {
     double ys[CG_MAX_POINTS];
     int count;
     int closed;
+    int image;
+    void *offscreen;
+    unsigned char *rgba;
 };
 
 static CGContextRef g_current_context;
@@ -112,6 +122,124 @@ CGContextRef iosim_cg_begin_view(int x, int y, int w, int h, double scale,
     context->state.line_width = 1.0;
     g_current_context = context;
     return context;
+}
+
+CGContextRef iosim_cg_current(void)
+{
+    return g_current_context;
+}
+
+CGContextRef iosim_cg_begin_image(int w, int h, double scale)
+{
+    if (w <= 0 || h <= 0)
+        return 0;
+    CGContextRef context = calloc(1, sizeof(*context));
+    if (!context)
+        return 0;
+    void *offscreen = iosim_fb_begin_offscreen((unsigned)w, (unsigned)h);
+    if (!offscreen)
+    {
+        free(context);
+        return 0;
+    }
+    context->w = w;
+    context->h = h;
+    context->scale = scale > 0 ? scale : 1.0;
+    context->base_alpha = 1.0;
+    context->image = 1;
+    context->offscreen = offscreen;
+    context->state.sx = 1;
+    context->state.sy = 1;
+    context->state.alpha = 1;
+    context->state.fill.a = 1;
+    context->state.stroke.a = 1;
+    context->state.line_width = 1.0;
+    g_current_context = context;
+    return context;
+}
+
+int iosim_cg_image_data(CGContextRef context, unsigned char **out_rgba,
+                        int *out_w, int *out_h)
+{
+    if (!context || !context->image)
+        return -1;
+    if (!context->rgba)
+    {
+        int width = 0, height = 0;
+        unsigned *pixels = 0;
+        if (context->offscreen)
+        {
+            pixels = iosim_fb_end_offscreen(context->offscreen, &width,
+                                            &height);
+            context->offscreen = 0;
+        }
+        if (!pixels || width <= 0 || height <= 0)
+            return -1;
+        unsigned char *rgba = malloc((unsigned long)width * height * 4);
+        if (!rgba)
+        {
+            iosim_fb_free_offscreen(pixels);
+            return -1;
+        }
+        for (int y = 0; y < height; y++)
+            for (int x = 0; x < width; x++)
+            {
+                unsigned color = pixels[(unsigned long)y * width + x];
+                unsigned char *dst = rgba + ((unsigned long)y * width + x) * 4;
+                dst[0] = (unsigned char)((color >> 16) & 255);
+                dst[1] = (unsigned char)((color >> 8) & 255);
+                dst[2] = (unsigned char)(color & 255);
+                dst[3] = 255;
+            }
+        iosim_fb_free_offscreen(pixels);
+        context->rgba = rgba;
+    }
+    if (out_rgba)
+        *out_rgba = context->rgba;
+    if (out_w)
+        *out_w = context->w;
+    if (out_h)
+        *out_h = context->h;
+    return 0;
+}
+
+void iosim_cg_end_image(CGContextRef context)
+{
+    if (!context)
+        return;
+    if (context->offscreen)
+    {
+        int width = 0, height = 0;
+        unsigned *pixels = iosim_fb_end_offscreen(context->offscreen, &width,
+                                                  &height);
+        if (pixels)
+            iosim_fb_free_offscreen(pixels);
+        context->offscreen = 0;
+    }
+    free(context->rgba);
+    if (g_current_context == context)
+        g_current_context = 0;
+    iosim_fb_set_opacity(1.0);
+    free(context);
+}
+
+void iosim_cg_draw_image(CGContextRef context, const unsigned char *rgba,
+                         int w, int h, CGRect rect)
+{
+    if (!context)
+        context = g_current_context;
+    if (!context || !rgba || w <= 0 || h <= 0)
+        return;
+    double x0, y0, x1, y1;
+    cg_transform(context, rect.origin.x, rect.origin.y, &x0, &y0);
+    cg_transform(context, rect.origin.x + rect.size.width,
+                 rect.origin.y + rect.size.height, &x1, &y1);
+    int px = (int)(x0 + 0.5), py = (int)(y0 + 0.5);
+    int pw = (int)(x1 - x0 + 0.5), ph = (int)(y1 - y0 + 0.5);
+    if (pw <= 0 || ph <= 0)
+        return;
+    iosim_fb_set_opacity(context->base_alpha * context->state.alpha);
+    iosim_fb_blit_rgba_scaled(px, py, pw, ph, rgba, w, h, w * 4);
 }
 
 void iosim_cg_end_view(CGContextRef context)

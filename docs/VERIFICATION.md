@@ -629,6 +629,14 @@ paints four shapes, writes a PNG and exits. The suite samples the PNG at
 `(60,180)` red, `(250,190)` green, `(20,300)` blue stroke and `(90,455)`
 yellow path, proving the renderer-to-CGContext bridge and device scale.
 
+### UIKit: UIGraphics image contexts
+
+`tests/uigraphics_test.m` begins a 10x10 image context at scale 2, fills it
+red, and extracts a 20x20 `UIImage` whose center pixel is 255,0,0,255. It then
+begins a scale-1 blue context, draws the red image with `drawInRect:` and
+extracts it again, sampling red at the center to prove context compositing and
+image extraction.
+
 ### Foundation: NSRegularExpression
 
 `tests/regex_test.m` matches `([A-Za-z]+) (\\d+)` against

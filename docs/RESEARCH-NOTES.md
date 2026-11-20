@@ -248,8 +248,10 @@ a real CoreGraphics surface, not more renderer special cases:
 CoreGraphics MVP status: `CoreGraphics.framework` now exports a
 direct-framebuffer CGContext and UIKit calls `drawRect:` between background
 and sublayers. Fixtures cover fills/strokes/ellipses/paths and a full app
-frame. Still missing: `UIGraphics` image contexts, CGPath objects, color
-spaces, clipping paths beyond the framebuffer rect, text and images.
+frame. UIGraphics image contexts now render into the loader's offscreen
+framebuffer and produce RGBA-backed UIImage objects; `UIImage drawInRect:`
+draws into the current context. Still missing: CGPath objects, color spaces,
+non-rect clipping paths and text.
 
 ## Open directions
 

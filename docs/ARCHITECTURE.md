@@ -404,8 +404,11 @@ stack. `iosim_cg_begin_view` maps points through the view origin and device
 scale and draws through the loader's framebuffer primitives, so clipping and
 view alpha apply. The renderer calls `drawRect:` for every view after its
 background and before its sublayers; plain `UIView` implements a no-op and
-custom subclasses can paint immediately. `UIGraphics` image contexts and
-full CGPath/color-space APIs remain future work.
+custom subclasses can paint immediately. `UIGraphicsBeginImageContextWithOptions`
+redirects the same CGContext into a loader offscreen framebuffer; the result
+is copied out as RGBA for `UIGraphicsGetImageFromCurrentImageContext`, and
+`UIImage drawInRect:` blits into whichever context is current. Full CGPath
+objects, color spaces and paths beyond a point list remain future work.
 
 UIScrollView tracks recent pointer velocity while dragging instead of
 averaging the whole gesture. A release above 50 pt/s records the deceleration

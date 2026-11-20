@@ -12,6 +12,13 @@ typedef const void *CGPathRef;
 CGContextRef iosim_cg_begin_view(int x, int y, int w, int h, double scale,
                                  double alpha);
 void iosim_cg_end_view(CGContextRef context);
+CGContextRef iosim_cg_current(void);
+CGContextRef iosim_cg_begin_image(int w, int h, double scale);
+int iosim_cg_image_data(CGContextRef context, unsigned char **out_rgba,
+                        int *out_w, int *out_h);
+void iosim_cg_end_image(CGContextRef context);
+void iosim_cg_draw_image(CGContextRef context, const unsigned char *rgba,
+                         int w, int h, CGRect rect);
 
 void CGContextSetRGBFillColor(CGContextRef context, double r, double g,
                               double b, double a);

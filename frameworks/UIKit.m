@@ -4768,7 +4768,73 @@ static long datepicker_rows_for(UIDatePicker *picker, long component)
 }
 - (int)width { return _width; }
 - (int)height { return _height; }
+- (void)drawInRect:(CGRect)rect
+{
+    iosim_cg_draw_image(0, _rgba, _width, _height, rect);
+}
+- (void)drawAtPoint:(CGPoint)point
+{
+    [self drawInRect:CGRectMake(point.x, point.y, _width, _height)];
+}
 @end
+
+#define MAX_IMAGE_CONTEXTS 8
+static CGContextRef g_image_contexts[MAX_IMAGE_CONTEXTS];
+static int g_image_context_count;
+
+void UIGraphicsBeginImageContextWithOptions(CGSize size, BOOL opaque,
+                                            double scale)
+{
+    (void)opaque;
+    if (scale <= 0)
+        scale = [[UIScreen mainScreen] scale];
+    if (scale <= 0)
+        scale = 1.0;
+    int w = (int)(size.width * scale + 0.5);
+    int h = (int)(size.height * scale + 0.5);
+    CGContextRef context = iosim_cg_begin_image(w, h, scale);
+    if (!context || g_image_context_count >= MAX_IMAGE_CONTEXTS)
+        return;
+    g_image_contexts[g_image_context_count++] = context;
+}
+
+void UIGraphicsBeginImageContext(CGSize size)
+{
+    UIGraphicsBeginImageContextWithOptions(size, NO, 1.0);
+}
+
+CGContextRef UIGraphicsGetCurrentContext(void)
+{
+    if (g_image_context_count > 0)
+        return g_image_contexts[g_image_context_count - 1];
+    return iosim_cg_current();
+}
+
+UIImage *UIGraphicsGetImageFromCurrentImageContext(void)
+{
+    if (g_image_context_count <= 0)
+        return nil;
+    CGContextRef context = g_image_contexts[g_image_context_count - 1];
+    unsigned char *rgba = 0;
+    int w = 0, h = 0;
+    if (iosim_cg_image_data(context, &rgba, &w, &h) != 0 || !rgba)
+        return nil;
+    UIImage *image = [[UIImage alloc] init];
+    image->_rgba = malloc((unsigned long)w * h * 4);
+    if (image->_rgba)
+        memcpy(image->_rgba, rgba, (unsigned long)w * h * 4);
+    image->_width = w;
+    image->_height = h;
+    return image;
+}
+
+void UIGraphicsEndImageContext(void)
+{
+    if (g_image_context_count <= 0)
+        return;
+    CGContextRef context = g_image_contexts[--g_image_context_count];
+    iosim_cg_end_image(context);
+}
 
 @implementation UIImageView
 - (id)initWithImage:(UIImage *)image
