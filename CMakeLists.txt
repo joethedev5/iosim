@@ -19,6 +19,7 @@ add_executable(iosim-run
   loader/context.c
   loader/objc_runtime.c
   loader/framebuffer.c
+  loader/events.c
   loader/start.S
 )
 target_include_directories(iosim-run PRIVATE loader)

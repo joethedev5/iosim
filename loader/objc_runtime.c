@@ -475,6 +475,11 @@ void *objc_alloc(void *class_ptr)
     return obj;
 }
 
+void *objc_autorelease(void *obj)
+{
+    return obj;
+}
+
 void *objc_autoreleasePoolPush(void)
 {
     static uintptr_t token;

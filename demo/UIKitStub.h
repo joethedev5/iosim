@@ -39,6 +39,8 @@ __attribute__((objc_root_class))
 
 @interface CALayer : NSObject
 @property double cornerRadius;
+@property double opacity;
+- (void)addSublayer:(CALayer *)layer;
 @end
 
 @interface UIColor : NSObject
@@ -62,9 +64,11 @@ __attribute__((objc_root_class))
 @interface UIView : UIResponder
 - (id)initWithFrame:(CGRect)frame;
 @property CGRect frame;
+@property double alpha;
 @property(nonatomic, retain) UIColor *backgroundColor;
 @property(readonly) CALayer *layer;
 - (void)addSubview:(UIView *)view;
++ (void)animateWithDuration:(double)duration animations:(void (^)(void))animations;
 @end
 
 @interface UILabel : UIView
@@ -72,6 +76,35 @@ __attribute__((objc_root_class))
 @property(nonatomic, retain) UIColor *textColor;
 @property(nonatomic, retain) UIFont *font;
 @property int textAlignment;
+@end
+
+@interface UIViewController : NSObject
+- (id)init;
+@property(nonatomic, retain) UIView *view;
+- (void)loadView;
+- (void)viewDidLoad;
+@end
+
+enum {
+    UIControlStateNormal = 0,
+    UIControlStateHighlighted = 1
+};
+enum {
+    UIControlEventTouchUpInside = 1 << 6
+};
+enum {
+    UIButtonTypeSystem = 1
+};
+
+@interface UIControl : UIView
+- (void)addTarget:(id)target action:(SEL)action
+    forControlEvents:(unsigned long)events;
+@end
+
+@interface UIButton : UIControl
++ (id)buttonWithType:(int)type;
+- (void)setTitle:(id)title forState:(unsigned long)state;
+- (void)setTitleColor:(UIColor *)color forState:(unsigned long)state;
 @end
 
 @interface UIScene : NSObject
@@ -94,6 +127,7 @@ __attribute__((objc_root_class))
 extern id UIWindowSceneSessionRoleApplication;
 
 @interface UIWindow : UIView
+@property(nonatomic, retain) UIViewController *rootViewController;
 - (id)initWithWindowScene:(UIWindowScene *)scene;
 - (void)makeKeyAndVisible;
 @end

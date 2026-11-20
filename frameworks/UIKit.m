@@ -39,16 +39,83 @@ extern void iosim_fb_font_metrics(int style, double size_pt, double scale,
                                   int *ascent, int *descent,
                                   int *line_height);
 extern int  iosim_fb_present(const char *path);
+extern int  iosim_event_next(int *type, int *x, int *y);
+extern void iosim_fb_set_opacity(double opacity);
+extern double iosim_now(void);
+extern int  iosim_foundation_tick(void);
+extern const char *iosim_string_cstr(id string);
+extern int  strcmp(const char *a, const char *b);
 
 @class UIView;
 @class UIWindowScene;
 
+@class UIColor;
+
 @interface CALayer : NSObject {
 @public
     double _cornerRadius;
+    CGRect _frame;
+    UIColor *_backgroundColor;
+    double _opacity;
+    BOOL _hidden;
+    BOOL _masksToBounds;
+    id _sublayers[16];
+    int _sublayerCount;
+    id _animKeyPath;
+    id _animFrom;
+    id _animTo;
+    double _animStart;
+    double _animDuration;
+    double _animRepeatCount;
+    BOOL _animInfinite;
 }
 - (double)cornerRadius;
 - (void)setCornerRadius:(double)radius;
+- (CGRect)frame;
+- (void)setFrame:(CGRect)frame;
+- (void)setBackgroundColor:(UIColor *)color;
+- (UIColor *)backgroundColor;
+- (void)setOpacity:(double)opacity;
+- (double)opacity;
+- (void)setHidden:(BOOL)hidden;
+- (BOOL)isHidden;
+- (void)addSublayer:(CALayer *)layer;
+- (void)removeFromSuperlayer;
+- (void)addAnimation:(id)animation forKey:(id)key;
+- (void)removeAnimationForKey:(id)key;
+@end
+
+@interface CAMediaTimingFunction : NSObject {
+@public
+    int _kind;
+}
++ (id)functionWithName:(id)name;
+- (double)evaluate:(double)t;
+@end
+
+extern id kCAMediaTimingFunctionLinear;
+extern id kCAMediaTimingFunctionEaseIn;
+extern id kCAMediaTimingFunctionEaseOut;
+extern id kCAMediaTimingFunctionEaseInEaseOut;
+
+@interface CAAnimation : NSObject {
+@public
+    id _keyPath;
+    id _fromValue;
+    id _toValue;
+    double _duration;
+    double _repeatCount;
+    id _timingFunction;
+}
++ (id)animationWithKeyPath:(id)path;
+- (void)setFromValue:(id)value;
+- (void)setToValue:(id)value;
+- (void)setDuration:(double)duration;
+- (void)setRepeatCount:(double)count;
+- (void)setTimingFunction:(id)function;
+@end
+
+@interface CABasicAnimation : CAAnimation
 @end
 
 @interface UIColor : NSObject {
@@ -90,6 +157,11 @@ extern int  iosim_fb_present(const char *path);
     BOOL _hidden;
     double _alpha;
     CALayer *_layer;
+    BOOL _animatingAlpha;
+    double _animAlphaFrom, _animAlphaTo;
+    BOOL _animatingFrame;
+    CGRect _animFrameFrom, _animFrameTo;
+    double _animStart, _animDuration;
 }
 - (id)initWithFrame:(CGRect)frame;
 - (CGRect)frame;
@@ -103,6 +175,15 @@ extern int  iosim_fb_present(const char *path);
 - (BOOL)isHidden;
 - (void)setAlpha:(double)alpha;
 - (double)alpha;
+- (BOOL)pointInside:(CGPoint)point;
+- (UIView *)hitTest:(CGPoint)point;
++ (void)animateWithDuration:(double)duration animations:(void (^)(void))animations;
++ (void)animateWithDuration:(double)duration animations:(void (^)(void))animations
+                 completion:(void (^)(BOOL finished))completion;
++ (void)animateWithDuration:(double)duration delay:(double)delay
+                    options:(unsigned long)options
+                 animations:(void (^)(void))animations
+                 completion:(void (^)(BOOL finished))completion;
 @end
 
 @interface UILabel : UIView {
@@ -125,8 +206,61 @@ extern int  iosim_fb_present(const char *path);
 - (int)numberOfLines;
 @end
 
-@interface UIWindow : UIView
+@interface UIViewController : NSObject {
+@public
+    UIView *_view;
+    BOOL _viewLoaded;
+}
+- (id)init;
+- (UIView *)view;
+- (void)setView:(UIView *)view;
+- (void)loadView;
+- (void)viewDidLoad;
+@end
+
+enum {
+    UIControlStateNormal = 0,
+    UIControlStateHighlighted = 1
+};
+
+enum {
+    UIControlEventTouchUpInside = 1 << 6
+};
+
+enum {
+    UIButtonTypeSystem = 1
+};
+
+@interface UIControl : UIView {
+@public
+    id _target;
+    SEL _action;
+    unsigned long _controlEvents;
+}
+- (void)addTarget:(id)target action:(SEL)action
+    forControlEvents:(unsigned long)events;
+- (void)sendActionsForControlEvents:(unsigned long)events;
+@end
+
+@interface UIButton : UIControl {
+@public
+    id _title;
+    UIColor *_titleColor;
+    UILabel *_titleLabel;
+}
++ (id)buttonWithType:(int)type;
+- (void)setTitle:(id)title forState:(unsigned long)state;
+- (void)setTitleColor:(UIColor *)color forState:(unsigned long)state;
+@end
+
+@interface UIWindow : UIView {
+@public
+    UIViewController *_rootViewController;
+}
 - (id)initWithWindowScene:(UIWindowScene *)scene;
+- (void)setRootViewController:(UIViewController *)controller;
+- (UIViewController *)rootViewController;
+- (void)dispatchTapX:(int)x y:(int)y;
 - (void)makeKeyAndVisible;
 + (UIWindow *)keyWindow;
 @end
@@ -175,9 +309,93 @@ extern int UIApplicationMain(int argc, char **argv, id principal,
 
 /* ---------------------------------------------------------------- layers */
 
+static void animation_mark_active(double duration, double repeat);
+
 @implementation CALayer
+- (id)init
+{
+    self = [super init];
+    if (self)
+        _opacity = 1.0;
+    return self;
+}
 - (double)cornerRadius { return _cornerRadius; }
 - (void)setCornerRadius:(double)radius { _cornerRadius = radius; }
+- (CGRect)frame { return _frame; }
+- (void)setFrame:(CGRect)frame { _frame = frame; }
+- (void)setBackgroundColor:(UIColor *)color { _backgroundColor = color; }
+- (UIColor *)backgroundColor { return _backgroundColor; }
+- (void)setOpacity:(double)opacity { _opacity = opacity; }
+- (double)opacity { return _opacity; }
+- (void)setHidden:(BOOL)hidden { _hidden = hidden; }
+- (BOOL)isHidden { return _hidden; }
+- (void)addSublayer:(CALayer *)layer
+{
+    if (layer && _sublayerCount < 16)
+        _sublayers[_sublayerCount++] = layer;
+}
+- (void)removeFromSuperlayer { }
+- (void)addAnimation:(id)animation forKey:(id)key
+{
+    (void)key;
+    CAAnimation *anim = (CAAnimation *)animation;
+    _animKeyPath = anim->_keyPath;
+    _animFrom = anim->_fromValue;
+    _animTo = anim->_toValue;
+    _animDuration = anim->_duration;
+    _animRepeatCount = anim->_repeatCount;
+    _animStart = iosim_now();
+    _animInfinite = anim->_repeatCount < 0;
+    if (_animDuration <= 0)
+        _animDuration = 0.25;
+    animation_mark_active(_animDuration, _animRepeatCount);
+}
+- (void)removeAnimationForKey:(id)key { (void)key; _animKeyPath = nil; }
+@end
+
+id kCAMediaTimingFunctionLinear = @"linear";
+id kCAMediaTimingFunctionEaseIn = @"easeIn";
+id kCAMediaTimingFunctionEaseOut = @"easeOut";
+id kCAMediaTimingFunctionEaseInEaseOut = @"easeInEaseOut";
+
+@implementation CAMediaTimingFunction
++ (id)functionWithName:(id)name
+{
+    CAMediaTimingFunction *f = [[self alloc] init];
+    const char *s = iosim_string_cstr(name);
+    if (strcmp(s, "linear") == 0) f->_kind = 0;
+    else if (strcmp(s, "easeIn") == 0) f->_kind = 1;
+    else if (strcmp(s, "easeOut") == 0) f->_kind = 2;
+    else f->_kind = 3;
+    return f;
+}
+- (double)evaluate:(double)t
+{
+    if (t < 0) t = 0;
+    if (t > 1) t = 1;
+    if (_kind == 1) return t * t;
+    if (_kind == 2) return 1 - (1 - t) * (1 - t);
+    if (_kind == 3) return t * t * (3 - 2 * t);
+    return t;
+}
+@end
+
+@implementation CAAnimation
++ (id)animationWithKeyPath:(id)path
+{
+    CAAnimation *a = [[self alloc] init];
+    a->_keyPath = path;
+    a->_duration = 0.25;
+    return a;
+}
+- (void)setFromValue:(id)value { _fromValue = value; }
+- (void)setToValue:(id)value { _toValue = value; }
+- (void)setDuration:(double)duration { _duration = duration; }
+- (void)setRepeatCount:(double)count { _repeatCount = count; }
+- (void)setTimingFunction:(id)function { _timingFunction = function; }
+@end
+
+@implementation CABasicAnimation
 @end
 
 /* ---------------------------------------------------------------- colors */
@@ -251,6 +469,29 @@ extern int UIApplicationMain(int argc, char **argv, id principal,
 
 /* ---------------------------------------------------------------- views */
 
+static BOOL g_animating;
+static double g_animStart, g_animDuration;
+static double g_animActiveUntil;
+static BOOL g_animInfinite;
+
+static void animation_mark_active(double duration, double repeat)
+{
+    if (repeat < 0)
+        g_animInfinite = YES;
+    else
+    {
+        double total = duration * (repeat > 0 ? repeat : 1);
+        double until = iosim_now() + total;
+        if (until > g_animActiveUntil)
+            g_animActiveUntil = until;
+    }
+}
+
+int iosim_animations_active(void)
+{
+    return g_animInfinite || iosim_now() < g_animActiveUntil;
+}
+
 @implementation UIResponder
 @end
 
@@ -264,11 +505,26 @@ extern int UIApplicationMain(int argc, char **argv, id principal,
         _alpha = 1.0;
         _hidden = NO;
         _layer = [[CALayer alloc] init];
+        _layer->_frame = CGRectMake(0, 0, frame.size.width, frame.size.height);
     }
     return self;
 }
 - (CGRect)frame { return _frame; }
-- (void)setFrame:(CGRect)frame { _frame = frame; }
+- (void)setFrame:(CGRect)frame
+{
+    if (g_animating && _frame.size.width >= 0)
+    {
+        _animFrameFrom = _frame;
+        _animFrameTo = frame;
+        _animStart = g_animStart;
+        _animDuration = g_animDuration;
+        _animatingFrame = YES;
+        animation_mark_active(g_animDuration, 0);
+    }
+    _frame = frame;
+    if (_layer)
+        _layer->_frame = CGRectMake(0, 0, frame.size.width, frame.size.height);
+}
 - (CGRect)bounds
 {
     return CGRectMake(0, 0, _frame.size.width, _frame.size.height);
@@ -283,8 +539,67 @@ extern int UIApplicationMain(int argc, char **argv, id principal,
 - (CALayer *)layer { return _layer; }
 - (void)setHidden:(BOOL)hidden { _hidden = hidden; }
 - (BOOL)isHidden { return _hidden; }
-- (void)setAlpha:(double)alpha { _alpha = alpha; }
+- (void)setAlpha:(double)alpha
+{
+    if (g_animating && alpha != _alpha)
+    {
+        _animAlphaFrom = _alpha;
+        _animAlphaTo = alpha;
+        _animStart = g_animStart;
+        _animDuration = g_animDuration;
+        _animatingAlpha = YES;
+        animation_mark_active(g_animDuration, 0);
+    }
+    _alpha = alpha;
+}
 - (double)alpha { return _alpha; }
+- (BOOL)pointInside:(CGPoint)point
+{
+    return point.x >= 0 && point.y >= 0 && point.x < _frame.size.width &&
+           point.y < _frame.size.height;
+}
+- (UIView *)hitTest:(CGPoint)point
+{
+    if (_hidden || _alpha < 0.01 || ![self pointInside:point])
+        return nil;
+    for (int i = _subviewCount - 1; i >= 0; i--)
+    {
+        UIView *sub = (UIView *)_subviews[i];
+        CGPoint local = CGPointMake(point.x - sub->_frame.origin.x,
+                                    point.y - sub->_frame.origin.y);
+        UIView *hit = [sub hitTest:local];
+        if (hit)
+            return hit;
+    }
+    return self;
+}
++ (void)animateWithDuration:(double)duration animations:(void (^)(void))animations
+{
+    if (!animations)
+        return;
+    g_animating = YES;
+    g_animStart = iosim_now();
+    g_animDuration = duration;
+    animations();
+    g_animating = NO;
+    animation_mark_active(duration, 0);
+}
++ (void)animateWithDuration:(double)duration animations:(void (^)(void))animations
+                 completion:(void (^)(BOOL finished))completion
+{
+    (void)completion;
+    [self animateWithDuration:duration animations:animations];
+}
++ (void)animateWithDuration:(double)duration delay:(double)delay
+                    options:(unsigned long)options
+                 animations:(void (^)(void))animations
+                 completion:(void (^)(BOOL finished))completion
+{
+    (void)delay;
+    (void)options;
+    (void)completion;
+    [self animateWithDuration:duration animations:animations];
+}
 @end
 
 @implementation UILabel
@@ -298,6 +613,99 @@ extern int UIApplicationMain(int argc, char **argv, id principal,
 - (int)textAlignment { return _textAlignment; }
 - (void)setNumberOfLines:(int)n { _numberOfLines = n; }
 - (int)numberOfLines { return _numberOfLines; }
+- (UIView *)hitTest:(CGPoint)point
+{
+    (void)point;
+    return nil;
+}
+@end
+
+@implementation UIViewController
+- (id)init { return [super init]; }
+- (void)loadView
+{
+    _view = [[UIView alloc] initWithFrame:[[UIScreen mainScreen] bounds]];
+}
+- (UIView *)view
+{
+    if (!_view)
+        [self loadView];
+    if (_view && !_viewLoaded)
+    {
+        _viewLoaded = YES;
+        [self viewDidLoad];
+    }
+    return _view;
+}
+- (void)setView:(UIView *)view
+{
+    _view = view;
+    if (_view && !_viewLoaded)
+    {
+        _viewLoaded = YES;
+        [self viewDidLoad];
+    }
+}
+- (void)viewDidLoad
+{
+}
+@end
+
+@implementation UIControl
+- (void)addTarget:(id)target action:(SEL)action
+    forControlEvents:(unsigned long)events
+{
+    _target = target;
+    _action = action;
+    _controlEvents = events;
+}
+- (void)sendActionsForControlEvents:(unsigned long)events
+{
+    if (_target && _action && (_controlEvents & events))
+    {
+        void (*imp)(id, SEL, id) = (void (*)(id, SEL, id))objc_msgSend;
+        imp(_target, _action, self);
+    }
+}
+@end
+
+@implementation UIButton
++ (id)buttonWithType:(int)type
+{
+    (void)type;
+    UIButton *button = [[self alloc] initWithFrame:CGRectMake(0, 0, 0, 0)];
+    UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, 0, 0)];
+    label->_textAlignment = 1;
+    label->_font = [UIFont systemFontOfSize:17];
+    label->_textColor = [UIColor systemBlueColor];
+    [button addSubview:label];
+    button->_titleLabel = label;
+    [button layoutTitle];
+    return button;
+}
+- (void)layoutTitle
+{
+    if (_titleLabel)
+        _titleLabel->_frame = CGRectMake(0, 0, _frame.size.width,
+                                         _frame.size.height);
+}
+- (void)setFrame:(CGRect)frame
+{
+    [super setFrame:frame];
+    [self layoutTitle];
+}
+- (void)setTitle:(id)title forState:(unsigned long)state
+{
+    (void)state;
+    _title = title;
+    _titleLabel->_text = title;
+}
+- (void)setTitleColor:(UIColor *)color forState:(unsigned long)state
+{
+    (void)state;
+    _titleColor = color;
+    _titleLabel->_textColor = color;
+}
 @end
 
 static UIWindow *g_keyWindow;
@@ -307,6 +715,23 @@ static UIWindow *g_keyWindow;
 {
     (void)scene;
     return [self initWithFrame:[[UIScreen mainScreen] bounds]];
+}
+- (void)setRootViewController:(UIViewController *)controller
+{
+    _rootViewController = controller;
+    if (controller)
+        [self addSubview:[controller view]];
+}
+- (UIViewController *)rootViewController { return _rootViewController; }
+- (void)dispatchTapX:(int)x y:(int)y
+{
+    double scale = [[UIScreen mainScreen] scale];
+    if (scale <= 0)
+        scale = 1.0;
+    CGPoint point = CGPointMake(x / scale, y / scale);
+    UIView *hit = [self hitTest:point];
+    if (hit && [hit isKindOfClass:[UIControl class]])
+        [(UIControl *)hit sendActionsForControlEvents:UIControlEventTouchUpInside];
 }
 - (void)makeKeyAndVisible { g_keyWindow = self; }
 + (UIWindow *)keyWindow { return g_keyWindow; }
@@ -371,10 +796,8 @@ static const char *string_cstr(id object)
 {
     if (!object)
         return 0;
-    struct cf_constant_string *cs = (struct cf_constant_string *)object;
-    if (cs->flags == 0x7c8 && cs->cstr)
-        return cs->cstr;
-    return 0;
+    const char *s = iosim_string_cstr(object);
+    return (s && *s) ? s : 0;
 }
 
 static unsigned color_rgb(UIColor *color)
@@ -390,13 +813,122 @@ static unsigned color_rgb(UIColor *color)
     return ((unsigned)r << 16) | ((unsigned)g << 8) | (unsigned)b;
 }
 
+static double ease_t(double t)
+{
+    if (t < 0) t = 0;
+    if (t > 1) t = 1;
+    return t * t * (3 - 2 * t);
+}
+
+static CGRect current_frame(UIView *view)
+{
+    if (view->_animatingFrame)
+    {
+        double t = (iosim_now() - view->_animStart) / view->_animDuration;
+        if (t >= 1.0)
+        {
+            view->_animatingFrame = NO;
+            view->_frame = view->_animFrameTo;
+        }
+        else
+        {
+            double e = ease_t(t);
+            CGRect a = view->_animFrameFrom, b = view->_animFrameTo;
+            return CGRectMake(a.origin.x + (b.origin.x - a.origin.x) * e,
+                              a.origin.y + (b.origin.y - a.origin.y) * e,
+                              a.size.width + (b.size.width - a.size.width) * e,
+                              a.size.height + (b.size.height - a.size.height) * e);
+        }
+    }
+    return view->_frame;
+}
+
+static double current_alpha(UIView *view)
+{
+    if (view->_animatingAlpha)
+    {
+        double t = (iosim_now() - view->_animStart) / view->_animDuration;
+        if (t >= 1.0)
+        {
+            view->_animatingAlpha = NO;
+            view->_alpha = view->_animAlphaTo;
+        }
+        else
+            return view->_animAlphaFrom +
+                   (view->_animAlphaTo - view->_animAlphaFrom) * ease_t(t);
+    }
+    return view->_alpha;
+}
+
+static double number_value(id value, double fallback)
+{
+    if (!value)
+        return fallback;
+    return ((double (*)(id, SEL))objc_msgSend)(value, @selector(doubleValue));
+}
+
+static double layer_key_value(CALayer *layer, const char *key, double base)
+{
+    if (!layer->_animKeyPath ||
+        strcmp(iosim_string_cstr(layer->_animKeyPath), key) != 0)
+        return base;
+    double from = number_value(layer->_animFrom, base);
+    double to = number_value(layer->_animTo, base);
+    double t = (iosim_now() - layer->_animStart) / layer->_animDuration;
+    if (layer->_animRepeatCount < 0 || layer->_animRepeatCount > 1)
+    {
+        double loops = t;
+        if (loops < 0) loops = 0;
+        t = loops - (long)loops;
+    }
+    else if (t >= 1.0)
+        return to;
+    return from + (to - from) * ease_t(t);
+}
+
+static void render_layer(CALayer *layer, double parentX, double parentY,
+                         double scale, double parentAlpha)
+{
+    if (!layer || layer->_hidden)
+        return;
+    double alpha = parentAlpha * layer_key_value(layer, "opacity", layer->_opacity);
+    if (alpha <= 0.001)
+        return;
+    CGRect frame = layer->_frame;
+    int x = (int)((parentX + frame.origin.x) * scale + 0.5);
+    int y = (int)((parentY + frame.origin.y) * scale + 0.5);
+    int w = (int)(frame.size.width * scale + 0.5);
+    int h = (int)(frame.size.height * scale + 0.5);
+    iosim_fb_set_opacity(alpha);
+    if (layer->_backgroundColor && w > 0 && h > 0)
+    {
+        unsigned color = color_rgb(layer->_backgroundColor);
+        double radius = layer_key_value(layer, "cornerRadius",
+                                        layer->_cornerRadius);
+        if (radius > 0)
+            iosim_fb_fill_round_rect(x, y, w, h, (int)(radius * scale + 0.5),
+                                     color);
+        else
+            iosim_fb_fill_rect(x, y, w, h, color);
+    }
+    for (int i = 0; i < layer->_sublayerCount; i++)
+        render_layer((CALayer *)layer->_sublayers[i], parentX + frame.origin.x,
+                     parentY + frame.origin.y, scale, alpha);
+    iosim_fb_set_opacity(1.0);
+}
+
 static void render_view(UIView *view, double originX, double originY,
-                        double scale)
+                        double scale, double parentAlpha)
 {
     if (!view || view->_hidden)
         return;
 
-    CGRect frame = view->_frame;
+    double alpha = parentAlpha * current_alpha(view);
+    if (alpha <= 0.001)
+        return;
+    iosim_fb_set_opacity(alpha);
+
+    CGRect frame = current_frame(view);
     int x = (int)((originX + frame.origin.x) * scale + 0.5);
     int y = (int)((originY + frame.origin.y) * scale + 0.5);
     int w = (int)(frame.size.width * scale + 0.5);
@@ -413,6 +945,14 @@ static void render_view(UIView *view, double originX, double originY,
                                      color);
         else
             iosim_fb_fill_rect(x, y, w, h, color);
+    }
+
+    if (view->_layer)
+    {
+        for (int i = 0; i < view->_layer->_sublayerCount; i++)
+            render_layer((CALayer *)view->_layer->_sublayers[i],
+                         originX + frame.origin.x, originY + frame.origin.y,
+                         scale, alpha);
     }
 
     if ([view isKindOfClass:[UILabel class]])
@@ -454,8 +994,9 @@ static void render_view(UIView *view, double originX, double originY,
     {
         UIView *sub = (UIView *)view->_subviews[i];
         render_view(sub, originX + frame.origin.x, originY + frame.origin.y,
-                    scale);
+                    scale, alpha);
     }
+    iosim_fb_set_opacity(1.0);
 }
 
 int UIApplicationMain(int argc, char **argv, id principal, id delegateName)
@@ -527,7 +1068,7 @@ int UIApplicationMain(int argc, char **argv, id principal, id delegateName)
     int fbWidth = pw ? atoi(pw) : 1206;
     int fbHeight = ph ? atoi(ph) : 2622;
     iosim_fb_begin((unsigned)fbWidth, (unsigned)fbHeight);
-    render_view(window, 0, 0, scale);
+    render_view(window, 0, 0, scale, 1.0);
 
     /* Simulated device chrome: status bar, Dynamic Island, home indicator. */
     int margin = (int)(24 * scale);
@@ -573,5 +1114,30 @@ int UIApplicationMain(int argc, char **argv, id principal, id delegateName)
     printf("[UIKit-lite] UIApplicationMain argc=%d delegate=%p window=%p\n",
            argc, delegate, window);
     printf("[UIKit-lite] rendered app frame at %.1fx scale\n", scale);
+
+    if (getenv("IOSIM_EVENT_FIFO") && window)
+    {
+        int type = 0, x = 0, y = 0;
+        int r;
+        while ((r = iosim_event_next(&type, &x, &y)) != 0)
+        {
+            int redraw = 0;
+            if (r == 1 && type == 1)
+            {
+                [window dispatchTapX:x y:y];
+                redraw = 1;
+            }
+            if (iosim_foundation_tick())
+                redraw = 1;
+            if (iosim_animations_active())
+                redraw = 1;
+            if (!redraw)
+                continue;
+            iosim_fb_set_opacity(1.0);
+            render_view(window, 0, 0, scale, 1.0);
+            if (path && *path)
+                iosim_fb_present(path);
+        }
+    }
     return 0;
 }

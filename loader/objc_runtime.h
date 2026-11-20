@@ -26,6 +26,7 @@ void  objc_setProperty_atomic_copy(void *self, void *sel, void *value, long offs
 void *objc_alloc_init(void *cls);
 void *objc_alloc(void *cls);
 void *objc_autoreleasePoolPush(void);
+void *objc_autorelease(void *obj);
 void  objc_autoreleasePoolPop(void *pool);
 void *objc_retain(void *obj);
 void  objc_release(void *obj);

@@ -27,7 +27,7 @@ build_dylib() {
   src="$1"; out="$2"; install="$3"; shift 3
   obj="$B/$(basename "$src" | sed 's/\.[cm]$//').o"
   case "$src" in
-    *.m) objcflags="-fobjc-runtime=ios-18.0 -fno-objc-arc" ;;
+    *.m) objcflags="-fobjc-runtime=ios-18.0 -fno-objc-arc -fblocks" ;;
     *)   objcflags="" ;;
   esac
   "$CC" -target "$SDK_TARGET" -ffreestanding -fPIC -O2 $objcflags \

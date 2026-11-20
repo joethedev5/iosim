@@ -10,6 +10,7 @@
 #include <zlib.h>
 
 static uint32_t *fb_pixels;
+static double fb_opacity = 1.0;
 static unsigned fb_width;
 static unsigned fb_height;
 
@@ -34,6 +35,28 @@ void iosim_fb_release(void)
     fb_width = fb_height = 0;
 }
 
+void iosim_fb_set_opacity(double opacity)
+{
+    if (opacity < 0)
+        opacity = 0;
+    if (opacity > 1)
+        opacity = 1;
+    fb_opacity = opacity;
+}
+
+static uint32_t blend_color(uint32_t color, double alpha)
+{
+    if (alpha >= 0.999)
+        return color;
+    if (alpha <= 0)
+        return 0;
+    unsigned a = (unsigned)(alpha * 255.0 + 0.5);
+    unsigned r = ((color >> 16) & 0xFF) * a / 255;
+    unsigned g = ((color >> 8) & 0xFF) * a / 255;
+    unsigned b = (color & 0xFF) * a / 255;
+    return (r << 16) | (g << 8) | b;
+}
+
 void iosim_fb_clear(uint32_t color)
 {
     if (!fb_pixels)
@@ -51,11 +74,30 @@ void iosim_fb_fill_rect(int x, int y, int w, int h, uint32_t color)
     int y0 = y < 0 ? 0 : y;
     int x1 = x + w > (int)fb_width ? (int)fb_width : x + w;
     int y1 = y + h > (int)fb_height ? (int)fb_height : y + h;
+    if (fb_opacity >= 0.999)
+    {
+        for (int yy = y0; yy < y1; yy++)
+        {
+            uint32_t *row = fb_pixels + (size_t)yy * fb_width;
+            for (int xx = x0; xx < x1; xx++)
+                row[xx] = color;
+        }
+        return;
+    }
+    unsigned fa = (unsigned)(fb_opacity * 255.0 + 0.5);
+    unsigned fr = (color >> 16) & 0xFF, fg = (color >> 8) & 0xFF,
+             fb = color & 0xFF;
     for (int yy = y0; yy < y1; yy++)
     {
         uint32_t *row = fb_pixels + (size_t)yy * fb_width;
         for (int xx = x0; xx < x1; xx++)
-            row[xx] = color;
+        {
+            uint32_t dst = row[xx];
+            unsigned r = (fr * fa + ((dst >> 16) & 0xFF) * (255 - fa) + 127) / 255;
+            unsigned g = (fg * fa + ((dst >> 8) & 0xFF) * (255 - fa) + 127) / 255;
+            unsigned b = (fb * fa + (dst & 0xFF) * (255 - fa) + 127) / 255;
+            row[xx] = (r << 16) | (g << 8) | b;
+        }
     }
 }
 
@@ -96,7 +138,7 @@ void iosim_fb_fill_round_rect(int x, int y, int w, int h, int radius,
             double outside = __builtin_sqrt(ax * ax + ay * ay);
             double inside = qx > qy ? qx : qy;
             double d = outside + (inside < 0 ? inside : 0) - radius;
-            double coverage = 0.5 - d;
+            double coverage = (0.5 - d) * fb_opacity;
             if (coverage <= 0)
                 continue;
             if (coverage >= 1)
@@ -134,7 +176,7 @@ void iosim_fb_fill_circle(int cx, int cy, int radius, uint32_t color)
         {
             double dx = x + 0.5 - cx;
             double d = __builtin_sqrt(dx * dx + dy * dy) - radius;
-            double coverage = 0.5 - d;
+            double coverage = (0.5 - d) * fb_opacity;
             if (coverage <= 0)
                 continue;
             if (coverage >= 1)
@@ -720,7 +762,7 @@ void iosim_fb_font_text(int x, int baseline_y, const char *text, int style,
                 int xx = gx + (int)col;
                 if (xx < 0 || xx >= (int)fb_width)
                     continue;
-                unsigned a = src[col];
+                unsigned a = (unsigned)(src[col] * fb_opacity + 0.5);
                 if (!a)
                     continue;
                 uint32_t d = dst[xx];

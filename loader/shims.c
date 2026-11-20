@@ -3,6 +3,7 @@
 #include "macho.h"
 #include "objc_runtime.h"
 #include "framebuffer.h"
+#include "events.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -12,8 +13,13 @@
 #include <time.h>
 #include <unistd.h>
 #include <math.h>
+#include <time.h>
+#include <stdarg.h>
 
 void  *objc_opt_class(void *obj);
+double iosim_now(void);
+void *_Block_copy(void *block);
+void _Block_release(void *block);
 struct iosim_sincos_result { double sin_value; double cos_value; };
 struct iosim_sincos_result __sincos_stret(double x);
 
@@ -214,6 +220,9 @@ static int shim_UIApplicationMain(int argc, char **argv, void *principalClass,
 }
 
 static char shim_CFConstantStringClassReference[8];
+static char shim_NSConcreteStackBlock[64];
+static char shim_NSConcreteGlobalBlock[64];
+static char shim_NSConcreteMallocBlock[64];
 
 /* ---------- sysctl (small subset used by startup code) ---------- */
 
@@ -331,12 +340,16 @@ static const struct iosim_shim shims[] = {
     SHIM_ALIAS("NSLog", NSLog),
     SHIM_ALIAS("UIApplicationMain", UIApplicationMain),
     SHIM_ALIAS("__CFConstantStringClassReference", CFConstantStringClassReference),
+    SHIM_ALIAS("_NSConcreteStackBlock", NSConcreteStackBlock),
+    SHIM_ALIAS("_NSConcreteGlobalBlock", NSConcreteGlobalBlock),
+    SHIM_ALIAS("_NSConcreteMallocBlock", NSConcreteMallocBlock),
     SHIM_DIRECT(iosim_fb_begin),
     SHIM_DIRECT(iosim_fb_release),
     SHIM_DIRECT(iosim_fb_clear),
     SHIM_DIRECT(iosim_fb_fill_rect),
     SHIM_DIRECT(iosim_fb_fill_round_rect),
     SHIM_DIRECT(iosim_fb_fill_circle),
+    SHIM_DIRECT(iosim_fb_set_opacity),
     SHIM_DIRECT(__sincos_stret),
     SHIM_DIRECT(iosim_fb_text),
     SHIM_DIRECT(iosim_fb_text_width),
@@ -344,6 +357,27 @@ static const struct iosim_shim shims[] = {
     SHIM_DIRECT(iosim_fb_font_text),
     SHIM_DIRECT(iosim_fb_font_metrics),
     SHIM_DIRECT(iosim_fb_present),
+    SHIM_DIRECT(iosim_event_next),
+    SHIM_DIRECT(_Block_copy),
+    SHIM_DIRECT(_Block_release),
+    SHIM_DIRECT(iosim_now),
+    SHIM_DIRECT(malloc),
+    SHIM_DIRECT(calloc),
+    SHIM_DIRECT(realloc),
+    SHIM_DIRECT(free),
+    SHIM_DIRECT(strlen),
+    SHIM_DIRECT(strcmp),
+    SHIM_DIRECT(strncmp),
+    SHIM_DIRECT(strcpy),
+    SHIM_DIRECT(strncpy),
+    SHIM_DIRECT(strcat),
+    SHIM_DIRECT(memcpy),
+    SHIM_DIRECT(memmove),
+    SHIM_DIRECT(memset),
+    SHIM_DIRECT(snprintf),
+    SHIM_DIRECT(vsnprintf),
+    SHIM_DIRECT(strtol),
+    SHIM_DIRECT(strtod),
     SHIM_DIRECT(objc_msgSend),
     SHIM_DIRECT(objc_msgSendSuper2),
     SHIM_DIRECT(objc_msgSend_stret),
@@ -359,6 +393,9 @@ static const struct iosim_shim shims[] = {
     SHIM_DIRECT(objc_setProperty_atomic_copy),
     SHIM_DIRECT(objc_alloc_init),
     SHIM_DIRECT(objc_alloc),
+    SHIM_DIRECT(objc_autorelease),
+    SHIM_DIRECT(objc_retain),
+    SHIM_DIRECT(objc_release),
     SHIM_DIRECT(objc_autoreleasePoolPush),
     SHIM_DIRECT(objc_autoreleasePoolPop),
     SHIM_DIRECT(objc_retain),
@@ -396,4 +433,21 @@ struct iosim_sincos_result __sincos_stret(double x)
     r.sin_value = s;
     r.cos_value = c;
     return r;
+}
+
+double iosim_now(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec + ts.tv_nsec / 1e9;
+}
+
+void *_Block_copy(void *block)
+{
+    return block;
+}
+
+void _Block_release(void *block)
+{
+    (void)block;
 }
