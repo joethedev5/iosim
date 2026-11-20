@@ -754,9 +754,14 @@ typedef enum {
     UIColor *_textColor;
     UIFont *_font;
     BOOL _editable;
+    NSRange _selectedRange;
+    double _lastTapTime;
+    unsigned long _lastTapIndex;
 }
 - (id)text;
 - (void)setText:(id)text;
+- (NSRange)selectedRange;
+- (void)setSelectedRange:(NSRange)range;
 - (UIFont *)font;
 - (void)setFont:(UIFont *)font;
 - (UIColor *)textColor;
@@ -3561,20 +3566,126 @@ static id g_firstResponder;
 /* Editable multiline text view: text is appended at the end, wrapped with
  * spaces preserved, and drawn with a caret while first responder. */
 @implementation UITextView
+static unsigned long text_byte_length(id text)
+{
+    const char *s = text ? iosim_string_cstr(text) : 0;
+    return s ? strlen(s) : 0;
+}
+
+static int text_ascii_alnum(char c)
+{
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+           (c >= '0' && c <= '9') || c == '_';
+}
+
+static NSRange text_word_range(const char *text, unsigned long index)
+{
+    unsigned long length = text ? strlen(text) : 0;
+    if (!text || length == 0)
+        return NSMakeRange(0, 0);
+    if (index > length)
+        index = length;
+    unsigned long start = index;
+    unsigned long end = index;
+    while (start > 0 && text_ascii_alnum(text[start - 1]))
+        start--;
+    while (end < length && text_ascii_alnum(text[end]))
+        end++;
+    if (start == end && start > 0)
+        start--;
+    if (start == end && end < length)
+        end++;
+    return NSMakeRange(start, end - start);
+}
+
+static unsigned long text_index_at_point(UITextView *editor, CGPoint point)
+{
+    const char *text = editor->_text ? iosim_string_cstr(editor->_text) : "";
+    if (!text)
+        return 0;
+    unsigned long length = strlen(text);
+    double scale = [[UIScreen mainScreen] scale];
+    if (scale <= 0)
+        scale = 1.0;
+    double points = editor->_font ? editor->_font->_size : 17.0;
+    int style = editor->_font && editor->_font->_bold ? IOSIM_FONT_BOLD
+                                                       : IOSIM_FONT_REGULAR;
+    int ascent = 0, descent = 0, lineHeight = 0;
+    iosim_fb_font_metrics(style, points, scale, &ascent, &descent,
+                          &lineHeight);
+    double line_height_pts = lineHeight / scale;
+    if (line_height_pts <= 0)
+        return length;
+    double width = editor->_frame.size.width - 24.0;
+    if (width <= 0)
+        return length;
+    char lines[IOSIM_MAX_WRAP_LINES][256];
+    int count = wrap_editable_lines(text, style, points, scale,
+                                   (int)(width * scale + 0.5), lines,
+                                   IOSIM_MAX_WRAP_LINES);
+    if (count <= 0)
+        return 0;
+    int line = (int)((point.y - 12.0) / line_height_pts);
+    if (line < 0)
+        return 0;
+    if (line >= count)
+        return length;
+    unsigned long start = 0;
+    for (int i = 0; i < line; i++)
+        start += strlen(lines[i]) + 1;
+    if (start > length)
+        start = length;
+    const char *line_text = lines[line];
+    double target = point.x - 12.0;
+    unsigned long prefix = 0;
+    char probe[256];
+    while (line_text[prefix])
+    {
+        int n = (int)prefix + 1;
+        if (n > 255)
+            break;
+        memcpy(probe, line_text, (unsigned long)n);
+        probe[n] = 0;
+        int width_px = iosim_fb_font_text_width(probe, style, points, scale);
+        if (width_px / scale > target)
+            break;
+        prefix++;
+    }
+    unsigned long index = start + prefix;
+    return index > length ? length : index;
+}
+
 - (id)initWithFrame:(CGRect)frame
 {
     self = [super initWithFrame:frame];
     if (self)
     {
-        _text = [NSString stringWithUTF8String:""];
+        _text = [NSString stringWithUTF8String:@""];
         _font = [UIFont systemFontOfSize:17];
         _textColor = [UIColor whiteColor];
         _editable = YES;
+        _selectedRange = NSMakeRange(0, 0);
     }
     return self;
 }
 - (id)text { return _text; }
-- (void)setText:(id)text { _text = text; }
+- (void)setText:(id)text
+{
+    _text = text;
+    _selectedRange = NSMakeRange(text_byte_length(text), 0);
+    _needsLayout = YES;
+}
+- (NSRange)selectedRange { return _selectedRange; }
+- (void)setSelectedRange:(NSRange)range
+{
+    unsigned long length = text_byte_length(_text);
+    if (range.location > length)
+        range.location = length;
+    if (range.length > length - range.location)
+        range.length = length - range.location;
+    _selectedRange = range;
+    _needsLayout = YES;
+}
 - (UIFont *)font { return _font; }
 - (void)setFont:(UIFont *)font { _font = font; }
 - (UIColor *)textColor { return _textColor; }
@@ -3597,33 +3708,96 @@ static id g_firstResponder;
 - (BOOL)isFirstResponder { return g_firstResponder == self; }
 - (void)touchesBegan:(NSSet *)touches withEvent:(UIEvent *)event
 {
-    (void)touches;
     (void)event;
+    UITouch *touch = [touches anyObject];
+    CGPoint point = touch ? [touch locationInView:self] : CGPointMake(0, 0);
+    const char *text = _text ? iosim_string_cstr(_text) : "";
+    unsigned long index = text_index_at_point(self, point);
+    double now = iosim_now();
+    if (now - _lastTapTime < 0.35)
+    {
+        NSRange word = text_word_range(text, index);
+        if (word.length > 0)
+        {
+            [self setSelectedRange:word];
+            _lastTapIndex = index;
+        }
+        else
+        {
+            [self setSelectedRange:NSMakeRange(index, 0)];
+        }
+    }
+    else
+    {
+        [self setSelectedRange:NSMakeRange(index, 0)];
+        _lastTapIndex = index;
+    }
+    _lastTapTime = now;
     if (_editable)
         [self becomeFirstResponder];
+    _needsLayout = YES;
 }
 - (void)insertText:(id)text
 {
     if (!text)
         return;
-    if (_text)
-        _text = [_text stringByAppendingString:text];
-    else
-        _text = text;
+    const char *add = iosim_string_cstr(text);
+    if (!add)
+        return;
+    const char *current = _text ? iosim_string_cstr(_text) : "";
+    if (!current)
+        current = "";
+    unsigned long length = strlen(current);
+    unsigned long location = _selectedRange.location;
+    unsigned long selected = _selectedRange.length;
+    if (location > length)
+        location = length;
+    if (selected > length - location)
+        selected = length - location;
+    unsigned long add_len = strlen(add);
+    char *copy = malloc(length - selected + add_len + 1);
+    if (!copy)
+        return;
+    memcpy(copy, current, location);
+    memcpy(copy + location, add, add_len);
+    memcpy(copy + location + add_len, current + location + selected,
+           length - location - selected);
+    copy[length - selected + add_len] = 0;
+    _text = [NSString stringWithUTF8String:copy];
+    free(copy);
+    _selectedRange = NSMakeRange(location + add_len, 0);
+    _needsLayout = YES;
 }
 - (void)deleteBackward
 {
     const char *current = _text ? iosim_string_cstr(_text) : "";
-    unsigned long length = strlen(current);
-    if (length == 0)
+    if (!current)
         return;
-    char *copy = malloc(length);
+    unsigned long length = strlen(current);
+    unsigned long location = _selectedRange.location;
+    unsigned long selected = _selectedRange.length;
+    if (location > length)
+        location = length;
+    if (selected > length - location)
+        selected = length - location;
+    if (selected == 0)
+    {
+        if (location == 0)
+            return;
+        location--;
+        selected = 1;
+    }
+    char *copy = malloc(length - selected + 1);
     if (!copy)
         return;
-    memcpy(copy, current, length - 1);
-    copy[length - 1] = 0;
+    memcpy(copy, current, location);
+    memcpy(copy + location, current + location + selected,
+           length - location - selected);
+    copy[length - selected] = 0;
     _text = [NSString stringWithUTF8String:copy];
     free(copy);
+    _selectedRange = NSMakeRange(location, 0);
+    _needsLayout = YES;
 }
 @end
 
@@ -9771,6 +9945,46 @@ static void render_view(UIView *view, double originX, double originY,
         int n = wrap_editable_lines(text ? text : "", style, points, scale,
                                     w - 2 * inset, lines,
                                     IOSIM_MAX_WRAP_LINES);
+        NSRange selection = editor->_selectedRange;
+        unsigned long text_length = text ? strlen(text) : 0;
+        if (selection.location > text_length)
+            selection.location = text_length;
+        if (selection.length > text_length - selection.location)
+            selection.length = text_length - selection.location;
+        unsigned long selection_start = selection.location;
+        unsigned long selection_end = selection.location + selection.length;
+
+        unsigned long line_start = 0;
+        for (int i = 0; i < n; i++)
+        {
+            int length = (int)strlen(lines[i]);
+            unsigned long line_end = line_start + (unsigned long)length;
+            unsigned long highlight_start =
+                selection_start > line_start ? selection_start : line_start;
+            unsigned long highlight_end =
+                selection_end < line_end ? selection_end : line_end;
+            if (selection.length > 0 && highlight_end > highlight_start)
+            {
+                int prefix = (int)(highlight_start - line_start);
+                int span = (int)(highlight_end - highlight_start);
+                char before[256], selected_text[256];
+                if (prefix > 255) prefix = 255;
+                if (span > 255) span = 255;
+                memcpy(before, lines[i], (unsigned long)prefix);
+                before[prefix] = 0;
+                memcpy(selected_text, lines[i] + prefix, (unsigned long)span);
+                selected_text[span] = 0;
+                int before_width = iosim_fb_font_text_width(
+                    before, style, points, scale);
+                int span_width = iosim_fb_font_text_width(
+                    selected_text, style, points, scale);
+                iosim_fb_fill_rect(x + inset + before_width,
+                                   y + inset + i * lineHeight,
+                                   span_width, lineHeight, 0x33507a);
+            }
+            line_start = line_end + 1;
+        }
+
         int caretX = x + inset;
         int caretBaseline = y + inset + ascent;
         for (int i = 0; i < n; i++)
@@ -9782,6 +9996,34 @@ static void render_view(UIView *view, double originX, double originY,
             caretX = tx + iosim_fb_font_text_width(lines[i], style, points,
                                                    scale);
             caretBaseline = baseline;
+        }
+        if (selection.length > 0 || selection.location != text_length)
+        {
+            unsigned long caret_index =
+                selection.location + selection.length;
+            unsigned long remaining = caret_index;
+            line_start = 0;
+            for (int i = 0; i < n; i++)
+            {
+                int length = (int)strlen(lines[i]);
+                if (remaining <= (unsigned long)length || i == n - 1)
+                {
+                    int offset = (int)(remaining > (unsigned long)length
+                                           ? (unsigned long)length
+                                           : remaining);
+                    char prefix[256];
+                    if (offset > 255) offset = 255;
+                    memcpy(prefix, lines[i], (unsigned long)offset);
+                    prefix[offset] = 0;
+                    caretX = x + inset + iosim_fb_font_text_width(
+                        prefix, style, points, scale);
+                    caretBaseline = y + inset + i * lineHeight + ascent;
+                    break;
+                }
+                remaining -= (unsigned long)length;
+                if (remaining > 0)
+                    remaining--;
+            }
         }
         if (g_firstResponder == editor)
             iosim_fb_fill_rect(caretX + (int)(1 * scale),

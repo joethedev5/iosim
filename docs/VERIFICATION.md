@@ -304,6 +304,17 @@ riser and top hook); shift, delete, emoji and mic are drawn from measured
 glyph bounds as well. The residual is concentrated on glyph antialiasing and
 the sub-pixel key edges.
 
+### Text input: UITextView selection
+
+`tests/textview_selection_test.m` starts with `hello world`: `setText:`
+leaves the caret at 11, `setSelectedRange:{6,5}` stores `6 5`, and inserting
+`there` replaces `world` to produce `hello there` with the caret at 11.
+Selecting `{0,6}` and deleting leaves `there` with caret 0; setting `{99,5}`
+clamps to `5 0`. `tests/textview_selection_visual_test.m` places a 24 pt
+`hello world` view with `{6,5}` selected, captures a PNG through a later
+sibling view and the suite finds 12960 pixels of the `#33507a` selection
+highlight in the text region.
+
 ### Text input: multiline UITextView and hardware keys
 
 `demo/TextViewApp.m` puts a multiline `UITextView` on screen and reports its

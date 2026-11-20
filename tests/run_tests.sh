@@ -3323,6 +3323,54 @@ else
     echo "FAIL NSString drawing"; echo "$out"; fails=$((fails+1))
 fi
 
+# ---------- 38. UITextView selection ----------
+"$ROOT/tools/build_app.sh" "$ROOT/tests/textview_selection_test.m" \
+    "$T/textview_selection_test" >/dev/null
+out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" \
+    "$T/textview_selection_test" 2>&1)"
+check "[sel] initial 11 0" "$out" \
+    "setText: places the caret at the end of the text"
+check "[sel] set 6 5" "$out" \
+    "setSelectedRange: stores the requested range"
+check "[sel] replaced hello there 11 0" "$out" \
+    "insertText: replaces the selected range and collapses the caret"
+check "[sel] deleted there 0 0" "$out" \
+    "deleteBackward removes the selected range"
+check "[sel] clamped 5 0" "$out" \
+    "setSelectedRange: clamps a range past the text length"
+
+"$ROOT/tools/build_app.sh" "$ROOT/tests/textview_selection_visual_test.m" \
+    "$T/textview_selection_visual_test" >/dev/null
+out="$(IOSIM_TEST_PNG="$T/textview_selection.png" \
+    DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" \
+    "$T/textview_selection_visual_test" 2>&1)"
+check "[sel] range 6 5" "$out" \
+    "a UITextView carries its selectedRange into the render pass"
+check "[sel] png written" "$out" \
+    "the selected UITextView frame is captured"
+if out="$(python3 - "$ROOT/tools" "$T/textview_selection.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+count = 0
+for y in range(100 * 3, 260 * 3):
+    for x in range(24 * 3, 344 * 3):
+        c = pngpixel.px(rows, bpp, x, y)
+        r, g, b = ((c >> 16) & 255), ((c >> 8) & 255), (c & 255)
+        if abs(r - 0x33) < 25 and abs(g - 0x50) < 25 and abs(b - 0x7a) < 25:
+            count += 1
+if count < 500:
+    raise SystemExit("selection highlight not visible: %d" % count)
+print("ok   UITextView selection paints %d highlight pixels:" % count)
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL UITextView selection rendering"; echo "$out"
+    fails=$((fails+1))
+fi
+
 if [ "$fails" -ne 0 ]; then
     echo "$fails test(s) failed" >&2
     exit 1

@@ -9,6 +9,13 @@ typedef struct {
     unsigned long length;
 } NSRange;
 
+static inline NSRange NSMakeRange(unsigned long location,
+                                  unsigned long length)
+{
+    NSRange range = { location, length };
+    return range;
+}
+
 __attribute__((objc_root_class))
 @interface NSObject {
     Class isa;
@@ -338,6 +345,7 @@ enum {
 @property(nonatomic, retain) id text;
 @property(nonatomic, retain) UIColor *textColor;
 @property(nonatomic, retain) UIFont *font;
+@property NSRange selectedRange;
 - (void)setEditable:(BOOL)editable;
 - (void)insertText:(id)text;
 - (void)deleteBackward;

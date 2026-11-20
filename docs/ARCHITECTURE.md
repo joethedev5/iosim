@@ -863,11 +863,15 @@ shift/delete keys, a 24 pt predictive bar and measured return, shift, delete,
 emoji and mic artwork.
 
 `UITextView` shares the first-responder role. Touching an editable text view
-focuses it; `insertText:` appends at the end and `deleteBackward:` removes the
-last character. The return key inserts a newline instead of ending editing,
-which `UITextField` does. The renderer wraps the stored text preserving spaces
-(breaking at the last space that fits) and draws a caret at the insertion
-point. Hardware input reaches both views through `ui key` records, which
+focuses it and maps the touch to a byte index in the wrapped text; a second
+tap within 350 ms selects the word under the finger. `selectedRange` can be
+set programmatically and is clamped to the text length. `insertText:`
+replaces the selected range and `deleteBackward:` removes it (or the
+character before a collapsed caret). The return key inserts a newline instead
+of ending editing, which `UITextField` does. The renderer wraps the stored
+text preserving spaces (breaking at the last space that fits), paints a
+selected-range highlight behind the text and draws the caret at the selection
+end. Hardware input reaches both views through `ui key` records, which
 `iosimctl` emits per character (`key return` for a newline, `key space` for a
 space) and `ui backspace`; the on-screen keyboard taps use the same edit
 methods.
@@ -1049,8 +1053,9 @@ Python for iteration speed.
   `$HOME/Library/Preferences`; binary property lists are not parsed.
 - Auto Layout is a relaxation solver over anchors and guides, not Cassowary;
   it does not cover every UIKit layout API or content-size class.
-- Text input is `UITextField` and an append-only `UITextView`; selection
-  handles, text selection and multitap gestures are absent.
+- Text input is `UITextField` and `UITextView` with caret positioning,
+  programmatic/double-tap selection and selected-range editing; selection
+  handles, drag selection and the full multitap gesture set are absent.
 - Darwin syscall differences are hidden by glibc for simple calls, but
   `stat`, `pthread`, `kqueue`, `mmap` flags and Mach traps need explicit
   translation.

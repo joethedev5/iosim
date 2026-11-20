@@ -270,7 +270,10 @@ resolved from `__objc_catlist` by category symbol name, and NSString
 sizeWithAttributes:/drawAtPoint: renders through the CGContext text bridge,
 and drawInRect:/boundingRectWithSize: word-wrap paragraphs. Device RGB/gray
 color spaces, CGColorCreate, CGPath bounding boxes, containment and copies
-are covered. Still missing: non-rect path clipping and color management.
+are covered. UITextView maps taps to byte indices, selects words on a second
+tap, clamps programmatic selectedRange and replaces/removes selected ranges;
+the renderer paints the selection highlight. Still missing: non-rect path
+clipping and color management.
 
 ## Open directions
 
