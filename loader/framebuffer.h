@@ -45,6 +45,8 @@ int  iosim_fb_height(void);
 #define IOSIM_FONT_SEMIBOLD 2
 int  iosim_fb_font_text_width(const char *text, int style, double size_pt,
                               double scale);
+int  iosim_fb_font_text_width_untracked(const char *text, int style,
+                                       double size_pt, double scale);
 void iosim_fb_font_text(int x, int baseline_y, const char *text, int style,
                         double size_pt, double scale, uint32_t color);
 void iosim_fb_font_metrics(int style, double size_pt, double scale,

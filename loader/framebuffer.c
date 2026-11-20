@@ -691,6 +691,38 @@ int iosim_fb_font_text_width(const char *text, int style, double size_pt,
     return (int)((pen + 32) >> 6);
 }
 
+int iosim_fb_font_text_width_untracked(const char *text, int style,
+                                       double size_pt, double scale)
+{
+    if (!text || !*text)
+        return 0;
+    if (!set_face_pixels(style, size_pt, scale))
+        return iosim_fb_text_width(text, (int)(size_pt * scale / 12.0 + 0.5));
+    FT_Face face = g_faces[style].face;
+    FT_UInt prev = 0;
+    int64_t pen = 0;
+    const unsigned char *p = (const unsigned char *)text;
+    while (*p)
+    {
+        uint32_t cp = utf8_next(&p);
+        if (cp == '\n')
+            continue;
+        FT_UInt glyph = FT_Get_Char_Index(face, cp);
+        if (!glyph)
+            glyph = FT_Get_Char_Index(face, '?');
+        if (prev)
+        {
+            FT_Vector kern;
+            if (FT_Get_Kerning(face, prev, glyph, FT_KERNING_UNFITTED, &kern) == 0)
+                pen += kern.x;
+        }
+        if (FT_Load_Glyph(face, glyph, FT_LOAD_NO_HINTING | FT_LOAD_NO_BITMAP) == 0)
+            pen += face->glyph->advance.x;
+        prev = glyph;
+    }
+    return (int)((pen + 32) >> 6);
+}
+
 void iosim_fb_font_text(int x, int baseline_y, const char *text, int style,
                         double size_pt, double scale, uint32_t color)
 {

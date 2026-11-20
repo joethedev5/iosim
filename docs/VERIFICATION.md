@@ -98,8 +98,8 @@ from UIKit.
 
 | Metric | Value |
 |---|---|
-| Mean absolute channel error | **<!--GRAPHICS_MEAN--> / 255** |
-| Pixels with max-channel error > 24 | **<!--GRAPHICS_BAD--> %** |
+| Mean absolute channel error | **3.71 / 255** |
+| Pixels with max-channel error > 24 | **3.33 %** |
 | Geometry | layer frames, gradient direction, path vertices equal |
 | Remaining difference | glyph edges and the live status-bar clock when unpinned |
 
@@ -116,8 +116,8 @@ frame renders the highlight.
 
 | Metric | Value |
 |---|---|
-| Mean absolute channel error | **<!--LIST_MEAN--> / 255** |
-| Pixels with max-channel error > 24 | **<!--LIST_BAD--> %** |
+| Mean absolute channel error | **4.85 / 255** |
+| Pixels with max-channel error > 24 | **3.55 %** |
 | Text | same SFUI outlines, same per-size tracking, same cell metrics |
 
 ### Services: dispatch, Mach, bootstrap and XPC

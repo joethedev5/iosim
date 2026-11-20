@@ -1173,7 +1173,7 @@ int iosim_animations_active(void)
         {
             _detailTextLabel =
                 [[UILabel alloc] initWithFrame:CGRectMake(16, 22, 200, 18)];
-            _detailTextLabel->_font = [UIFont systemFontOfSize:14];
+            _detailTextLabel->_font = [UIFont systemFontOfSize:15];
             _detailTextLabel->_textColor =
                 [UIColor colorWithRed:0.55 green:0.58 blue:0.64 alpha:1.0];
             [self addSubview:_detailTextLabel];
@@ -1748,11 +1748,6 @@ static void render_view(UIView *view, double originX, double originY,
             }
             int ry = y + (int)(i * rowHeight * scale + 0.5);
             int rh = (int)(rowHeight * scale + 0.5);
-            if (i == table->_selectedRow)
-            {
-                iosim_fb_set_opacity(alpha);
-                iosim_fb_fill_rect(x, ry, w, rh, 0x2c2c2e);
-            }
             UITableViewCell *cell = nil;
             if (table->_dataSource &&
                 [table->_dataSource respondsToSelector:
@@ -1767,8 +1762,13 @@ static void render_view(UIView *view, double originX, double originY,
                 cell->_frame = CGRectMake(0, i * rowHeight,
                                           frame.size.width, rowHeight);
                 [cell setFrame:cell->_frame];
+                UIColor *savedBackground = cell->_backgroundColor;
+                if (i == table->_selectedRow)
+                    cell->_backgroundColor = [UIColor
+                        colorWithRed:0.17 green:0.18 blue:0.20 alpha:1.0];
                 render_view(cell, originX + frame.origin.x,
                             originY + frame.origin.y, scale, alpha);
+                cell->_backgroundColor = savedBackground;
             }
             iosim_fb_set_opacity(alpha);
             iosim_fb_fill_rect(x + (int)(16 * scale), ry + rh - 1,
@@ -1863,17 +1863,34 @@ static void draw_device_chrome(int fbWidth, double scale)
                                                 : 18.0;
     double timeBaseline = getenv("IOSIM_TIME_BASELINE")
                               ? atof(getenv("IOSIM_TIME_BASELINE")) : 38.9;
-    int timeWidth = iosim_fb_font_text_width("9:41", IOSIM_FONT_SEMIBOLD,
+    const char *statusTime = getenv("IOSIM_STATUS_TIME");
+    if (!statusTime || !*statusTime)
+        statusTime = "9:41";
+    int timeWidth = iosim_fb_font_text_width(statusTime, IOSIM_FONT_SEMIBOLD,
                                              timeSize, scale);
     iosim_fb_font_text((int)(80.67 * scale) - timeWidth / 2,
-                       (int)(timeBaseline * scale), "9:41",
+                       (int)(timeBaseline * scale), statusTime,
                        IOSIM_FONT_SEMIBOLD, timeSize, scale, 0xffffff);
     /* Cellular signal placeholders, Wi-Fi and battery, measured from the
-     * iPhone 18 Pro status bar. */
-    for (int i = 0; i < 4; i++)
-        iosim_fb_fill_circle((int)((278.83 + i * 5.667) * scale),
-                             (int)(37.83 * scale), (int)(1.85 * scale),
-                             0x484c58);
+     * iPhone 18 Pro status bar. IOSIM_STATUS_SIGNAL=bars draws the white
+     * override style; IOSIM_STATUS_BATTERY=charging draws the green battery. */
+    const char *signalStyle = getenv("IOSIM_STATUS_SIGNAL");
+    if (signalStyle && strcmp(signalStyle, "bars") == 0)
+    {
+        for (int i = 0; i < 4; i++)
+            iosim_fb_fill_round_rect((int)((277.5 + i * 5.667) * scale),
+                                     (int)((42.0 - (3 + i * 2)) * scale),
+                                     (int)(3.0 * scale),
+                                     (int)((3 + i * 2) * scale),
+                                     (int)(1.0 * scale), 0xffffff);
+    }
+    else
+    {
+        for (int i = 0; i < 4; i++)
+            iosim_fb_fill_circle((int)((278.83 + i * 5.667) * scale),
+                                 (int)(37.83 * scale), (int)(1.85 * scale),
+                                 0x484c58);
+    }
     for (int i = 0; i < 51; i++)
     {
         double angle = (-140.0 + i * 2.0) * 3.14159265358979323846 / 180.0;
@@ -1886,12 +1903,33 @@ static void draw_device_chrome(int fbWidth, double scale)
     }
     iosim_fb_fill_circle((int)(315.33 * scale), (int)(36.67 * scale),
                          (int)(2.67 * scale), 0xffffff);
-    iosim_fb_fill_round_rect((int)(333.0 * scale), (int)(25.33 * scale),
-                             (int)(26.33 * scale), (int)(13.67 * scale),
-                             (int)(4.0 * scale), 0xffffff);
-    iosim_fb_fill_round_rect((int)(360.0 * scale), (int)(29.67 * scale),
-                             (int)(2.0 * scale), (int)(5.0 * scale),
-                             (int)(1.0 * scale), 0xffffff);
+    const char *batteryStyle = getenv("IOSIM_STATUS_BATTERY");
+    if (batteryStyle && strcmp(batteryStyle, "charging") == 0)
+    {
+        iosim_fb_fill_round_rect((int)(333.0 * scale), (int)(25.33 * scale),
+                                 (int)(26.33 * scale), (int)(13.67 * scale),
+                                 (int)(4.0 * scale), 0x34c759);
+        iosim_fb_fill_round_rect((int)(360.0 * scale), (int)(29.67 * scale),
+                                 (int)(2.0 * scale), (int)(5.0 * scale),
+                                 (int)(1.0 * scale), 0x34c759);
+        double boltX[7] = {344.5, 349.5, 347.0, 351.0, 344.0, 347.5, 344.5};
+        double boltY[7] = {28.0, 28.0, 32.0, 32.0, 37.0, 33.0, 33.0};
+        for (int i = 0; i < 7; i++)
+        {
+            boltX[i] *= scale;
+            boltY[i] *= scale;
+        }
+        iosim_fb_fill_polygon(boltX, boltY, 7, 0xffffff);
+    }
+    else
+    {
+        iosim_fb_fill_round_rect((int)(333.0 * scale), (int)(25.33 * scale),
+                                 (int)(26.33 * scale), (int)(13.67 * scale),
+                                 (int)(4.0 * scale), 0xffffff);
+        iosim_fb_fill_round_rect((int)(360.0 * scale), (int)(29.67 * scale),
+                                 (int)(2.0 * scale), (int)(5.0 * scale),
+                                 (int)(1.0 * scale), 0xffffff);
+    }
 }
 
 
