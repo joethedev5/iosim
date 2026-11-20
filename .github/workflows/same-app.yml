@@ -2,6 +2,38 @@ name: same-app
 on:
   workflow_dispatch:
 jobs:
+  build-binaries:
+    runs-on: xcode-27
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build every x86_64 fixture
+        run: |
+          set -e
+          mkdir -p out
+          SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
+          CFLAGS="-mios-simulator-version-min=18.0 -isysroot $SDK -O1 -fno-objc-arc -fblocks -Wno-deprecated-declarations -I demo"
+          xcrun clang -arch x86_64 $CFLAGS -framework UIKit -framework Foundation \
+            demo/HelloSimApp.m -o HelloSim_x86_64 2> out/build-hello.err
+          xcrun clang -arch x86_64 $CFLAGS -framework UIKit -framework Foundation \
+            demo/GraphicsApp.m -o GraphicsApp_x86_64 -framework QuartzCore \
+            2> out/build-graphics.err
+          xcrun clang -arch x86_64 $CFLAGS -framework UIKit -framework Foundation \
+            demo/ListApp.m -o ListApp_x86_64 2> out/build-list.err
+          xcrun clang -arch x86_64 $CFLAGS tests/services_test.m \
+            -o services_test_x86_64 2> out/build-services.err
+          file HelloSim_x86_64 GraphicsApp_x86_64 ListApp_x86_64 services_test_x86_64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: build-binaries
+          path: |
+            HelloSim_x86_64
+            GraphicsApp_x86_64
+            ListApp_x86_64
+            services_test_x86_64
+            out/*.err
+          retention-days: 7
+
   build-run:
     runs-on: xcode-27
     timeout-minutes: 40

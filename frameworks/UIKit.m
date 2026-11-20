@@ -265,6 +265,7 @@ extern id kCAMediaTimingFunctionEaseInEaseOut;
     double _animStart, _animDuration;
     id _superview;
     BOOL _needsLayout;
+    CGAffineTransform _transform;
 }
 - (id)initWithFrame:(CGRect)frame;
 - (CGRect)frame;
@@ -281,6 +282,8 @@ extern id kCAMediaTimingFunctionEaseInEaseOut;
 - (BOOL)pointInside:(CGPoint)point;
 - (UIView *)hitTest:(CGPoint)point;
 - (id)superview;
+- (CGAffineTransform)transform;
+- (void)setTransform:(CGAffineTransform)transform;
 - (void)layoutSubviews;
 - (void)setNeedsLayout;
 - (void)layoutIfNeeded;
@@ -379,6 +382,25 @@ enum {
 @end
 
 
+@interface UIScrollView : UIView {
+@public
+    CGSize _contentSize;
+    CGPoint _contentOffset;
+    BOOL _scrollEnabled;
+    BOOL _showsVerticalScrollIndicator;
+    BOOL _bounces;
+}
+- (CGSize)contentSize;
+- (void)setContentSize:(CGSize)size;
+- (CGPoint)contentOffset;
+- (void)setContentOffset:(CGPoint)offset;
+- (void)setContentOffset:(CGPoint)offset animated:(BOOL)animated;
+- (BOOL)isScrollEnabled;
+- (void)setScrollEnabled:(BOOL)enabled;
+- (BOOL)showsVerticalScrollIndicator;
+- (void)setShowsVerticalScrollIndicator:(BOOL)shows;
+@end
+
 @class UITableView;
 @class UITableViewCell;
 @class NSIndexPath;
@@ -441,7 +463,7 @@ enum {
 - (void)prepareForReuse;
 @end
 
-@interface UITableView : UIView {
+@interface UITableView : UIScrollView {
 @public
     id _dataSource;
     id _delegate;
@@ -716,6 +738,7 @@ int iosim_animations_active(void)
         _hidden = NO;
         _layer = [[CALayer alloc] init];
         _layer->_frame = CGRectMake(0, 0, frame.size.width, frame.size.height);
+        _transform = CGAffineTransformIdentityValue();
     }
     return self;
 }
@@ -767,6 +790,8 @@ int iosim_animations_active(void)
 }
 - (double)alpha { return _alpha; }
 - (id)superview { return _superview; }
+- (CGAffineTransform)transform { return _transform; }
+- (void)setTransform:(CGAffineTransform)transform { _transform = transform; }
 - (void)layoutSubviews { }
 - (void)setNeedsLayout { _needsLayout = YES; }
 - (void)layoutIfNeeded
@@ -1106,6 +1131,23 @@ int iosim_animations_active(void)
 }
 @end
 
+
+@implementation UIScrollView
+- (CGSize)contentSize { return _contentSize; }
+- (void)setContentSize:(CGSize)size { _contentSize = size; }
+- (CGPoint)contentOffset { return _contentOffset; }
+- (void)setContentOffset:(CGPoint)offset { _contentOffset = offset; }
+- (void)setContentOffset:(CGPoint)offset animated:(BOOL)animated
+{
+    (void)animated;
+    _contentOffset = offset;
+}
+- (BOOL)isScrollEnabled { return _scrollEnabled; }
+- (void)setScrollEnabled:(BOOL)enabled { _scrollEnabled = enabled; }
+- (BOOL)showsVerticalScrollIndicator { return _showsVerticalScrollIndicator; }
+- (void)setShowsVerticalScrollIndicator:(BOOL)shows
+{ _showsVerticalScrollIndicator = shows; }
+@end
 
 /* ------------------------------------------------------------ table views */
 
@@ -1569,6 +1611,22 @@ static void render_view(UIView *view, double originX, double originY,
     if (w < 0) w = 0;
     if (h < 0) h = 0;
 
+    CGAffineTransform tf = view->_transform;
+    if (tf.a != 1.0 || tf.b != 0.0 || tf.c != 0.0 || tf.d != 1.0 ||
+        tf.tx != 0.0 || tf.ty != 0.0)
+    {
+        double sx = __builtin_sqrt(tf.a * tf.a + tf.b * tf.b);
+        double sy = __builtin_sqrt(tf.c * tf.c + tf.d * tf.d);
+        if (sx <= 0) sx = 1;
+        if (sy <= 0) sy = 1;
+        double cx = x + w / 2.0 + tf.tx * scale;
+        double cy = y + h / 2.0 + tf.ty * scale;
+        w = (int)(w * sx + 0.5);
+        h = (int)(h * sy + 0.5);
+        x = (int)(cx - w / 2.0 + 0.5);
+        y = (int)(cy - h / 2.0 + 0.5);
+    }
+
     if (view->_backgroundColor && w > 0 && h > 0)
     {
         unsigned color = color_rgb(view->_backgroundColor);
@@ -1736,11 +1794,18 @@ static void render_view(UIView *view, double originX, double originY,
         }
     }
 
+    double scrollX = 0, scrollY = 0;
+    if ([view isKindOfClass:[UIScrollView class]])
+    {
+        UIScrollView *scroll = (UIScrollView *)view;
+        scrollX = scroll->_contentOffset.x;
+        scrollY = scroll->_contentOffset.y;
+    }
     for (int i = 0; i < view->_subviewCount; i++)
     {
         UIView *sub = (UIView *)view->_subviews[i];
-        render_view(sub, originX + frame.origin.x, originY + frame.origin.y,
-                    scale, alpha);
+        render_view(sub, originX + frame.origin.x - scrollX,
+                    originY + frame.origin.y - scrollY, scale, alpha);
     }
     iosim_fb_set_opacity(1.0);
 }
