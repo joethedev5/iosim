@@ -4901,12 +4901,54 @@ static void kb_panel(int fbW, int fbH, double scale, int topPx,
     iosim_fb_fill_polygon(xs, ys, n, color);
 }
 
+static void kb_panel_highlight(int fbW, double scale, int topPx)
+{
+    /* Measured glass edge: a bright 1 px line, then a short gradient into
+     * the panel fill, following the 26 pt top corners. */
+    static const int stops[8] = {0, 1, 2, 3, 7, 10, 13, 19};
+    static const unsigned cols[8] = {0x3e3f45, 0x36373d, 0x303135, 0x242529,
+                                     0x222328, 0x212227, 0x202126, 0x202025};
+    int rows = (int)(19 * scale / 3.0 + 0.5);
+    if (rows < 4)
+        rows = 4;
+    double r1 = 26.0 * scale;
+    for (int dy = 0; dy < rows; dy++)
+    {
+        double t = 19.0 * dy / (rows > 1 ? rows - 1 : 1);
+        int i = 0;
+        while (i < 6 && t > stops[i + 1])
+            i++;
+        double f = (t - stops[i]) / (stops[i + 1] - stops[i]);
+        unsigned c0 = cols[i], c1 = cols[i + 1];
+        unsigned rr = (unsigned)(((c0 >> 16 & 0xff) +
+                                  ((int)(c1 >> 16 & 0xff) -
+                                   (int)(c0 >> 16 & 0xff)) * f) + 0.5);
+        unsigned gg = (unsigned)(((c0 >> 8 & 0xff) +
+                                  ((int)(c1 >> 8 & 0xff) -
+                                   (int)(c0 >> 8 & 0xff)) * f) + 0.5);
+        unsigned bb = (unsigned)(((c0 & 0xff) +
+                                  ((int)(c1 & 0xff) -
+                                   (int)(c0 & 0xff)) * f) + 0.5);
+        int inset = 0;
+        if (dy < r1)
+            inset = (int)(r1 - __builtin_sqrt(r1 * r1 -
+                                              (r1 - dy) * (r1 - dy)));
+        if (inset < 0)
+            inset = 0;
+        iosim_fb_fill_rect(inset, topPx + dy, fbW - 2 * inset, 1,
+                           (rr << 16) | (gg << 8) | bb);
+    }
+}
+
 static void draw_qwerty(int fbW, int fbH, double scale)
 {
     double W = fbW / scale, H = fbH / scale;
     double top = H - 324.0;
     int topPx = (int)(top * scale + 0.5);
-    kb_panel(fbW, fbH, scale, topPx, 0x202025);
+    double panelTop = H - 328.0;
+    int panelTopPx = (int)(panelTop * scale + 0.5);
+    kb_panel(fbW, fbH, scale, panelTopPx, 0x202025);
+    kb_panel_highlight(fbW, scale, panelTopPx);
     int predTop = topPx + (int)(9 * scale);
     int predH = (int)(24 * scale);
     for (int i = 1; i < 3; i++)

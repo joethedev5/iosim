@@ -164,16 +164,19 @@ frame:
 
 | Metric | Value |
 |---|---|
-| Mean absolute channel error | **2.01 / 255** |
-| Pixels with max-channel error > 24 | **1.86 %** |
-| App content above the keyboard | **1.93 / 255** mean, 1.65 % over 24 |
+| Mean absolute channel error | **1.91 / 255** |
+| Pixels with max-channel error > 24 | **1.67 %** |
+| App content above the keyboard | **1.84 / 255** mean, 1.39 % over 24 |
+| Keyboard panel | **2.02 / 255** mean, 2.14 % over 24 |
 | Key background / keyboard background | `#444448` / `#202025` (sampled) |
 
 The keyboard geometry was measured key by key against the iPhone 18 Pro
-capture: a 324 pt panel with 26 pt top corners, a 24 pt predictive bar with
-1 pt dividers inset one point from each third, 43 pt key rows on an 11 pt
-gap, 33.2 pt letters (32.2 pt on the shift row), 44.7 pt shift/delete keys and
-92.7/191.3/92.7 pt bottom keys. Labels sit 1.2 pt above the geometric centre.
+capture: a 328 pt panel with 26 pt top corners, 58 pt bottom corners, a glass
+edge that falls from `#3e3f45` to the `#202025` fill over 6 pt, a 24 pt
+predictive bar with 1 pt dividers inset one point from each third, 43 pt key
+rows on an 11 pt gap, 33.2 pt letters (33 pt on the shift row), 44.7 pt
+shift/delete keys and 92.7/191.3/92.7 pt bottom keys. Labels sit 1.2 pt above
+the geometric centre.
 The return key uses the measured `↵` glyph (18 pt shaft, left arrowhead, right
 riser and top hook); shift, delete, emoji and mic are drawn from measured
 glyph bounds as well. The residual is concentrated on glyph antialiasing and
