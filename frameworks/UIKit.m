@@ -503,6 +503,9 @@ enum {
 + (UIApplication *)sharedApplication;
 - (void)setDelegate:(id)delegate;
 - (id)delegate;
+- (long)applicationState;
+- (unsigned long)beginBackgroundTaskWithExpirationHandler:(void (^)(void))handler;
+- (void)endBackgroundTask:(unsigned long)task;
 @end
 
 @interface UIScene : NSObject {
@@ -1202,9 +1205,19 @@ int iosim_animations_active(void)
 {
     [super setFrame:frame];
     double w = frame.size.width;
-    _textLabel->_frame = CGRectMake(16, 0, w - 76, 22);
-    if (_detailTextLabel)
-        _detailTextLabel->_frame = CGRectMake(16, 22, w - 76, 18);
+    if (_style == UITableViewCellStyleSubtitle ||
+        _style == UITableViewCellStyleValue1 ||
+        _style == UITableViewCellStyleValue2)
+    {
+        _textLabel->_frame = CGRectMake(16, 8, w - 76, 22);
+        if (_detailTextLabel)
+            _detailTextLabel->_frame = CGRectMake(16, 30, w - 76, 18);
+    }
+    else
+    {
+        _textLabel->_frame = CGRectMake(16, (frame.size.height - 22) / 2,
+                                        w - 76, 22);
+    }
 }
 @end
 
@@ -1256,6 +1269,11 @@ int iosim_animations_active(void)
 @end
 
 static UIWindow *g_keyWindow;
+id UIApplicationDidBecomeActiveNotification = @"UIApplicationDidBecomeActiveNotification";
+id UIApplicationWillResignActiveNotification = @"UIApplicationWillResignActiveNotification";
+id UIApplicationDidEnterBackgroundNotification = @"UIApplicationDidEnterBackgroundNotification";
+id UIApplicationWillEnterForegroundNotification = @"UIApplicationWillEnterForegroundNotification";
+id UIApplicationDidFinishLaunchingNotification = @"UIApplicationDidFinishLaunchingNotification";
 
 @implementation UIWindow
 - (id)initWithWindowScene:(UIWindowScene *)scene

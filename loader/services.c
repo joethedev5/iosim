@@ -178,10 +178,14 @@ int iosim_dispatch_drain_main(void)
 
 void dispatch_main(void)
 {
-    for (int i = 0; i < 200 && iosim_dispatch_drain_main(); i++)
+    /* Darwin declares dispatch_main noreturn; callers may have optimized away
+     * everything after the call. Drain due work, then keep the main thread
+     * alive. */
+    for (;;)
+    {
+        iosim_dispatch_drain_main();
         usleep(1000);
-    while (iosim_dispatch_drain_main())
-        usleep(1000);
+    }
 }
 void *dispatch_get_current_queue(void) { return &main_queue; }
 const char *dispatch_queue_get_label(void *queue) { return queue == &main_queue ? "com.apple.main-thread" : "iosim.queue"; }

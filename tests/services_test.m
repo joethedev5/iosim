@@ -6,6 +6,7 @@
 #import <xpc/xpc.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 extern kern_return_t bootstrap_register(mach_port_t bp, const char *name, mach_port_t port);
 extern kern_return_t bootstrap_look_up(mach_port_t bp, const char *name, mach_port_t *port);
@@ -100,8 +101,13 @@ int main(void)
            xpc_dictionary_get_string(dict, "kind"),
            (long long)xpc_dictionary_get_int64(dict, "seq"), g_xpc_events);
 
+    dispatch_async(dispatch_get_main_queue(), ^{
+        printf("dispatch: main blocks ran, hits=%d group=%d\n", g_main_hits,
+               g_group_hits);
+        printf("services: done\n");
+        fflush(stdout);
+        exit(0);
+    });
     dispatch_main();
-    printf("dispatch: main blocks ran, hits=%d group=%d\n", g_main_hits, g_group_hits);
-    printf("services: done\n");
     return 0;
 }
