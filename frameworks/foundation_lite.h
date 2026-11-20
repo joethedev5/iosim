@@ -200,6 +200,17 @@ __attribute__((objc_root_class))
 - (void)synchronize;
 @end
 
+/* XML property lists (the format cfprefsd writes on the simulator). */
+#define NSPropertyListXMLFormat_v1_0 100UL
+#define NSPropertyListBinaryFormat_v1_0 200UL
+
+@interface NSPropertyListSerialization : NSObject
++ (id)dataWithPropertyList:(id)plist format:(unsigned long)format
+                   options:(unsigned long)options error:(id *)error;
++ (id)propertyListWithData:(id)data options:(unsigned long)options
+                    format:(unsigned long *)format error:(id *)error;
+@end
+
 @interface NSData : NSObject {
 @public
     void *_bytes;

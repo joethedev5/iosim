@@ -1072,6 +1072,47 @@ static char *format_va(const char *fmt, va_list ap)
 
 /* ---------------------------------------------------------- user defaults */
 
+/* Preference domain: the app's bundle id from XPC_SERVICE_NAME when the
+ * system UI launched it, otherwise the launchd spawn domain. Apps see their
+ * domain through $HOME/Library/Preferences/<domain>.plist, which is where
+ * cfprefsd keeps them on the simulator. */
+static void defaults_path(char *out, unsigned long cap)
+{
+    const char *home = getenv("HOME");
+    if (!home || !*home)
+        home = "/tmp";
+    char domain[128];
+    snprintf(domain, sizeof(domain), "%s", "com.iosim.defaults");
+    const char *service = getenv("XPC_SERVICE_NAME");
+    if (service && *service)
+    {
+        const char *colon = 0;
+        const char *bracket = 0;
+        for (const char *q = service; *q; q++)
+        {
+            if (*q == ':' && !colon)
+                colon = q;
+            if (*q == '[' && colon)
+            {
+                bracket = q;
+                break;
+            }
+        }
+        if (colon)
+        {
+            const char *begin = colon + 1;
+            const char *end = bracket ? bracket : begin + strlen(begin);
+            unsigned long n = (unsigned long)(end - begin);
+            if (n > 0 && n < sizeof(domain))
+            {
+                memcpy(domain, begin, n);
+                domain[n] = 0;
+            }
+        }
+    }
+    snprintf(out, cap, "%s/Library/Preferences/%s.plist", home, domain);
+}
+
 @implementation NSUserDefaults
 + (NSUserDefaults *)standardUserDefaults
 {
@@ -1084,7 +1125,29 @@ static char *format_va(const char *fmt, va_list ap)
 {
     self = [super init];
     if (self)
+    {
         _store = [NSMutableDictionary dictionary];
+        char path[1024];
+        defaults_path(path, sizeof(path));
+        unsigned char *bytes = 0;
+        unsigned long length = 0;
+        if (iosim_fs_read(path, &bytes, &length) == 0)
+        {
+            NSData *data = [[NSData alloc] initWithBytes:bytes length:length];
+            id plist = [NSPropertyListSerialization
+                propertyListWithData:data options:0 format:0 error:0];
+            if (plist && [plist isKindOfClass:[NSDictionary class]])
+            {
+                NSArray *keys = [plist allKeys];
+                for (unsigned long i = 0; i < [keys count]; i++)
+                {
+                    id key = [keys objectAtIndex:i];
+                    [_store setObject:[plist objectForKey:key] forKey:key];
+                }
+            }
+            free(bytes);
+        }
+    }
     return self;
 }
 - (void)setObject:(id)value forKey:(id)key
@@ -1095,9 +1158,16 @@ static char *format_va(const char *fmt, va_list ap)
         [_store setObject:value forKey:key];
     else
         [_store removeObjectForKey:key];
+    [self synchronize];
 }
 - (id)objectForKey:(id)key { return key ? [_store objectForKey:key] : nil; }
-- (void)removeObjectForKey:(id)key { if (key) [_store removeObjectForKey:key]; }
+- (void)removeObjectForKey:(id)key
+{
+    if (!key)
+        return;
+    [_store removeObjectForKey:key];
+    [self synchronize];
+}
 - (id)stringForKey:(id)key
 {
     id value = [self objectForKey:key];
@@ -1115,7 +1185,27 @@ static char *format_va(const char *fmt, va_list ap)
     return value && [value respondsToSelector:@selector(integerValue)]
                ? [value integerValue] : 0;
 }
-- (void)synchronize { }
+- (void)synchronize
+{
+    char path[1024];
+    defaults_path(path, sizeof(path));
+    char dir[1024];
+    snprintf(dir, sizeof(dir), "%s", path);
+    char *slash = 0;
+    for (char *q = dir; *q; q++)
+        if (*q == '/')
+            slash = q;
+    if (slash)
+    {
+        *slash = 0;
+        iosim_fs_mkdir(dir, 1);
+    }
+    NSData *data = [NSPropertyListSerialization
+        dataWithPropertyList:_store format:NSPropertyListXMLFormat_v1_0
+        options:0 error:0];
+    if (data)
+        [data writeToFile:[NSString stringWithUTF8String:path] atomically:YES];
+}
 @end
 
 @implementation NSData
@@ -2019,6 +2109,652 @@ static id json_parse_value(struct json_state *p, int depth)
     p->error = 1;
     return nil;
 }
+
+/* ------------------------------------------------- xml property lists */
+
+static void plist_write_escaped(NSMutableString *out, const char *text)
+{
+    if (!text)
+        text = "";
+    char chunk[64];
+    int used = 0;
+    for (const char *p = text; ; p++)
+    {
+        char c = *p;
+        if (c == 0 || c == '&' || c == '<' || c == '>' || c == '"' || c == '\'')
+        {
+            if (used)
+            {
+                chunk[used] = 0;
+                [out appendString:[NSString stringWithUTF8String:chunk]];
+                used = 0;
+            }
+            if (c == 0)
+                break;
+            if (c == '&') [out appendString:@"&amp;"];
+            else if (c == '<') [out appendString:@"&lt;"];
+            else if (c == '>') [out appendString:@"&gt;"];
+            else if (c == '"') [out appendString:@"&quot;"];
+            else [out appendString:@"&apos;"];
+            continue;
+        }
+        chunk[used++] = c;
+        if (used == (int)sizeof(chunk) - 1)
+        {
+            chunk[used] = 0;
+            [out appendString:[NSString stringWithUTF8String:chunk]];
+            used = 0;
+        }
+    }
+}
+
+static void plist_indent(NSMutableString *out, int depth)
+{
+    [out appendString:@"\n"];
+    for (int i = 0; i < depth; i++)
+        [out appendString:@"\t"];
+}
+
+static void civil_from_days(long long z, long long *out_year, int *out_month,
+                            int *out_day)
+{
+    z += 719468;
+    long long era = (z >= 0 ? z : z - 146096) / 146097;
+    unsigned long doe = (unsigned long)(z - era * 146097);
+    unsigned long yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    long long year = (long long)yoe + era * 400;
+    unsigned long doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    unsigned long mp = (5 * doy + 2) / 153;
+    unsigned long day = doy - (153 * mp + 2) / 5 + 1;
+    unsigned long month = mp + (mp < 10 ? 3 : (unsigned long)-9);
+    year += (month <= 2);
+    *out_year = year;
+    *out_month = (int)month;
+    *out_day = (int)day;
+}
+
+static long long days_from_civil(long long y, int m, int d)
+{
+    y -= m <= 2;
+    long long era = (y >= 0 ? y : y - 399) / 400;
+    unsigned long yoe = (unsigned long)(y - era * 400);
+    unsigned long doy =
+        (unsigned long)((153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1);
+    unsigned long doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    return era * 146097 + (long long)doe - 719468;
+}
+
+static const char base64_chars[] =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+static void plist_write_base64(NSMutableString *out, const unsigned char *bytes,
+                               unsigned long length)
+{
+    char quad[5];
+    for (unsigned long i = 0; i < length; i += 3)
+    {
+        unsigned long v = (unsigned long)bytes[i] << 16;
+        if (i + 1 < length)
+            v |= (unsigned long)bytes[i + 1] << 8;
+        if (i + 2 < length)
+            v |= bytes[i + 2];
+        quad[0] = base64_chars[(v >> 18) & 63];
+        quad[1] = base64_chars[(v >> 12) & 63];
+        quad[2] = i + 1 < length ? base64_chars[(v >> 6) & 63] : '=';
+        quad[3] = i + 2 < length ? base64_chars[v & 63] : '=';
+        quad[4] = 0;
+        [out appendString:[NSString stringWithUTF8String:quad]];
+    }
+}
+
+static BOOL plist_write_value(NSMutableString *out, id value, int depth)
+{
+    if (!value || [value isKindOfClass:[NSNull class]])
+        return NO;
+    if ([value isKindOfClass:[NSString class]])
+    {
+        [out appendString:@"<string>"];
+        plist_write_escaped(out, iosim_string_cstr(value));
+        [out appendString:@"</string>"];
+        return YES;
+    }
+    if ([value isKindOfClass:[NSNumber class]])
+    {
+        NSNumber *number = (NSNumber *)value;
+        char buf[64];
+        if (number->_kind == 2)
+            [out appendString:number->_ival ? @"<true/>" : @"<false/>"];
+        else if (number->_kind == 1)
+        {
+            snprintf(buf, sizeof(buf), "<real>%.15g</real>", number->_dval);
+            [out appendString:[NSString stringWithUTF8String:buf]];
+        }
+        else
+        {
+            snprintf(buf, sizeof(buf), "<integer>%lld</integer>",
+                     number->_ival);
+            [out appendString:[NSString stringWithUTF8String:buf]];
+        }
+        return YES;
+    }
+    if ([value isKindOfClass:[NSDate class]])
+    {
+        double interval = [(NSDate *)value timeIntervalSince1970];
+        long long secs = (long long)interval;
+        if (secs < 0)
+            secs = 0;
+        long long days = secs / 86400;
+        long long rem = secs % 86400;
+        long long year;
+        int month, day;
+        civil_from_days(days, &year, &month, &day);
+        char buf[64];
+        snprintf(buf, sizeof(buf), "<date>%04lld-%02d-%02dT%02lld:%02lld:%02lldZ</date>",
+                 year, month, day, rem / 3600, (rem / 60) % 60, rem % 60);
+        [out appendString:[NSString stringWithUTF8String:buf]];
+        return YES;
+    }
+    if ([value isKindOfClass:[NSData class]])
+    {
+        NSData *data = (NSData *)value;
+        [out appendString:@"<data>"];
+        plist_write_base64(out, (const unsigned char *)[data bytes],
+                           [data length]);
+        [out appendString:@"</data>"];
+        return YES;
+    }
+    if ([value isKindOfClass:[NSArray class]])
+    {
+        NSArray *array = (NSArray *)value;
+        unsigned long count = [array count];
+        if (count == 0)
+        {
+            [out appendString:@"<array/>"];
+            return YES;
+        }
+        [out appendString:@"<array>"];
+        for (unsigned long i = 0; i < count; i++)
+        {
+            plist_indent(out, depth + 1);
+            if (!plist_write_value(out, [array objectAtIndex:i], depth + 1))
+                return NO;
+        }
+        plist_indent(out, depth);
+        [out appendString:@"</array>"];
+        return YES;
+    }
+    if ([value isKindOfClass:[NSDictionary class]])
+    {
+        NSDictionary *dict = (NSDictionary *)value;
+        NSArray *keys = [dict allKeys];
+        unsigned long count = [keys count];
+        if (count == 0)
+        {
+            [out appendString:@"<dict/>"];
+            return YES;
+        }
+        [out appendString:@"<dict>"];
+        for (unsigned long i = 0; i < count; i++)
+        {
+            id key = [keys objectAtIndex:i];
+            if (![key isKindOfClass:[NSString class]])
+                return NO;
+            plist_indent(out, depth + 1);
+            [out appendString:@"<key>"];
+            plist_write_escaped(out, iosim_string_cstr(key));
+            [out appendString:@"</key>"];
+            plist_indent(out, depth + 1);
+            if (!plist_write_value(out, [dict objectForKey:key], depth + 1))
+                return NO;
+        }
+        plist_indent(out, depth);
+        [out appendString:@"</dict>"];
+        return YES;
+    }
+    return NO;
+}
+
+struct plist_state {
+    const char *s;
+    unsigned long i;
+    unsigned long n;
+    int error;
+};
+
+static int plist_has(struct plist_state *p, const char *tag)
+{
+    unsigned long len = strlen(tag);
+    if (p->i + len > p->n)
+        return 0;
+    return memcmp(p->s + p->i, tag, len) == 0;
+}
+
+static void plist_skip_misc(struct plist_state *p)
+{
+    for (;;)
+    {
+        while (p->i < p->n)
+        {
+            char c = p->s[p->i];
+            if (c != ' ' && c != '\t' && c != '\n' && c != '\r')
+                break;
+            p->i++;
+        }
+        if (p->i + 2 <= p->n && p->s[p->i] == '<' && p->s[p->i + 1] == '?')
+        {
+            while (p->i + 1 < p->n &&
+                   !(p->s[p->i] == '?' && p->s[p->i + 1] == '>'))
+                p->i++;
+            p->i += 2;
+            continue;
+        }
+        if (p->i + 4 <= p->n && memcmp(p->s + p->i, "<!--", 4) == 0)
+        {
+            while (p->i + 2 < p->n &&
+                   !(p->s[p->i] == '-' && p->s[p->i + 1] == '-' &&
+                     p->s[p->i + 2] == '>'))
+                p->i++;
+            p->i += 3;
+            continue;
+        }
+        if (p->i + 9 <= p->n && memcmp(p->s + p->i, "<!DOCTYPE", 9) == 0)
+        {
+            while (p->i < p->n && p->s[p->i] != '>')
+                p->i++;
+            if (p->i < p->n)
+                p->i++;
+            continue;
+        }
+        break;
+    }
+}
+
+static NSString *plist_unescape(const char *s, unsigned long len)
+{
+    char *buf = malloc(len + 1);
+    if (!buf)
+        return nil;
+    unsigned long o = 0;
+    for (unsigned long i = 0; i < len; i++)
+    {
+        if (s[i] != '&')
+        {
+            buf[o++] = s[i];
+            continue;
+        }
+        if (i + 5 <= len && memcmp(s + i, "&amp;", 5) == 0)
+        {
+            buf[o++] = '&';
+            i += 4;
+        }
+        else if (i + 4 <= len && memcmp(s + i, "&lt;", 4) == 0)
+        {
+            buf[o++] = '<';
+            i += 3;
+        }
+        else if (i + 4 <= len && memcmp(s + i, "&gt;", 4) == 0)
+        {
+            buf[o++] = '>';
+            i += 3;
+        }
+        else if (i + 6 <= len && memcmp(s + i, "&quot;", 6) == 0)
+        {
+            buf[o++] = '"';
+            i += 5;
+        }
+        else if (i + 6 <= len && memcmp(s + i, "&apos;", 6) == 0)
+        {
+            buf[o++] = '\'';
+            i += 5;
+        }
+        else
+            buf[o++] = '&';
+    }
+    buf[o] = 0;
+    NSString *text = [NSString stringWithUTF8String:buf];
+    free(buf);
+    return text;
+}
+
+static int plist_raw_until(struct plist_state *p, const char *close,
+                           const char **out, unsigned long *out_len)
+{
+    unsigned long clen = strlen(close);
+    unsigned long start = p->i;
+    while (p->i + clen <= p->n && memcmp(p->s + p->i, close, clen) != 0)
+        p->i++;
+    if (p->i + clen > p->n)
+    {
+        p->error = 1;
+        return -1;
+    }
+    *out = p->s + start;
+    *out_len = p->i - start;
+    p->i += clen;
+    return 0;
+}
+
+static long long plist_parse_integer(const char *s, unsigned long len)
+{
+    unsigned long i = 0;
+    int negative = 0;
+    long long value = 0;
+    while (i < len && (s[i] == ' ' || s[i] == '\t' || s[i] == '\n'))
+        i++;
+    if (i < len && (s[i] == '-' || s[i] == '+'))
+    {
+        negative = s[i] == '-';
+        i++;
+    }
+    while (i < len && s[i] >= '0' && s[i] <= '9')
+    {
+        value = value * 10 + (s[i] - '0');
+        i++;
+    }
+    return negative ? -value : value;
+}
+
+static double plist_parse_date(const char *s, unsigned long len)
+{
+    if (len < 19)
+        return 0;
+    long long year = plist_parse_integer(s, 4);
+    int month = (int)plist_parse_integer(s + 5, 2);
+    int day = (int)plist_parse_integer(s + 8, 2);
+    int hour = (int)plist_parse_integer(s + 11, 2);
+    int minute = (int)plist_parse_integer(s + 14, 2);
+    int second = (int)plist_parse_integer(s + 17, 2);
+    if (year < 1 || month < 1 || month > 12 || day < 1 || day > 31)
+        return 0;
+    return (double)(days_from_civil(year, month, day) * 86400 +
+                    hour * 3600 + minute * 60 + second);
+}
+
+static int base64_value(char c)
+{
+    if (c >= 'A' && c <= 'Z') return c - 'A';
+    if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+    if (c >= '0' && c <= '9') return c - '0' + 52;
+    if (c == '+') return 62;
+    if (c == '/') return 63;
+    return -1;
+}
+
+static NSData *plist_base64_decode(const char *s, unsigned long len)
+{
+    unsigned char *bytes = malloc(len / 4 * 3 + 4);
+    if (!bytes)
+        return nil;
+    unsigned long o = 0;
+    int quad[4];
+    int q = 0, pad = 0;
+    for (unsigned long i = 0; i < len; i++)
+    {
+        char c = s[i];
+        if (c == ' ' || c == '\t' || c == '\n' || c == '\r')
+            continue;
+        if (c == '=')
+        {
+            quad[q++] = -2;
+            pad++;
+        }
+        else
+        {
+            int v = base64_value(c);
+            if (v < 0)
+            {
+                free(bytes);
+                return nil;
+            }
+            quad[q++] = v;
+        }
+        if (q == 4)
+        {
+            long v = ((long)quad[0] << 18) | ((long)quad[1] << 12) |
+                     ((long)(quad[2] < 0 ? 0 : quad[2]) << 6) |
+                     (long)(quad[3] < 0 ? 0 : quad[3]);
+            bytes[o++] = (unsigned char)((v >> 16) & 255);
+            if (pad < 2)
+                bytes[o++] = (unsigned char)((v >> 8) & 255);
+            if (pad < 1)
+                bytes[o++] = (unsigned char)(v & 255);
+            q = 0;
+            pad = 0;
+        }
+    }
+    NSData *data = [[NSData alloc] initWithBytes:bytes length:o];
+    free(bytes);
+    return data;
+}
+
+static id plist_parse_value(struct plist_state *p, int depth)
+{
+    if (depth > 64)
+    {
+        p->error = 1;
+        return nil;
+    }
+    plist_skip_misc(p);
+    if (plist_has(p, "<dict/>"))
+    {
+        p->i += 7;
+        return [NSMutableDictionary dictionary];
+    }
+    if (plist_has(p, "<dict>"))
+    {
+        p->i += 6;
+        NSMutableDictionary *dict = [NSMutableDictionary dictionary];
+        for (;;)
+        {
+            plist_skip_misc(p);
+            if (plist_has(p, "</dict>"))
+            {
+                p->i += 7;
+                return dict;
+            }
+            if (!plist_has(p, "<key>"))
+            {
+                p->error = 1;
+                return nil;
+            }
+            p->i += 5;
+            const char *raw = 0;
+            unsigned long raw_len = 0;
+            if (plist_raw_until(p, "</key>", &raw, &raw_len) != 0)
+                return nil;
+            NSString *key = plist_unescape(raw, raw_len);
+            id value = plist_parse_value(p, depth + 1);
+            if (!key || !value)
+                return nil;
+            [dict setObject:value forKey:key];
+        }
+    }
+    if (plist_has(p, "<array/>"))
+    {
+        p->i += 8;
+        return [NSMutableArray array];
+    }
+    if (plist_has(p, "<array>"))
+    {
+        p->i += 7;
+        NSMutableArray *array = [NSMutableArray array];
+        for (;;)
+        {
+            plist_skip_misc(p);
+            if (plist_has(p, "</array>"))
+            {
+                p->i += 8;
+                return array;
+            }
+            id value = plist_parse_value(p, depth + 1);
+            if (!value)
+                return nil;
+            [array addObject:value];
+        }
+    }
+    if (plist_has(p, "<string/>"))
+    {
+        p->i += 9;
+        return [NSString stringWithUTF8String:""];
+    }
+    if (plist_has(p, "<string>"))
+    {
+        p->i += 8;
+        const char *raw = 0;
+        unsigned long raw_len = 0;
+        if (plist_raw_until(p, "</string>", &raw, &raw_len) != 0)
+            return nil;
+        return plist_unescape(raw, raw_len);
+    }
+    if (plist_has(p, "<integer>"))
+    {
+        p->i += 9;
+        const char *raw = 0;
+        unsigned long raw_len = 0;
+        if (plist_raw_until(p, "</integer>", &raw, &raw_len) != 0)
+            return nil;
+        return [NSNumber numberWithLongLong:plist_parse_integer(raw, raw_len)];
+    }
+    if (plist_has(p, "<real>"))
+    {
+        p->i += 6;
+        const char *raw = 0;
+        unsigned long raw_len = 0;
+        if (plist_raw_until(p, "</real>", &raw, &raw_len) != 0)
+            return nil;
+        char buf[64];
+        unsigned long n = raw_len < sizeof(buf) - 1 ? raw_len : sizeof(buf) - 1;
+        memcpy(buf, raw, n);
+        buf[n] = 0;
+        return [NSNumber numberWithDouble:strtod(buf, 0)];
+    }
+    if (plist_has(p, "<true/>"))
+    {
+        p->i += 7;
+        return [NSNumber numberWithBool:YES];
+    }
+    if (plist_has(p, "<false/>"))
+    {
+        p->i += 8;
+        return [NSNumber numberWithBool:NO];
+    }
+    if (plist_has(p, "<true>"))
+    {
+        p->i += 6;
+        if (!plist_has(p, "</true>"))
+        {
+            p->error = 1;
+            return nil;
+        }
+        p->i += 7;
+        return [NSNumber numberWithBool:YES];
+    }
+    if (plist_has(p, "<false>"))
+    {
+        p->i += 7;
+        if (!plist_has(p, "</false>"))
+        {
+            p->error = 1;
+            return nil;
+        }
+        p->i += 8;
+        return [NSNumber numberWithBool:NO];
+    }
+    if (plist_has(p, "<data>"))
+    {
+        p->i += 6;
+        const char *raw = 0;
+        unsigned long raw_len = 0;
+        if (plist_raw_until(p, "</data>", &raw, &raw_len) != 0)
+            return nil;
+        return plist_base64_decode(raw, raw_len);
+    }
+    if (plist_has(p, "<date>"))
+    {
+        p->i += 6;
+        const char *raw = 0;
+        unsigned long raw_len = 0;
+        if (plist_raw_until(p, "</date>", &raw, &raw_len) != 0)
+            return nil;
+        return [NSDate dateWithTimeIntervalSince1970:
+                    plist_parse_date(raw, raw_len)];
+    }
+    p->error = 1;
+    return nil;
+}
+
+@implementation NSPropertyListSerialization
++ (id)dataWithPropertyList:(id)plist format:(unsigned long)format
+                   options:(unsigned long)options error:(id *)error
+{
+    (void)format;
+    (void)options;
+    NSMutableString *text = [NSMutableString string];
+    [text appendString:
+        @"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+        @"<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" "
+        @"\"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n"
+        @"<plist version=\"1.0\">"];
+    if (!plist)
+    {
+        if (error)
+            *error = [NSError errorWithDomain:@"NSCocoaErrorDomain" code:3840
+                                       userInfo:nil];
+        return nil;
+    }
+    [text appendString:@"\n"];
+    if (!plist_write_value(text, plist, 0))
+    {
+        if (error)
+            *error = [NSError errorWithDomain:@"NSCocoaErrorDomain" code:3840
+                                       userInfo:nil];
+        return nil;
+    }
+    [text appendString:@"\n</plist>\n"];
+    return [text dataUsingEncoding:4];
+}
++ (id)propertyListWithData:(id)data options:(unsigned long)options
+                    format:(unsigned long *)format error:(id *)error
+{
+    (void)options;
+    if (!data || [data length] == 0)
+    {
+        if (error)
+            *error = [NSError errorWithDomain:@"NSCocoaErrorDomain" code:3840
+                                       userInfo:nil];
+        return nil;
+    }
+    struct plist_state p;
+    p.s = (const char *)[data bytes];
+    p.i = 0;
+    p.n = [data length];
+    p.error = 0;
+    plist_skip_misc(&p);
+    if (!plist_has(&p, "<plist"))
+    {
+        if (error)
+            *error = [NSError errorWithDomain:@"NSCocoaErrorDomain" code:3840
+                                       userInfo:nil];
+        return nil;
+    }
+    while (p.i < p.n && p.s[p.i] != '>')
+        p.i++;
+    if (p.i < p.n)
+        p.i++;
+    id value = plist_parse_value(&p, 0);
+    plist_skip_misc(&p);
+    if (!value || p.error || !plist_has(&p, "</plist>"))
+    {
+        if (error)
+            *error = [NSError errorWithDomain:@"NSCocoaErrorDomain" code:3840
+                                       userInfo:nil];
+        return nil;
+    }
+    if (format)
+        *format = NSPropertyListXMLFormat_v1_0;
+    return value;
+}
+@end
 
 @implementation NSJSONSerialization
 + (BOOL)isValidJSONObject:(id)object

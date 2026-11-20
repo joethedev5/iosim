@@ -365,6 +365,25 @@ operations go through host-side wrappers for `fopen`, `stat`, `mkdir`,
 `rename` and `readdir`, so Darwin flag values and `struct stat` layouts never
 reach glibc.
 
+### Foundation: persistent defaults and property lists
+
+`tests/defaults_test.m` writes a domain with `NSUserDefaults` in one process
+and reads it back in a second process with the same `HOME` and
+`XPC_SERVICE_NAME`. The write reports `defaults: wrote theme=dark seen=1
+count=42`; the read reports the string, bool, integer, a two-item array and a
+four-byte data value. The domain file is
+`Library/Preferences/com.iosim.defaults.plist` under the app home (the suite
+name is taken from the bundle id in `XPC_SERVICE_NAME`), and Python's
+`plistlib` parses it as a real XML property list containing
+`<string>dark</string>`, `<true/>`, `<integer>42</integer>`, the string array
+and `<data>YWJjZA==</data>`. That cross-language parse is the check that the
+writer emits the actual plist format rather than an internal encoding.
+
+`NSPropertyListSerialization` implements both directions for dictionaries,
+arrays, strings, integers, reals, booleans, data and dates. Strings are
+XML-escaped on the way out and unescaped on the way in; the parser bounds
+nesting depth and only accepts well-formed tags.
+
 ### Services: dispatch, Mach, bootstrap and XPC
 
 `tests/services_test.m` is an Apple-clang x86_64 executable with no UI. It
@@ -548,8 +567,9 @@ layout (pitch, icon size, labels, dock and pill) remains the measured capture.
 The framework surface is still a subset. Auto Layout supports equality and
 inequality anchors with priorities evaluated by relaxation, intrinsic sizing
 and guides, but not the full Cassowary solver or every UIKit layout API.
-`NSUserDefaults` is still memory-only, and JSON covers Foundation objects
-without comments, streaming or fragments unless enabled.
+`NSUserDefaults` persists XML property lists under the app's
+`Library/Preferences`; binary property lists are not parsed. JSON covers
+Foundation objects without comments, streaming or fragments unless enabled.
 Text input is a single-line `UITextField` with a QWERTY keyboard; UITextView,
 multitap gestures and selection handles are not implemented. Touch input is
 single-finger: there is no multitouch, touch prediction or pressure. Mach

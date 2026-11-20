@@ -176,6 +176,44 @@ check "parsed Sim 42 1.5 1" "$out" \
     "NSJSONSerialization parses strings, numbers, arrays, bools and null"
 check "invalid 1" "$out" "malformed JSON is rejected"
 
+# ---------- 4c. NSUserDefaults persists an XML property list ----------
+"$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
+    -ffreestanding -O1 -I "$ROOT/frameworks" \
+    -c "$ROOT/tests/defaults_test.m" -o "$T/defaults.o"
+"$LD64" -arch x86_64 -platform_version $PLATFORM -e _main -o "$T/defaults" \
+    "$T/defaults.o" \
+    "$ROOT/runtime/System/Library/Frameworks/Foundation.framework/Foundation" \
+    -undefined dynamic_lookup
+DEF_HOME="$T/defaults-home"
+rm -rf "$DEF_HOME"
+mkdir -p "$DEF_HOME"
+out="$(cd "$DEF_HOME" && HOME="$DEF_HOME" \
+    XPC_SERVICE_NAME='UIKitApplication:com.iosim.defaults[iosim]' \
+    DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/defaults" write 2>&1)"
+check "defaults: wrote theme=dark seen=1 count=42" "$out" \
+    "NSUserDefaults stores strings, bools and integers"
+out="$(cd "$DEF_HOME" && HOME="$DEF_HOME" \
+    XPC_SERVICE_NAME='UIKitApplication:com.iosim.defaults[iosim]' \
+    DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/defaults" read 2>&1)"
+check "defaults: theme=dark seen=1 count=42 recent=2 blob=4" "$out" \
+    "a second process reads the same defaults domain"
+if out="$(python3 - "$DEF_HOME/Library/Preferences/com.iosim.defaults.plist" <<'PY'
+import plistlib, sys
+with open(sys.argv[1], "rb") as f:
+    d = plistlib.load(f)
+assert d["theme"] == "dark", d
+assert d["seen"] is True, d
+assert d["launchCount"] == 42, d
+assert d["recent"] == ["a", "b"], d
+assert d["blob"] == b"abcd", d
+print("ok   the defaults domain is a real XML property list on disk")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL defaults plist"; echo "$out"; fails=$((fails+1))
+fi
+
 # ---------- 5. UIKit-lite framework dylib ----------
 cat > "$T/uikit_app.c" <<'EOF'
 extern int printf(const char *fmt, ...);

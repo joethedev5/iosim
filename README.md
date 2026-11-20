@@ -42,6 +42,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | CoreAnimation paths, gradients, sublayers (z-ordered), PNG images | ✅ |
 | Foundation collections, strings, notifications, timers, NSIndexPath | ✅ |
 | `NSFileManager`, `NSData` file I/O, `NSURL`, `NSJSONSerialization` | ✅ |
+| `NSPropertyListSerialization` and persistent `NSUserDefaults` domains | ✅ |
 | libdispatch queues, groups, semaphores; main-queue drain from UIKit | ✅ |
 | Mach ports/messages, launchd bootstrap namespace, cross-process messaging | ✅ |
 | XPC connections and dictionaries, serialized across processes | ✅ |

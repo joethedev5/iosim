@@ -569,14 +569,19 @@ Python for iteration speed.
 ## 4. Known limitations
 
 - Rendering is a software framebuffer. CoreAnimation is a subset: layers,
-  sublayers with zPosition, shadows, borders, gradients, shapes, opacity and
-  corner-radius animations. No render server, Metal, video or IOSurface.
-- Mach ports, bootstrap and XPC are in-process. There is no cross-process Mach
-  transport, launchd job control or multi-process app launch.
+  sublayers with zPosition, shadows, borders, gradients, shapes, and several
+  concurrent opacity, corner-radius and keyframe animations per layer. No
+  render server, Metal, video or IOSurface.
+- Mach messages, the bootstrap namespace and serialized XPC dictionaries cross
+  guest processes through launchd-owned names and abstract Unix sockets.
+  Mach port rights are per-service send sockets rather than general port right
+  transfer, and launchd does not start service jobs on demand.
 - `libdispatch` covers main/global queues, groups, semaphores and timers.
   Foundation is a subset (strings, collections, numbers, data, notifications,
-  timers, dates, errors, bundles, defaults, file manager, URLs and JSON); it
-  is not the full Foundation. `NSUserDefaults` is still memory-only.
+  timers, dates, errors, bundles, defaults, plists, file manager, URLs and
+  JSON); it is not the full Foundation. `NSUserDefaults` persists XML property
+  lists under `$HOME/Library/Preferences`; binary property lists are not
+  parsed.
 - Auto Layout is a relaxation solver over anchors and guides, not Cassowary;
   it does not cover every UIKit layout API or content-size class.
 - Text input is a single-line `UITextField` with a QWERTY/numeric keyboard;
