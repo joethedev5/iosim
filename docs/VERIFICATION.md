@@ -158,11 +158,19 @@ the field's `keyboardType` selects one, with the same framebuffer primitives as
 app content. Tapping a key inserts text; `key`/`backspace` records on the event
 FIFO do the same without a keyboard.
 
-The keyboard's field and caret alignment match the real simulator frame within
-2.4/255 over the app's upper region. A full-frame keyboard comparison is not
-part of the automated metric because the reference simulator shows Apple's
-one-time slide-to-type tutorial over the first keyboard presentation; the
-fixture's own top region is measured instead.
+The reference capture disables the simulator's one-time slide-to-type tutorial
+with a keyboard preference before launch. Measured over the full 1206×2622
+frame:
+
+| Metric | Value |
+|---|---|
+| Mean absolute channel error | **4.07 / 255** |
+| Pixels with max-channel error > 24 | **3.88 %** |
+| App content above the keyboard | **2.32 / 255** mean, 2.00 % over 24 |
+| Key background / keyboard background | `#444448` / `#202025` (sampled) |
+
+The residual is concentrated on glyph antialiasing and key-corner edges; key
+rows, the predictive bar and the bottom emoji/mic row align within a pixel.
 
 ### Services: dispatch, Mach, bootstrap and XPC
 
