@@ -71,6 +71,16 @@ extern void exit(int status);
     plain.transform = identity;
     [root.layer addSublayer:plain];
 
+    CATransform3D perspective = CATransform3DIdentityValue();
+    perspective.m34 = -1.0 / 300.0;
+    perspective = CATransform3DRotate(perspective, 0.6, 0, 1, 0);
+    CALayer *tilted = [[CALayer alloc] init];
+    tilted.frame = CGRectMake(140, 700, 100, 60);
+    tilted.backgroundColor =
+        [UIColor colorWithRed:1.0 green:0.0 blue:1.0 alpha:1.0];
+    tilted.transform = perspective;
+    [root.layer addSublayer:tilted];
+
     CALayer *moved = [[CALayer alloc] init];
     moved.frame = CGRectMake(60, 600, 80, 40);
     moved.backgroundColor =

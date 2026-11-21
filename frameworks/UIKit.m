@@ -135,6 +135,11 @@ extern void iosim_fb_mask_round_rect(int x, int y, int w, int h, int radius);
 extern void iosim_fb_blit_affine(const unsigned *src, int sw, int sh,
                                  double fa, double fb, double fc, double fd,
                                  double ftx, double fty, double opacity);
+extern void iosim_fb_blit_homography(const unsigned *src, int sw, int sh,
+                                     double h11, double h12, double h13,
+                                     double h21, double h22, double h23,
+                                     double h31, double h32, double h33,
+                                     double opacity);
 extern void iosim_fb_free_offscreen(unsigned *buf);
 extern void iosim_fb_blit_rgba_scaled(int x, int y, int w, int h,
                                       const unsigned char *rgba,
@@ -17771,7 +17776,15 @@ static void render_layer(CALayer *layer, double parentX, double parentY,
     CATransform3D tf = layer->_transform;
     int transformed = layer != g_no_transform_layer &&
         (tf.m11 != 1.0 || tf.m12 != 0.0 || tf.m21 != 0.0 ||
-         tf.m22 != 1.0 || tf.m41 != 0.0 || tf.m42 != 0.0);
+         tf.m22 != 1.0 || tf.m41 != 0.0 || tf.m42 != 0.0 ||
+         tf.m13 != 0.0 || tf.m23 != 0.0 || tf.m31 != 0.0 ||
+         tf.m32 != 0.0 || tf.m33 != 1.0 || tf.m34 != 0.0 ||
+         tf.m43 != 0.0 || tf.m44 != 1.0 || tf.m14 != 0.0 ||
+         tf.m24 != 0.0);
+    int perspective = tf.m13 != 0.0 || tf.m23 != 0.0 || tf.m31 != 0.0 ||
+        tf.m32 != 0.0 || tf.m33 != 1.0 || tf.m34 != 0.0 ||
+        tf.m43 != 0.0 || tf.m44 != 1.0 || tf.m14 != 0.0 ||
+        tf.m24 != 0.0;
     if (transformed && w > 0 && h > 0)
     {
         void *state = iosim_fb_begin_offscreen((unsigned)w, (unsigned)h);
@@ -17792,8 +17805,26 @@ static void render_layer(CALayer *layer, double parentX, double parentY,
                              tf.m41 * scale;
                 double fty = y + cy - (tf.m12 * cx + tf.m22 * cy) +
                              tf.m42 * scale;
-                iosim_fb_blit_affine(buf, bw, bh, tf.m11, tf.m12, tf.m21,
-                                     tf.m22, ftx, fty, alpha);
+                if (perspective)
+                {
+                    double h11 = tf.m11;
+                    double h12 = tf.m21;
+                    double h13 = ftx;
+                    double h21 = tf.m12;
+                    double h22 = tf.m22;
+                    double h23 = fty;
+                    double h31 = tf.m14 + tf.m34 * tf.m13;
+                    double h32 = tf.m24 + tf.m34 * tf.m23;
+                    double h33 = tf.m44 +
+                        tf.m34 * (tf.m43 * scale - tf.m13 * cx - tf.m23 * cy) -
+                        tf.m14 * cx - tf.m24 * cy;
+                    iosim_fb_blit_homography(buf, bw, bh, h11, h12, h13,
+                                             h21, h22, h23, h31, h32, h33,
+                                             alpha);
+                }
+                else
+                    iosim_fb_blit_affine(buf, bw, bh, tf.m11, tf.m12, tf.m21,
+                                         tf.m22, ftx, fty, alpha);
                 iosim_fb_free_offscreen(buf);
             }
             return;

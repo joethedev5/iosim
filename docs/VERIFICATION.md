@@ -1769,7 +1769,10 @@ translation, and touch conversion and hit-testing invert the transform, but
 skewed transforms interpolate as their nearest rotation plus scale.
 `UISplitViewController` supports the double-column primary/secondary layout
 and its compact collapse; supplementary and triple-column layouts are not
-modeled. `CATransform3D` is not supported. Core Animation keeps four
+modeled. `CATransform3D` layers project through a homography when the
+perspective terms are set; 3D rotation, scale and translation render, but
+the layer's offscreen is still its untransformed size, so extreme perspective
+can clip. Core Animation keeps four
 explicit animation slots per layer, and `CADisplayLink` ignores preferred
 frame-rate ranges. XPC carries dictionaries
 and value objects between processes but not connections, file descriptors or

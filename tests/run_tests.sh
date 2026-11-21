@@ -3392,6 +3392,12 @@ if not (r > 200 and g > 200 and b < 60):
 r, g, b = rgb(70, 630)
 if not (r < 40 and g < 40 and b < 60):
     raise SystemExit("translated layer left a copy at its old position: %02x%02x%02x" % (r, g, b))
+r, g, b = rgb(190, 730)
+if not (r > 200 and g < 60 and b > 200):
+    raise SystemExit("perspective layer center is not magenta: %02x%02x%02x" % (r, g, b))
+r, g, b = rgb(145, 730)
+if not (r < 40 and g < 40 and b < 60):
+    raise SystemExit("perspective layer kept its left edge: %02x%02x%02x" % (r, g, b))
 print("ok   CALayer transforms rotate, scale and translate offscreen")
 PY
 )"; then

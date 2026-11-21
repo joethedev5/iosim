@@ -100,3 +100,8 @@ void iosim_fb_mask_round_rect(int x, int y, int w, int h, int radius);
 void iosim_fb_blit_affine(const uint32_t *src, int sw, int sh,
                           double fa, double fb, double fc, double fd,
                           double ftx, double fty, double opacity);
+void iosim_fb_blit_homography(const uint32_t *src, int sw, int sh,
+                              double h11, double h12, double h13,
+                              double h21, double h22, double h23,
+                              double h31, double h32, double h33,
+                              double opacity);

@@ -1455,3 +1455,7 @@ and resuming handlers; hierarchy registration and publishing are no-ops.
 `NSOperationQueue` dispatches each operation into its dispatch group; the
 operation's block waits on `isReady` (all dependencies finished or cancelled)
 before calling `start`, which marks it finished and runs its completion.
+A 3D `CALayer.transform` builds a 3x3 homography from the row-vector
+CATransform3D, including the m34 perspective term applied to the rotated z
+coordinate, and renders through `iosim_fb_blit_homography`; 2D-only matrices
+stay on `iosim_fb_blit_affine`.

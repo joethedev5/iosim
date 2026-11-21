@@ -812,6 +812,123 @@ void iosim_fb_blit_affine(const uint32_t *src, int sw, int sh,
     }
 }
 
+void iosim_fb_blit_homography(const uint32_t *src, int sw, int sh,
+                              double h11, double h12, double h13,
+                              double h21, double h22, double h23,
+                              double h31, double h32, double h33,
+                              double opacity)
+{
+    if (!fb_pixels || !src || sw <= 0 || sh <= 0 || opacity <= 0)
+        return;
+    double det = h11 * (h22 * h33 - h23 * h32) -
+                 h12 * (h21 * h33 - h23 * h31) +
+                 h13 * (h21 * h32 - h22 * h31);
+    if (__builtin_fabs(det) < 1e-12)
+        return;
+    double i11 = (h22 * h33 - h23 * h32) / det;
+    double i12 = (h13 * h32 - h12 * h33) / det;
+    double i13 = (h12 * h23 - h13 * h22) / det;
+    double i21 = (h23 * h31 - h21 * h33) / det;
+    double i22 = (h11 * h33 - h13 * h31) / det;
+    double i23 = (h13 * h21 - h11 * h23) / det;
+    double i31 = (h21 * h32 - h22 * h31) / det;
+    double i32 = (h12 * h31 - h11 * h32) / det;
+    double i33 = (h11 * h22 - h12 * h21) / det;
+    double corners_x[4] = {0, sw, 0, sw};
+    double corners_y[4] = {0, 0, sh, sh};
+    double minx = 1e18, maxx = -1e18, miny = 1e18, maxy = -1e18;
+    for (int i = 0; i < 4; i++)
+    {
+        double W = h31 * corners_x[i] + h32 * corners_y[i] + h33;
+        if (W <= 1e-9)
+            continue;
+        double X = (h11 * corners_x[i] + h12 * corners_y[i] + h13) / W;
+        double Y = (h21 * corners_x[i] + h22 * corners_y[i] + h23) / W;
+        if (X < minx) minx = X;
+        if (X > maxx) maxx = X;
+        if (Y < miny) miny = Y;
+        if (Y > maxy) maxy = Y;
+    }
+    if (minx > maxx || miny > maxy)
+        return;
+    int x0 = (int)__builtin_floor(minx), x1 = (int)__builtin_ceil(maxx);
+    int y0 = (int)__builtin_floor(miny), y1 = (int)__builtin_ceil(maxy);
+    if (x0 < 0) x0 = 0;
+    if (y0 < 0) y0 = 0;
+    if (x1 > (int)fb_width) x1 = (int)fb_width;
+    if (y1 > (int)fb_height) y1 = (int)fb_height;
+    for (int y = y0; y < y1; y++)
+    {
+        if (y < fb_clip_y0() || y >= fb_clip_y1())
+            continue;
+        uint32_t *row = fb_pixels + (size_t)y * fb_width;
+        double Y = y + 0.5;
+        for (int x = x0; x < x1; x++)
+        {
+            if (x < fb_clip_x0() || x >= fb_clip_x1())
+                continue;
+            int mcov = fb_mask_coverage(x, y);
+            if (!mcov)
+                continue;
+            double X = x + 0.5;
+            double denom = i31 * X + i32 * Y + i33;
+            if (__builtin_fabs(denom) < 1e-12)
+                continue;
+            double u = (i11 * X + i12 * Y + i13) / denom - 0.5;
+            double v = (i21 * X + i22 * Y + i23) / denom - 0.5;
+            if (u < -1.0 || v < -1.0 || u > sw || v > sh)
+                continue;
+            int u0 = (int)__builtin_floor(u), v0 = (int)__builtin_floor(v);
+            double tu = u - u0, tv = v - v0;
+            int u1 = u0 + 1, v1 = v0 + 1;
+            int u0c = u0 < 0 ? 0 : (u0 >= sw ? sw - 1 : u0);
+            int u1c = u1 < 0 ? 0 : (u1 >= sw ? sw - 1 : u1);
+            int v0c = v0 < 0 ? 0 : (v0 >= sh ? sh - 1 : v0);
+            int v1c = v1 < 0 ? 0 : (v1 >= sh ? sh - 1 : v1);
+            uint32_t p00 = src[(size_t)v0c * sw + u0c];
+            uint32_t p10 = src[(size_t)v0c * sw + u1c];
+            uint32_t p01 = src[(size_t)v1c * sw + u0c];
+            uint32_t p11 = src[(size_t)v1c * sw + u1c];
+            double w00 = (1 - tu) * (1 - tv), w10 = tu * (1 - tv);
+            double w01 = (1 - tu) * tv, w11 = tu * tv;
+            double a00 = (p00 >> 24) & 0xFF, a10 = (p10 >> 24) & 0xFF,
+                   a01 = (p01 >> 24) & 0xFF, a11 = (p11 >> 24) & 0xFF;
+            double sa = a00 * w00 + a10 * w10 + a01 * w01 + a11 * w11;
+            if (sa <= 0.5)
+                continue;
+            double sr = (((p00 >> 16) & 0xFF) * a00 * w00 +
+                         ((p10 >> 16) & 0xFF) * a10 * w10 +
+                         ((p01 >> 16) & 0xFF) * a01 * w01 +
+                         ((p11 >> 16) & 0xFF) * a11 * w11) / sa;
+            double sg = (((p00 >> 8) & 0xFF) * a00 * w00 +
+                         ((p10 >> 8) & 0xFF) * a10 * w10 +
+                         ((p01 >> 8) & 0xFF) * a01 * w01 +
+                         ((p11 >> 8) & 0xFF) * a11 * w11) / sa;
+            double sb = ((p00 & 0xFF) * a00 * w00 + (p10 & 0xFF) * a10 * w10 +
+                         (p01 & 0xFF) * a01 * w01 +
+                         (p11 & 0xFF) * a11 * w11) / sa;
+            double f = (sa / 255.0) * opacity * (mcov / 255.0);
+            if (f <= 0.0005)
+                continue;
+            uint32_t dst = row[x];
+            unsigned dr = (dst >> 16) & 0xFF, dg = (dst >> 8) & 0xFF,
+                     db = dst & 0xFF;
+            unsigned r = (unsigned)(sr * f + dr * (1 - f) + 0.5);
+            unsigned g = (unsigned)(sg * f + dg * (1 - f) + 0.5);
+            unsigned b = (unsigned)(sb * f + db * (1 - f) + 0.5);
+            if (fb_alpha)
+            {
+                unsigned da = dst >> 24;
+                unsigned oa = (unsigned)(sa * opacity + da * (1 - f) + 0.5);
+                if (oa > 255) oa = 255;
+                row[x] = (oa << 24) | (r << 16) | (g << 8) | b;
+            }
+            else
+                row[x] = (r << 16) | (g << 8) | b;
+        }
+    }
+}
+
 void iosim_fb_set_opacity(double opacity)
 {
     if (opacity < 0)

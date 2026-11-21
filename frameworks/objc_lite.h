@@ -61,7 +61,8 @@ static inline CGAffineTransform CGAffineTransformIdentityValue(void)
 
 /* QuartzCore-style 4x4 transform. Points are row vectors, so the first two
  * columns map x/y exactly like CGAffineTransform's a/b/c/d; the renderer
- * uses the 2D submatrix plus m41/m42 translation and ignores perspective. */
+ * uses the 2D submatrix plus m41/m42 translation, and projects m13/m23/m31/
+ * m32/m33/m34/m43 into a homography when a 3D transform is present. */
 typedef struct CATransform3D {
     double m11, m12, m13, m14;
     double m21, m22, m23, m24;

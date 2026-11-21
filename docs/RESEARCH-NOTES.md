@@ -859,3 +859,8 @@ components.
   dependency is finished or cancelled. A queued operation polls `isReady`
   before starting, so adding a dependent before its dependency still runs in
   order. `name` is stored; queue priority and QoS are not modeled yet.
+- `CATransform3D` layer rendering now includes the perspective terms. With a
+  non-2D matrix, the renderer builds a homography from the row-vector
+  transform (`X=m11x+m21y+m41`, `Y=m12x+m22y+m42`,
+  `W=(m14+m34*m13)x+(m24+m34*m23)y+...`) and calls a projective blit that
+  inverse-maps each destination pixel. Pure 2D matrices keep the affine blit.
