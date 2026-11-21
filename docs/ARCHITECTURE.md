@@ -1416,9 +1416,9 @@ Python for iteration speed.
 `UIViewPropertyAnimator` is a thin state machine over the existing UIView
 animation engine: `startAnimation` schedules the animation blocks and a
 completion, `finishAnimationAtPosition:` settles immediately, and pause/stop
-only change the reported state. Block copy currently leaves `__block`
-scalars pointing at their creating stack frame, so asynchronous blocks must
-capture heap objects or globals.
+only change the reported state. Block copy promotes `__block` storage to a
+refcounted heap byref, so asynchronous blocks keep their captured state after
+the creating frame returns.
 Custom modal transitions are a small context object plus delegate dispatch:
 `presentViewController:` and `dismissViewControllerAnimated:` ask the
 transitioning delegate for an animator, build a

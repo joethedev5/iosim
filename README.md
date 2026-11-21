@@ -64,6 +64,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | NSOperationQueue/NSBlockOperation over dispatch groups | ✅ |
 | App bundle resources: `NSBundle` lookup and `UIImage imageNamed:` PNGs | ✅ |
 | libdispatch queues, groups, semaphores, timer/data sources; UIKit and run-loop drain | ✅ |
+| Block runtime: heap block copies with retain/release counts and `__block` byref promotion to shared heap storage | ✅ |
 | Mach ports/messages with refcounted rights, launchd bootstrap namespace, cross-process messaging | ✅ |
 | Mach-O initializers (`__init_offsets`, `__mod_init_func`), thread-local variables, Darwin pthread normalization | ✅ |
 | Darwin ABI translation: `stat$INODE64`, `open` flags, signals, CommonCrypto, `dispatch_data` | ✅ |

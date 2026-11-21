@@ -1,5 +1,15 @@
 /* NSString trimming/number/percent helpers and NSCharacterSet. */
 #include "UIKitStub.h"
+typedef void *dispatch_group_t;
+typedef void *dispatch_queue_t;
+extern dispatch_queue_t dispatch_get_global_queue(long identifier,
+                                                   unsigned long flags);
+extern dispatch_group_t dispatch_group_create(void);
+extern void dispatch_group_async(dispatch_group_t group,
+                                 dispatch_queue_t queue,
+                                 void (^block)(void));
+extern long dispatch_group_wait(dispatch_group_t group,
+                                unsigned long long timeout);
 
 extern int printf(const char *fmt, ...);
 extern int fflush(void *stream);
@@ -507,6 +517,14 @@ static int g_animatorRuns;
     sizeChild.preferredContentSize = CGSizeMake(123, 45);
     printf("[fnd] sizechildcount %d %.0f\n", parentController->_sizeChanges,
            [sizeChild preferredContentSize].width);
+
+    dispatch_group_t asyncGroup = dispatch_group_create();
+    __block int asyncValue = 0;
+    dispatch_group_async(asyncGroup, dispatch_get_global_queue(0, 0), ^{
+        asyncValue = 42;
+    });
+    dispatch_group_wait(asyncGroup, ~0ULL);
+    printf("[fnd] byref %d\n", asyncValue);
 
     NSProgress *progress = [NSProgress progressWithTotalUnitCount:10];
     __block int progressCancelled = 0;

@@ -803,13 +803,13 @@ components.
 - `UIViewPropertyAnimator` reuses the UIView animation engine: it runs its
   animation blocks through `animateWithDuration:`, reports the end position to
   completion handlers and keeps pause/stop/finish as state transitions over
-  that single engine. A real limitation surfaced by its async completion:
-  `_Block_copy` copies the block struct but the runtime's
-  `_Block_object_assign` is a no-op, so a `__block` scalar captured by a block
-  that runs after the creating stack frame returns still points at the stack.
-  Synchronous block consumers (enumeration, sorting) see the right value;
-  asynchronous ones need a heap object or global until the block runtime
-  promotes byref storage.
+  that single engine. Async completions exposed a block-runtime gap: the
+  loader's `_Block_object_assign` was a no-op, so `__block` storage stayed on
+  the creating stack frame. The runtime now promotes byref storage to a
+  refcounted heap copy, copies captured blocks, and treats object fields as
+  objects; an early attempt crashed because the field-kind test used bitwise
+  overlap (`flags & 3` matching 7), so it must compare the exact
+  object/block/byref kind.
 - Custom view-controller transitions use the same modal presentation path as
   the built-in page sheet, but when the presented controller has a
   `transitioningDelegate` that returns an animator, the runtime builds a

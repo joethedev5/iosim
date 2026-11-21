@@ -1244,6 +1244,8 @@ struct iosim_block_layout {
 #define IOSIM_BLOCK_IS_GLOBAL  (1 << 28)
 #define IOSIM_BLOCK_HAS_COPY_DISPOSE (1 << 25)
 #define IOSIM_BLOCK_IS_HEAP (1 << 24)
+#define IOSIM_BLOCK_DEALLOCATING 1
+#define IOSIM_BLOCK_REFCOUNT_MASK 0xfffe
 
 void *_Block_copy(void *block)
 {
@@ -1253,40 +1255,165 @@ void *_Block_copy(void *block)
     if (b->flags & IOSIM_BLOCK_IS_GLOBAL)
         return block;
     if (b->flags & IOSIM_BLOCK_IS_HEAP)
+    {
+        b->flags += 2;
         return block;
+    }
     if (!b->descriptor || b->descriptor->size < sizeof(struct iosim_block_layout))
         return block;
     struct iosim_block_layout *copy = malloc(b->descriptor->size);
     memcpy(copy, b, b->descriptor->size);
-    copy->flags |= IOSIM_BLOCK_IS_HEAP;
+    copy->flags = (copy->flags & ~IOSIM_BLOCK_REFCOUNT_MASK) |
+                  IOSIM_BLOCK_IS_HEAP | 2;
     if ((b->flags & IOSIM_BLOCK_HAS_COPY_DISPOSE) && b->descriptor->copy)
         b->descriptor->copy(copy, b);
     return copy;
 }
 
+#define IOSIM_BLOCK_FIELD_IS_OBJECT 3
+#define IOSIM_BLOCK_FIELD_IS_BLOCK 7
+#define IOSIM_BLOCK_FIELD_IS_BYREF 8
+#define IOSIM_BLOCK_BYREF_CALLER 128
+#define IOSIM_BLOCK_BYREF_NEEDS_FREE (1 << 24)
+#define IOSIM_BLOCK_BYREF_HAS_COPY_DISPOSE (1 << 25)
+#define IOSIM_BLOCK_BYREF_REFCOUNT_MASK 0xffff
+
+struct iosim_block_byref {
+    void *isa;
+    struct iosim_block_byref *forwarding;
+    volatile int flags;
+    unsigned int size;
+    void (*keep)(struct iosim_block_byref *dst, struct iosim_block_byref *src);
+    void (*destroy)(struct iosim_block_byref *byref);
+};
+
+#define IOSIM_BLOCK_BYREF_HEADER_SIZE 24
+
+static int iosim_byref_size_ok(const struct iosim_block_byref *byref)
+{
+    return byref && byref->size >= IOSIM_BLOCK_BYREF_HEADER_SIZE &&
+           byref->size <= (1u << 20);
+}
+
+static int iosim_block_pointer_ok(const void *object)
+{
+    const struct iosim_block_layout *block = object;
+    if (!block || !block->descriptor)
+        return 0;
+    if (block->descriptor->size < sizeof(struct iosim_block_layout) ||
+        block->descriptor->size > (1u << 20))
+        return 0;
+    if ((block->flags & IOSIM_BLOCK_HAS_COPY_DISPOSE) &&
+        !block->descriptor->copy)
+        return 0;
+    return 1;
+}
+
+static struct iosim_block_byref *iosim_byref_copy(void *object)
+{
+    struct iosim_block_byref *src = object;
+    if (!iosim_byref_size_ok(src))
+        return src;
+    struct iosim_block_byref *forward = src->forwarding;
+    if (!forward)
+        forward = src;
+    if ((forward->flags & IOSIM_BLOCK_BYREF_REFCOUNT_MASK) == 0)
+    {
+        struct iosim_block_byref *copy = malloc(src->size);
+        if (!copy)
+            return forward;
+        memcpy(copy, src, src->size);
+        copy->forwarding = copy;
+        copy->flags = (src->flags & ~IOSIM_BLOCK_BYREF_REFCOUNT_MASK) |
+                      IOSIM_BLOCK_BYREF_NEEDS_FREE | 4;
+        src->forwarding = copy;
+        if ((copy->flags & IOSIM_BLOCK_BYREF_HAS_COPY_DISPOSE) && copy->keep)
+            copy->keep(copy, src);
+        return copy;
+    }
+    if (forward->flags & IOSIM_BLOCK_BYREF_NEEDS_FREE)
+        forward->flags += 2;
+    return forward;
+}
+
+static void iosim_byref_release(void *object)
+{
+    struct iosim_block_byref *byref = object;
+    if (!iosim_byref_size_ok(byref))
+        return;
+    byref = byref->forwarding ? byref->forwarding : byref;
+    if ((byref->flags & IOSIM_BLOCK_BYREF_NEEDS_FREE) == 0)
+        return;
+    int refcount = byref->flags & IOSIM_BLOCK_BYREF_REFCOUNT_MASK;
+    if (refcount == 0)
+        return;
+    if (refcount > 2)
+    {
+        byref->flags -= 2;
+        return;
+    }
+    if ((byref->flags & IOSIM_BLOCK_BYREF_HAS_COPY_DISPOSE) && byref->destroy)
+        byref->destroy(byref);
+    free(byref);
+}
+
 void _Block_object_assign(void *dest, const void *object, int flags)
 {
-    (void)flags;
-    if (dest)
+    if (!dest)
+        return;
+    if (flags & IOSIM_BLOCK_BYREF_CALLER)
+    {
         *(const void **)dest = object;
+        return;
+    }
+    int kind = (flags & ~IOSIM_BLOCK_BYREF_CALLER) & 0xf;
+    if (kind == IOSIM_BLOCK_FIELD_IS_BYREF && object)
+    {
+        *(const void **)dest = iosim_byref_copy((void *)object);
+        return;
+    }
+    if (kind == IOSIM_BLOCK_FIELD_IS_BLOCK && object &&
+        iosim_block_pointer_ok(object))
+    {
+        *(const void **)dest = _Block_copy((void *)object);
+        return;
+    }
+    *(const void **)dest = object;
 }
 
 void _Block_object_dispose(const void *object, int flags)
 {
-    (void)object; (void)flags;
+    if (!object || (flags & IOSIM_BLOCK_BYREF_CALLER))
+        return;
+    int kind = (flags & ~IOSIM_BLOCK_BYREF_CALLER) & 0xf;
+    if (kind == IOSIM_BLOCK_FIELD_IS_BYREF)
+    {
+        iosim_byref_release((void *)object);
+        return;
+    }
+    if (kind == IOSIM_BLOCK_FIELD_IS_BLOCK && iosim_block_pointer_ok(object))
+        _Block_release((void *)object);
 }
 
 void _Block_release(void *block)
 {
     struct iosim_block_layout *b = block;
-    if (!b || (b->flags & IOSIM_BLOCK_IS_GLOBAL) == 0)
-    {
-        if (!b)
-            return;
-    }
+    if (!b || (b->flags & IOSIM_BLOCK_IS_GLOBAL))
+        return;
     if (!(b->flags & IOSIM_BLOCK_IS_HEAP))
         return;
-    if ((b->flags & IOSIM_BLOCK_HAS_COPY_DISPOSE) && b->descriptor && b->descriptor->dispose)
+    int old = b->flags;
+    int refcount = old & IOSIM_BLOCK_REFCOUNT_MASK;
+    if (refcount == 0)
+        return;
+    if (refcount > 2)
+    {
+        b->flags = old - 2;
+        return;
+    }
+    b->flags = old | IOSIM_BLOCK_DEALLOCATING;
+    if ((b->flags & IOSIM_BLOCK_HAS_COPY_DISPOSE) && b->descriptor &&
+        b->descriptor->dispose)
         b->descriptor->dispose(b);
     free(b);
 }
