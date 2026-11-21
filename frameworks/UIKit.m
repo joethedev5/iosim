@@ -703,6 +703,8 @@ typedef enum {
     double _animAlphaFrom, _animAlphaTo;
     BOOL _animatingFrame;
     CGRect _animFrameFrom, _animFrameTo;
+    BOOL _animatingTransform;
+    CGAffineTransform _animTransformFrom, _animTransformTo;
     double _animStart, _animDuration;
     double _animDelay;
     BOOL _animInfinite;
@@ -1931,6 +1933,8 @@ static void animation_mark_active(double duration, double repeat);
 static void animation_unmark_infinite(void);
 static CGRect current_frame(UIView *view);
 static double current_alpha(UIView *view);
+static CGAffineTransform current_transform(UIView *view);
+static CGPoint view_untransform_point(UIView *view, CGPoint point);
 static double layer_key_value(CALayer *layer, const char *key, double base);
 
 @implementation CALayer
@@ -2729,23 +2733,31 @@ int iosim_animations_active(void)
 
 /* ---------------------------------------------------------------- touches */
 
-/* Window-point to view-local conversion along the view hierarchy. Scroll
- * views shift their content, as do the controls that use them. */
+/* Window-point to view-local conversion along the view hierarchy. Descending
+ * from the window, each step removes the view's frame origin, inverts its
+ * (possibly animating) transform around the box center, and adds a scroll
+ * view's content offset before entering its content. */
 static CGPoint touch_point_in_view(UIView *view, CGPoint point)
 {
-    double ox = 0, oy = 0;
-    for (UIView *v = view; v; v = (UIView *)v->_superview)
+    UIView *chain[64];
+    int n = 0;
+    for (UIView *v = view; v && n < 64; v = (UIView *)v->_superview)
+        chain[n++] = v;
+    CGPoint p = point;
+    for (int i = n - 1; i >= 0; i--)
     {
-        ox += v->_frame.origin.x;
-        oy += v->_frame.origin.y;
+        UIView *v = chain[i];
+        p = CGPointMake(p.x - v->_frame.origin.x,
+                        p.y - v->_frame.origin.y);
+        p = view_untransform_point(v, p);
         if ([v isKindOfClass:[UIScrollView class]])
         {
             UIScrollView *scroll = (UIScrollView *)v;
-            ox -= scroll->_contentOffset.x;
-            oy -= scroll->_contentOffset.y;
+            p.x += scroll->_contentOffset.x;
+            p.y += scroll->_contentOffset.y;
         }
     }
-    return CGPointMake(point.x - ox, point.y - oy);
+    return p;
 }
 
 @implementation UITouch
@@ -3327,11 +3339,10 @@ static int wrap_editable_lines(const char *text, int style, double points,
 }
 - (void)setCenter:(CGPoint)center
 {
-    _frame.origin.x = center.x - _frame.size.width / 2.0;
-    _frame.origin.y = center.y - _frame.size.height / 2.0;
-    if (_layer)
-        _layer->_frame = CGRectMake(0, 0, _frame.size.width,
-                                    _frame.size.height);
+    CGRect frame = _frame;
+    frame.origin.x = center.x - frame.size.width / 2.0;
+    frame.origin.y = center.y - frame.size.height / 2.0;
+    [self setFrame:frame];
 }
 
 /* Coordinate conversion walks the superview chain, adding each frame origin
@@ -3479,7 +3490,24 @@ static CGPoint window_point_for_view(UIView *view, CGPoint point)
 - (id)superview { return _superview; }
 - (UIResponder *)nextResponder { return _superview; }
 - (CGAffineTransform)transform { return _transform; }
-- (void)setTransform:(CGAffineTransform)transform { _transform = transform; }
+- (void)setTransform:(CGAffineTransform)transform
+{
+    if (g_animating)
+    {
+        _animTransformFrom = current_transform(self);
+        _animTransformTo = transform;
+        _animStart = g_animStart;
+        _animDuration = g_animDuration;
+        _animDelay = g_animateDelay;
+        _animInfinite = g_animateInfinite;
+        _animAutoreverse = g_animateAutoreverse;
+        _animCurve = g_animateCurve;
+        _animatingTransform = YES;
+        animation_mark_active(g_animDuration + g_animateDelay,
+                              g_animateInfinite ? -1 : 0);
+    }
+    _transform = transform;
+}
 - (void)layoutSubviews { }
 - (void)drawRect:(CGRect)rect { (void)rect; }
 - (void)setNeedsLayout { _needsLayout = YES; }
@@ -3640,14 +3668,20 @@ static CGPoint window_point_for_view(UIView *view, CGPoint point)
 }
 - (UIView *)hitTest:(CGPoint)point
 {
-    if (_hidden || _alpha < 0.01 || ![self pointInside:point])
+    if (_hidden || current_alpha(self) < 0.01)
+        return nil;
+    /* The point arrives in this view's frame box; invert the (possibly
+     * animating) transform around the box center to reach the untransformed
+     * coordinate space that bounds and subview frames are laid out in. */
+    CGPoint local = view_untransform_point(self, point);
+    if (![self pointInside:local])
         return nil;
     for (int i = _subviewCount - 1; i >= 0; i--)
     {
         UIView *sub = (UIView *)_subviews[i];
-        CGPoint local = CGPointMake(point.x - sub->_frame.origin.x,
-                                    point.y - sub->_frame.origin.y);
-        UIView *hit = [sub hitTest:local];
+        CGPoint subPoint = CGPointMake(local.x - sub->_frame.origin.x,
+                                       local.y - sub->_frame.origin.y);
+        UIView *hit = [sub hitTest:subPoint];
         if (hit)
             return hit;
     }
@@ -9441,6 +9475,87 @@ static double current_alpha(UIView *view)
     return view->_alpha;
 }
 
+#define IOSIM_PI 3.14159265358979323846
+
+/* Interpolates two affine transforms by decomposing them into rotation,
+ * scale and translation, mirroring CoreAnimation: a rotation animation
+ * sweeps the angle along the shorter arc instead of collapsing through a
+ * scaled intermediate. Skew is not representable in this decomposition and
+ * resolves to the nearest rotation plus scale. */
+static CGAffineTransform transform_lerp(CGAffineTransform a,
+                                        CGAffineTransform b, double t)
+{
+    if (t <= 0.0)
+        return a;
+    if (t >= 1.0)
+        return b;
+    double angleA = __builtin_atan2(a.b, a.a);
+    double angleB = __builtin_atan2(b.b, b.a);
+    double sxA = __builtin_sqrt(a.a * a.a + a.b * a.b);
+    double sxB = __builtin_sqrt(b.a * b.a + b.b * b.b);
+    double syA = __builtin_sqrt(a.c * a.c + a.d * a.d);
+    double syB = __builtin_sqrt(b.c * b.c + b.d * b.d);
+    if (a.a * a.d - a.b * a.c < 0.0)
+        syA = -syA;
+    if (b.a * b.d - b.b * b.c < 0.0)
+        syB = -syB;
+    double delta = angleB - angleA;
+    while (delta > IOSIM_PI)
+        delta -= 2.0 * IOSIM_PI;
+    while (delta < -IOSIM_PI)
+        delta += 2.0 * IOSIM_PI;
+    double angle = angleA + delta * t;
+    double sx = sxA + (sxB - sxA) * t;
+    double sy = syA + (syB - syA) * t;
+    double c = __builtin_cos(angle), s = __builtin_sin(angle);
+    CGAffineTransform r;
+    r.a = c * sx;
+    r.b = s * sx;
+    r.c = -s * sy;
+    r.d = c * sy;
+    r.tx = a.tx + (b.tx - a.tx) * t;
+    r.ty = a.ty + (b.ty - a.ty) * t;
+    return r;
+}
+
+static CGAffineTransform current_transform(UIView *view)
+{
+    if (view->_animatingTransform)
+    {
+        int finished = 0;
+        double e = view_animation_progress(view, &finished);
+        if (finished)
+        {
+            view->_animatingTransform = NO;
+            view->_transform = view->_animTransformTo;
+        }
+        else
+            return transform_lerp(view->_animTransformFrom,
+                                  view->_animTransformTo, e);
+    }
+    return view->_transform;
+}
+
+/* Maps a point from a view's transformed frame-box space back into the
+ * untransformed local space its bounds and subviews live in. */
+static CGPoint view_untransform_point(UIView *view, CGPoint point)
+{
+    CGAffineTransform tf = current_transform(view);
+    if (tf.a == 1.0 && tf.b == 0.0 && tf.c == 0.0 && tf.d == 1.0 &&
+        tf.tx == 0.0 && tf.ty == 0.0)
+        return point;
+    CGRect frame = current_frame(view);
+    double cx = frame.size.width / 2.0;
+    double cy = frame.size.height / 2.0;
+    double det = tf.a * tf.d - tf.b * tf.c;
+    if (det == 0.0 || det != det)
+        return point;
+    double x = point.x - cx - tf.tx;
+    double y = point.y - cy - tf.ty;
+    return CGPointMake(cx + (tf.d * x - tf.c * y) / det,
+                       cy + (-tf.b * x + tf.a * y) / det);
+}
+
 static double number_value(id value, double fallback)
 {
     if (!value)
@@ -10472,7 +10587,7 @@ static void render_view(UIView *view, double originX, double originY,
     if (w < 0) w = 0;
     if (h < 0) h = 0;
 
-    CGAffineTransform tf = view->_transform;
+    CGAffineTransform tf = current_transform(view);
     int transformed = (tf.a != 1.0 || tf.b != 0.0 || tf.c != 0.0 ||
                        tf.d != 1.0 || tf.tx != 0.0 || tf.ty != 0.0);
     if (transformed && view != g_no_transform_view && w > 0 && h > 0)

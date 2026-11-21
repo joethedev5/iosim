@@ -845,7 +845,12 @@ decoded with libpng in `loader/image.c`.
   spring (`mass`, `stiffness`, `damping`, `initialVelocity`) and reports a
   settling duration derived from the damping ratio and natural frequency. A 2D
   affine transform is applied around the view center through an offscreen
-  composite.
+  composite. UIView transform changes inside an animation block are captured
+  like frame and alpha and interpolated by decomposing both endpoints into
+  rotation, x/y scale and translation, sweeping the angle along the shorter
+  arc (CoreAnimation's behavior) instead of blending matrix coefficients.
+  `setCenter:` routes through `setFrame:` so center animations share the same
+  path and completion accounting.
 
 ### 2.11 Auto Layout, gestures and text input
 
@@ -865,7 +870,11 @@ previous point, phase, timestamp, hit view). Touches are delivered as an
 default implementation forwards up the responder chain to the superview,
 view controller and window; `touchesMoved:`/`touchesEnded:` go to the same
 view. `locationInView:` converts window points into any ancestor's
-coordinates, including scroll offsets.
+coordinates, descending from the window and removing each frame origin,
+inverting each animating transform around its box center and adding scroll
+offsets. `hitTest:` performs the same transform inversion on the point it
+receives, so a rotated or scaled view is touchable over the area it paints
+rather than its untransformed frame.
 
 `UIControl` tracks the touch: it highlights on down, sends `TouchDown`,
 reports `TouchDragInside`/`TouchDragOutside` (and enter/exit transitions) as

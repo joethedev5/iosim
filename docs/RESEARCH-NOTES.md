@@ -427,6 +427,30 @@ management.
 - Fixture `tests/mach_port_lifecycle_test.c` covers refcounted survival,
   payload delivery and both post-release error codes.
 
+## 2026-11-21: animated UIView transforms
+
+- `UIView` transform changes inside an animation block are captured like
+  frame and alpha (`_animatingTransform` plus from/to matrices) and sampled
+  by `current_transform`, which the renderer now reads instead of the model
+  ivar. Interpolation decomposes each endpoint into rotation (atan2 of the
+  first column), x/y scale and translation, takes the shorter arc for the
+  angle and rebuilds the matrix. Linear coefficient blending was rejected:
+  a 0→180° rotation would collapse through zero scale at the midpoint.
+- `setCenter:` now routes through `setFrame:`, so animated center moves
+  share the frame path (previously the origin was written directly and
+  snapped).
+- Touch conversion descends the view chain applying frame origin, inverse
+  transform around the box center and scroll offset in render order;
+  `hitTest:` inverts its own transform before `pointInside:`, and the alpha
+  gate samples the animated value. A scaled/rotated view is now hittable
+  over the area it paints.
+- Skew cannot be represented by the decomposition and resolves to the
+  nearest rotation plus scale; that limitation is documented.
+- Fixture `tests/transform_animation_test.m`: a square scaling 1→2 and a bar
+  rotating 0→90° under one linear animation; midpoint and end captures check
+  interpolated extents (not snap), and `hitTest:` at (110,220) proves the
+  final 2x touch extent.
+
 ## Open directions
 
 - `metal-cpp` + macOS SDK Metal headers make it possible to implement a

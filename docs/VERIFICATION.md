@@ -842,6 +842,22 @@ fingers from 0° to 90° ends `UIRotationGestureRecognizer` at 90°, and
 magenta marker pixels; after the pinch the marker is twice as wide and
 counts 13924.
 
+### UIKit: animated UIView transforms
+
+`tests/transform_animation_test.m` animates a 100×100 green square from
+identity to scale 2 and a 120×20 green bar from 0° to 90° in one linear
+0.8 s `animateWithDuration:delay:options:animations:completion:` block, then
+captures the framebuffer at 450 ms and 1200 ms. At the midpoint the square
+must cover x 126–276 (progress 0.5 → scale 1.5): the sample at (133,220) is
+green while (120,220) is still background, which fails both when the
+transform snaps to its final value and when it does not animate at all. The
+bar at 45° covers (229,648) on the diagonal and has left (150,620); the final
+capture has the square covering (120,220) but not (95,220) and the bar
+vertical so both diagonal samples are background. At 1 s the fixture also
+calls `hitTest:` at (110,220), inside the final 2x bounds but outside the
+model frame, and at (95,220): `[tx] hit 1 1` proves touch conversion follows
+the animated transform.
+
 ### Foundation: NSURLSession
 
 The suite starts `python -m http.server` on a loopback ephemeral port and a
@@ -1443,7 +1459,10 @@ returns 0: the model suspends the process immediately instead of granting a
 background execution window. CoreText shaping is limited to the glyphs in SFUI;
 right-to-left and complex scripts are not shaped. `UIView.transform` applies a
 full 2D affine transform (translation, scale and rotation) through an offscreen
-composite; `CATransform3D` is not supported. Core Animation keeps four
+composite; animating one interpolates decomposed rotation, scale and
+translation, and touch conversion and hit-testing invert the transform, but
+skewed transforms interpolate as their nearest rotation plus scale.
+`CATransform3D` is not supported. Core Animation keeps four
 explicit animation slots per layer, and `CADisplayLink` ignores preferred
 frame-rate ranges. XPC carries dictionaries
 and value objects between processes but not connections, file descriptors or

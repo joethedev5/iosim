@@ -3914,6 +3914,63 @@ else
     echo "FAIL UIScrollView zoom/pinch"; echo "$out"; fails=$((fails+1))
 fi
 
+rm -f "$T/tx.fifo"
+mkfifo "$T/tx.fifo"
+"$ROOT/tools/build_app.sh" "$ROOT/tests/transform_animation_test.m" \
+    "$T/transform_animation_test" >/dev/null
+out="$(IOSIM_EVENT_FIFO="$T/tx.fifo" \
+    IOSIM_TEST_PNG_MID="$T/tx_mid.png" \
+    IOSIM_TEST_PNG_END="$T/tx_end.png" \
+    DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" \
+    "$T/transform_animation_test" 2>&1)"
+check "[tx] started" "$out" \
+    "animateWithDuration starts a transform animation"
+check "[tx] hit 1 1" "$out" \
+    "hit-testing follows the animated transform's extent"
+check "[tx] png written" "$out" \
+    "the transform fixture captures both phases"
+if out="$(python3 - "$ROOT/tools" "$T/tx_mid.png" "$T/tx_end.png" <<'TXPNG'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+
+def loader(path):
+    w, h, bpp, rows = pngpixel.load(path)
+    def read(x, y):
+        return pngpixel.px(rows, bpp, x * 3, y * 3)
+    return read
+
+def green(read, x, y):
+    c = read(x, y)
+    r, g, b = ((c >> 16) & 255), ((c >> 8) & 255), (c & 255)
+    return abs(r - 26) < 25 and abs(g - 204) < 25 and abs(b - 77) < 25
+
+mid = loader(sys.argv[2])
+end = loader(sys.argv[3])
+if not green(mid, 133, 220):
+    raise SystemExit("scale animation did not begin")
+if green(mid, 120, 220):
+    raise SystemExit("scale snapped to its final value")
+if green(mid, 150, 620):
+    raise SystemExit("bar did not rotate away from its start")
+if not green(mid, 229, 648):
+    raise SystemExit("bar is not on the 45-degree diagonal at the midpoint")
+if not green(end, 120, 220):
+    raise SystemExit("scale did not reach 2x")
+if green(end, 95, 220):
+    raise SystemExit("scale exceeded 2x")
+if green(end, 229, 648):
+    raise SystemExit("bar did not finish rotating")
+if green(end, 150, 620):
+    raise SystemExit("bar is not vertical at the end")
+print("ok   scaled square and rotating bar interpolate between captures")
+TXPNG
+)"; then
+    echo "$out"
+else
+    echo "FAIL animated UIView transforms"; echo "$out"; fails=$((fails+1))
+fi
+
 if [ "$fails" -ne 0 ]; then
     echo "$fails test(s) failed" >&2
     exit 1

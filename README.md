@@ -37,7 +37,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | UISwitch, UISlider, UISegmentedControl, UIPageControl, UIActivityIndicatorView, UIProgressView | ✅ |
 | UIAlertController alerts and actions, animated page-sheet modal presentation and dismissal | ✅ |
 | UINavigationController push/pop, UITabBarController, UIStackView, standalone UINavigationBar/UIToolbar with item targets, UIButton titles | ✅ |
-| UIView animations (frame, alpha), delay/curve/repeat options, completion blocks | ✅ |
+| UIView animations (frame, alpha, transform), delay/curve/repeat options, completion blocks | ✅ |
 | `CADisplayLink`, presentation layers, multiple concurrent layer animations | ✅ |
 | `CAAnimationGroup`: grouped opacity/corner animations, group removal clears children | ✅ |
 | `CASpringAnimation`: mass/stiffness/damping/initial velocity, settling duration | ✅ |
@@ -76,7 +76,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | Lock screen: date and clock, lock/unlock, apps suspend on lock and resume in place | ✅ |
 | Spotlight search: pill opens a keyboard-driven search over installed apps | ✅ |
 | Control Center: top-right drag, connectivity toggles, media, brightness/volume and utilities | ✅ |
-| UIView 2D transforms (rotation and scale), center/bounds/point conversion, UIScrollView insets/paging/zoom/delegate, momentum and animated offsets | ✅ |
+| UIView 2D transforms (rotation and scale) with decomposed animation interpolation and transform-aware hit-testing/location conversion, center/bounds/point conversion, UIScrollView insets/paging/zoom/delegate, momentum and animated offsets | ✅ |
 | Layer clipping (`clipsToBounds`/`masksToBounds`), shadows and borders | ✅ |
 | UIVisualEffectView backdrop blur: capture, box blur, tint, rounded mask, contentView | ✅ |
 | Switch, slider, segmented, progress, page and activity controls in the iOS 26 glass design | ✅ |
