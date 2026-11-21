@@ -546,6 +546,40 @@ management.
   rather than opening a submenu, and menu dismissal is immediate (no return
   animation yet).
 
+## UserNotifications and the system notification UI
+
+- `UserNotifications.framework` is a canonical runtime dylib, like UIKit and
+  QuartzCore. The center keeps pending and delivered arrays in the app and
+  writes each scheduled request to a shared escaped-text file
+  (`bundle, id, fire epoch, repeats, interval, title, subtitle, body`) under
+  `Library/SpringBoard/notifications/` in the shared resources directory. A
+  main-queue timer fires due requests; it skips a request whose file has
+  disappeared, because SpringBoard removes the file when it takes ownership.
+- SpringBoard scans that directory every 200 ms. A due request is added to the
+  delivered list and shown as a banner: capture the screen under the banner
+  rect, box-blur, tint a `#35353e` card at (8, 58) pt with a 38 pt icon, app
+  name, "now", title and body. The banner auto-dismisses at 5 s; a swipe up
+  inside it dismisses early.
+- The shell draws only in response to events, so the 0.28 s slide-in is driven
+  by the notification tick returning "redraw" while the banner is young. A full
+  redraw costs tens of milliseconds, which paces the animation at a handful of
+  frames; without this the banner froze at whatever fraction it had on the
+  first draw.
+- A top-edge drag left of the top-right corner opens Notification Center: a
+  full-screen blurred capture under a 42 % dim, a 62 pt clock and real date,
+  and delivered cards from y = 198 pt. Tapping a banner or card writes
+  `Library/SpringBoard/notification-response.txt`, removes that delivered
+  entry, and launches or resumes the app. The app polls the response file
+  every 250 ms and calls
+  `userNotificationCenter:didReceiveNotificationResponse:withCompletionHandler:`
+  once its delegate exists, so a tap while the app was stopped still arrives
+  after resume.
+- Dispatch main-queue bug found by the notification fixture: the ring drain
+  broke at the first not-due head, so a block enqueued later but due earlier
+  (a 0.25 s response poll behind a longer timer) starved until the head fired.
+  The drain now scans the ring for the earliest due entry, removes it by
+  shifting the rest, and leaves the others in order.
+
 ## Open directions
 
 - `metal-cpp` + macOS SDK Metal headers make it possible to implement a
@@ -556,3 +590,8 @@ management.
 - Apple `libdispatch`/`libpthread` sources in apple-oss-distributions are the
   reference for deeper dispatch and pthread fidelity (dispatch_source is
   still missing in the loader services layer).
+- Notification follow-ons: `UNNotificationCategory`/`UNNotificationAction`
+  with a long-press expanded banner and action buttons (the response file
+  already carries an action identifier), badge numbers drawn on home-screen
+  icons, and delivered notifications listed on the lock screen rather than
+  only in Notification Center.

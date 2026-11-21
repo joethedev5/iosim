@@ -1122,6 +1122,33 @@ Unlocking resumes that stopped process and waits on it again, so the app
 returns in place with `applicationWillEnterForeground:` /
 `applicationDidBecomeActive:` and its `viewDidLoad` still ran only once.
 
+Notification requests cross the process boundary through the shared device
+data, because SpringBoard must show them while the app that scheduled them is
+suspended. `UserNotifications.framework` keeps the center's pending and
+delivered lists in the app process and writes one escaped text file per request
+under
+`Library/SpringBoard/notifications/` in the shared resources directory
+(bundle, identifier, fire epoch, repeats, interval, title, subtitle, body).
+A main-queue timer fires due requests in the app: it checks that the file still
+exists (SpringBoard removes it when it takes ownership), re-arms a repeating
+request by rewriting its fire time, and calls the delegate's
+`willPresentNotification:` with the presentation options. SpringBoard scans the
+same directory every 200 ms from its event loop. A due request becomes a
+delivered entry (newest first, capped at 16) and a banner: a blurred capture of
+the screen under the banner rect, a dark tinted card at (8, 58) pt with the
+app's icon, name, relative time, title and body, and a 0.28 s ease-out slide
+driven by the tick, since the shell otherwise draws only for events. The banner
+auto-dismisses after 5 s; a swipe up inside it dismisses it early. A top-edge
+drag left of the top-right corner opens Notification Center instead: a
+full-screen blurred capture under a 42 % black dim, the 62 pt clock and real
+date, and the delivered cards from y = 198 pt. Tapping a banner or card writes
+`Library/SpringBoard/notification-response.txt` (bundle, identifier, action,
+title, body), removes that entry from the delivered list, and launches or
+resumes the app. The app's center polls the response file every 250 ms and calls
+`userNotificationCenter:didReceiveNotificationResponse:withCompletionHandler:`
+once its delegate exists, which is how a tap that happened while the process
+was stopped still reaches the app after it resumes.
+
 ### 2.13 Kernel symbolication from a KDK
 
 The services layer implements Mach and BSD entry points by name, so it needs

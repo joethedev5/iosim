@@ -344,12 +344,26 @@ int iosim_dispatch_drain_main(void)
         void *context = NULL;
         double now = now_seconds();
         pthread_mutex_lock(&mainq_lock);
-        if (mainq_head != mainq_tail && mainq[mainq_head].when <= now)
+        /* Later submissions can carry earlier deadlines: a timer added after
+         * a chain of delayed blocks must not wait behind them. Scan for the
+         * first due item and close the gap it leaves in the ring. */
+        for (int i = mainq_head; i != mainq_tail; i = (i + 1) % MAINQ_CAP)
         {
-            block = mainq[mainq_head].block;
-            function = mainq[mainq_head].function;
-            context = mainq[mainq_head].context;
-            mainq_head = (mainq_head + 1) % MAINQ_CAP;
+            if (mainq[i].when > now)
+                continue;
+            block = mainq[i].block;
+            function = mainq[i].function;
+            context = mainq[i].context;
+            int j = i;
+            int k = (i + 1) % MAINQ_CAP;
+            while (k != mainq_tail)
+            {
+                mainq[j] = mainq[k];
+                j = k;
+                k = (k + 1) % MAINQ_CAP;
+            }
+            mainq_tail = j;
+            break;
         }
         pthread_mutex_unlock(&mainq_lock);
         if (!block && !function)

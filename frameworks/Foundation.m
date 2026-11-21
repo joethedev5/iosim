@@ -2955,6 +2955,36 @@ static int pred_parse_or(pred_parser *parser)
     return [NSString stringWithUTF8String:dir];
 }
 - (id)bundlePath { return [self resourcePath]; }
+- (id)infoDictionary
+{
+    if (_infoDictionary)
+        return _infoDictionary;
+    const char *dir = getenv("IOSIM_BUNDLE_DIR");
+    if (!dir || !*dir)
+        dir = ".";
+    char path[1024];
+    snprintf(path, sizeof(path), "%s/Info.plist", dir);
+    NSData *data =
+        [NSData dataWithContentsOfFile:[NSString stringWithUTF8String:path]];
+    if (!data)
+        return nil;
+    id plist = [NSPropertyListSerialization propertyListWithData:data
+                                                         options:0
+                                                          format:0
+                                                           error:0];
+    if (plist && [plist isKindOfClass:[NSDictionary class]])
+        _infoDictionary = plist;
+    return _infoDictionary;
+}
+- (id)bundleIdentifier
+{
+    const char *env = getenv("IOSIM_BUNDLE_ID");
+    if (env && *env)
+        return [NSString stringWithUTF8String:env];
+    id plist = [self infoDictionary];
+    id value = plist ? [plist objectForKey:@"CFBundleIdentifier"] : nil;
+    return [value isKindOfClass:[NSString class]] ? value : nil;
+}
 - (id)pathForResource:(id)name ofType:(id)type
 {
     const char *n = iosim_string_cstr(name);

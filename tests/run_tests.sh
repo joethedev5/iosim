@@ -4138,6 +4138,64 @@ else
     echo "FAIL UIActivityViewController share sheet"; echo "$out"; fails=$((fails+1))
 fi
 
+# ---------- UserNotifications.framework ----------
+rm -rf "$T/un-shared"
+mkdir -p "$T/un-shared"
+rm -f "$T/un.fifo"
+mkfifo "$T/un.fifo"
+"$ROOT/tools/build_app.sh" "$ROOT/tests/notifications_test.m" \
+    "$T/notifications_test" >/dev/null
+out="$(IOSIM_EVENT_FIFO="$T/un.fifo" \
+    IOSIM_TEST_PNG_FINAL="$T/un_final.png" \
+    SIMULATOR_SHARED_RESOURCES_DIRECTORY="$T/un-shared" \
+    IOSIM_BUNDLE_ID=com.iosim.notify \
+    DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" \
+    "$T/notifications_test" 2>&1)"
+check "[un] granted 1" "$out" \
+    "requestAuthorization grants alert, sound and badge"
+check "[un] status 2" "$out" "notification settings report authorized"
+check "[un] added 1" "$out" "a time-interval request is accepted"
+check "[un] pending 1 store 1" "$out" \
+    "the request is pending and written for the system UI"
+check "[un] willPresent lunch Lunch" "$out" \
+    "a foreground request reaches the center delegate"
+check "[un] after pending 0 store 0" "$out" \
+    "a one-shot request leaves the pending list and the shared schedule"
+check "[un] delivered title Lunch" "$out" \
+    "the delivered notification carries its content"
+check "[un] ticks 2" "$out" "a repeating request fires again"
+check "[un] stopped pending 0" "$out" \
+    "removing pending identifiers stops the repeat"
+check "[un] stopped delivered 0 store 0" "$out" \
+    "delivered notifications and the shared schedule are removed"
+check "[un] png written" "$out" "the notification fixture captures the frame"
+if [ -z "$(ls -A "$T/un-shared/Library/SpringBoard/notifications" \
+        2>/dev/null)" ]; then
+    echo "ok   no notification schedule files are left behind"
+else
+    echo "FAIL notification schedule cleanup"; fails=$((fails+1))
+fi
+if out="$(python3 - "$ROOT/tools" "$T" <<'UNPNG'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+root = sys.argv[2]
+w, h, bpp, rows = pngpixel.load(root + "/un_final.png")
+def rgb(x, y):
+    c = pngpixel.px(rows, bpp, x * 3, y * 3)
+    return ((c >> 16) & 255, (c >> 8) & 255, c & 255)
+c = rgb(201, 300)
+if not (abs(c[0] - 89) < 12 and abs(c[1] - 51) < 12 and
+        abs(c[2] - 140) < 12):
+    raise SystemExit("the notification fixture frame is missing")
+print("ok   the notification fixture draws its frame")
+UNPNG
+)"; then
+    echo "$out"
+else
+    echo "FAIL UserNotifications"; echo "$out"; fails=$((fails+1))
+fi
+
 rm -f "$T/ctx.fifo"
 mkfifo "$T/ctx.fifo"
 "$ROOT/tools/build_app.sh" "$ROOT/tests/context_menu_test.m" \
@@ -4255,6 +4313,171 @@ CTXPNG
 else
     echo "FAIL context menus"; echo "$out"; fails=$((fails+1))
 fi
+
+# ---------- system notifications: banners and Notification Center ----------
+# The device sections above shut their phone down; notifications need a live
+# SpringBoard, so boot a fresh phone for this block.
+UDID="$("$ROOT/tools/iosimctl" create "Notify iPhone" com.iosim.SimDeviceType.iPhone-18-Pro)"
+"$ROOT/tools/iosimctl" boot "$UDID" >/dev/null
+SBLOG="$IOSIM_HOME/Devices/$UDID/logs/springboard.log"
+sleep 0.6
+"$ROOT/tools/build_app.sh" "$ROOT/tests/notification_app_test.m" \
+    "$T/NotifyApp" >/dev/null
+mkdir -p "$T/NotifyApp.app"
+cp "$T/NotifyApp" "$T/NotifyApp.app/NotifyApp"
+python3 - "$T/NotifyApp.app/Info.plist" <<'PY'
+import plistlib, sys
+with open(sys.argv[1], "wb") as f:
+    plistlib.dump({
+        "CFBundleIdentifier": "com.iosim.notifyapp",
+        "CFBundleExecutable": "NotifyApp",
+        "CFBundleName": "Notify",
+        "CFBundlePackageType": "APPL",
+        "CFBundleVersion": "1",
+        "CFBundleShortVersionString": "1.0",
+    }, f)
+PY
+"$ROOT/tools/iosimctl" install "$UDID" "$T/NotifyApp.app" >/dev/null
+sleep 0.6
+"$ROOT/tools/iosimctl" ui "$UDID" tap 201 718.5 >/dev/null
+if wait_log "[SpringBoard] search opened"; then
+    echo "ok   Spotlight opens for the notification fixture"
+else
+    echo "FAIL notification search open"; fails=$((fails+1))
+fi
+for c in n o t i f y; do
+    "$ROOT/tools/iosimctl" ui "$UDID" key "$c" >/dev/null
+done
+if wait_log "[SpringBoard] search results 1"; then
+    echo "ok   the notification app is found in Spotlight"
+else
+    echo "FAIL notification search"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" tap 200 270 >/dev/null
+if wait_log "[notifyapp] scheduled first 1"; then
+    echo "ok   the app schedules a request through UserNotifications"
+else
+    echo "FAIL notification scheduling"; fails=$((fails+1))
+fi
+sleep 0.4
+"$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
+if wait_log "[SpringBoard] notification banner Lunch"; then
+    echo "ok   a due request appears as a system banner"
+else
+    echo "FAIL notification banner"; fails=$((fails+1))
+fi
+sleep 0.6
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/nbanner.png" >/dev/null
+if out="$(python3 - "$ROOT/tools" "$T" <<'NBANPNG'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+root = sys.argv[2]
+w, h, bpp, rows = pngpixel.load(root + "/nbanner.png")
+def rgb(x, y):
+    c = pngpixel.px(rows, bpp, x * 3, y * 3)
+    return ((c >> 16) & 255, (c >> 8) & 255, c & 255)
+card = rgb(201, 100)
+if not (abs(card[0] - 53) < 16 and abs(card[1] - 53) < 16 and
+        abs(card[2] - 62) < 16):
+    raise SystemExit("banner card not drawn: %06x" % (card[0] << 16 |
+                     card[1] << 8 | card[2]))
+icon = rgb(46, 84)
+if not (icon[0] > 200 and icon[1] > 200 and icon[2] > 200):
+    raise SystemExit("banner icon not drawn: %06x" % (icon[0] << 16 |
+                     icon[1] << 8 | icon[2]))
+outside = rgb(201, 300)
+if (abs(outside[0] - card[0]) < 12 and abs(outside[1] - card[1]) < 12 and
+        abs(outside[2] - card[2]) < 12):
+    raise SystemExit("banner fills the whole screen")
+print("ok   the banner slides in with its app icon and card")
+NBANPNG
+)"; then
+    echo "$out"
+else
+    echo "FAIL notification banner rendering"; echo "$out"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" tap 201 100 >/dev/null
+if wait_log "[SpringBoard] notification opened Lunch"; then
+    echo "ok   tapping the banner opens its notification"
+else
+    echo "FAIL notification banner tap"; fails=$((fails+1))
+fi
+if wait_log "[notifyapp] didReceive first Lunch"; then
+    echo "ok   the resumed app receives the tapped response"
+else
+    echo "FAIL notification response"; fails=$((fails+1))
+fi
+if wait_log "[notifyapp] scheduled second 1"; then
+    echo "ok   the response delegate schedules a second request"
+else
+    echo "FAIL notification rescheduling"; fails=$((fails+1))
+fi
+sleep 0.5
+"$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
+if wait_log "[SpringBoard] notification banner Meeting"; then
+    echo "ok   a background request banners after the app is suspended"
+else
+    echo "FAIL background notification banner"; fails=$((fails+1))
+fi
+sleep 0.6
+"$ROOT/tools/iosimctl" ui "$UDID" swipe 201 120 201 30 0.2 >/dev/null
+if wait_log "[SpringBoard] notification banner dismissed"; then
+    echo "ok   swiping the banner up dismisses it"
+else
+    echo "FAIL notification banner swipe"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" swipe 120 30 120 500 0.3 >/dev/null
+if wait_log "[SpringBoard] notification center opened"; then
+    echo "ok   a top-edge drag opens Notification Center"
+else
+    echo "FAIL notification center open"; fails=$((fails+1))
+fi
+sleep 0.5
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/ncenter.png" >/dev/null
+if out="$(python3 - "$ROOT/tools" "$T" <<'NCPNG'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+root = sys.argv[2]
+w, h, bpp, rows = pngpixel.load(root + "/ncenter.png")
+def rgb(x, y):
+    c = pngpixel.px(rows, bpp, x * 3, y * 3)
+    return ((c >> 16) & 255, (c >> 8) & 255, c & 255)
+card = rgb(201, 240)
+if not (abs(card[0] - 53) < 18 and abs(card[1] - 53) < 18 and
+        abs(card[2] - 62) < 18):
+    raise SystemExit("delivered notification card not drawn: %06x" %
+                     (card[0] << 16 | card[1] << 8 | card[2]))
+white = 0
+for y in range(122, 190, 4):
+    for x in range(24, 200, 4):
+        c = rgb(x, y)
+        if c[0] > 230 and c[1] > 230 and c[2] > 230:
+            white += 1
+if white < 3:
+    raise SystemExit("Notification Center clock not drawn")
+print("ok   Notification Center draws the clock and the delivered card")
+NCPNG
+)"; then
+    echo "$out"
+else
+    echo "FAIL notification center rendering"; echo "$out"
+    fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" tap 201 240 >/dev/null
+if wait_log "[SpringBoard] notification opened Meeting"; then
+    echo "ok   tapping the Notification Center card opens it"
+else
+    echo "FAIL notification center tap"; fails=$((fails+1))
+fi
+if wait_log "[notifyapp] didReceive second Meeting"; then
+    echo "ok   the app receives the Notification Center response"
+else
+    echo "FAIL notification center response"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
+sleep 0.4
 
 if [ "$fails" -ne 0 ]; then
     echo "$fails test(s) failed" >&2

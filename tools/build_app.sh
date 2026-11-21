@@ -13,7 +13,7 @@ if [ -z "${LD64:-}" ] || [ ! -x "$LD64" ]; then
     echo "ld64.lld not found" >&2
     exit 1
 fi
-for f in UIKit Foundation QuartzCore; do
+for f in UIKit Foundation QuartzCore UserNotifications; do
     if [ ! -f "$ROOT/runtime/System/Library/Frameworks/$f.framework/$f" ]; then
         echo "runtime missing $f; run tools/build_runtime.sh first" >&2
         exit 1
@@ -28,6 +28,7 @@ OBJ="$OUT.o"
     "$ROOT/runtime/System/Library/Frameworks/Foundation.framework/Foundation" \
     "$ROOT/runtime/System/Library/Frameworks/UIKit.framework/UIKit" \
     "$ROOT/runtime/System/Library/Frameworks/QuartzCore.framework/QuartzCore" \
+    "$ROOT/runtime/System/Library/Frameworks/UserNotifications.framework/UserNotifications" \
     -undefined dynamic_lookup
 rm -f "$OBJ"
 echo "built $OUT"

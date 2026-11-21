@@ -327,6 +327,7 @@ int iosim_spawn_app(const char *exe, const char *bundle, const char *home)
             snprintf(name, sizeof(name), "UIKitApplication:%s[%d]", bundle,
                      (int)getpid());
             setenv("XPC_SERVICE_NAME", name, 1);
+            setenv("IOSIM_BUNDLE_ID", bundle, 1);
         }
         if (home && *home)
         {

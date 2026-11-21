@@ -1355,6 +1355,31 @@ lock screen screenshot with the same big-clock pixel count. Unlocking logs
 `[lockapp] foreground state=1` and `[lockapp] active state=0`: the same stopped
 process continued, and its view controller was never recreated.
 
+### System notifications
+
+`UserNotifications.framework` is exercised first in-process by
+`tests/notifications_test.m`: authorization grants alert/sound/badge, settings
+report authorized, a time-interval request is accepted and written to the
+shared schedule, a foreground request reaches the delegate, a one-shot request
+leaves both the pending list and the shared schedule, a repeating request fires
+again, and removing pending identifiers stops it and clears delivered entries —
+with no schedule files left behind. The suite also runs
+`tests/notification_app_test.m` through the real system UI. The fixture
+schedules "Lunch" at 2 s; sending home suspends it, and SpringBoard logs
+`[SpringBoard] notification banner Lunch`. A screenshot 0.6 s later samples the
+banner card at (201, 100) pt as `#35353e` and its icon at (46, 84) pt as white,
+while (201, 300) pt remains wallpaper — a real card, not a full-screen overlay.
+Tapping the banner logs `[SpringBoard] notification opened Lunch` and
+`[notifyapp] didReceive first Lunch` after the same stopped process resumes; the
+response delegate schedules "Meeting" at 4 s. Home again, and the background
+request banners; a swipe up logs
+`[SpringBoard] notification banner dismissed`. A top-edge drag opens
+Notification Center, where a screenshot finds the delivered card at
+(201, 240) pt and the big clock's white pixels, and tapping the card logs
+`[SpringBoard] notification opened Meeting` and
+`[notifyapp] didReceive second Meeting` — the response file handoff reaches the
+app after its second suspension.
+
 ### UIKit: pull-to-refresh
 
 `demo/RefreshApp.m` attaches a `UIRefreshControl` to a twelve-row table. The

@@ -25,7 +25,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | `objc_msgSend` ABI trampoline (integer + SSE args), nil-receiver zero return | ✅ |
 | Ivar layout realization (`__objc_ivar` offset variables) | ✅ |
 | `objc_alloc_init`, autorelease pools, `sel_*`, `class_*` basics | ✅ |
-| Reimplemented `UIKit.framework` / `Foundation.framework` in a runtime root | ✅ (lite) |
+| Reimplemented `UIKit` / `Foundation` / `QuartzCore` / `UserNotifications` frameworks in a runtime root | ✅ (lite) |
 | `simctl`-style device lifecycle, boot, install, launch, spawn | ✅ |
 | Scene lifecycle (`UIWindowScene`, `UISceneDelegate`) required by iOS 27 | ✅ |
 | Software framebuffer, SF font rendering, UIKit view rendering | ✅ |
@@ -76,6 +76,9 @@ runners**, combined with the public Darling and Apple dyld sources.
 | Lock screen: date and clock, lock/unlock, apps suspend on lock and resume in place | ✅ |
 | Spotlight search: pill opens a keyboard-driven search over installed apps | ✅ |
 | Control Center: top-right drag, connectivity toggles, media, brightness/volume and utilities | ✅ |
+| `UserNotifications.framework`: authorization and settings, time-interval requests and repeats, foreground delivery and delegate callbacks | ✅ |
+| System notification banners: due-request scanning, blurred card with app icon, slide-in, auto-dismiss and swipe-up dismissal | ✅ |
+| Notification Center: top-edge drag, blurred backdrop, clock and date, delivered cards, tap-to-open response handoff | ✅ |
 | UIView 2D transforms (rotation and scale) with decomposed animation interpolation and transform-aware hit-testing/location conversion, center/bounds/point conversion, UIScrollView insets/paging/zoom/delegate, momentum and animated offsets | ✅ |
 | Layer clipping (`clipsToBounds`/`masksToBounds`), shadows and borders | ✅ |
 | UIVisualEffectView backdrop blur: capture, box blur, tint, rounded mask, contentView | ✅ |

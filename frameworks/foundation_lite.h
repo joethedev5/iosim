@@ -375,10 +375,15 @@ enum {
 - (void)setObject:(id)object forKeyedSubscript:(id)key;
 @end
 
-@interface NSBundle : NSObject
+@interface NSBundle : NSObject {
+@public
+    id _infoDictionary;
+}
 + (NSBundle *)mainBundle;
 - (id)resourcePath;
 - (id)bundlePath;
+- (id)infoDictionary;
+- (id)bundleIdentifier;
 - (id)pathForResource:(id)name ofType:(id)type;
 @end
 

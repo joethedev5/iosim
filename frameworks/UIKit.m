@@ -55,6 +55,8 @@ extern void iosim_fb_font_metrics(int style, double size_pt, double scale,
                                   int *ascent, int *descent,
                                   int *line_height);
 extern int  iosim_fb_present(const char *path);
+extern int  iosim_fb_width(void);
+extern int  iosim_fb_height(void);
 extern int  iosim_event_next(int *type, int *x, int *y);
 extern void iosim_event_second_point(int *x, int *y);
 extern int  iosim_event_open(void);
@@ -82,6 +84,9 @@ extern int  iosim_fs_read(const char *path, unsigned char **out,
                           unsigned long *out_len);
 extern int  iosim_fs_write(const char *path, const void *bytes,
                            unsigned long len);
+extern int  iosim_fs_remove(const char *path);
+extern int  iosim_fs_list(const char *path, char *out, unsigned long cap);
+extern double iosim_wall_time(void);
 extern int  iosim_png_load(const char *path, unsigned char **out_rgba,
                            int *out_width, int *out_height);
 extern void *_Block_copy(void *block);
@@ -13081,6 +13086,10 @@ static void draw_status_icons(int fbWidth, double scale)
     }
 }
 
+static int g_shell_active;
+static int g_sb_overlay_guard;
+static void shell_draw_notification_overlays(int fbWidth, double scale);
+
 static void draw_device_chrome(int fbWidth, double scale)
 {
     (void)fbWidth;
@@ -13098,6 +13107,8 @@ static void draw_device_chrome(int fbWidth, double scale)
                        (int)(timeBaseline * scale), statusTime,
                        IOSIM_FONT_SEMIBOLD, timeSize, scale, 0xffffff);
     draw_status_icons(fbWidth, scale);
+    if (g_shell_active && !g_sb_overlay_guard)
+        shell_draw_notification_overlays(fbWidth, scale);
 }
 
 
@@ -14898,6 +14909,668 @@ static void shell_draw(int fbWidth, int fbHeight, double scale)
     draw_device_chrome(fbWidth, scale);
 }
 
+/* --------------------------------------------------- system notifications
+ *
+ * UserNotifications writes one request file per scheduled notification into
+ * the shared device data. While SpringBoard owns the screen it scans that
+ * directory, presents due requests as banners, keeps them in Notification
+ * Center, and hands a tapped notification back to its app through a response
+ * file that the app's UNUserNotificationCenter polls. */
+
+#define SB_NOTIFICATION_MAX 16
+
+struct sb_notification {
+    char bundle[128];
+    char identifier[128];
+    char title[512];
+    char subtitle[512];
+    char body[2048];
+    double fire;
+    double interval;
+    int repeats;
+};
+
+static struct sb_notification g_sb_delivered[SB_NOTIFICATION_MAX];
+static double g_sb_delivered_time[SB_NOTIFICATION_MAX];
+static int g_sb_delivered_count;
+static struct sb_notification g_sb_banner;
+static int g_sb_banner_active;
+static double g_sb_banner_start;
+static int g_notification_center;
+static double g_sb_last_notification_scan;
+static unsigned *g_sb_nc_backdrop;
+static int g_sb_nc_backdrop_w, g_sb_nc_backdrop_h;
+
+static void share_text_ellipsis(const char *text, int style, double size,
+                                double scale, int maxWidth, char *out,
+                                unsigned long outSize);
+static void shell_launch(int index, int fbWidth, int fbHeight, double scale,
+                         const char *path);
+static void shell_refresh_all(int fbWidth, int fbHeight, double scale,
+                              const char *path);
+
+static int shell_shared_dir(char *out, unsigned long cap)
+{
+    const char *shared = getenv("SIMULATOR_SHARED_RESOURCES_DIRECTORY");
+    if (!shared || !*shared)
+    {
+        out[0] = 0;
+        return 0;
+    }
+    snprintf(out, cap, "%s", shared);
+    return 1;
+}
+
+static int shell_notifications_dir(char *out, unsigned long cap)
+{
+    char shared[900];
+    if (!shell_shared_dir(shared, sizeof(shared)))
+    {
+        out[0] = 0;
+        return 0;
+    }
+    snprintf(out, cap, "%s/Library/SpringBoard/notifications", shared);
+    return 1;
+}
+
+static void sb_unescape(const char *in, char *out, unsigned long cap)
+{
+    unsigned long o = 0;
+    while (*in && o + 1 < cap)
+    {
+        if (in[0] == '\\' && in[1] == 'n')
+        {
+            out[o++] = '\n';
+            in += 2;
+        }
+        else if (in[0] == '\\' && in[1] == 'r')
+        {
+            out[o++] = '\r';
+            in += 2;
+        }
+        else if (in[0] == '\\' && in[1] == '\\')
+        {
+            out[o++] = '\\';
+            in += 2;
+        }
+        else
+            out[o++] = *in++;
+    }
+    out[o] = 0;
+}
+
+static void sb_escape(const char *in, char *out, unsigned long cap)
+{
+    unsigned long o = 0;
+    if (!in)
+        in = "";
+    for (; *in && o + 3 < cap; in++)
+    {
+        if (*in == '\n')
+        {
+            out[o++] = '\\';
+            out[o++] = 'n';
+        }
+        else if (*in == '\r')
+        {
+            out[o++] = '\\';
+            out[o++] = 'r';
+        }
+        else if (*in == '\\')
+        {
+            out[o++] = '\\';
+            out[o++] = '\\';
+        }
+        else
+            out[o++] = *in;
+    }
+    out[o] = 0;
+}
+
+/* Matches "key=" at the start of a line and unescapes its value. */
+static int sb_field(const char *line, unsigned long len, const char *key,
+                    char *out, unsigned long cap)
+{
+    unsigned long k = strlen(key);
+    if (len < k || strncmp(line, key, k) != 0)
+        return 0;
+    char tmp[2200];
+    unsigned long n = len - k;
+    if (n >= sizeof(tmp))
+        n = sizeof(tmp) - 1;
+    memcpy(tmp, line + k, n);
+    tmp[n] = 0;
+    sb_unescape(tmp, out, cap);
+    return 1;
+}
+
+static int sb_parse_notification(const char *buf, struct sb_notification *out)
+{
+    memset(out, 0, sizeof(*out));
+    int fields = 0;
+    const char *p = buf;
+    while (*p)
+    {
+        const char *line = p;
+        while (*p && *p != '\n')
+            p++;
+        unsigned long len = (unsigned long)(p - line);
+        if (sb_field(line, len, "bundle=", out->bundle,
+                     sizeof(out->bundle)))
+            fields++;
+        else if (sb_field(line, len, "id=", out->identifier,
+                          sizeof(out->identifier)))
+            fields++;
+        else if (sb_field(line, len, "title=", out->title,
+                          sizeof(out->title)))
+            fields++;
+        else if (sb_field(line, len, "subtitle=", out->subtitle,
+                          sizeof(out->subtitle)))
+            fields++;
+        else if (sb_field(line, len, "body=", out->body, sizeof(out->body)))
+            fields++;
+        else if (len > 5 && strncmp(line, "fire=", 5) == 0)
+        {
+            char tmp[64];
+            unsigned long n = len - 5;
+            if (n >= sizeof(tmp))
+                n = sizeof(tmp) - 1;
+            memcpy(tmp, line + 5, n);
+            tmp[n] = 0;
+            out->fire = atof(tmp);
+        }
+        else if (len > 8 && strncmp(line, "repeats=", 8) == 0)
+            out->repeats = atoi(line + 8);
+        else if (len > 9 && strncmp(line, "interval=", 9) == 0)
+            out->interval = atof(line + 9);
+        if (*p)
+            p++;
+    }
+    return fields >= 2;
+}
+
+static int sb_read_notification(const char *path, struct sb_notification *out)
+{
+    unsigned char *bytes = 0;
+    unsigned long length = 0;
+    if (iosim_fs_read(path, &bytes, &length) != 0 || !bytes)
+        return 0;
+    char buf[4200];
+    if (length >= sizeof(buf))
+        length = sizeof(buf) - 1;
+    memcpy(buf, bytes, length);
+    buf[length] = 0;
+    free(bytes);
+    return sb_parse_notification(buf, out);
+}
+
+static void sb_write_notification(const char *path,
+                                  struct sb_notification *n, double fire)
+{
+    char bundle[300], identifier[300], title[600], subtitle[600], body[2400];
+    sb_escape(n->bundle, bundle, sizeof(bundle));
+    sb_escape(n->identifier, identifier, sizeof(identifier));
+    sb_escape(n->title, title, sizeof(title));
+    sb_escape(n->subtitle, subtitle, sizeof(subtitle));
+    sb_escape(n->body, body, sizeof(body));
+    char buf[4200];
+    int len = snprintf(buf, sizeof(buf),
+                       "bundle=%s\nid=%s\nfire=%.6f\nrepeats=%d\n"
+                       "interval=%.6f\ntitle=%s\nsubtitle=%s\nbody=%s\n",
+                       bundle, identifier, fire, n->repeats, n->interval,
+                       title, subtitle, body);
+    if (len > 0)
+        iosim_fs_write(path, buf, (unsigned long)len);
+}
+
+static int shell_app_index_for_bundle(const char *bundle)
+{
+    if (!bundle || !*bundle)
+        return -1;
+    for (int i = 0; i < g_shell_app_count; i++)
+        if (g_shell_apps[i].bundle[0] &&
+            strcmp(g_shell_apps[i].bundle, bundle) == 0)
+            return i;
+    return -1;
+}
+
+static void shell_notification_app_name(struct sb_notification *n, char *out,
+                                        unsigned long cap)
+{
+    int index = shell_app_index_for_bundle(n->bundle);
+    if (index >= 0)
+        snprintf(out, cap, "%s", g_shell_apps[index].name);
+    else if (n->bundle[0])
+        snprintf(out, cap, "%s", n->bundle);
+    else
+        snprintf(out, cap, "Notifications");
+}
+
+static int shell_notification_stock(struct sb_notification *n)
+{
+    int index = shell_app_index_for_bundle(n->bundle);
+    return index >= 0 ? g_shell_apps[index].stock : -1;
+}
+
+static void shell_relative_time(double when, char *out, unsigned long cap)
+{
+    double delta = iosim_wall_time() - when;
+    if (delta < 60.0)
+        snprintf(out, cap, "now");
+    else if (delta < 3600.0)
+        snprintf(out, cap, "%dm", (int)(delta / 60.0));
+    else if (delta < 86400.0)
+        snprintf(out, cap, "%dh", (int)(delta / 3600.0));
+    else
+        snprintf(out, cap, "%dd", (int)(delta / 86400.0));
+}
+
+static void shell_date_string(char *out, unsigned long cap)
+{
+    static const char *week[] = {
+        "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday",
+        "Saturday"
+    };
+    static const char *months[] = {
+        "January", "February", "March", "April", "May", "June", "July",
+        "August", "September", "October", "November", "December"
+    };
+    double now = iosim_wall_time();
+    long long days = (long long)(now / 86400.0);
+    long long z = days + 719468;
+    long long era = (z >= 0 ? z : z - 146096) / 146097;
+    unsigned long long doe = (unsigned long long)(z - era * 146097);
+    unsigned long long yoe =
+        (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    long long year = (long long)yoe + era * 400;
+    unsigned long long doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    unsigned long long mp = (5 * doy + 2) / 153;
+    unsigned long long day = doy - (153 * mp + 2) / 5 + 1;
+    unsigned long long month = mp + (mp < 10 ? 3 : -9);
+    year += (month <= 2);
+    (void)year;
+    int weekday = (int)((days + 4) % 7);
+    if (weekday < 0)
+        weekday += 7;
+    snprintf(out, cap, "%s, %s %d", week[weekday], months[month - 1],
+             (int)day);
+}
+
+static void shell_draw_notification_card(struct sb_notification *n,
+                                         int px, int py, int pw, int ph,
+                                         double scale, const char *when,
+                                         int blur)
+{
+    if (blur)
+    {
+        unsigned *cap = malloc((unsigned long)pw * (unsigned long)ph *
+                               sizeof(unsigned));
+        if (cap)
+        {
+            iosim_fb_capture(px, py, pw, ph, cap);
+            blur_box_xrgb(cap, pw, ph, (int)(16 * scale + 0.5), 2);
+            iosim_fb_blit_xrgb_scaled(cap, pw, ph, px, py, pw, ph, 1.0);
+            free(cap);
+        }
+    }
+    int radius = (int)(24 * scale + 0.5);
+    iosim_fb_set_opacity(0.30);
+    iosim_fb_fill_round_rect(px + 2, py + 5, pw - 4, ph, radius, 0x000000);
+    iosim_fb_set_opacity(1.0);
+    iosim_fb_fill_round_rect(px, py, pw, ph, radius, 0x2a2a32);
+    iosim_fb_fill_round_rect(px + 1, py + 1, pw - 2, ph - 2, radius - 1,
+                             0x35353e);
+    int iconSize = (int)(38 * scale + 0.5);
+    int ix = px + (int)(14 * scale + 0.5);
+    int iy = py + (int)(14 * scale + 0.5);
+    int stock = shell_notification_stock(n);
+    if (stock >= 0)
+        shell_stock_icon(stock, ix, iy, iconSize, scale);
+    else
+        shell_placeholder_icon(ix, iy, iconSize, scale);
+    int textX = ix + iconSize + (int)(12 * scale + 0.5);
+    int maxText = px + pw - (int)(14 * scale + 0.5) - textX;
+    char name[300], shown[600];
+    shell_notification_app_name(n, name, sizeof(name));
+    share_text_ellipsis(name, IOSIM_FONT_SEMIBOLD, 13, scale,
+                        maxText - (int)(56 * scale + 0.5), shown,
+                        sizeof(shown));
+    iosim_fb_font_text(textX, py + (int)(28 * scale + 0.5), shown,
+                       IOSIM_FONT_SEMIBOLD, 13, scale, 0xb9b9c0);
+    int whenWidth =
+        iosim_fb_font_text_width(when, IOSIM_FONT_REGULAR, 13, scale);
+    iosim_fb_font_text(px + pw - (int)(14 * scale + 0.5) - whenWidth,
+                       py + (int)(28 * scale + 0.5), when,
+                       IOSIM_FONT_REGULAR, 13, scale, 0xb9b9c0);
+    share_text_ellipsis(n->title, IOSIM_FONT_SEMIBOLD, 16, scale, maxText,
+                        shown, sizeof(shown));
+    iosim_fb_font_text(textX, py + (int)(51 * scale + 0.5), shown,
+                       IOSIM_FONT_SEMIBOLD, 16, scale, 0xffffff);
+    if (n->body[0])
+    {
+        share_text_ellipsis(n->body, IOSIM_FONT_REGULAR, 14, scale, maxText,
+                            shown, sizeof(shown));
+        iosim_fb_font_text(textX, py + (int)(73 * scale + 0.5), shown,
+                           IOSIM_FONT_REGULAR, 14, scale, 0xdedee3);
+    }
+}
+
+static void shell_banner_final_frame(int fbWidth, double scale, int *outX,
+                                     int *outY, int *outW, int *outH)
+{
+    double W = fbWidth / scale;
+    *outX = (int)(8 * scale + 0.5);
+    *outY = (int)(58 * scale + 0.5);
+    *outW = (int)((W - 16) * scale + 0.5);
+    *outH = (int)((g_sb_banner.body[0] ? 92.0 : 74.0) * scale + 0.5);
+}
+
+static void shell_draw_banner(int fbWidth, double scale)
+{
+    int x, y, w, h;
+    shell_banner_final_frame(fbWidth, scale, &x, &y, &w, &h);
+    double p = (iosim_now() - g_sb_banner_start) / 0.28;
+    if (p < 0)
+        p = 0;
+    if (p > 1)
+        p = 1;
+    p = 1 - (1 - p) * (1 - p);
+    int oy = y - (int)((1.0 - p) * (h + 20));
+    shell_draw_notification_card(&g_sb_banner, x, oy, w, h, scale, "now",
+                                 1);
+}
+
+static void shell_build_nc_backdrop(int fbWidth, int fbHeight, double scale)
+{
+    free(g_sb_nc_backdrop);
+    g_sb_nc_backdrop = malloc((unsigned long)fbWidth *
+                              (unsigned long)fbHeight * sizeof(unsigned));
+    if (!g_sb_nc_backdrop)
+        return;
+    iosim_fb_capture(0, 0, fbWidth, fbHeight, g_sb_nc_backdrop);
+    blur_box_xrgb(g_sb_nc_backdrop, fbWidth, fbHeight,
+                  (int)(26 * scale + 0.5), 2);
+    g_sb_nc_backdrop_w = fbWidth;
+    g_sb_nc_backdrop_h = fbHeight;
+}
+
+static int shell_notification_card_height(struct sb_notification *n)
+{
+    return n->body[0] ? 86 : 70;
+}
+
+static void shell_draw_notification_center(int fbWidth, int fbHeight,
+                                           double scale)
+{
+    double W = fbWidth / scale;
+    if (g_sb_nc_backdrop && g_sb_nc_backdrop_w == fbWidth &&
+        g_sb_nc_backdrop_h == fbHeight)
+        iosim_fb_paste_xrgb(g_sb_nc_backdrop);
+    else
+        iosim_fb_clear(0x11131a);
+    iosim_fb_set_opacity(0.42);
+    iosim_fb_fill_rect(0, 0, fbWidth, fbHeight, 0x000000);
+    iosim_fb_set_opacity(1.0);
+
+    const char *timeText = getenv("IOSIM_STATUS_TIME");
+    if (!timeText || !*timeText)
+        timeText = "9:41";
+    int timeWidth =
+        iosim_fb_font_text_width(timeText, IOSIM_FONT_SEMIBOLD, 62, scale);
+    iosim_fb_font_text((int)(24 * scale + 0.5), (int)(122 * scale + 0.5),
+                       timeText, IOSIM_FONT_SEMIBOLD, 62, scale, 0xffffff);
+    (void)timeWidth;
+    char date[128];
+    shell_date_string(date, sizeof(date));
+    iosim_fb_font_text((int)(26 * scale + 0.5), (int)(162 * scale + 0.5),
+                       date, IOSIM_FONT_REGULAR, 17, scale, 0xd5d5dc);
+
+    int y = (int)(198 * scale + 0.5);
+    if (g_sb_delivered_count == 0)
+    {
+        const char *none = "No Notifications";
+        int tw = iosim_fb_font_text_width(none, IOSIM_FONT_SEMIBOLD, 17,
+                                          scale);
+        iosim_fb_font_text((fbWidth - tw) / 2, (int)(300 * scale + 0.5),
+                           none, IOSIM_FONT_SEMIBOLD, 17, scale, 0x8f8f99);
+    }
+    for (int i = 0; i < g_sb_delivered_count && i < 6; i++)
+    {
+        int ch = (int)(shell_notification_card_height(&g_sb_delivered[i]) *
+                       scale + 0.5);
+        char when[32];
+        shell_relative_time(g_sb_delivered_time[i], when, sizeof(when));
+        shell_draw_notification_card(&g_sb_delivered[i],
+                                     (int)(16 * scale + 0.5), y,
+                                     (int)((W - 32) * scale + 0.5), ch,
+                                     scale, when, 0);
+        y += ch + (int)(8 * scale + 0.5);
+    }
+    g_sb_overlay_guard = 1;
+    draw_device_chrome(fbWidth, scale);
+    g_sb_overlay_guard = 0;
+}
+
+static void shell_open_notification_center(int fbWidth, int fbHeight,
+                                           double scale, const char *path)
+{
+    if (g_notification_center)
+        return;
+    g_notification_center = 1;
+    g_sb_banner_active = 0;
+    shell_build_nc_backdrop(fbWidth, fbHeight, scale);
+    printf("[SpringBoard] notification center opened\n");
+    fflush(0);
+    shell_draw_notification_center(fbWidth, fbHeight, scale);
+    if (path && *path)
+        iosim_fb_present(path);
+}
+
+static void shell_close_notification_center(int fbWidth, int fbHeight,
+                                            double scale, const char *path)
+{
+    (void)fbWidth;
+    (void)fbHeight;
+    (void)scale;
+    (void)path;
+    if (!g_notification_center)
+        return;
+    g_notification_center = 0;
+    printf("[SpringBoard] notification center closed\n");
+    fflush(0);
+}
+
+static int shell_notification_center_hit(double px, double py, int fbWidth,
+                                         double scale)
+{
+    double W = fbWidth / scale;
+    int y = 198;
+    if (px < 16.0 || px > W - 16.0)
+        return -1;
+    for (int i = 0; i < g_sb_delivered_count && i < 6; i++)
+    {
+        int ch = shell_notification_card_height(&g_sb_delivered[i]);
+        if (py >= y && py < y + ch)
+            return i;
+        y += ch + 8;
+    }
+    return -1;
+}
+
+static void shell_write_notification_response(struct sb_notification *n,
+                                              const char *action)
+{
+    char shared[900];
+    if (!shell_shared_dir(shared, sizeof(shared)))
+        return;
+    char dir[1000];
+    snprintf(dir, sizeof(dir), "%s/Library/SpringBoard", shared);
+    iosim_fs_mkdir(dir, 1);
+    char path[1100];
+    snprintf(path, sizeof(path), "%s/notification-response.txt", dir);
+    char bundle[300], identifier[300], title[600], body[2400], act[128];
+    sb_escape(n->bundle, bundle, sizeof(bundle));
+    sb_escape(n->identifier, identifier, sizeof(identifier));
+    sb_escape(n->title, title, sizeof(title));
+    sb_escape(n->body, body, sizeof(body));
+    sb_escape(action, act, sizeof(act));
+    char buf[4200];
+    int len = snprintf(buf, sizeof(buf),
+                       "bundle=%s\nid=%s\naction=%s\ntitle=%s\nbody=%s\n",
+                       bundle, identifier, act, title, body);
+    if (len > 0)
+        iosim_fs_write(path, buf, (unsigned long)len);
+}
+
+static void shell_forget_delivered(struct sb_notification *n)
+{
+    for (int i = 0; i < g_sb_delivered_count; i++)
+    {
+        if (strcmp(g_sb_delivered[i].bundle, n->bundle) == 0 &&
+            strcmp(g_sb_delivered[i].identifier, n->identifier) == 0)
+        {
+            for (int j = i; j + 1 < g_sb_delivered_count; j++)
+            {
+                g_sb_delivered[j] = g_sb_delivered[j + 1];
+                g_sb_delivered_time[j] = g_sb_delivered_time[j + 1];
+            }
+            g_sb_delivered_count--;
+            return;
+        }
+    }
+}
+
+static void shell_open_notification(struct sb_notification *n, int fbWidth,
+                                    int fbHeight, double scale,
+                                    const char *path)
+{
+    shell_write_notification_response(n,
+        "com.apple.UNNotificationDefaultActionIdentifier");
+    printf("[SpringBoard] notification opened %s (%s)\n", n->title,
+           n->bundle);
+    fflush(0);
+    g_sb_banner_active = 0;
+    shell_forget_delivered(n);
+    int index = shell_app_index_for_bundle(n->bundle);
+    if (index >= 0)
+    {
+        shell_launch(index, fbWidth, fbHeight, scale, path);
+        return;
+    }
+    printf("[SpringBoard] notification app not installed (%s)\n", n->bundle);
+    fflush(0);
+    shell_refresh_all(fbWidth, fbHeight, scale, path);
+}
+
+static void shell_add_delivered(struct sb_notification *n, double when)
+{
+    if (g_sb_delivered_count >= SB_NOTIFICATION_MAX)
+        g_sb_delivered_count = SB_NOTIFICATION_MAX - 1;
+    for (int i = g_sb_delivered_count; i > 0; i--)
+    {
+        g_sb_delivered[i] = g_sb_delivered[i - 1];
+        g_sb_delivered_time[i] = g_sb_delivered_time[i - 1];
+    }
+    g_sb_delivered[0] = *n;
+    g_sb_delivered_time[0] = when;
+    g_sb_delivered_count++;
+}
+
+/* Scans the shared schedule; returns 1 when a banner or list changed. */
+static int shell_notification_tick(int fbWidth, int fbHeight, double scale,
+                                   const char *path)
+{
+    (void)fbWidth;
+    (void)fbHeight;
+    (void)scale;
+    (void)path;
+    int redraw = 0;
+    double now = iosim_now();
+    if (g_sb_banner_active && now - g_sb_banner_start >= 5.0)
+    {
+        g_sb_banner_active = 0;
+        redraw = 1;
+    }
+    /* The shell otherwise draws only in response to events, so drive the
+     * banner's slide-in from the tick. A full redraw takes tens of
+     * milliseconds, which paces the animation at a handful of frames. */
+    if (g_sb_banner_active && now - g_sb_banner_start < 0.5)
+        redraw = 1;
+    if (now - g_sb_last_notification_scan < 0.20)
+        return redraw;
+    g_sb_last_notification_scan = now;
+    char dir[900];
+    if (!shell_notifications_dir(dir, sizeof(dir)))
+        return redraw;
+    char list[4096];
+    int count = iosim_fs_list(dir, list, sizeof(list));
+    if (count <= 0)
+        return redraw;
+    const char *p = list;
+    while (*p)
+    {
+        char name[256];
+        unsigned long len = 0;
+        while (p[len] && p[len] != '\n' && len + 1 < sizeof(name))
+        {
+            name[len] = p[len];
+            len++;
+        }
+        name[len] = 0;
+        while (*p && *p != '\n')
+            p++;
+        if (*p)
+            p++;
+        if (len < 6 || strcmp(name + len - 6, ".notif") != 0)
+            continue;
+        char file[1100];
+        snprintf(file, sizeof(file), "%s/%s", dir, name);
+        struct sb_notification n;
+        if (!sb_read_notification(file, &n))
+            continue;
+        double wall = iosim_wall_time();
+        if (n.fire > wall)
+            continue;
+        if (n.repeats && n.interval > 0.05)
+        {
+            n.fire = wall + n.interval;
+            sb_write_notification(file, &n, n.fire);
+        }
+        else
+            iosim_fs_remove(file);
+        shell_add_delivered(&n, wall);
+        if (!g_notification_center && !g_sb_banner_active)
+        {
+            g_sb_banner = n;
+            g_sb_banner_active = 1;
+            g_sb_banner_start = now;
+            printf("[SpringBoard] notification banner %s (%s)\n", n.title,
+                   n.bundle);
+            fflush(0);
+        }
+        else if (g_notification_center)
+        {
+            printf("[SpringBoard] notification listed %s (%s)\n", n.title,
+                   n.bundle);
+            fflush(0);
+        }
+        redraw = 1;
+        break;
+    }
+    return redraw;
+}
+
+static void shell_draw_notification_overlays(int fbWidth, double scale)
+{
+    if (g_notification_center)
+    {
+        shell_draw_notification_center(fbWidth, iosim_fb_height(), scale);
+        return;
+    }
+    if (g_sb_banner_active)
+        shell_draw_banner(fbWidth, scale);
+}
+
 static int g_switcher;
 static int g_switcher_index;
 static volatile int g_switcher_requested;
@@ -15723,6 +16396,7 @@ static void shell_lock(int fbWidth, int fbHeight, double scale,
     g_lock_resume_app = resume_app;
     g_switcher = 0;
     g_control_center = 0;
+    g_notification_center = 0;
     g_open_folder = -1;
     if (g_search)
     {
@@ -15876,6 +16550,34 @@ static void shell_repaint(int fbWidth, int fbHeight, double scale,
     }
 }
 
+/* Redraws whichever system surface currently owns the screen. */
+static void shell_refresh_all(int fbWidth, int fbHeight, double scale,
+                              const char *path)
+{
+    if (g_locked)
+        shell_draw_lock(fbWidth, fbHeight, scale, path);
+    else if (g_notification_center)
+    {
+        shell_draw_notification_center(fbWidth, fbHeight, scale);
+        if (path && *path)
+            iosim_fb_present(path);
+    }
+    else if (g_switcher)
+        shell_draw_switcher(fbWidth, fbHeight, scale, path);
+    else if (g_control_center)
+        shell_draw_control_center(fbWidth, fbHeight, scale, path);
+    else if (g_search)
+        shell_draw_search(fbWidth, fbHeight, scale, path);
+    else if (g_open_folder >= 0)
+        shell_draw_folder(fbWidth, fbHeight, scale, path);
+    else
+    {
+        shell_draw(fbWidth, fbHeight, scale);
+        if (path && *path)
+            iosim_fb_present(path);
+    }
+}
+
 static int run_springboard(void)
 {
     double scale = 3.0;
@@ -15896,6 +16598,7 @@ static int run_springboard(void)
     shell_load_apps();
     shell_folders_load();
     shell_folders_prune();
+    g_shell_active = 1;
     shell_draw(fbWidth, fbHeight, scale);
     const char *path = getenv("IOSIM_SCREENSHOT_PATH");
     if (path && *path)
@@ -15912,6 +16615,11 @@ static int run_springboard(void)
     int type = 0, x = 0, y = 0, r;
     while ((r = iosim_event_next(&type, &x, &y)) != 0)
     {
+        if (shell_notification_tick(fbWidth, fbHeight, scale, path))
+        {
+            shell_refresh_all(fbWidth, fbHeight, scale, path);
+            continue;
+        }
         if (r == 1 && type == 8)
         {
             /* The set of installed apps changed: rebuild the home screen. */
@@ -15947,6 +16655,13 @@ static int run_springboard(void)
         {
             if (g_locked)
                 continue;
+            if (g_notification_center)
+            {
+                shell_close_notification_center(fbWidth, fbHeight, scale,
+                                                path);
+                shell_refresh_all(fbWidth, fbHeight, scale, path);
+                continue;
+            }
             if (g_open_folder >= 0)
             {
                 g_open_folder = -1;
@@ -16030,12 +16745,38 @@ static int run_springboard(void)
             g_sb_icon_hold = 0;
             if (!down)
                 continue;
+            if (g_sb_banner_active)
+            {
+                int bx, by, bw, bh;
+                shell_banner_final_frame(fbWidth, scale, &bx, &by, &bw, &bh);
+                if (dy < -25 && g_sb_down_x >= bx / scale &&
+                    g_sb_down_x < (bx + bw) / scale &&
+                    g_sb_down_y >= by / scale &&
+                    g_sb_down_y < (by + bh) / scale)
+                {
+                    g_sb_banner_active = 0;
+                    printf("[SpringBoard] notification banner dismissed\n");
+                    fflush(0);
+                    shell_refresh_all(fbWidth, fbHeight, scale, path);
+                    continue;
+                }
+            }
             if (g_locked)
             {
                 /* Swiping up anywhere on the lock screen unlocks, the same
                  * gesture a Face ID phone accepts. */
                 if (dy < -80)
                     shell_unlock(fbWidth, fbHeight, scale, path);
+                continue;
+            }
+            if (g_notification_center)
+            {
+                if (dy < -90)
+                {
+                    shell_close_notification_center(fbWidth, fbHeight, scale,
+                                                    path);
+                    shell_refresh_all(fbWidth, fbHeight, scale, path);
+                }
                 continue;
             }
             if (g_control_center)
@@ -16064,6 +16805,16 @@ static int run_springboard(void)
                 /* A downward drag from the top-right corner opens the
                  * Control Center, like the real system gesture. */
                 shell_open_control_center(fbWidth, fbHeight, scale, path);
+                continue;
+            }
+            if (!g_switcher && !g_search && !g_control_center &&
+                g_open_folder < 0 && g_sb_down_y < 60 &&
+                g_sb_down_x <= fbWidth / scale - 120 && dy > 90)
+            {
+                /* A downward drag from the rest of the top edge opens
+                 * Notification Center. */
+                shell_open_notification_center(fbWidth, fbHeight, scale,
+                                               path);
                 continue;
             }
             if (!g_switcher && !g_search && !g_control_center &&
@@ -16186,6 +16937,13 @@ static int run_springboard(void)
                 shell_unlock(fbWidth, fbHeight, scale, path);
                 continue;
             }
+            if (g_notification_center)
+            {
+                shell_close_notification_center(fbWidth, fbHeight, scale,
+                                                path);
+                shell_refresh_all(fbWidth, fbHeight, scale, path);
+                continue;
+            }
             if (g_open_folder >= 0)
             {
                 g_open_folder = -1;
@@ -16216,8 +16974,34 @@ static int run_springboard(void)
         if (r != 1 || type != 1)
             continue;
         double px = x / scale, py = y / scale;
+        if (g_sb_banner_active)
+        {
+            int bx, by, bw, bh;
+            shell_banner_final_frame(fbWidth, scale, &bx, &by, &bw, &bh);
+            if (px >= bx / scale && px < (bx + bw) / scale &&
+                py >= by / scale && py < (by + bh) / scale)
+            {
+                shell_open_notification(&g_sb_banner, fbWidth, fbHeight,
+                                        scale, path);
+                continue;
+            }
+            g_sb_banner_active = 0;
+            printf("[SpringBoard] notification banner dismissed\n");
+            fflush(0);
+            shell_refresh_all(fbWidth, fbHeight, scale, path);
+            continue;
+        }
         if (g_locked)
             continue;
+        if (g_notification_center)
+        {
+            int index =
+                shell_notification_center_hit(px, py, fbWidth, scale);
+            if (index >= 0)
+                shell_open_notification(&g_sb_delivered[index], fbWidth,
+                                        fbHeight, scale, path);
+            continue;
+        }
         if (g_control_center)
         {
             int toggle = shell_cc_toggle_at(px, py);

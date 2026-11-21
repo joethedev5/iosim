@@ -17,6 +17,7 @@ OUT="$ROOT/runtime"
 B="$ROOT/build/runtime"
 mkdir -p "$B" \
   "$OUT/System/Library/Frameworks/UIKit.framework" \
+  "$OUT/System/Library/Frameworks/UserNotifications.framework" \
   "$OUT/System/Library/Frameworks/Foundation.framework" \
   "$OUT/System/Library/Frameworks/CoreGraphics.framework" \
   "$OUT/System/Library/Frameworks/CoreFoundation.framework" \
@@ -54,6 +55,12 @@ build_dylib "$ROOT/frameworks/UIKit.m" \
   "$OUT/System/Library/Frameworks/Foundation.framework/Foundation" \
   "$OUT/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics" \
   "$B/protocol_export.o"
+
+build_dylib "$ROOT/frameworks/UserNotifications.m" \
+  "$OUT/System/Library/Frameworks/UserNotifications.framework/UserNotifications" \
+  /System/Library/Frameworks/UserNotifications.framework/UserNotifications \
+  "$OUT/System/Library/Frameworks/Foundation.framework/Foundation" \
+  "$OUT/System/Library/Frameworks/UIKit.framework/UIKit"
 
 # Dependency anchors: real runtime layout, empty implementations for now.
 "$CC" -target "$SDK_TARGET" -ffreestanding -fPIC -c "$ROOT/frameworks/empty.c" -o "$B/empty.o"

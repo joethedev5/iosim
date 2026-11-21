@@ -1217,4 +1217,140 @@ typedef enum {
 
 #define CGRectZero CGRectMake(0, 0, 0, 0)
 
+/* ------------------------------------------- UserNotifications.framework */
+
+enum {
+    UNAuthorizationStatusNotDetermined = 0,
+    UNAuthorizationStatusDenied = 1,
+    UNAuthorizationStatusAuthorized = 2,
+    UNAuthorizationStatusProvisional = 3,
+    UNAuthorizationStatusEphemeral = 4
+};
+
+enum {
+    UNAuthorizationOptionBadge = 1,
+    UNAuthorizationOptionSound = 2,
+    UNAuthorizationOptionAlert = 4,
+    UNAuthorizationOptionCarPlay = 8,
+    UNAuthorizationOptionCriticalAlert = 16,
+    UNAuthorizationOptionProvisional = 32,
+    UNAuthorizationOptionProvidesAppNotificationSettings = 64
+};
+
+enum {
+    UNNotificationSettingNotSupported = 0,
+    UNNotificationSettingDisabled = 1,
+    UNNotificationSettingEnabled = 2
+};
+
+enum {
+    UNNotificationPresentationOptionBadge = 1,
+    UNNotificationPresentationOptionSound = 2,
+    UNNotificationPresentationOptionAlert = 4,
+    UNNotificationPresentationOptionList = 8,
+    UNNotificationPresentationOptionBanner = 16
+};
+
+@protocol UNUserNotificationCenterDelegate
+- (void)userNotificationCenter:(id)center
+       willPresentNotification:(id)notification
+         withCompletionHandler:(void (^)(unsigned long options))completionHandler;
+- (void)userNotificationCenter:(id)center
+    didReceiveNotificationResponse:(id)response
+             withCompletionHandler:(void (^)(void))completionHandler;
+@end
+
+@interface UNNotificationContent : NSObject
+- (id)title;
+- (void)setTitle:(id)title;
+- (id)subtitle;
+- (void)setSubtitle:(id)subtitle;
+- (id)body;
+- (void)setBody:(id)body;
+- (id)sound;
+- (void)setSound:(id)sound;
+- (id)badge;
+- (void)setBadge:(id)badge;
+- (id)categoryIdentifier;
+- (void)setCategoryIdentifier:(id)identifier;
+- (id)threadIdentifier;
+- (void)setThreadIdentifier:(id)identifier;
+- (id)userInfo;
+- (void)setUserInfo:(id)userInfo;
+- (unsigned long)summaryArgumentCount;
+- (void)setSummaryArgumentCount:(unsigned long)count;
+- (id)summaryArgument;
+- (void)setSummaryArgument:(id)argument;
+@end
+
+@interface UNMutableNotificationContent : UNNotificationContent
+@end
+
+@interface UNNotificationSound : NSObject
++ (id)defaultSound;
++ (id)soundNamed:(id)name;
+- (id)name;
+@end
+
+@interface UNNotificationTrigger : NSObject
+- (BOOL)repeats;
+@end
+
+@interface UNTimeIntervalNotificationTrigger : UNNotificationTrigger
++ (id)triggerWithTimeInterval:(double)interval repeats:(BOOL)repeats;
+- (double)timeInterval;
+- (id)nextTriggerDate;
+@end
+
+@interface UNNotificationRequest : NSObject
++ (id)requestWithIdentifier:(id)identifier content:(id)content
+                    trigger:(id)trigger;
+- (id)identifier;
+- (id)content;
+- (id)trigger;
+@end
+
+@interface UNNotification : NSObject
+- (id)request;
+- (id)date;
+@end
+
+@interface UNNotificationResponse : NSObject
+- (id)notification;
+- (id)actionIdentifier;
+- (id)userInfo;
+@end
+
+@interface UNNotificationSettings : NSObject
+- (long)authorizationStatus;
+- (long)alertSetting;
+- (long)soundSetting;
+- (long)badgeSetting;
+- (long)notificationCenterSetting;
+- (long)lockScreenSetting;
+- (long)criticalAlertSetting;
+@end
+
+@interface UNUserNotificationCenter : NSObject
++ (id)currentNotificationCenter;
+- (id)delegate;
+- (void)setDelegate:(id)delegate;
+- (void)requestAuthorizationWithOptions:(unsigned long)options
+                      completionHandler:(void (^)(BOOL granted, id error))completion;
+- (void)getNotificationSettingsWithCompletionHandler:
+    (void (^)(id settings))completion;
+- (void)addNotificationRequest:(UNNotificationRequest *)request
+          withCompletionHandler:(void (^)(id error))completion;
+- (void)removePendingNotificationRequestsWithIdentifiers:(id)identifiers;
+- (void)removeAllPendingNotificationRequests;
+- (void)getPendingNotificationRequestsWithCompletionHandler:
+    (void (^)(id requests))completion;
+- (void)getDeliveredNotificationsWithCompletionHandler:
+    (void (^)(id notifications))completion;
+- (void)removeDeliveredNotificationsWithIdentifiers:(id)identifiers;
+- (void)removeAllDeliveredNotifications;
+@end
+
+extern NSString *const UNNotificationDefaultActionIdentifier;
+
 #endif
