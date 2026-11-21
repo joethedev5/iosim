@@ -54,6 +54,7 @@ __attribute__((objc_root_class))
 
 @interface NSNumber : NSObject
 + (id)numberWithDouble:(double)value;
++ (id)numberWithInt:(int)value;
 - (double)doubleValue;
 @end
 
@@ -80,6 +81,7 @@ typedef struct {
 @end
 
 @interface NSSet : NSObject <NSFastEnumeration>
++ (id)setWithObject:(id)object;
 - (unsigned long)count;
 - (id)anyObject;
 - (id)allObjects;
@@ -808,6 +810,7 @@ enum {
 @interface UIApplication : UIResponder
 + (UIApplication *)sharedApplication;
 - (long)applicationState;
+@property(nonatomic) long applicationIconBadgeNumber;
 @end
 
 @interface UIPasteboard : NSObject
@@ -896,6 +899,7 @@ extern int UIApplicationMain(int argc, char **argv, id principal,
 @end
 
 @interface NSArray : NSObject <NSFastEnumeration>
++ (id)arrayWithObjects:(id)first, ...;
 + (id)arrayWithObjects:(const id *)objects count:(unsigned long)count;
 + (id)arrayWithObject:(id)object;
 @property(readonly) unsigned long count;
@@ -1292,6 +1296,35 @@ enum {
 - (id)name;
 @end
 
+enum {
+    UNNotificationActionOptionAuthenticationRequired = 1,
+    UNNotificationActionOptionDestructive = 2,
+    UNNotificationActionOptionForeground = 4
+};
+
+@interface UNNotificationAction : NSObject
++ (id)actionWithIdentifier:(id)identifier title:(id)title
+                   options:(unsigned long)options;
+- (id)identifier;
+- (id)title;
+- (unsigned long)options;
+@end
+
+enum {
+    UNNotificationCategoryOptionCustomDismissAction = 1,
+    UNNotificationCategoryOptionAllowInCarPlay = 2
+};
+
+@interface UNNotificationCategory : NSObject
++ (id)categoryWithIdentifier:(id)identifier actions:(id)actions
+            intentIdentifiers:(id)intentIdentifiers
+                      options:(unsigned long)options;
+- (id)identifier;
+- (id)actions;
+- (id)intentIdentifiers;
+- (unsigned long)options;
+@end
+
 @interface UNNotificationTrigger : NSObject
 - (BOOL)repeats;
 @end
@@ -1349,6 +1382,9 @@ enum {
     (void (^)(id notifications))completion;
 - (void)removeDeliveredNotificationsWithIdentifiers:(id)identifiers;
 - (void)removeAllDeliveredNotifications;
+- (void)setNotificationCategories:(id)categories;
+- (void)getNotificationCategoriesWithCompletionHandler:
+    (void (^)(id categories))completion;
 @end
 
 extern NSString *const UNNotificationDefaultActionIdentifier;

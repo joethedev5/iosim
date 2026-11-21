@@ -8,12 +8,14 @@ extern int fflush(void *stream);
 extern int strcmp(const char *a, const char *b);
 
 static void schedule(const char *identifier, const char *title,
-                     const char *body, double interval)
+                     const char *body, double interval, int badge)
 {
     UNMutableNotificationContent *content =
         [[UNMutableNotificationContent alloc] init];
     [content setTitle:[NSString stringWithUTF8String:title]];
     [content setBody:[NSString stringWithUTF8String:body]];
+    if (badge > 0)
+        [content setBadge:[NSNumber numberWithInt:badge]];
     UNNotificationRequest *request = [UNNotificationRequest
         requestWithIdentifier:[NSString stringWithUTF8String:identifier]
                       content:content
@@ -51,13 +53,17 @@ static void schedule(const char *identifier, const char *title,
 {
     (void)center;
     UNNotificationRequest *request = [[response notification] request];
-    printf("[notifyapp] didReceive %s %s\n",
+    const char *action = [[response actionIdentifier] UTF8String];
+    printf("[notifyapp] didReceive %s %s action=%s\n",
            [[request identifier] UTF8String],
-           [[[request content] title] UTF8String]);
+           [[[request content] title] UTF8String], action);
     fflush(0);
-    if (strcmp([[request identifier] UTF8String], "first") == 0)
+    if (strcmp([[request identifier] UTF8String], "first") == 0 &&
+        strcmp(action,
+               "com.apple.UNNotificationDefaultActionIdentifier") == 0)
     {
-        schedule("second", "Meeting", "Room 4 at 3", 4.0);
+        [UIApplication sharedApplication].applicationIconBadgeNumber = 0;
+        schedule("second", "Meeting", "Room 4 at 3", 4.0, 0);
     }
     if (completionHandler)
         completionHandler();
@@ -121,7 +127,7 @@ static void schedule(const char *identifier, const char *title,
         printf("[notifyapp] granted %d\n", granted ? 1 : 0);
         fflush(0);
     }];
-    schedule("first", "Lunch", "Tacos at noon", 2.0);
+    schedule("first", "Lunch", "Tacos at noon", 2.0, 3);
 }
 @end
 

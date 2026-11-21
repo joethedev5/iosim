@@ -1149,6 +1149,23 @@ resumes the app. The app's center polls the response file every 250 ms and calls
 once its delegate exists, which is how a tap that happened while the process
 was stopped still reaches the app after it resumes.
 
+Categories registered with `setNotificationCategories:` are mirrored to
+`Library/SpringBoard/notification-categories.txt`: a `category=` line, then one
+`action=identifier|title|options` line per action and an `end` terminator, with
+`|` and newlines escaped. SpringBoard reloads that file with every schedule
+scan. A banner whose request names a registered category grows one 44 pt row
+per action when it is long-pressed (0.45 s without movement); tapping a row
+writes that action identifier into the response file instead of the default
+action identifier, and destructive actions are drawn in red. Notification
+Center cards expand the same way into a dark action sheet below the card. A
+request can also carry a badge count: delivery rewrites
+`Library/SpringBoard/badges.txt` (`bundle|count` lines) and updates the home
+icon's red count badge, and the `applicationIconBadgeNumber` setter writes the
+same store, so a response delegate can clear the badge from inside the app.
+Delivered notifications are also drawn on the lock screen as cards from
+y = 470 pt; tapping one unlocks the phone and opens its app through the same
+response handoff.
+
 ### 2.13 Kernel symbolication from a KDK
 
 The services layer implements Mach and BSD entry points by name, so it needs

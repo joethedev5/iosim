@@ -79,6 +79,9 @@ runners**, combined with the public Darling and Apple dyld sources.
 | `UserNotifications.framework`: authorization and settings, time-interval requests and repeats, foreground delivery and delegate callbacks | ✅ |
 | System notification banners: due-request scanning, blurred card with app icon, slide-in, auto-dismiss and swipe-up dismissal | ✅ |
 | Notification Center: top-edge drag, blurred backdrop, clock and date, delivered cards, tap-to-open response handoff | ✅ |
+| Notification actions: `UNNotificationAction`/`UNNotificationCategory`, long-press expanded banners and Notification Center action sheets, destructive styling and action identifiers in the response | ✅ |
+| Icon badges: `applicationIconBadgeNumber`, shared badge store, red count badge on the home icon, cleared by the response | ✅ |
+| Lock screen notifications: delivered cards above the controls, tap unlocks and opens the notification's app | ✅ |
 | UIView 2D transforms (rotation and scale) with decomposed animation interpolation and transform-aware hit-testing/location conversion, center/bounds/point conversion, UIScrollView insets/paging/zoom/delegate, momentum and animated offsets | ✅ |
 | Layer clipping (`clipsToBounds`/`masksToBounds`), shadows and borders | ✅ |
 | UIVisualEffectView backdrop blur: capture, box blur, tint, rounded mask, contentView | ✅ |

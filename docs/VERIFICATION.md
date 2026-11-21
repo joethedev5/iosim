@@ -1380,6 +1380,26 @@ Notification Center, where a screenshot finds the delivered card at
 `[notifyapp] didReceive second Meeting` — the response file handoff reaches the
 app after its second suspension.
 
+The fixture also attaches badge 3 to "Lunch": the banner screenshot counts red
+badge pixels in the icon's top-right corner, and after the response clears the
+badge through `applicationIconBadgeNumber`, a second screenshot taken while
+"Meeting" banners finds no red there. `tests/notification_actions_test.m`
+registers category "lunch" with Snooze and Delete and schedules "Dinner" at
+2 s. A 0.6 s long press logs `[SpringBoard] notification actions Dinner`; the
+expanded card grows two 44 pt rows, and a screenshot finds card fill at
+(201, 160) pt plus blue and red action-title pixels. Tapping the first row logs
+`[SpringBoard] notification action snooze (Dinner)` and
+`[actions] didReceive actionable Dinner action=snooze`, and the delegate
+schedules "Dinner 2". That request is dismissed, its card is long-pressed in
+Notification Center, the action sheet below it is sampled at (201, 310) pt,
+and tapping the destructive row logs `[SpringBoard] notification action delete
+(Dinner 2)` and `[actions] didReceive actionable2 Dinner 2 action=delete`. A
+request written directly to the shared schedule as "Locked" banners, is
+dismissed, and remains as a lock-screen card; the screenshot samples the card
+at (201, 500) pt and its white title pixels, and tapping it logs
+`[SpringBoard] unlocked`, `[SpringBoard] notification opened Locked` and
+`[notifyapp] didReceive locked Locked`.
+
 ### UIKit: pull-to-refresh
 
 `demo/RefreshApp.m` attaches a `UIRefreshControl` to a twelve-row table. The

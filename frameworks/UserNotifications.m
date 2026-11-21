@@ -129,6 +129,46 @@ enum {
 - (id)name;
 @end
 
+enum {
+    UNNotificationActionOptionAuthenticationRequired = 1,
+    UNNotificationActionOptionDestructive = 2,
+    UNNotificationActionOptionForeground = 4
+};
+
+@interface UNNotificationAction : NSObject {
+@public
+    id _identifier;
+    id _title;
+    unsigned long _options;
+}
++ (id)actionWithIdentifier:(id)identifier title:(id)title
+                   options:(unsigned long)options;
+- (id)identifier;
+- (id)title;
+- (unsigned long)options;
+@end
+
+enum {
+    UNNotificationCategoryOptionCustomDismissAction = 1,
+    UNNotificationCategoryOptionAllowInCarPlay = 2
+};
+
+@interface UNNotificationCategory : NSObject {
+@public
+    id _identifier;
+    id _actions;
+    id _intentIdentifiers;
+    unsigned long _options;
+}
++ (id)categoryWithIdentifier:(id)identifier actions:(id)actions
+            intentIdentifiers:(id)intentIdentifiers
+                      options:(unsigned long)options;
+- (id)identifier;
+- (id)actions;
+- (id)intentIdentifiers;
+- (unsigned long)options;
+@end
+
 @interface UNNotificationTrigger : NSObject {
 @public
     BOOL _repeats;
@@ -205,6 +245,7 @@ enum {
     unsigned long _authorizedOptions;
     NSMutableArray *_pending;
     NSMutableArray *_delivered;
+    id _categories;
 }
 + (id)currentNotificationCenter;
 - (id)delegate;
@@ -223,6 +264,42 @@ enum {
     (void (^)(id notifications))completion;
 - (void)removeDeliveredNotificationsWithIdentifiers:(id)identifiers;
 - (void)removeAllDeliveredNotifications;
+- (void)setNotificationCategories:(id)categories;
+- (void)getNotificationCategoriesWithCompletionHandler:
+    (void (^)(id categories))completion;
+@end
+
+@implementation UNNotificationAction
++ (id)actionWithIdentifier:(id)identifier title:(id)title
+                   options:(unsigned long)options
+{
+    UNNotificationAction *action = [[self alloc] init];
+    action->_identifier = identifier;
+    action->_title = title;
+    action->_options = options;
+    return action;
+}
+- (id)identifier { return _identifier; }
+- (id)title { return _title; }
+- (unsigned long)options { return _options; }
+@end
+
+@implementation UNNotificationCategory
++ (id)categoryWithIdentifier:(id)identifier actions:(id)actions
+            intentIdentifiers:(id)intentIdentifiers
+                      options:(unsigned long)options
+{
+    UNNotificationCategory *category = [[self alloc] init];
+    category->_identifier = identifier;
+    category->_actions = actions;
+    category->_intentIdentifiers = intentIdentifiers;
+    category->_options = options;
+    return category;
+}
+- (id)identifier { return _identifier; }
+- (id)actions { return _actions; }
+- (id)intentIdentifiers { return _intentIdentifiers; }
+- (unsigned long)options { return _options; }
 @end
 
 @implementation UNNotificationContent
@@ -358,6 +435,105 @@ static void un_escape(const char *in, char *out, unsigned long cap)
     out[o] = 0;
 }
 
+/* Category definitions travel to SpringBoard through a second text file, so
+ * an expanded banner can draw the same action buttons the app registered. */
+static void un_escape_pipe(const char *in, char *out, unsigned long cap)
+{
+    unsigned long o = 0;
+    if (!in)
+        in = "";
+    for (; *in && o + 3 < cap; in++)
+    {
+        if (*in == '\n')
+        {
+            out[o++] = '\\';
+            out[o++] = 'n';
+        }
+        else if (*in == '\r')
+        {
+            out[o++] = '\\';
+            out[o++] = 'r';
+        }
+        else if (*in == '\\')
+        {
+            out[o++] = '\\';
+            out[o++] = '\\';
+        }
+        else if (*in == '|')
+        {
+            out[o++] = '\\';
+            out[o++] = 'p';
+        }
+        else
+            out[o++] = *in;
+    }
+    out[o] = 0;
+}
+
+static void un_badge_text(id badge, char *out, unsigned long cap)
+{
+    out[0] = 0;
+    if (!badge)
+        return;
+    if ([badge isKindOfClass:[NSNumber class]])
+    {
+        snprintf(out, cap, "%ld", (long)[badge integerValue]);
+        return;
+    }
+    const char *text = iosim_string_cstr(badge);
+    if (text)
+        snprintf(out, cap, "%s", text);
+}
+
+static void un_categories_write(id categories)
+{
+    const char *shared = getenv("SIMULATOR_SHARED_RESOURCES_DIRECTORY");
+    if (!shared || !*shared)
+        return;
+    char dir[900];
+    snprintf(dir, sizeof(dir), "%s/Library/SpringBoard", shared);
+    iosim_fs_mkdir(dir, 1);
+    char path[1100];
+    snprintf(path, sizeof(path), "%s/notification-categories.txt", dir);
+    id list = categories;
+    if ([categories isKindOfClass:[NSSet class]])
+        list = [categories allObjects];
+    unsigned long count = list ? [list count] : 0;
+    char buf[8000];
+    int n = 0;
+    for (unsigned long i = 0; i < count && n < (int)sizeof(buf) - 200; i++)
+    {
+        UNNotificationCategory *category = [list objectAtIndex:i];
+        if (![category isKindOfClass:[UNNotificationCategory class]])
+            continue;
+        char identifier[300];
+        un_escape_pipe(iosim_string_cstr(category->_identifier), identifier,
+                       sizeof(identifier));
+        n += snprintf(buf + n, sizeof(buf) - (unsigned long)n,
+                      "category=%s\n", identifier);
+        id actions = category->_actions;
+        unsigned long actionCount = actions ? [actions count] : 0;
+        for (unsigned long j = 0; j < actionCount &&
+                                n < (int)sizeof(buf) - 200; j++)
+        {
+            UNNotificationAction *action = [actions objectAtIndex:j];
+            if (![action isKindOfClass:[UNNotificationAction class]])
+                continue;
+            char actionId[300], title[300];
+            un_escape_pipe(iosim_string_cstr(action->_identifier), actionId,
+                           sizeof(actionId));
+            un_escape_pipe(iosim_string_cstr(action->_title), title,
+                           sizeof(title));
+            n += snprintf(buf + n, sizeof(buf) - (unsigned long)n,
+                          "action=%s|%s|%lu\n", actionId, title,
+                          action->_options);
+        }
+        n += snprintf(buf + n, sizeof(buf) - (unsigned long)n, "end\n");
+    }
+    if (n > 0)
+        iosim_fs_write(path, buf, (unsigned long)n);
+}
+
 static const char *un_bundle_id(void)
 {
     id bundle = [NSBundle mainBundle];
@@ -430,6 +606,10 @@ static void un_store_write(UNNotificationRequest *request, double fire)
         return;
     UNNotificationContent *content = request ? request->_content : nil;
     char title[600], subtitle[600], body[2200], identifier[300];
+    char category[300], badge[64];
+    un_escape(content ? iosim_string_cstr(content->_categoryIdentifier) : "",
+              category, sizeof(category));
+    un_badge_text(content ? content->_badge : nil, badge, sizeof(badge));
     un_escape(content ? iosim_string_cstr(content->_title) : "", title,
               sizeof(title));
     un_escape(content ? iosim_string_cstr(content->_subtitle) : "", subtitle,
@@ -454,9 +634,10 @@ static void un_store_write(UNNotificationRequest *request, double fire)
     char buf[4200];
     int n = snprintf(buf, sizeof(buf),
                      "bundle=%s\nid=%s\nfire=%.6f\nrepeats=%d\n"
-                     "interval=%.6f\ntitle=%s\nsubtitle=%s\nbody=%s\n",
+                     "interval=%.6f\ntitle=%s\nsubtitle=%s\nbody=%s\n"
+                     "category=%s\nbadge=%s\n",
                      un_bundle_id(), identifier, fire, repeats, interval,
-                     title, subtitle, body);
+                     title, subtitle, body, category, badge);
     if (n > 0)
         iosim_fs_write(path, buf, (unsigned long)n);
 }
@@ -838,6 +1019,17 @@ static void un_fire(UNNotificationRequest *request)
 - (void)removeAllDeliveredNotifications
 {
     [_delivered removeAllObjects];
+}
+- (void)setNotificationCategories:(id)categories
+{
+    _categories = categories;
+    un_categories_write(categories);
+}
+- (void)getNotificationCategoriesWithCompletionHandler:
+    (void (^)(id categories))completion
+{
+    if (completion)
+        completion(_categories);
 }
 @end
 

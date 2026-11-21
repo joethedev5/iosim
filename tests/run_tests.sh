@@ -4386,6 +4386,14 @@ icon = rgb(46, 84)
 if not (icon[0] > 200 and icon[1] > 200 and icon[2] > 200):
     raise SystemExit("banner icon not drawn: %06x" % (icon[0] << 16 |
                      icon[1] << 8 | icon[2]))
+red = 0
+for y in range(180, 208):
+    for x in range(352, 384):
+        c = rgb(x, y)
+        if c[0] > 180 and c[1] < 110 and c[2] < 110:
+            red += 1
+if red < 80:
+    raise SystemExit("icon badge not drawn on the home icon")
 outside = rgb(201, 300)
 if (abs(outside[0] - card[0]) < 12 and abs(outside[1] - card[1]) < 12 and
         abs(outside[2] - card[2]) < 12):
@@ -4421,6 +4429,31 @@ else
     echo "FAIL background notification banner"; fails=$((fails+1))
 fi
 sleep 0.6
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/nbadgeoff.png" >/dev/null
+if out="$(python3 - "$ROOT/tools" "$T" <<'NBADGEOFF'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+root = sys.argv[2]
+w, h, bpp, rows = pngpixel.load(root + "/nbadgeoff.png")
+def rgb(x, y):
+    c = pngpixel.px(rows, bpp, x * 3, y * 3)
+    return ((c >> 16) & 255, (c >> 8) & 255, c & 255)
+red = 0
+for y in range(180, 208):
+    for x in range(352, 384):
+        c = rgb(x, y)
+        if c[0] > 180 and c[1] < 110 and c[2] < 110:
+            red += 1
+if red > 20:
+    raise SystemExit("the icon badge was not cleared by the response")
+print("ok   the response clears the icon badge")
+NBADGEOFF
+)"; then
+    echo "$out"
+else
+    echo "FAIL icon badge clearing"; echo "$out"; fails=$((fails+1))
+fi
 "$ROOT/tools/iosimctl" ui "$UDID" swipe 201 120 201 30 0.2 >/dev/null
 if wait_log "[SpringBoard] notification banner dismissed"; then
     echo "ok   swiping the banner up dismisses it"
@@ -4478,6 +4511,265 @@ else
 fi
 "$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
 sleep 0.4
+
+# ---------- notification actions and the lock screen ----------
+# Start a clean log so the second Spotlight search and the action titles
+# cannot match lines left by the banner block above.
+: > "$SBLOG"
+"$ROOT/tools/build_app.sh" "$ROOT/tests/notification_actions_test.m" \
+    "$T/ActionsApp" >/dev/null
+mkdir -p "$T/ActionsApp.app"
+cp "$T/ActionsApp" "$T/ActionsApp.app/ActionsApp"
+python3 - "$T/ActionsApp.app/Info.plist" <<'PY'
+import plistlib, sys
+with open(sys.argv[1], "wb") as f:
+    plistlib.dump({
+        "CFBundleIdentifier": "com.iosim.notifyactions",
+        "CFBundleExecutable": "ActionsApp",
+        "CFBundleName": "Actions",
+        "CFBundlePackageType": "APPL",
+        "CFBundleVersion": "1",
+        "CFBundleShortVersionString": "1.0",
+    }, f)
+PY
+"$ROOT/tools/iosimctl" install "$UDID" "$T/ActionsApp.app" >/dev/null
+sleep 0.6
+"$ROOT/tools/iosimctl" ui "$UDID" tap 201 718.5 >/dev/null
+if wait_log "[SpringBoard] search opened"; then
+    echo "ok   Spotlight opens for the action fixture"
+else
+    echo "FAIL action search open"; fails=$((fails+1))
+fi
+for c in a c t i o n s; do
+    "$ROOT/tools/iosimctl" ui "$UDID" key "$c" >/dev/null
+done
+if wait_log "[SpringBoard] search results 1"; then
+    echo "ok   the action fixture is found in Spotlight"
+else
+    echo "FAIL action search"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" tap 200 270 >/dev/null
+if wait_log "[actions] scheduled actionable 1"; then
+    echo "ok   the app registers a category and schedules a request"
+else
+    echo "FAIL action scheduling"; fails=$((fails+1))
+fi
+sleep 0.4
+"$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
+if wait_log "[SpringBoard] notification banner Dinner"; then
+    echo "ok   the categorized request banners"
+else
+    echo "FAIL action banner"; fails=$((fails+1))
+fi
+sleep 0.6
+"$ROOT/tools/iosimctl" ui "$UDID" down 201 100 >/dev/null
+sleep 0.6
+"$ROOT/tools/iosimctl" ui "$UDID" up 201 100 >/dev/null
+if wait_log "[SpringBoard] notification actions Dinner"; then
+    echo "ok   a long press expands the banner actions"
+else
+    echo "FAIL action expansion"; fails=$((fails+1))
+fi
+sleep 0.3
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/nactions.png" >/dev/null
+if out="$(python3 - "$ROOT/tools" "$T" <<'NABANPNG'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+root = sys.argv[2]
+w, h, bpp, rows = pngpixel.load(root + "/nactions.png")
+def rgb(x, y):
+    c = pngpixel.px(rows, bpp, x * 3, y * 3)
+    return ((c >> 16) & 255, (c >> 8) & 255, c & 255)
+card = rgb(201, 160)
+if not (abs(card[0] - 53) < 16 and abs(card[1] - 53) < 16 and
+        abs(card[2] - 62) < 16):
+    raise SystemExit("the expanded action area is missing: %06x" %
+                     (card[0] << 16 | card[1] << 8 | card[2]))
+blue = red = 0
+for y in range(152, 238, 2):
+    for x in range(80, 320, 2):
+        c = rgb(x, y)
+        if c[2] > 150 and c[0] < 90 and c[1] < 170:
+            blue += 1
+        if c[0] > 180 and c[1] < 110 and c[2] < 110:
+            red += 1
+if blue < 30 or red < 30:
+    raise SystemExit("the action titles are not drawn (blue %d, red %d)" %
+                     (blue, red))
+print("ok   the expanded banner draws the action rows")
+NABANPNG
+)"; then
+    echo "$out"
+else
+    echo "FAIL action rows"; echo "$out"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" tap 201 172 >/dev/null
+if wait_log "[SpringBoard] notification action snooze (Dinner)"; then
+    echo "ok   tapping an action row runs that action"
+else
+    echo "FAIL action tap"; fails=$((fails+1))
+fi
+if wait_log "[actions] didReceive actionable Dinner action=snooze"; then
+    echo "ok   the app receives the chosen action identifier"
+else
+    echo "FAIL action response"; fails=$((fails+1))
+fi
+if wait_log "[actions] scheduled actionable2 1"; then
+    echo "ok   the action response schedules the next request"
+else
+    echo "FAIL action rescheduling"; fails=$((fails+1))
+fi
+sleep 0.3
+"$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
+if wait_log "[SpringBoard] notification banner Dinner 2"; then
+    echo "ok   the next categorized request banners"
+else
+    echo "FAIL second action banner"; fails=$((fails+1))
+fi
+sleep 0.6
+"$ROOT/tools/iosimctl" ui "$UDID" swipe 201 120 201 30 0.2 >/dev/null
+if wait_log "[SpringBoard] notification banner dismissed"; then
+    echo "ok   the second action banner is dismissed"
+else
+    echo "FAIL second action dismiss"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" swipe 120 30 120 500 0.3 >/dev/null
+if wait_log "[SpringBoard] notification center opened"; then
+    echo "ok   Notification Center opens over the action card"
+else
+    echo "FAIL action center open"; fails=$((fails+1))
+fi
+sleep 0.5
+"$ROOT/tools/iosimctl" ui "$UDID" down 201 240 >/dev/null
+sleep 0.6
+"$ROOT/tools/iosimctl" ui "$UDID" up 201 240 >/dev/null
+if wait_log "[SpringBoard] notification actions Dinner 2"; then
+    echo "ok   a long press expands the Notification Center card"
+else
+    echo "FAIL center action expansion"; fails=$((fails+1))
+fi
+sleep 0.3
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/ncactions.png" >/dev/null
+if out="$(python3 - "$ROOT/tools" "$T" <<'NCAPNG'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+root = sys.argv[2]
+w, h, bpp, rows = pngpixel.load(root + "/ncactions.png")
+def rgb(x, y):
+    c = pngpixel.px(rows, bpp, x * 3, y * 3)
+    return ((c >> 16) & 255, (c >> 8) & 255, c & 255)
+sheet = rgb(201, 310)
+if not (abs(sheet[0] - 53) < 18 and abs(sheet[1] - 53) < 18 and
+        abs(sheet[2] - 62) < 18):
+    raise SystemExit("the action sheet is missing: %06x" %
+                     (sheet[0] << 16 | sheet[1] << 8 | sheet[2]))
+blue = red = 0
+for y in range(294, 378, 2):
+    for x in range(80, 320, 2):
+        c = rgb(x, y)
+        if c[2] > 150 and c[0] < 90 and c[1] < 170:
+            blue += 1
+        if c[0] > 180 and c[1] < 110 and c[2] < 110:
+            red += 1
+if blue < 30 or red < 30:
+    raise SystemExit("the sheet titles are not drawn (blue %d, red %d)" %
+                     (blue, red))
+print("ok   the Notification Center action sheet draws both actions")
+NCAPNG
+)"; then
+    echo "$out"
+else
+    echo "FAIL center action sheet"; echo "$out"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" tap 201 358 >/dev/null
+if wait_log "[SpringBoard] notification action delete (Dinner 2)"; then
+    echo "ok   tapping the destructive row runs it"
+else
+    echo "FAIL center action tap"; fails=$((fails+1))
+fi
+if wait_log "[actions] didReceive actionable2 Dinner 2 action=delete"; then
+    echo "ok   the app receives the destructive action identifier"
+else
+    echo "FAIL center action response"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
+sleep 0.6
+
+# A delivered notification left on the lock screen is tapped to unlock and
+# open the app, exercising the same response handoff from the lock UI.
+python3 - "$IOSIM_HOME/Devices/$UDID/data/Library/SpringBoard/notifications" <<'PY'
+import os, sys, time
+directory = sys.argv[1]
+os.makedirs(directory, exist_ok=True)
+fire = time.time() + 0.8
+with open(os.path.join(directory, "locked.notif"), "w") as f:
+    f.write("bundle=com.iosim.notifyapp\nid=locked\nfire=%.6f\n"
+            "repeats=0\ninterval=0\ntitle=Locked\nsubtitle=\n"
+            "body=Tap to open\ncategory=\nbadge=\n" % fire)
+PY
+if wait_log "[SpringBoard] notification banner Locked"; then
+    echo "ok   the injected request banners before locking"
+else
+    echo "FAIL lock banner"; fails=$((fails+1))
+fi
+sleep 0.6
+"$ROOT/tools/iosimctl" ui "$UDID" swipe 201 120 201 30 0.2 >/dev/null
+sleep 0.4
+"$ROOT/tools/iosimctl" ui "$UDID" lock >/dev/null
+if wait_log "[SpringBoard] locked"; then
+    echo "ok   the lock screen shows the delivered notification"
+else
+    echo "FAIL lock screen"; fails=$((fails+1))
+fi
+sleep 0.5
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/nlock.png" >/dev/null
+if out="$(python3 - "$ROOT/tools" "$T" <<'NLOCKPNG'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+root = sys.argv[2]
+w, h, bpp, rows = pngpixel.load(root + "/nlock.png")
+def rgb(x, y):
+    c = pngpixel.px(rows, bpp, x * 3, y * 3)
+    return ((c >> 16) & 255, (c >> 8) & 255, c & 255)
+card = rgb(201, 500)
+if not (abs(card[0] - 53) < 18 and abs(card[1] - 53) < 18 and
+        abs(card[2] - 62) < 18):
+    raise SystemExit("the lock screen card is missing: %06x" %
+                     (card[0] << 16 | card[1] << 8 | card[2]))
+white = 0
+for y in range(510, 530, 2):
+    for x in range(80, 320, 2):
+        c = rgb(x, y)
+        if c[0] > 200 and c[1] > 200 and c[2] > 200:
+            white += 1
+if white < 10:
+    raise SystemExit("the lock screen card title is not drawn")
+print("ok   the lock screen draws the delivered card")
+NLOCKPNG
+)"; then
+    echo "$out"
+else
+    echo "FAIL lock card"; echo "$out"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" tap 201 500 >/dev/null
+if wait_log "[SpringBoard] unlocked"; then
+    echo "ok   tapping the lock card unlocks the phone"
+else
+    echo "FAIL lock unlock"; fails=$((fails+1))
+fi
+if wait_log "[SpringBoard] notification opened Locked"; then
+    echo "ok   the lock card opens its notification"
+else
+    echo "FAIL lock open"; fails=$((fails+1))
+fi
+if wait_log "[notifyapp] didReceive locked Locked"; then
+    echo "ok   the app receives the lock screen response"
+else
+    echo "FAIL lock response"; fails=$((fails+1))
+fi
 
 if [ "$fails" -ne 0 ]; then
     echo "$fails test(s) failed" >&2

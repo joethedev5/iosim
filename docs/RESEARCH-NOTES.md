@@ -551,7 +551,8 @@ management.
 - `UserNotifications.framework` is a canonical runtime dylib, like UIKit and
   QuartzCore. The center keeps pending and delivered arrays in the app and
   writes each scheduled request to a shared escaped-text file
-  (`bundle, id, fire epoch, repeats, interval, title, subtitle, body`) under
+  (`bundle, id, fire epoch, repeats, interval, title, subtitle, body, category,
+  badge`) under
   `Library/SpringBoard/notifications/` in the shared resources directory. A
   main-queue timer fires due requests; it skips a request whose file has
   disappeared, because SpringBoard removes the file when it takes ownership.
@@ -580,6 +581,25 @@ management.
   The drain now scans the ring for the earliest due entry, removes it by
   shifting the rest, and leaves the others in order.
 
+- Categories and actions are mirrored to
+  `Library/SpringBoard/notification-categories.txt` (`category=`, one
+  `action=id|title|options` per action, `end`), which SpringBoard reloads with
+  each schedule scan. A banner naming a category expands by 44 pt per action
+  after a 0.45 s long press without movement; a tap in a row writes that
+  action identifier to the response file and launches the app. Notification
+  Center cards expand the same way into a dark action sheet below the card,
+  with destructive titles in red.
+- Badge counts ride in the request file. Delivery rewrites
+  `Library/SpringBoard/badges.txt` (`bundle|count`) and updates the home icon's
+  red count badge; `applicationIconBadgeNumber` writes the same store, so the
+  response delegate can clear it. The badge is drawn inside the icon's
+  top-right corner and clears on the next home redraw after the app stops.
+- Delivered notifications are also drawn on the lock screen from y = 470 pt,
+  above the flashlight and camera controls. Tapping one unlocks and opens the
+  app through the same response handoff; launching from a banner or card now
+  also clears the Notification Center flag, which otherwise reopened an empty
+  center on the next redraw.
+
 ## Open directions
 
 - `metal-cpp` + macOS SDK Metal headers make it possible to implement a
@@ -588,10 +608,13 @@ management.
 - UI-kit keyboard glyphs can drive pixel-accurate keyboard rendering; extract
   metrics/colors rather than committing Apple assets.
 - Apple `libdispatch`/`libpthread` sources in apple-oss-distributions are the
-  reference for deeper dispatch and pthread fidelity (dispatch_source is
-  still missing in the loader services layer).
-- Notification follow-ons: `UNNotificationCategory`/`UNNotificationAction`
-  with a long-press expanded banner and action buttons (the response file
-  already carries an action identifier), badge numbers drawn on home-screen
-  icons, and delivered notifications listed on the lock screen rather than
-  only in Notification Center.
+  reference for deeper dispatch and pthread fidelity; `dispatch_source`
+  (timer, data add/or/replace, read/write) is already implemented and
+  covered by section 23.
+- Appearance is the next UIKit surface gap: there is no `UITraitCollection`,
+  `overrideUserInterfaceStyle` or dynamic system colors. Plan: a global
+  light/dark style resolved by `UIColor`'s `CGColor` and `text_color_rgb`
+  paths, per-view/controller overrides, `traitCollectionDidChange:`, a shared
+  `Library/SpringBoard/appearance.txt` toggled by a new UI event, SpringBoard
+  exporting the style to launched apps, and running apps polling the file to
+  repaint.
