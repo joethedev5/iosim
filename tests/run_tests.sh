@@ -4055,6 +4055,89 @@ else
     echo "FAIL interactive navigation pop"; echo "$out"; fails=$((fails+1))
 fi
 
+rm -f "$T/share.fifo"
+mkfifo "$T/share.fifo"
+"$ROOT/tools/build_app.sh" "$ROOT/tests/activity_sheet_test.m" \
+    "$T/activity_sheet_test" >/dev/null
+out="$(IOSIM_EVENT_FIFO="$T/share.fifo" \
+    IOSIM_TEST_PNG_MID="$T/share_mid.png" \
+    IOSIM_TEST_PNG_FULL="$T/share_full.png" \
+    IOSIM_TEST_PNG_COPYGONE="$T/share_copygone.png" \
+    IOSIM_TEST_PNG_EMPTY="$T/share_empty.png" \
+    IOSIM_TEST_PNG_CANCEL="$T/share_cancel.png" \
+    DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" \
+    "$T/activity_sheet_test" 2>&1)"
+check "[share] presented" "$out" "a share sheet presents over the app"
+check "[share] done com.apple.UIKit.activity.CopyToPasteboard 1" "$out" \
+    "the Copy row reports its activity type and completion"
+check "[share] paste Hello share sheet" "$out" \
+    "Copy places the shared string on the pasteboard"
+check "[share] excluded" "$out" "a second sheet excludes the Copy activity"
+check "[share] done (null) 0" "$out" \
+    "cancelling reports a nil activity without completing"
+check "[share] png written" "$out" "the share fixture captures every phase"
+if out="$(python3 - "$ROOT/tools" "$T" <<'SHAREPNG'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+
+def loader(path):
+    w, h, bpp, rows = pngpixel.load(path)
+    def read(x, y):
+        return pngpixel.px(rows, bpp, x * 3, y * 3)
+    return read
+
+def rgb(read, x, y):
+    c = read(x, y)
+    return ((c >> 16) & 255, (c >> 8) & 255, c & 255)
+
+def green(c):
+    return abs(c[0] - 26) < 25 and abs(c[1] - 204) < 25 and abs(c[2] - 77) < 25
+
+def dim_green(c):
+    return c[1] > 100 and c[1] > c[0] + 60 and c[1] > c[2] + 60
+
+def card(c):
+    return c[0] < 70 and c[1] < 70 and c[2] < 80
+
+def boundary(read):
+    for y in range(400, 874):
+        if card(rgb(read, 201, y)):
+            return y
+    return -1
+
+root = sys.argv[2]
+mid = loader(root + "/share_mid.png")
+full = loader(root + "/share_full.png")
+gone = loader(root + "/share_copygone.png")
+empty = loader(root + "/share_empty.png")
+cancel = loader(root + "/share_cancel.png")
+if not dim_green(rgb(mid, 201, 450)):
+    raise SystemExit("the parent is not dimmed during the slide")
+if not card(rgb(mid, 201, 860)):
+    raise SystemExit("the sheet is not sliding in from the bottom")
+if not dim_green(rgb(full, 201, 450)):
+    raise SystemExit("the settled sheet does not dim its parent")
+b = boundary(full)
+if b < 600 or b > 660:
+    raise SystemExit("settled share sheet top has unexpected position: %d" % b)
+if not card(rgb(full, 201, 760)):
+    raise SystemExit("share sheet body is not drawn")
+em = boundary(empty)
+if em < 660 or em > 710:
+    raise SystemExit("rowless share sheet has unexpected height: %d" % em)
+if not (green(rgb(gone, 201, 450)) and green(rgb(gone, 201, 860))):
+    raise SystemExit("copy did not dismiss the share sheet")
+if not (green(rgb(cancel, 201, 450)) and green(rgb(cancel, 201, 860))):
+    raise SystemExit("cancel did not dismiss the share sheet")
+print("ok   share sheet slides, copies, excludes and cancels")
+SHAREPNG
+)"; then
+    echo "$out"
+else
+    echo "FAIL UIActivityViewController share sheet"; echo "$out"; fails=$((fails+1))
+fi
+
 if [ "$fails" -ne 0 ]; then
     echo "$fails test(s) failed" >&2
     exit 1

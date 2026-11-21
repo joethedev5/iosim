@@ -480,6 +480,44 @@ management.
 - The bar's title and buttons do not animate during the drag yet; they switch
   when the transition settles.
 
+## 2026-11-21: UIActivityViewController share sheet
+
+- API surface: `initWithActivityItems:applicationActivities:`,
+  `activityItems`, `applicationActivities`, `excludedActivityTypes`, the
+  modern `completionWithItemsHandler` (activityType, completed,
+  returnedItems, error) and the deprecated `completionHandler`. Activity
+  type constants are the `com.apple.UIKit.activity.*` strings
+  (`CopyToPasteboard`, `Mail`, `Message`, `Print`, `SaveToCameraRoll`, ...).
+  `UIActivity` subclasses override type/title/image and
+  `canPerformWithActivityItems:`, receive `prepareWithActivityItems:` before
+  `performActivity`, and report through `activityDidFinish:`.
+  `UIActivityItemSource` supplies a placeholder for the header and a
+  per-activity item through `itemForActivityType:`.
+- Sheet geometry on the 402x874 screen: floating card inset 8 pt on the
+  sides and bottom with 34 pt corners; 240 pt tall for one row, 182 pt with
+  no rows, each additional row adding 58 pt. The header block is 30 pt top
+  padding plus 64 pt with a 44 pt preview tile, a 17 pt bold title and a
+  13 pt type subtitle; rows start at +106 pt with a 32 pt icon; Cancel is a
+  50 pt pill inset 16 pt from the card sides.
+- The activity list is computed once per configuration: application
+  activities that accept the items (and are not excluded) first, then Copy
+  unless excluded. Copy asks an item source for the CopyToPasteboard item,
+  falls back to the first item, and writes the string, absoluteString or
+  description to the general pasteboard.
+- Completion semantics reproduced: a completed activity receives its type
+  and `completed = YES`; Cancel, the close button and a tap on the dim
+  receive nil with `completed = NO`. `UIActivity.activityDidFinish:` reaches
+  the controller through a global active-controller pointer, so custom
+  asynchronous activities can finish after the tap.
+- Layout happens at draw time and its rectangles feed the next tap (same
+  model as the edit menu and alerts); the sheet slides on the modal progress
+  and the 0.47 dim scales with it.
+- Fixture `tests/activity_sheet_test.m`: a Copy row tap checks the
+  pasteboard and the reported completion type; a second sheet excludes Copy
+  and lays out rowless; a tap on the dim cancels. Captures: mid-slide top
+  ~778 pt, settled 626 pt, rowless 684 pt, exact green after both
+  dismissals.
+
 ## Open directions
 
 - `metal-cpp` + macOS SDK Metal headers make it possible to implement a

@@ -392,6 +392,23 @@ everywhere. The renderer slides the sheet by the remaining fraction of the
 screen height and scales the 0.47 dim with progress; no frames are captured
 from a static state.
 
+### Share sheet: UIActivityViewController
+
+`tests/activity_sheet_test.m` presents a share sheet with one string item
+over a green parent, taps its Copy row through the event FIFO, then presents
+a second sheet with `UIActivityTypeCopyToPasteboard` excluded and cancels it
+by tapping the dim. The captures measure: at 250 ms the sheet's top edge is
+~778 pt down and the parent above it reads dim green `#16a940`; the settled
+one-row sheet is 240 pt tall (top edge 626 pt) with the card at `#23242d`,
+dim green `#0e6c29` at (201,450) and the body at (201,760); the rowless
+secondary sheet is 182 pt tall with a 684 pt top edge; after Copy the
+parent is the exact `#1acc4d` at top and bottom, and cancel restores the
+same. Copy places "Hello share sheet" on the general pasteboard, and the
+completion handler receives `com.apple.UIKit.activity.CopyToPasteboard` with
+`completed = YES`; cancelling receives a nil activity and `completed = NO`.
+The suite accepts a settled top edge within 600–660 pt and the rowless sheet
+within 660–710 pt.
+
 ### Numeric keypad
 
 `demo/NumberPadApp.m` is the text-input fixture with the number-pad trait

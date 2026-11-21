@@ -989,6 +989,22 @@ the controller in a dismissing slot and slides it back down before clearing
 it. `modalPresentationStyle` can request full-screen presentation, which
 skips the dim. Alerts keep their measured form and their own dim.
 
+`UIActivityViewController` draws the share sheet as a floating bottom card
+over the same 0.47 dim: a 34 pt rounded card inset 8 pt from the screen
+sides and bottom, a grabber, a 44 pt content preview (a text page, a URL
+page or the item's image) with a bold title and a type subtitle, a circular
+close button, one 58 pt row per available activity with a 32 pt icon and a
+separator, and a pill Cancel button. The list is built once from application
+activities that accept the items plus the built-in Copy action, filtered by
+`excludedActivityTypes`; Copy resolves an `UIActivityItemSource` through
+`itemForActivityType:` before writing the general pasteboard. The sheet
+slides on the modal progress, lays its rows out at draw time, and routes
+taps through the drawn rectangles: a row calls
+`prepareWithActivityItems:`/`performActivity`, `activityDidFinish:` reports
+the activity type and completion to `completionWithItemsHandler`, the close
+and Cancel buttons report a nil activity with `completed = NO`, and a tap on
+the dimmed area cancels.
+
 Standard controls render with the measured iOS 26 design. `UISwitch` paints
 a 63 x 28 pt capsule with a 36.3 x 23.3 pt white knob; `UISlider` uses a
 5.7 pt track and the same lozenge as a thumb; `UISegmentedControl`,

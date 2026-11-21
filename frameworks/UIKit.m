@@ -991,6 +991,70 @@ enum {
 - (NSArray *)actions;
 @end
 
+/* ---------------------------------------------------------- activities */
+
+typedef id UIActivityType;
+
+enum {
+    UIActivityCategoryAction = 0,
+    UIActivityCategoryShare = 1
+};
+
+@class UIActivityViewController;
+
+@protocol UIActivityItemSource
+- (id)activityViewControllerPlaceholderItem:(UIActivityViewController *)activityViewController;
+- (id)activityViewController:(UIActivityViewController *)activityViewController
+        itemForActivityType:(UIActivityType)activityType;
+@optional
+- (id)activityViewController:(UIActivityViewController *)activityViewController
+        subjectForActivityType:(UIActivityType)activityType;
+- (UIImage *)activityViewController:(UIActivityViewController *)activityViewController
+    thumbnailImageForActivityType:(UIActivityType)activityType
+                     suggestedSize:(CGSize)size;
+- (id)activityViewController:(UIActivityViewController *)activityViewController
+    dataTypeIdentifierForActivityType:(UIActivityType)activityType;
+@end
+
+@interface UIActivity : NSObject
++ (long)activityCategory;
+- (UIActivityType)activityType;
+- (id)activityTitle;
+- (UIImage *)activityImage;
+- (BOOL)canPerformWithActivityItems:(NSArray *)activityItems;
+- (void)prepareWithActivityItems:(NSArray *)activityItems;
+- (UIViewController *)activityViewController;
+- (void)performActivity;
+- (void)activityDidFinish:(BOOL)completed;
+@end
+
+@interface UIActivityViewController : UIViewController {
+@public
+    id _activityItems;
+    id _applicationActivities;
+    id _excludedActivityTypes;
+    id _availableActivities;
+    void (^_completionWithItemsHandler)(id, BOOL, id, id);
+    void (^_completionHandler)(id, BOOL);
+}
+- (id)initWithActivityItems:(NSArray *)activityItems
+       applicationActivities:(NSArray *)applicationActivities;
+- (NSArray *)activityItems;
+- (NSArray *)applicationActivities;
+- (void)setExcludedActivityTypes:(NSArray *)excludedActivityTypes;
+- (NSArray *)excludedActivityTypes;
+- (void)setCompletionWithItemsHandler:(void (^)(id activityType,
+                                               BOOL completed,
+                                               id returnedItems,
+                                               id error))handler;
+- (void (^)(id, BOOL, id, id))completionWithItemsHandler;
+- (void)setCompletionHandler:(void (^)(id activityType,
+                                       BOOL completed))handler;
+- (void (^)(id, BOOL))completionHandler;
+- (NSArray *)_availableActivities;
+- (void)_activityDidFinish:(UIActivity *)activity completed:(BOOL)completed;
+@end
+
 @interface UIStackView : UIView {
 @public
     id _arranged[32];
@@ -6338,6 +6402,178 @@ static int iosim_modal_tick(void)
 {
     return [NSArray arrayWithObjects:_actions
                                 count:(unsigned long)_actionCount];
+}
+@end
+
+/* --------------------------------------------------------- activities */
+
+id UIActivityTypePostToFacebook = @"com.apple.UIKit.activity.PostToFacebook";
+id UIActivityTypePostToTwitter = @"com.apple.UIKit.activity.PostToTwitter";
+id UIActivityTypePostToWeibo = @"com.apple.UIKit.activity.PostToWeibo";
+id UIActivityTypeMessage = @"com.apple.UIKit.activity.Message";
+id UIActivityTypeMail = @"com.apple.UIKit.activity.Mail";
+id UIActivityTypePrint = @"com.apple.UIKit.activity.Print";
+id UIActivityTypeCopyToPasteboard = @"com.apple.UIKit.activity.CopyToPasteboard";
+id UIActivityTypeAssignToContact = @"com.apple.UIKit.activity.AssignToContact";
+id UIActivityTypeSaveToCameraRoll = @"com.apple.UIKit.activity.SaveToCameraRoll";
+id UIActivityTypeAddToReadingList = @"com.apple.UIKit.activity.AddToReadingList";
+id UIActivityTypePostToFlickr = @"com.apple.UIKit.activity.PostToFlickr";
+id UIActivityTypePostToVimeo = @"com.apple.UIKit.activity.PostToVimeo";
+id UIActivityTypePostToTencentWeibo = @"com.apple.UIKit.activity.PostToTencentWeibo";
+id UIActivityTypeAirDrop = @"com.apple.UIKit.activity.AirDrop";
+id UIActivityTypeOpenIniOSApp = @"com.apple.UIKit.activity.OpenIniOSApp";
+id UIActivityTypeMarkupAsPDF = @"com.apple.UIKit.activity.MarkupAsPDF";
+
+/* The activity controller that owns the sheet currently on screen. An
+ * activity reports completion through this pointer, which lets a custom
+ * asynchronous activity finish long after its row was tapped. */
+static UIActivityViewController *g_active_share_controller;
+static UIViewController *g_share_presenter;
+
+@implementation UIActivity
++ (long)activityCategory { return UIActivityCategoryAction; }
+- (UIActivityType)activityType { return nil; }
+- (id)activityTitle { return nil; }
+- (UIImage *)activityImage { return nil; }
+- (BOOL)canPerformWithActivityItems:(NSArray *)activityItems
+{
+    (void)activityItems;
+    return YES;
+}
+- (void)prepareWithActivityItems:(NSArray *)activityItems
+{
+    (void)activityItems;
+}
+- (UIViewController *)activityViewController { return nil; }
+- (void)performActivity
+{
+    [self activityDidFinish:YES];
+}
+- (void)activityDidFinish:(BOOL)completed
+{
+    UIActivityViewController *controller = g_active_share_controller;
+    if (controller)
+        [controller _activityDidFinish:self completed:completed];
+}
+@end
+
+static id share_item_for_activity_type(UIActivityViewController *controller,
+                                       id type)
+{
+    if (!controller || !controller->_activityItems ||
+        [controller->_activityItems count] == 0)
+        return nil;
+    id item = [controller->_activityItems objectAtIndex:0];
+    if ([item respondsToSelector:@selector(activityViewController:itemForActivityType:)])
+        return [(id<UIActivityItemSource>)item
+            activityViewController:controller itemForActivityType:type];
+    return item;
+}
+
+static id share_string_for_item(id item)
+{
+    if (!item)
+        return nil;
+    if ([item isKindOfClass:[NSString class]])
+        return item;
+    if ([item respondsToSelector:@selector(absoluteString)])
+        return [(NSURL *)item absoluteString];
+    return [item description];
+}
+
+@interface UIActivityCopy : UIActivity
+@end
+
+@implementation UIActivityCopy
+- (id)activityType { return UIActivityTypeCopyToPasteboard; }
+- (id)activityTitle { return @"Copy"; }
+- (void)performActivity
+{
+    id item = share_item_for_activity_type(g_active_share_controller,
+                                           UIActivityTypeCopyToPasteboard);
+    id string = share_string_for_item(item);
+    if (string)
+        [[UIPasteboard generalPasteboard] setString:string];
+    [self activityDidFinish:YES];
+}
+@end
+
+@implementation UIActivityViewController
+- (id)initWithActivityItems:(NSArray *)activityItems
+       applicationActivities:(NSArray *)applicationActivities
+{
+    self = [super init];
+    if (self)
+    {
+        _activityItems = activityItems;
+        _applicationActivities = applicationActivities;
+    }
+    return self;
+}
+- (NSArray *)activityItems { return _activityItems; }
+- (NSArray *)applicationActivities { return _applicationActivities; }
+- (void)setExcludedActivityTypes:(NSArray *)excludedActivityTypes
+{
+    _excludedActivityTypes = excludedActivityTypes;
+    _availableActivities = nil;
+}
+- (NSArray *)excludedActivityTypes { return _excludedActivityTypes; }
+- (void)setCompletionWithItemsHandler:(void (^)(id, BOOL, id, id))handler
+{
+    _completionWithItemsHandler =
+        handler ? (void (^)(id, BOOL, id, id))_Block_copy(handler) : 0;
+}
+- (void (^)(id, BOOL, id, id))completionWithItemsHandler
+{
+    return _completionWithItemsHandler;
+}
+- (void)setCompletionHandler:(void (^)(id, BOOL))handler
+{
+    _completionHandler = handler ? (void (^)(id, BOOL))_Block_copy(handler) : 0;
+}
+- (void (^)(id, BOOL))completionHandler { return _completionHandler; }
+
+/* The sheet lists every application activity that accepts the items plus
+ * the built-in Copy action, filtered by excludedActivityTypes. The list is
+ * built once per configuration so drawing and hit testing share it. */
+- (NSArray *)_availableActivities
+{
+    if (_availableActivities)
+        return _availableActivities;
+    NSMutableArray *list = [NSMutableArray array];
+    unsigned long count =
+        _applicationActivities ? [_applicationActivities count] : 0;
+    for (unsigned long i = 0; i < count && i < 16; i++)
+    {
+        UIActivity *activity =
+            (UIActivity *)[_applicationActivities objectAtIndex:i];
+        if (!activity)
+            continue;
+        if (_excludedActivityTypes && [activity activityType] &&
+            [_excludedActivityTypes containsObject:[activity activityType]])
+            continue;
+        if ([activity canPerformWithActivityItems:_activityItems])
+            [list addObject:activity];
+    }
+    if (!(_excludedActivityTypes &&
+          [_excludedActivityTypes containsObject:UIActivityTypeCopyToPasteboard]))
+        [list addObject:[[UIActivityCopy alloc] init]];
+    _availableActivities = list;
+    return list;
+}
+
+- (void)_activityDidFinish:(UIActivity *)activity completed:(BOOL)completed
+{
+    id type = [activity activityType];
+    if (_completionWithItemsHandler)
+        _completionWithItemsHandler(type, completed, nil, nil);
+    else if (_completionHandler)
+        _completionHandler(type, completed);
+    UIViewController *presenter = g_share_presenter;
+    g_share_presenter = nil;
+    g_active_share_controller = nil;
+    if (presenter && presenter->_presentedController == self)
+        [presenter dismissViewControllerAnimated:YES completion:nil];
 }
 @end
 
@@ -15660,6 +15896,273 @@ static int edit_menu_handle_tap(int px, int py)
     return 1;
 }
 
+/* ------------------------------------------------------- share sheet */
+
+/* The share sheet is laid out when it is drawn; the row and button
+ * rectangles feed the next tap, the same model as the edit menu. */
+static int g_share_sheet_rect[4];
+static int g_share_cancel_rect[4];
+static int g_share_close_rect[4];
+static int g_share_row_rects[16][4];
+static int g_share_row_count;
+static UIActivityViewController *g_share_drawn_controller;
+
+static void share_text_ellipsis(const char *text, int style, double size,
+                                double scale, int maxWidth, char *out,
+                                unsigned long outSize)
+{
+    snprintf(out, outSize, "%s", text ? text : "");
+    if (iosim_fb_font_text_width(out, style, size, scale) <= maxWidth)
+        return;
+    unsigned long len = strlen(out);
+    while (len > 0)
+    {
+        out[len - 1] = 0;
+        char candidate[256];
+        snprintf(candidate, sizeof(candidate), "%s...", out);
+        if (iosim_fb_font_text_width(candidate, style, size, scale) <= maxWidth)
+        {
+            snprintf(out, outSize, "%s", candidate);
+            return;
+        }
+        len--;
+    }
+    snprintf(out, outSize, "...");
+}
+
+static void share_draw_preview(id item, int tx, int ty, int size, double scale)
+{
+    if ([item isKindOfClass:[UIImage class]])
+    {
+        UIImage *image = (UIImage *)item;
+        iosim_fb_fill_round_rect(tx, ty, size, size,
+                                 (int)(8 * scale + 0.5), 0xffffff);
+        if (image->_rgba && image->_width > 0 && image->_height > 0)
+        {
+            int inset = (int)(2 * scale + 0.5);
+            iosim_fb_blit_rgba_scaled(tx + inset, ty + inset,
+                                      size - 2 * inset, size - 2 * inset,
+                                      image->_rgba, image->_width,
+                                      image->_height, image->_width * 4);
+        }
+        return;
+    }
+    iosim_fb_fill_round_rect(tx, ty, size, size, (int)(8 * scale + 0.5),
+                             0xffffff);
+    int inset = (int)(10 * scale + 0.5);
+    int lineH = (int)(2 * scale + 0.5);
+    int top = ty + (int)(13 * scale + 0.5);
+    int step = (int)(7 * scale + 0.5);
+    int lineW = size - 2 * inset;
+    unsigned lineColor = 0xa8a8ae;
+    int isURL = [item respondsToSelector:@selector(absoluteString)];
+    for (int i = 0; i < 3; i++)
+    {
+        int w = lineW;
+        if (i == 2)
+            w = lineW * 2 / 3;
+        unsigned color = (i == 0 && isURL) ? 0x0a84ff : lineColor;
+        iosim_fb_fill_rect(tx + inset, top + i * step, w, lineH, color);
+    }
+}
+
+static void share_draw_activity_icon(UIActivity *activity, int tx, int ty,
+                                     int size, double scale)
+{
+    UIImage *image = [activity activityImage];
+    if (image && image->_rgba && image->_width > 0 && image->_height > 0)
+    {
+        int inset = (int)(3 * scale + 0.5);
+        iosim_fb_blit_rgba_scaled(tx + inset, ty + inset, size - 2 * inset,
+                                  size - 2 * inset, image->_rgba,
+                                  image->_width, image->_height,
+                                  image->_width * 4);
+        return;
+    }
+    id type = [activity activityType];
+    int isCopy = type && [type isEqual:UIActivityTypeCopyToPasteboard];
+    Class cls = [activity class];
+    long category = [cls activityCategory];
+    unsigned tile = isCopy ? 0x5b5b61
+                           : (category == UIActivityCategoryShare ? 0x2f6df0
+                                                                  : 0x5b5b61);
+    iosim_fb_fill_round_rect(tx, ty, size, size, (int)(8 * scale + 0.5),
+                             tile);
+    if (isCopy)
+    {
+        int bw = (int)(9 * scale + 0.5);
+        int bh = (int)(11 * scale + 0.5);
+        int pad = (int)(2 * scale + 0.5);
+        int unit = (int)(scale + 0.5);
+        int backX = tx + size - bw - (int)(9 * scale + 0.5);
+        int backY = ty + (int)(8 * scale + 0.5);
+        iosim_fb_fill_round_rect(backX, backY, bw, bh, 2 * unit, 0xffffff);
+        int frontX = tx + (int)(7 * scale + 0.5);
+        int frontY = ty + (int)(12 * scale + 0.5);
+        iosim_fb_fill_round_rect(frontX - pad, frontY - pad, bw + 2 * pad,
+                                 bh + 2 * pad, 2 * unit, tile);
+        iosim_fb_fill_round_rect(frontX, frontY, bw, bh, 2 * unit, 0xffffff);
+        return;
+    }
+    const char *title = iosim_string_cstr([activity activityTitle]);
+    char letter[2];
+    letter[0] = (title && *title) ? title[0] : '?';
+    letter[1] = 0;
+    int asc = 0, desc = 0, lh = 0;
+    iosim_fb_font_metrics(IOSIM_FONT_BOLD, 16, scale, &asc, &desc, &lh);
+    int tw = iosim_fb_font_text_width(letter, IOSIM_FONT_BOLD, 16, scale);
+    iosim_fb_font_text(tx + (size - tw) / 2,
+                       ty + size / 2 - lh / 2 + asc, letter, IOSIM_FONT_BOLD,
+                       16, scale, 0xffffff);
+}
+
+static void draw_activity_sheet(UIActivityViewController *controller,
+                                int fbW, int fbH, double scale,
+                                double progress)
+{
+    double W = fbW / scale, H = fbH / scale;
+    NSArray *activities = [controller _availableActivities];
+    int rows = activities ? (int)[activities count] : 0;
+    if (rows > 16)
+        rows = 16;
+    double sheetW = W - 16;
+    double sheetH = 182.0 + 58.0 * rows;
+    int ix = (int)(8 * scale + 0.5);
+    int iw = (int)(sheetW * scale + 0.5);
+    int ih = (int)(sheetH * scale + 0.5);
+    int iy = (int)((H - 8.0 - sheetH + (1.0 - progress) * sheetH) * scale + 0.5);
+    g_share_drawn_controller = controller;
+    g_share_sheet_rect[0] = ix;
+    g_share_sheet_rect[1] = iy;
+    g_share_sheet_rect[2] = ix + iw;
+    g_share_sheet_rect[3] = iy + ih;
+
+    iosim_fb_set_opacity(0.47 * progress);
+    iosim_fb_fill_rect(0, 0, fbW, fbH, 0x000000);
+    iosim_fb_set_opacity(1.0);
+    draw_device_chrome(fbW, scale);
+
+    int radius = (int)(34 * scale + 0.5);
+    iosim_fb_fill_round_rect(ix, iy, iw, ih, radius, 0x3b3c45);
+    iosim_fb_fill_round_rect(ix + 1, iy + 1, iw - 2, ih - 2, radius - 1,
+                             0x23242d);
+    int grabW = (int)(36 * scale + 0.5);
+    int grabH = (int)(5 * scale + 0.5);
+    iosim_fb_fill_round_rect(ix + (iw - grabW) / 2,
+                             iy + (int)(10 * scale + 0.5), grabW, grabH,
+                             grabH / 2, 0x6b6c72);
+
+    id item = nil;
+    if (controller->_activityItems &&
+        [controller->_activityItems count] > 0)
+        item = [controller->_activityItems objectAtIndex:0];
+    if ([item respondsToSelector:@selector(activityViewControllerPlaceholderItem:)])
+        item = [(id<UIActivityItemSource>)item
+            activityViewControllerPlaceholderItem:controller];
+
+    int headerTop = (int)(30 * scale + 0.5);
+    int headerH = (int)(64 * scale + 0.5);
+    int tileSize = (int)(44 * scale + 0.5);
+    int tileX = ix + (int)(20 * scale + 0.5);
+    int tileY = iy + headerTop + (headerH - tileSize) / 2;
+    share_draw_preview(item, tileX, tileY, tileSize, scale);
+
+    int titleX = ix + (int)(76 * scale + 0.5);
+    int titleMax = iw - (int)(76 * scale + 0.5) - (int)(56 * scale + 0.5);
+    id titleItem = [item isKindOfClass:[UIImage class]]
+                       ? (id)@"Image" : share_string_for_item(item);
+    char titleText[256];
+    share_text_ellipsis(iosim_string_cstr(titleItem), IOSIM_FONT_SEMIBOLD, 17,
+                        scale, titleMax, titleText, sizeof(titleText));
+    const char *kind = "Text";
+    if ([item isKindOfClass:[UIImage class]])
+        kind = "Image";
+    else if ([item respondsToSelector:@selector(absoluteString)])
+        kind = "URL";
+    else if (!item)
+        kind = "Item";
+    int asc17 = 0, desc17 = 0, lh17 = 0;
+    int asc13 = 0, desc13 = 0, lh13 = 0;
+    iosim_fb_font_metrics(IOSIM_FONT_SEMIBOLD, 17, scale, &asc17, &desc17,
+                          &lh17);
+    iosim_fb_font_metrics(IOSIM_FONT_REGULAR, 13, scale, &asc13, &desc13,
+                          &lh13);
+    int blockH = lh17 + (int)(2 * scale + 0.5) + lh13;
+    int blockY = tileY + (tileSize - blockH) / 2;
+    iosim_fb_font_text(titleX, blockY + asc17, titleText,
+                       IOSIM_FONT_SEMIBOLD, 17, scale, 0xffffff);
+    iosim_fb_font_text(titleX,
+                       blockY + lh17 + (int)(2 * scale + 0.5) + asc13, kind,
+                       IOSIM_FONT_REGULAR, 13, scale, 0x9a9aa1);
+
+    int closeR = (int)(14 * scale + 0.5);
+    int closeX = ix + iw - (int)(30 * scale + 0.5);
+    int closeY = iy + headerTop + headerH / 2;
+    iosim_fb_fill_circle(closeX, closeY, closeR, 0x3a3b44);
+    int arm = (int)(4.5 * scale + 0.5);
+    int stroke = (int)(1.8 * scale + 0.5);
+    if (stroke < 1)
+        stroke = 1;
+    iosim_fb_draw_line(closeX - arm, closeY - arm, closeX + arm,
+                       closeY + arm, stroke, 0xd0d0d6);
+    iosim_fb_draw_line(closeX - arm, closeY + arm, closeX + arm,
+                       closeY - arm, stroke, 0xd0d0d6);
+    g_share_close_rect[0] = closeX - closeR;
+    g_share_close_rect[1] = closeY - closeR;
+    g_share_close_rect[2] = closeX + closeR;
+    g_share_close_rect[3] = closeY + closeR;
+
+    int rowsTop = iy + (int)(106 * scale + 0.5);
+    int rowH = (int)(58 * scale + 0.5);
+    int iconSize = (int)(32 * scale + 0.5);
+    int iconX = ix + (int)(20 * scale + 0.5);
+    g_share_row_count = rows;
+    for (int i = 0; i < rows; i++)
+    {
+        UIActivity *activity = (UIActivity *)[activities objectAtIndex:i];
+        int ry = rowsTop + i * rowH;
+        if (i > 0)
+            iosim_fb_fill_rect(ix + (int)(64 * scale + 0.5), ry,
+                               iw - (int)(84 * scale + 0.5),
+                               (int)(scale + 0.5), 0x3b3c43);
+        int iconY = ry + (rowH - iconSize) / 2;
+        share_draw_activity_icon(activity, iconX, iconY, iconSize, scale);
+        char rowTitle[192];
+        share_text_ellipsis(iosim_string_cstr([activity activityTitle]),
+                            IOSIM_FONT_REGULAR, 17, scale,
+                            iw - (int)(100 * scale + 0.5), rowTitle,
+                            sizeof(rowTitle));
+        int asc = 0, desc = 0, lh = 0;
+        iosim_fb_font_metrics(IOSIM_FONT_REGULAR, 17, scale, &asc, &desc,
+                              &lh);
+        iosim_fb_font_text(ix + (int)(64 * scale + 0.5),
+                           ry + rowH / 2 - lh / 2 + asc, rowTitle,
+                           IOSIM_FONT_REGULAR, 17, scale, 0xffffff);
+        g_share_row_rects[i][0] = ix;
+        g_share_row_rects[i][1] = ry;
+        g_share_row_rects[i][2] = ix + iw;
+        g_share_row_rects[i][3] = ry + rowH;
+    }
+
+    int cancelH = (int)(50 * scale + 0.5);
+    int cancelY = iy + (int)((120 + 58 * rows) * scale + 0.5);
+    int cancelX = ix + (int)(16 * scale + 0.5);
+    int cancelW = iw - (int)(32 * scale + 0.5);
+    iosim_fb_fill_round_rect(cancelX, cancelY, cancelW, cancelH,
+                             cancelH / 2, 0x404149);
+    int asc = 0, desc = 0, lh = 0;
+    iosim_fb_font_metrics(IOSIM_FONT_SEMIBOLD, 17, scale, &asc, &desc, &lh);
+    int tw = iosim_fb_font_text_width("Cancel", IOSIM_FONT_SEMIBOLD, 17,
+                                      scale);
+    iosim_fb_font_text(cancelX + (cancelW - tw) / 2,
+                       cancelY + cancelH / 2 - lh / 2 + asc, "Cancel",
+                       IOSIM_FONT_SEMIBOLD, 17, scale, 0xffffff);
+    g_share_cancel_rect[0] = cancelX;
+    g_share_cancel_rect[1] = cancelY;
+    g_share_cancel_rect[2] = cancelX + cancelW;
+    g_share_cancel_rect[3] = cancelY + cancelH;
+}
+
 static void draw_modals(UIViewController *root, int fbW, int fbH,
                         double scale)
 {
@@ -15668,6 +16171,15 @@ static void draw_modals(UIViewController *root, int fbW, int fbH,
     if (g_modal_animating == -1 && g_modal_dismissing_controller)
     {
         double progress = modal_progress();
+        if ([(UIViewController *)g_modal_dismissing_controller
+                isKindOfClass:[UIActivityViewController class]])
+        {
+            g_share_presenter = root;
+            draw_activity_sheet(
+                (UIActivityViewController *)g_modal_dismissing_controller,
+                fbW, fbH, scale, 1.0 - progress);
+            return;
+        }
         UIView *view = [(UIViewController *)g_modal_dismissing_controller view];
         if (view)
         {
@@ -15685,6 +16197,15 @@ static void draw_modals(UIViewController *root, int fbW, int fbH,
         return;
     if ([top isKindOfClass:[UIAlertController class]])
         draw_alert((UIAlertController *)top, fbW, fbH, scale);
+    else if ([top isKindOfClass:[UIActivityViewController class]])
+    {
+        double progress = 1.0;
+        if (g_modal_animating == 1 && g_modal_anim_controller == top)
+            progress = modal_progress();
+        g_share_presenter = root;
+        draw_activity_sheet((UIActivityViewController *)top, fbW, fbH, scale,
+                            progress);
+    }
     else
     {
         UIView *view = [top view];
@@ -15749,6 +16270,77 @@ static int alert_handle_tap(UIViewController *root, int px, int py, int fbW,
             a->_handler(a);
         [root dismissViewControllerAnimated:NO completion:nil];
     }
+    return 1;
+}
+
+static void share_dismiss_cancel(UIActivityViewController *controller,
+                                 UIViewController *presenter)
+{
+    if (controller->_completionWithItemsHandler)
+        controller->_completionWithItemsHandler(nil, NO, nil, nil);
+    else if (controller->_completionHandler)
+        controller->_completionHandler(nil, NO);
+    g_active_share_controller = nil;
+    g_share_presenter = nil;
+    if (presenter && presenter->_presentedController == controller)
+        [presenter dismissViewControllerAnimated:YES completion:nil];
+}
+
+/* Returns 1 when the tap belonged to the share sheet (a row, the cancel or
+ * close button, the card itself, or the dimmed area that cancels it). */
+static int activity_sheet_handle_tap(UIViewController *root, int px, int py,
+                                     int fbW, int fbH, double scale)
+{
+    (void)fbW;
+    (void)fbH;
+    (void)scale;
+    if (g_modal_animating == -1 && g_modal_dismissing_controller &&
+        [(UIViewController *)g_modal_dismissing_controller
+            isKindOfClass:[UIActivityViewController class]])
+        return 1;
+    if (!root || !root->_presentedController)
+        return 0;
+    UIViewController *top = top_presented(root);
+    if (!top || ![top isKindOfClass:[UIActivityViewController class]])
+        return 0;
+    UIActivityViewController *controller = (UIActivityViewController *)top;
+    g_share_presenter = root;
+    if (g_share_drawn_controller == controller)
+    {
+        if (px >= g_share_close_rect[0] && px < g_share_close_rect[2] &&
+            py >= g_share_close_rect[1] && py < g_share_close_rect[3])
+        {
+            share_dismiss_cancel(controller, root);
+            return 1;
+        }
+        if (px >= g_share_cancel_rect[0] && px < g_share_cancel_rect[2] &&
+            py >= g_share_cancel_rect[1] && py < g_share_cancel_rect[3])
+        {
+            share_dismiss_cancel(controller, root);
+            return 1;
+        }
+        for (int i = 0; i < g_share_row_count; i++)
+        {
+            if (px >= g_share_row_rects[i][0] &&
+                px < g_share_row_rects[i][2] &&
+                py >= g_share_row_rects[i][1] &&
+                py < g_share_row_rects[i][3])
+            {
+                UIActivity *activity = (UIActivity *)
+                    [[controller _availableActivities] objectAtIndex:i];
+                if (!activity)
+                    return 1;
+                g_active_share_controller = controller;
+                [activity prepareWithActivityItems:controller->_activityItems];
+                [activity performActivity];
+                return 1;
+            }
+        }
+        if (px >= g_share_sheet_rect[0] && px < g_share_sheet_rect[2] &&
+            py >= g_share_sheet_rect[1] && py < g_share_sheet_rect[3])
+            return 1;
+    }
+    share_dismiss_cancel(controller, root);
     return 1;
 }
 
@@ -15938,6 +16530,9 @@ int UIApplicationMain(int argc, char **argv, id principal, id delegateName)
                     redraw = 1;
                 else if (alert_handle_tap(rootController, x, y, fbWidth, fbHeight,
                                      scale))
+                    redraw = 1;
+                else if (activity_sheet_handle_tap(rootController, x, y, fbWidth,
+                                                   fbHeight, scale))
                     redraw = 1;
                 else if (keyboard_handle_tap(x, y, fbWidth, fbHeight, scale))
                     redraw = 1;

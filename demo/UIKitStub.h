@@ -464,6 +464,79 @@ enum { UIAlertControllerStyleActionSheet = 0, UIAlertControllerStyleAlert = 1 };
 enum { UIAlertActionStyleDefault = 0, UIAlertActionStyleCancel = 1,
        UIAlertActionStyleDestructive = 2 };
 
+/* ---------------------------------------------------------- activities */
+
+typedef NSString *UIActivityType;
+extern NSString *UIActivityTypePostToFacebook;
+extern NSString *UIActivityTypePostToTwitter;
+extern NSString *UIActivityTypePostToWeibo;
+extern NSString *UIActivityTypeMessage;
+extern NSString *UIActivityTypeMail;
+extern NSString *UIActivityTypePrint;
+extern NSString *UIActivityTypeCopyToPasteboard;
+extern NSString *UIActivityTypeAssignToContact;
+extern NSString *UIActivityTypeSaveToCameraRoll;
+extern NSString *UIActivityTypeAddToReadingList;
+extern NSString *UIActivityTypePostToFlickr;
+extern NSString *UIActivityTypePostToVimeo;
+extern NSString *UIActivityTypePostToTencentWeibo;
+extern NSString *UIActivityTypeAirDrop;
+extern NSString *UIActivityTypeOpenIniOSApp;
+extern NSString *UIActivityTypeMarkupAsPDF;
+
+enum { UIActivityCategoryAction = 0, UIActivityCategoryShare = 1 };
+
+@class UIImage;
+@class NSError;
+@class UIActivityViewController;
+
+typedef void (^UIActivityViewControllerCompletionWithItemsHandler)(
+    UIActivityType activityType, BOOL completed, NSArray *returnedItems,
+    NSError *error);
+typedef void (^UIActivityViewControllerCompletionHandler)(
+    UIActivityType activityType, BOOL completed);
+
+@protocol UIActivityItemSource
+- (id)activityViewControllerPlaceholderItem:(UIActivityViewController *)activityViewController;
+- (id)activityViewController:(UIActivityViewController *)activityViewController
+        itemForActivityType:(UIActivityType)activityType;
+@optional
+- (id)activityViewController:(UIActivityViewController *)activityViewController
+        subjectForActivityType:(UIActivityType)activityType;
+- (UIImage *)activityViewController:(UIActivityViewController *)activityViewController
+    thumbnailImageForActivityType:(UIActivityType)activityType
+                     suggestedSize:(CGSize)size;
+- (id)activityViewController:(UIActivityViewController *)activityViewController
+    dataTypeIdentifierForActivityType:(UIActivityType)activityType;
+@end
+
+@interface UIActivity : NSObject
++ (long)activityCategory;
+- (UIActivityType)activityType;
+- (NSString *)activityTitle;
+- (UIImage *)activityImage;
+- (BOOL)canPerformWithActivityItems:(NSArray *)activityItems;
+- (void)prepareWithActivityItems:(NSArray *)activityItems;
+- (UIViewController *)activityViewController;
+- (void)performActivity;
+- (void)activityDidFinish:(BOOL)completed;
+@end
+
+@interface UIActivityViewController : UIViewController
+- (id)initWithActivityItems:(NSArray *)activityItems
+       applicationActivities:(NSArray *)applicationActivities;
+- (NSArray *)activityItems;
+- (NSArray *)applicationActivities;
+- (void)setExcludedActivityTypes:(NSArray *)excludedActivityTypes;
+- (NSArray *)excludedActivityTypes;
+- (void)setCompletionWithItemsHandler:
+    (UIActivityViewControllerCompletionWithItemsHandler)handler;
+- (UIActivityViewControllerCompletionWithItemsHandler)completionWithItemsHandler;
+- (void)setCompletionHandler:
+    (UIActivityViewControllerCompletionHandler)handler;
+- (UIActivityViewControllerCompletionHandler)completionHandler;
+@end
+
 @interface UIActivityIndicatorView : UIView
 - (id)initWithActivityIndicatorStyle:(long)style;
 - (void)startAnimating;
@@ -746,6 +819,7 @@ extern int UIApplicationMain(int argc, char **argv, id principal,
 
 @interface NSArray : NSObject <NSFastEnumeration>
 + (id)arrayWithObjects:(const id *)objects count:(unsigned long)count;
++ (id)arrayWithObject:(id)object;
 @property(readonly) unsigned long count;
 - (id)objectAtIndex:(unsigned long)index;
 - (id)objectAtIndexedSubscript:(unsigned long)index;
