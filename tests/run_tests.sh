@@ -6041,6 +6041,8 @@ if wait_log "[fnd] trim 'Hello World'" &&
    wait_log "[fnd] navtoolbar 0 1 725 3 1 1" &&
    wait_log "[fnd] animator start 0.1 0.0 0 0" &&
    wait_log "[fnd] animator done 0 0 2" &&
+   wait_log "[fnd] deps 1 1" &&
+   wait_log "[fnd] deps done 1 1" &&
    wait_log "[fnd] byref 42" &&
    wait_log "[fnd] progress 0.4 0 0" &&
    wait_log "[fnd] progress2 1 1" &&

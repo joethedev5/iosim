@@ -1452,3 +1452,6 @@ space while `getRed:` still reports the original components.
 array.
 `NSProgress` is a unit-count state object with copied cancellation, pausing
 and resuming handlers; hierarchy registration and publishing are no-ops.
+`NSOperationQueue` dispatches each operation into its dispatch group; the
+operation's block waits on `isReady` (all dependencies finished or cancelled)
+before calling `start`, which marks it finished and runs its completion.

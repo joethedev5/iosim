@@ -7795,6 +7795,38 @@ extern long dispatch_group_wait(void *group, unsigned long long timeout);
 - (void)cancel { _cancelled = YES; }
 - (BOOL)isCancelled { return _cancelled; }
 - (BOOL)isFinished { return _finished; }
+- (BOOL)isReady
+{
+    if (!_dependencies)
+        return YES;
+    for (unsigned long i = 0; i < [(NSArray *)_dependencies count]; i++)
+    {
+        NSOperation *dependency =
+            (NSOperation *)[(NSArray *)_dependencies objectAtIndex:i];
+        if (!dependency->_finished && !dependency->_cancelled)
+            return NO;
+    }
+    return YES;
+}
+- (void)addDependency:(NSOperation *)operation
+{
+    if (!operation || operation == self)
+        return;
+    if (!_dependencies)
+        _dependencies = [NSMutableArray array];
+    [(NSMutableArray *)_dependencies addObject:operation];
+}
+- (void)removeDependency:(NSOperation *)operation
+{
+    if (_dependencies && operation)
+        [(NSMutableArray *)_dependencies removeObject:operation];
+}
+- (NSArray *)dependencies
+{
+    return _dependencies ? (NSArray *)_dependencies : [NSArray array];
+}
+- (id)name { return _name; }
+- (void)setName:(id)name { _name = name; }
 - (void)setCompletionBlock:(void (^)(void))block
 {
     _completionBlock = block ? (id)_Block_copy((void *)block) : nil;
@@ -7863,7 +7895,10 @@ extern long dispatch_group_wait(void *group, unsigned long long timeout);
     operation->_dispatched = YES;
     _pending++;
     void (^run)(void) = ^{
-        [operation start];
+        while (![operation isReady] && !operation->_cancelled)
+            usleep(1000);
+        if (!operation->_cancelled)
+            [operation start];
         _pending--;
     };
     dispatch_group_async(_group, _queue, (void *)run);

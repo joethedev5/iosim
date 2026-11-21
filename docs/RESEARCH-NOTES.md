@@ -855,3 +855,7 @@ components.
   `fractionCompleted`; cancellation and pause/resume flip flags and invoke the
   copied handlers synchronously. Parent/child registration and publish are
   accepted no-ops for now.
+- `NSOperation` dependencies are a stored array; `isReady` is true once every
+  dependency is finished or cancelled. A queued operation polls `isReady`
+  before starting, so adding a dependent before its dependency still runs in
+  order. `name` is stored; queue priority and QoS are not modeled yet.

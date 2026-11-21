@@ -518,6 +518,24 @@ static int g_animatorRuns;
     printf("[fnd] sizechildcount %d %.0f\n", parentController->_sizeChanges,
            [sizeChild preferredContentSize].width);
 
+    NSOperationQueue *operationQueue = [[NSOperationQueue alloc] init];
+    __block int operationOrder = 0;
+    NSBlockOperation *firstOperation =
+        [NSBlockOperation blockOperationWithBlock:^{
+            operationOrder = 1;
+        }];
+    NSBlockOperation *secondOperation =
+        [NSBlockOperation blockOperationWithBlock:^{
+            printf("[fnd] deps %d %d\n", operationOrder,
+                   [firstOperation isFinished]);
+        }];
+    [secondOperation addDependency:firstOperation];
+    [operationQueue addOperation:secondOperation];
+    [operationQueue addOperation:firstOperation];
+    [operationQueue waitUntilAllOperationsAreFinished];
+    printf("[fnd] deps done %d %lu\n", operationOrder,
+           [[secondOperation dependencies] count]);
+
     dispatch_group_t asyncGroup = dispatch_group_create();
     __block int asyncValue = 0;
     dispatch_group_async(asyncGroup, dispatch_get_global_queue(0, 0), ^{

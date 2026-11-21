@@ -970,12 +970,20 @@ extern id NSDefaultRunLoopMode;
     BOOL _finished;
     BOOL _dispatched;
     id _completionBlock;
+    id _dependencies;
+    id _name;
 }
 - (void)start;
 - (void)main;
 - (void)cancel;
 - (BOOL)isCancelled;
 - (BOOL)isFinished;
+- (BOOL)isReady;
+- (void)addDependency:(NSOperation *)operation;
+- (void)removeDependency:(NSOperation *)operation;
+- (NSArray *)dependencies;
+- (id)name;
+- (void)setName:(id)name;
 - (void)setCompletionBlock:(void (^)(void))block;
 @end
 

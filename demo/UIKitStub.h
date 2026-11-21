@@ -141,6 +141,39 @@ __attribute__((objc_root_class))
 - (void)unpublish;
 @end
 
+@interface NSOperation : NSObject
+- (void)start;
+- (void)main;
+- (void)cancel;
+- (BOOL)isCancelled;
+- (BOOL)isFinished;
+- (BOOL)isReady;
+- (void)addDependency:(NSOperation *)operation;
+- (void)removeDependency:(NSOperation *)operation;
+- (NSArray *)dependencies;
+- (id)name;
+- (void)setName:(id)name;
+- (void)setCompletionBlock:(void (^)(void))block;
+@end
+
+@interface NSBlockOperation : NSOperation
++ (id)blockOperationWithBlock:(void (^)(void))block;
+- (void)addExecutionBlock:(void (^)(void))block;
+@end
+
+@interface NSOperationQueue : NSObject
++ (NSOperationQueue *)mainQueue;
+- (void)addOperation:(NSOperation *)operation;
+- (void)addOperationWithBlock:(void (^)(void))block;
+- (void)waitUntilAllOperationsAreFinished;
+- (long)operationCount;
+- (void)setMaxConcurrentOperationCount:(long)count;
+- (long)maxConcurrentOperationCount;
+- (void)setSuspended:(BOOL)suspended;
+- (BOOL)isSuspended;
+- (void)cancelAllOperations;
+@end
+
 @interface NSProcessInfo : NSObject
 + (NSProcessInfo *)processInfo;
 - (NSDictionary *)environment;
