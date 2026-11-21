@@ -47,6 +47,25 @@ static int g_animatorRuns;
 }
 @end
 
+@interface FoundationInteractiveTransition : NSObject
+    <UIViewControllerInteractiveTransitioning> {
+@public
+    FoundationTransitionAnimator *_animator;
+    int _starts;
+}
+@end
+
+@implementation FoundationInteractiveTransition
+- (void)startInteractiveTransition:
+    (id<UIViewControllerContextTransitioning>)context
+{
+    _starts++;
+    printf("[fnd] inter start %d\n", _starts);
+    fflush(0);
+    [_animator animateTransition:context];
+}
+@end
+
 @interface FoundationPresentationController : UIPresentationController {
 @public
     int _willBegin;
@@ -93,6 +112,7 @@ static int g_animatorRuns;
     <UIViewControllerTransitioningDelegate> {
 @public
     FoundationTransitionAnimator *_animator;
+    FoundationInteractiveTransition *_interactive;
     FoundationPresentationController *_presentationController;
 }
 @end
@@ -111,6 +131,20 @@ static int g_animatorRuns;
 {
     (void)dismissed;
     return _animator;
+}
+- (id<UIViewControllerInteractiveTransitioning>)
+    interactionControllerForPresentation:
+        (id<UIViewControllerAnimatedTransitioning>)animator
+{
+    (void)animator;
+    return _interactive;
+}
+- (id<UIViewControllerInteractiveTransitioning>)
+    interactionControllerForDismissal:
+        (id<UIViewControllerAnimatedTransitioning>)animator
+{
+    (void)animator;
+    return _interactive;
 }
 - (UIPresentationController *)
     presentationControllerForPresentedViewController:(UIViewController *)presented
@@ -401,6 +435,10 @@ static int g_animatorRuns;
     FoundationTransitionDelegate *transitionDelegate =
         [[FoundationTransitionDelegate alloc] init];
     transitionDelegate->_animator = transitionAnimator;
+    FoundationInteractiveTransition *interactiveTransition =
+        [[FoundationInteractiveTransition alloc] init];
+    interactiveTransition->_animator = transitionAnimator;
+    transitionDelegate->_interactive = interactiveTransition;
     FoundationPresentationController *presentationController =
         [[FoundationPresentationController alloc] init];
     transitionDelegate->_presentationController = presentationController;

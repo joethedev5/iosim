@@ -822,3 +822,9 @@ management.
   and dismissal will/did callbacks around the animator handoff. Its
   `presentedView` defaults to the presented controller's view; a subclass can
   override it or the frame.
+- Presentation and dismissal also ask the transitioning delegate for an
+  interactive driver (`interactionControllerForPresentation:` /
+  `interactionControllerForDismissal:`). When one is returned the runtime
+  calls `startInteractiveTransition:` with the same context instead of
+  `animateTransition:`; the driver owns when to complete, so a percent-driven
+  driver can settle the context itself.

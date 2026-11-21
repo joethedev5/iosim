@@ -1430,3 +1430,6 @@ presentation-style query; custom transitions ask the transitioning delegate
 for one, set its container and controller pointers, and bracket the animator
 with the four transition lifecycle methods. The default `presentedView` is the
 presented controller's view.
+If the transitioning delegate returns an interactive driver, the transition
+context goes to `startInteractiveTransition:` rather than directly to the
+animator; the driver is responsible for driving and completing it.

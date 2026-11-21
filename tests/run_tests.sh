@@ -6042,11 +6042,13 @@ if wait_log "[fnd] trim 'Hello World'" &&
    wait_log "[fnd] animator done 0 0 2" &&
    wait_log "[fnd] trans delegate 1" &&
    wait_log "[fnd] pres will" &&
+   wait_log "[fnd] inter start 1" &&
    wait_log "[fnd] trans anim 1 1 1 1 1 0" &&
    wait_log "[fnd] pres did 1" &&
    wait_log "[fnd] trans present done" &&
    wait_log "[fnd] pres props 1 -2" &&
    wait_log "[fnd] pres dismiss will" &&
+   wait_log "[fnd] inter start 2" &&
    wait_log "[fnd] trans anim 2 1 1 1 0 1" &&
    wait_log "[fnd] pres dismiss did 1" &&
    wait_log "[fnd] trans dismiss done" &&

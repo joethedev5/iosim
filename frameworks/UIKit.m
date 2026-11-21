@@ -11258,7 +11258,14 @@ NSString *const UITransitionContextToViewKey =
         }];
         _transitionContext = context;
         _transitionAnimator = animator;
-        [animator animateTransition:context];
+        id interactive = nil;
+        if ([delegate respondsToSelector:@selector(interactionControllerForPresentation:)])
+            interactive = [delegate interactionControllerForPresentation:animator];
+        if (interactive &&
+            [interactive respondsToSelector:@selector(startInteractiveTransition:)])
+            [interactive startInteractiveTransition:context];
+        else
+            [animator animateTransition:context];
         return;
     }
     _presentedController = controller;
@@ -11342,7 +11349,14 @@ NSString *const UITransitionContextToViewKey =
         }];
         _transitionContext = context;
         _transitionAnimator = animator;
-        [animator animateTransition:context];
+        id interactive = nil;
+        if ([delegate respondsToSelector:@selector(interactionControllerForDismissal:)])
+            interactive = [delegate interactionControllerForDismissal:animator];
+        if (interactive &&
+            [interactive respondsToSelector:@selector(startInteractiveTransition:)])
+            [interactive startInteractiveTransition:context];
+        else
+            [animator animateTransition:context];
         return;
     }
     controller->_beingDismissed = YES;
