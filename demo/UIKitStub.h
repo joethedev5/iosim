@@ -996,10 +996,14 @@ enum {
 @property BOOL translucent;
 @end
 
+@class UIGestureRecognizer;
+
 @interface UINavigationController : UIViewController
 - (id)initWithRootViewController:(UIViewController *)root;
 - (void)pushViewController:(UIViewController *)controller animated:(BOOL)animated;
 - (UIViewController *)popViewControllerAnimated:(BOOL)animated;
+- (NSArray *)viewControllers;
+- (UIGestureRecognizer *)interactivePopGestureRecognizer;
 @end
 
 typedef enum {
@@ -1015,6 +1019,26 @@ typedef enum {
 - (id)initWithTarget:(id)target action:(SEL)action;
 - (long)state;
 - (CGPoint)locationInView:(UIView *)view;
+@end
+
+@interface UIPanGestureRecognizer : UIGestureRecognizer
+- (CGPoint)translationInView:(UIView *)view;
+- (CGPoint)velocityInView:(UIView *)view;
+- (void)setTranslation:(CGPoint)translation inView:(UIView *)view;
+@end
+
+typedef enum {
+    UIRectEdgeNone = 0,
+    UIRectEdgeTop = 1 << 0,
+    UIRectEdgeLeft = 1 << 1,
+    UIRectEdgeBottom = 1 << 2,
+    UIRectEdgeRight = 1 << 3,
+    UIRectEdgeAll = UIRectEdgeTop | UIRectEdgeLeft |
+                    UIRectEdgeBottom | UIRectEdgeRight
+} UIRectEdge;
+
+@interface UIScreenEdgePanGestureRecognizer : UIPanGestureRecognizer
+@property UIRectEdge edges;
 @end
 
 @interface UILongPressGestureRecognizer : UIGestureRecognizer

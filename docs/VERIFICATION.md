@@ -858,6 +858,26 @@ calls `hitTest:` at (110,220), inside the final 2x bounds but outside the
 model frame, and at (95,220): `[tx] hit 1 1` proves touch conversion follows
 the animated transform.
 
+### UIKit: interactive navigation pop
+
+`tests/nav_edge_pop_test.m` puts a green root controller inside a
+`UINavigationController` and pushes a magenta detail. It reports
+`[nav] gesture 1` for `interactivePopGestureRecognizer`, then injects a
+left-edge drag at y=437: down at x=2, moves to 100, 150 and 240, a capture,
+and an up at x=260. The capture shows the incoming root view along the left
+under a dimmed strip (17–18/131–143/50–54 for the sampled green), the detail
+magenta from a measured boundary column (148 pt in the recorded run) with a
+darker shadow column just left of it (green channel 122 vs 143), and magenta
+at the right edge. Lifting past halfway commits: `[nav] popped 1` and the
+final capture is the exact green 26/204/77 across the row, with the dim and
+detail gone. A second push is dragged only to 100 pt and released after a
+pause so the pan velocity has decayed to zero: `[nav] cancel 1` and the
+cancel capture is magenta across the row, proving the views animated back and
+the stack kept the detail. The suite accepts any revealed boundary between 80
+and 330 pt and requires at least an 8-level shadow drop. The navigation bar's
+title and buttons stay on the outgoing controller until the transition
+settles; only the content views animate.
+
 ### Foundation: NSURLSession
 
 The suite starts `python -m http.server` on a loopback ephemeral port and a

@@ -451,6 +451,35 @@ management.
   interpolated extents (not snap), and `hitTest:` at (110,220) proves the
   final 2x touch extent.
 
+## 2026-11-21: interactive navigation pop
+
+- `UIScreenEdgePanGestureRecognizer` is a `UIPanGestureRecognizer` plus
+  `UIRectEdge` bits. The window pre-scans the ancestor chain at touch-down:
+  a matching edge pan (start within 20 pt of an enabled screen edge) shadows
+  ordinary pans and the scroll view for that touch. It remains possible
+  until the finger moves 10 pt; a horizontal-dominant move sends Began then
+  Changed with the real translation, while a vertical-dominant move fails it
+  and hands the touch back to scrolling.
+- `UIPanGestureRecognizer.velocityInView:` now returns smoothed finger
+  velocity (the window previously computed only the scroll-signed velocity
+  and returned zero from the recognizer). Lift with no move for 100 ms
+  zeroes it, so a paused release does not count as a flick.
+- Interactive pop keeps both controllers' views in the nav hierarchy during
+  the gesture: the previous view is inserted below the bar under a 0.47
+  black dim that fades with progress, its left inset follows
+  `-0.3 * width * (1 - progress)`; the outgoing view moves to
+  `width * progress` and carries a left layer shadow. Release commits above
+  0.5 progress or 500 pt/s; the remaining distance of a 0.35 s transition is
+  animated ease-out, then the stack pops or the views are removed.
+- Test timing note: a 3x software frame takes ~100–150 ms to render, and a
+  `dispatch_after` capture runs during the drain before the same iteration's
+  render, so captures can reflect a frame from one or two moves earlier.
+  Fixtures keep ~300 ms between the last state change and a capture.
+- Fixture `tests/nav_edge_pop_test.m` commits one drag and cancels another,
+  sampling the revealed boundary, dimmed green, shadow and both end states.
+- The bar's title and buttons do not animate during the drag yet; they switch
+  when the transition settles.
+
 ## Open directions
 
 - `metal-cpp` + macOS SDK Metal headers make it possible to implement a

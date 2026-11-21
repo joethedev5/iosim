@@ -3971,6 +3971,90 @@ else
     echo "FAIL animated UIView transforms"; echo "$out"; fails=$((fails+1))
 fi
 
+rm -f "$T/nav.fifo"
+mkfifo "$T/nav.fifo"
+"$ROOT/tools/build_app.sh" "$ROOT/tests/nav_edge_pop_test.m" \
+    "$T/nav_edge_pop_test" >/dev/null
+out="$(IOSIM_EVENT_FIFO="$T/nav.fifo" \
+    IOSIM_TEST_PNG_BASE="$T/nav_base.png" \
+    IOSIM_TEST_PNG_MID="$T/nav_mid.png" \
+    IOSIM_TEST_PNG_END="$T/nav_end.png" \
+    IOSIM_TEST_PNG_CANCEL="$T/nav_cancel.png" \
+    DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" \
+    "$T/nav_edge_pop_test" 2>&1)"
+check "[nav] gesture 1" "$out" \
+    "the navigation controller vends a screen-edge pop recognizer"
+check "[nav] pushed" "$out" \
+    "the fixture pushes the detail controller"
+check "[nav] popped 1" "$out" \
+    "a drag past halfway commits the interactive pop"
+check "[nav] repushed" "$out" \
+    "the fixture pushes a second detail controller"
+check "[nav] cancel 1" "$out" \
+    "a short drag released in place leaves the stack untouched"
+check "[nav] png written" "$out" \
+    "the nav fixture captures all four phases"
+if out="$(python3 - "$ROOT/tools" "$T" <<'NEDGEPNG'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+
+def loader(path):
+    w, h, bpp, rows = pngpixel.load(path)
+    def read(x, y):
+        return pngpixel.px(rows, bpp, x * 3, y * 3)
+    return read
+
+def rgb(read, x, y):
+    c = read(x, y)
+    return ((c >> 16) & 255, (c >> 8) & 255, c & 255)
+
+def green(c):
+    return abs(c[0] - 26) < 25 and abs(c[1] - 204) < 25 and abs(c[2] - 77) < 25
+
+def magenta(c):
+    return abs(c[0] - 230) < 25 and abs(c[1] - 26) < 25 and abs(c[2] - 153) < 25
+
+def dim_green(c):
+    return c[1] > 100 and c[1] > c[0] + 60 and c[1] > c[2] + 60
+
+root = sys.argv[2]
+base = loader(root + "/nav_base.png")
+mid = loader(root + "/nav_mid.png")
+end = loader(root + "/nav_end.png")
+cancel = loader(root + "/nav_cancel.png")
+if not (magenta(rgb(base, 10, 437)) and magenta(rgb(base, 390, 437))):
+    raise SystemExit("baseline does not show the pushed detail")
+left = rgb(mid, 10, 437)
+if magenta(left):
+    raise SystemExit("mid-gesture detail still covers the left edge")
+if not dim_green(left):
+    raise SystemExit("incoming view missing or not dimmed: %r" % (left,))
+if not magenta(rgb(mid, 390, 437)):
+    raise SystemExit("detail is not tracking the finger")
+boundary = -1
+for x in range(0, 402):
+    if magenta(rgb(mid, x, 437)):
+        boundary = x
+        break
+if boundary < 80 or boundary > 330:
+    raise SystemExit("revealed strip has unexpected width: %d" % boundary)
+shadow = rgb(mid, boundary - 15, 437)
+if shadow[1] > left[1] - 8:
+    raise SystemExit("no edge shadow beside the detail: %r vs %r" %
+                     (shadow, left))
+if not (green(rgb(end, 10, 437)) and green(rgb(end, 390, 437))):
+    raise SystemExit("committed pop did not restore the root view")
+if not (magenta(rgb(cancel, 10, 437)) and magenta(rgb(cancel, 390, 437))):
+    raise SystemExit("cancelled pop did not restore the detail")
+print("ok   edge pan reveals, pops and cancels with a dim and shadow")
+NEDGEPNG
+)"; then
+    echo "$out"
+else
+    echo "FAIL interactive navigation pop"; echo "$out"; fails=$((fails+1))
+fi
+
 if [ "$fails" -ne 0 ]; then
     echo "$fails test(s) failed" >&2
     exit 1

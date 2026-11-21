@@ -31,12 +31,12 @@ runners**, combined with the public Darling and Apple dyld sources.
 | Software framebuffer, SF font rendering, UIKit view rendering | ✅ |
 | Touch hit-testing, target/action, table selection, event FIFO run loop | ✅ |
 | `UITouch`/`UIEvent` responder delivery, continuous control tracking | ✅ |
-| Drag scrolling with rubber-band clamp, tap/pan/swipe/pinch/rotation gesture recognizers | ✅ |
+| Drag scrolling with rubber-band clamp, tap/pan/swipe/pinch/rotation/screen-edge gesture recognizers with pan velocity | ✅ |
 | Auto Layout: NSLayoutConstraint, anchors, guides, intrinsic sizing, priorities | ✅ (subset) |
 | Multiline UILabel wrapping, UITextField/UITextView editing and delegates, UITextView drag selection, long press, draggable handles and a Copy/Paste edit menu, software keyboard | ✅ |
 | UISwitch, UISlider, UISegmentedControl, UIPageControl, UIActivityIndicatorView, UIProgressView | ✅ |
 | UIAlertController alerts and actions, animated page-sheet modal presentation and dismissal | ✅ |
-| UINavigationController push/pop, UITabBarController, UIStackView, standalone UINavigationBar/UIToolbar with item targets, UIButton titles | ✅ |
+| UINavigationController push/pop and interactive edge-pan pop transition, UITabBarController, UIStackView, standalone UINavigationBar/UIToolbar with item targets, UIButton titles | ✅ |
 | UIView animations (frame, alpha, transform), delay/curve/repeat options, completion blocks | ✅ |
 | `CADisplayLink`, presentation layers, multiple concurrent layer animations | ✅ |
 | `CAAnimationGroup`: grouped opacity/corner animations, group removal clears children | ✅ |

@@ -803,7 +803,15 @@ decoded with libpng in `loader/image.c`.
   renders its title plus left/right `UIBarButtonItem`s as real `UIControl`s
   in the bar, so their targets fire through normal touch tracking. A pushed
   controller gets an automatic "‹ Previous" back control that pops the stack;
-  an explicit left item or `hidesBackButton` replaces it.
+  an explicit left item or `hidesBackButton` replaces it. The controller also
+  vends a left-edge `UIScreenEdgePanGestureRecognizer` as
+  `interactivePopGestureRecognizer` (disabled at depth one and when the bar is
+  hidden). During a drag both the outgoing and previous controller's views
+  stay in the hierarchy: the previous view slides in from a 30% left parallax
+  under a 0.47 black overlay that fades with progress, while the outgoing view
+  tracks the finger with a left-edge layer shadow. Releasing past halfway or
+  with a rightward flick animates to a committed pop over the remaining
+  fraction of 0.35 s; otherwise it animates back and leaves the stack alone.
 - `UINavigationBar` and `UIToolbar` also stand alone as real views. The bar
   lays out the top item's title and left/right buttons across its own bounds
   and rebuilds them in `layoutSubviews`: `setItems:`, `pushNavigationItem:`
@@ -890,6 +898,12 @@ to the nearest page on the scrollable axis before the delegate's
 The drag delegate also receives begin, scroll and end callbacks, and
 `isDragging`/`isDecelerating`/`isTracking` report state. Tap, pan, swipe,
 pinch and rotation `UIGestureRecognizer` subclasses deliver target actions.
+A `UIScreenEdgePanGestureRecognizer` is chosen before ordinary pans when the
+touch begins inside the 20 pt strip along one of its screen edges. It stays
+possible until the finger moves 10 pt, then wins over the scroll view's drag
+for that touch and reports real finger velocity through
+`velocityInView:`; a mostly vertical first move fails it and lets scrolling
+proceed.
 Two-finger `pinchN`/`rotateN` FIFO records carry both finger points (the
 centroid in x/y, the other finger through `iosim_event_second_point`). The
 window hit-tests the centroid, sends `Began`/`Changed`/`Ended` to every

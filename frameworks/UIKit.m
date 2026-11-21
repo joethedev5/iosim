@@ -628,10 +628,31 @@ typedef enum {
 - (int)numberOfTapsRequired;
 @end
 
-@interface UIPanGestureRecognizer : UIGestureRecognizer
+@interface UIPanGestureRecognizer : UIGestureRecognizer {
+@public
+    CGPoint _panVelocity;
+}
 - (CGPoint)translationInView:(UIView *)view;
 - (CGPoint)velocityInView:(UIView *)view;
 - (void)setTranslation:(CGPoint)translation inView:(UIView *)view;
+@end
+
+typedef enum {
+    UIRectEdgeNone = 0,
+    UIRectEdgeTop = 1 << 0,
+    UIRectEdgeLeft = 1 << 1,
+    UIRectEdgeBottom = 1 << 2,
+    UIRectEdgeRight = 1 << 3,
+    UIRectEdgeAll = UIRectEdgeTop | UIRectEdgeLeft |
+                    UIRectEdgeBottom | UIRectEdgeRight
+} UIRectEdge;
+
+@interface UIScreenEdgePanGestureRecognizer : UIPanGestureRecognizer {
+@public
+    UIRectEdge _edges;
+}
+- (UIRectEdge)edges;
+- (void)setEdges:(UIRectEdge)edges;
 @end
 
 @interface UIPinchGestureRecognizer : UIGestureRecognizer {
@@ -1108,6 +1129,7 @@ enum {
     UIView *_contentView;
     id _leftButton;
     id _rightButton;
+    UIPanGestureRecognizer *_interactivePopGesture;
 }
 - (id)initWithRootViewController:(UIViewController *)root;
 - (UIViewController *)topViewController;
@@ -1116,6 +1138,7 @@ enum {
 - (UIViewController *)popViewControllerAnimated:(BOOL)animated;
 - (void)setNavigationBarHidden:(BOOL)hidden animated:(BOOL)animated;
 - (BOOL)isNavigationBarHidden;
+- (UIGestureRecognizer *)interactivePopGestureRecognizer;
 @end
 
 @interface UITabBarItem : NSObject {
@@ -1799,6 +1822,9 @@ enum {
     BOOL _dragMoved;
     UIView *_touchHit;
     UIPanGestureRecognizer *_activePan;
+    UIScreenEdgePanGestureRecognizer *_edgePan;
+    BOOL _edgePanPending;
+    CGPoint _panVelocity;
     UITouch *_touch;
     UIGestureRecognizer *_longPress;
     CGPoint _pressStartPoint;
@@ -3064,13 +3090,18 @@ static NSLayoutConstraint *make_layout_constraint(id item1, long attr1,
 - (CGPoint)velocityInView:(UIView *)view
 {
     (void)view;
-    return CGPointMake(0, 0);
+    return _panVelocity;
 }
 - (void)setTranslation:(CGPoint)translation inView:(UIView *)view
 {
     (void)view;
     _translation = translation;
 }
+@end
+
+@implementation UIScreenEdgePanGestureRecognizer
+- (UIRectEdge)edges { return _edges; }
+- (void)setEdges:(UIRectEdge)edges { _edges = edges; }
 @end
 
 @implementation UIPinchGestureRecognizer
@@ -6517,6 +6548,170 @@ static UIControl *nav_bar_control(UIBarButtonItem *item, CGRect frame,
     return control;
 }
 
+/* --------------------------------------------------- interactive nav pop */
+
+/* The interactive pop keeps both controllers' views on screen: the previous
+ * controller's view slides in from a 30% left parallax under a dark overlay
+ * that fades with progress, while the top view tracks the finger and casts a
+ * left-edge shadow. Releasing past halfway (or with a rightward flick)
+ * animates to completion; otherwise the views return and the stack stays. */
+static struct {
+    int active;
+    int animating; /* 1 finishing, -1 cancelling */
+    double animStart, animDuration;
+    double animFrom, animTo;
+    UINavigationController *nav;
+    UIView *fromView;
+    UIView *toView;
+    UIView *dimView;
+    double savedShadowOpacity, savedShadowRadius;
+    CGSize savedShadowOffset;
+    UIColor *savedShadowColor;
+} g_nav_transition;
+
+static void nav_transition_apply(double progress)
+{
+    if (!g_nav_transition.nav || !g_nav_transition.nav->_view)
+        return;
+    if (progress < 0.0)
+        progress = 0.0;
+    if (progress > 1.0)
+        progress = 1.0;
+    double width = g_nav_transition.nav->_view->_frame.size.width;
+    if (g_nav_transition.toView)
+        g_nav_transition.toView->_frame.origin.x =
+            -0.3 * width * (1.0 - progress);
+    if (g_nav_transition.fromView)
+        g_nav_transition.fromView->_frame.origin.x = width * progress;
+    if (g_nav_transition.dimView)
+        g_nav_transition.dimView->_alpha = 0.47 * (1.0 - progress);
+}
+
+static void nav_transition_cleanup(void)
+{
+    if (g_nav_transition.dimView)
+        [g_nav_transition.dimView removeFromSuperview];
+    if (g_nav_transition.toView)
+        [g_nav_transition.toView removeFromSuperview];
+    UIView *fromView = g_nav_transition.fromView;
+    if (fromView)
+    {
+        CGRect frame = fromView->_frame;
+        frame.origin.x = 0;
+        fromView->_frame = frame;
+        if (fromView->_layer)
+        {
+            fromView->_layer->_shadowOpacity =
+                g_nav_transition.savedShadowOpacity;
+            fromView->_layer->_shadowRadius =
+                g_nav_transition.savedShadowRadius;
+            fromView->_layer->_shadowOffset =
+                g_nav_transition.savedShadowOffset;
+            fromView->_layer->_shadowColor =
+                g_nav_transition.savedShadowColor;
+        }
+    }
+    g_nav_transition.active = 0;
+    g_nav_transition.animating = 0;
+    g_nav_transition.nav = nil;
+    g_nav_transition.fromView = nil;
+    g_nav_transition.toView = nil;
+    g_nav_transition.dimView = nil;
+}
+
+static void nav_transition_begin(UINavigationController *nav)
+{
+    if (!nav || nav->_stackCount <= 1 || nav->_navBarHidden)
+        return;
+    if (g_nav_transition.active || g_nav_transition.animating)
+        return;
+    UIViewController *from =
+        (UIViewController *)nav->_stack[nav->_stackCount - 1];
+    UIViewController *to =
+        (UIViewController *)nav->_stack[nav->_stackCount - 2];
+    UIView *fromView = [from view];
+    UIView *toView = [to view];
+    if (!fromView || !toView || !nav->_view)
+        return;
+    double navHeight = nav->_navBarHidden ? 0 : 100;
+    CGRect bounds = nav->_view->_frame;
+    CGRect content = CGRectMake(0, navHeight, bounds.size.width,
+                                bounds.size.height - navHeight);
+    toView->_frame = content;
+    toView->_hidden = NO;
+    toView->_alpha = 1.0;
+    [nav->_view insertSubview:toView atIndex:0];
+    UIView *dim = [[UIView alloc] initWithFrame:content];
+    dim->_backgroundColor = [UIColor colorWithRed:0 green:0 blue:0 alpha:1.0];
+    dim->_alpha = 0.47;
+    [nav->_view insertSubview:dim atIndex:1];
+
+    g_nav_transition.savedShadowOpacity = fromView->_layer->_shadowOpacity;
+    g_nav_transition.savedShadowRadius = fromView->_layer->_shadowRadius;
+    g_nav_transition.savedShadowOffset = fromView->_layer->_shadowOffset;
+    g_nav_transition.savedShadowColor = fromView->_layer->_shadowColor;
+    fromView->_layer->_shadowColor = [UIColor blackColor];
+    fromView->_layer->_shadowOpacity = 0.35;
+    fromView->_layer->_shadowRadius = 12.0;
+    fromView->_layer->_shadowOffset = CGSizeMake(-10.0, 0.0);
+
+    g_nav_transition.active = 1;
+    g_nav_transition.animating = 0;
+    g_nav_transition.nav = nav;
+    g_nav_transition.fromView = fromView;
+    g_nav_transition.toView = toView;
+    g_nav_transition.dimView = dim;
+    nav_transition_apply(0.0);
+}
+
+static void nav_transition_update(double progress)
+{
+    if (!g_nav_transition.active || g_nav_transition.animating)
+        return;
+    nav_transition_apply(progress);
+}
+
+static void nav_transition_end(double progress, CGPoint velocity)
+{
+    if (!g_nav_transition.active || g_nav_transition.animating)
+        return;
+    int finish = progress > 0.5 || velocity.x > 500.0;
+    g_nav_transition.animating = finish ? 1 : -1;
+    g_nav_transition.animFrom = progress;
+    g_nav_transition.animTo = finish ? 1.0 : 0.0;
+    double distance = __builtin_fabs(g_nav_transition.animTo - progress);
+    g_nav_transition.animDuration = 0.35 * distance;
+    if (g_nav_transition.animDuration < 0.001)
+        g_nav_transition.animDuration = 0.001;
+    g_nav_transition.animStart = iosim_now();
+}
+
+static int iosim_nav_tick(void)
+{
+    if (!g_nav_transition.animating)
+        return 0;
+    double t = (iosim_now() - g_nav_transition.animStart) /
+               g_nav_transition.animDuration;
+    if (t < 0.0)
+        t = 0.0;
+    if (t > 1.0)
+        t = 1.0;
+    if (t >= 1.0)
+    {
+        int finishing = g_nav_transition.animating == 1;
+        UINavigationController *nav = g_nav_transition.nav;
+        nav_transition_cleanup();
+        if (finishing && nav)
+            [nav popViewControllerAnimated:NO];
+        return 1;
+    }
+    double e = 1.0 - (1.0 - t) * (1.0 - t);
+    nav_transition_apply(g_nav_transition.animFrom +
+                         (g_nav_transition.animTo -
+                          g_nav_transition.animFrom) * e);
+    return 1;
+}
+
 @implementation UINavigationController
 - (id)initWithRootViewController:(UIViewController *)root
 {
@@ -6566,7 +6761,43 @@ static UIControl *nav_bar_control(UIBarButtonItem *item, CGRect frame,
         [_navBar addSubview:_navTitleLabel];
         (void)color;
         [self installTopViewController];
+        _interactivePopGesture = [[UIScreenEdgePanGestureRecognizer alloc]
+            initWithTarget:self action:@selector(handleInteractivePop:)];
+        [(UIScreenEdgePanGestureRecognizer *)_interactivePopGesture
+            setEdges:UIRectEdgeLeft];
+        [_view addGestureRecognizer:_interactivePopGesture];
     }
+}
+- (UIGestureRecognizer *)interactivePopGestureRecognizer
+{
+    (void)[self view];
+    return _interactivePopGesture;
+}
+- (void)handleInteractivePop:(UIScreenEdgePanGestureRecognizer *)gesture
+{
+    if (_stackCount <= 1 || _navBarHidden)
+        return;
+    double width = _view ? _view->_frame.size.width : 0;
+    if (width <= 0)
+        width = 1;
+    double progress = [gesture translationInView:_view].x / width;
+    long state = [gesture state];
+    if (getenv("IOSIM_DEBUG_NAV"))
+        fprintf(stderr, "[navdbg] state=%ld t=%.1f p=%.2f v=%.0f now=%.3f\n",
+                state, [gesture translationInView:_view].x, progress,
+                [gesture velocityInView:_view].x, iosim_now());
+    if (state == UIGestureRecognizerStateBegan)
+    {
+        nav_transition_begin(self);
+        nav_transition_update(progress);
+    }
+    else if (state == UIGestureRecognizerStateChanged)
+        nav_transition_update(progress);
+    else if (state == UIGestureRecognizerStateEnded)
+        nav_transition_end(progress, [gesture velocityInView:_view]);
+    else if (state == UIGestureRecognizerStateCancelled ||
+             state == UIGestureRecognizerStateFailed)
+        nav_transition_end(progress, CGPointMake(0, 0));
 }
 - (void)installTopViewController
 {
@@ -6627,6 +6858,9 @@ static UIControl *nav_bar_control(UIBarButtonItem *item, CGRect frame,
             CGRectMake(width - 148, 50, 140, 36), 1);
         [_navBar addSubview:(UIView *)_rightButton];
     }
+    if (_interactivePopGesture)
+        _interactivePopGesture->_enabled =
+            (_stackCount > 1 && !_navBarHidden);
     _view->_needsLayout = YES;
 }
 - (void)navBackTapped:(id)sender
@@ -8187,6 +8421,27 @@ static void send_gesture_action(UIGestureRecognizer *gesture, long state)
                                              gesture->_action, gesture);
 }
 
+/* A screen-edge pan recognizes only when the touch starts inside the 20 pt
+ * strip along one of its enabled screen edges. */
+static int iosim_edge_pan_matches(UIScreenEdgePanGestureRecognizer *gesture,
+                                  CGPoint point)
+{
+    if (!gesture)
+        return 0;
+    CGRect screen = [[UIScreen mainScreen] bounds];
+    double margin = 20.0;
+    long edges = gesture->_edges;
+    if ((edges & UIRectEdgeLeft) && point.x <= margin)
+        return 1;
+    if ((edges & UIRectEdgeRight) && point.x >= screen.size.width - margin)
+        return 1;
+    if ((edges & UIRectEdgeTop) && point.y <= margin)
+        return 1;
+    if ((edges & UIRectEdgeBottom) && point.y >= screen.size.height - margin)
+        return 1;
+    return 0;
+}
+
 static double clamp_scroll(double value, double low, double high)
 {
     if (value < low)
@@ -8475,8 +8730,28 @@ int iosim_scroll_tick(void)
     _dragStartContent = CGPointMake(0, 0);
     _dragScroll = nil;
     _activePan = nil;
+    _edgePan = nil;
+    _edgePanPending = NO;
+    _panVelocity = CGPointMake(0, 0);
     _longPress = nil;
     _touchHit = [self hitTest:point];
+    /* A screen-edge pan takes priority over ordinary pans and scroll views;
+     * it stays possible until the finger moves past the pan threshold. */
+    for (UIView *v = _touchHit; v && !_edgePan; v = [v superview])
+    {
+        for (int i = 0; i < v->_gestureRecognizerCount; i++)
+        {
+            UIGestureRecognizer *g = v->_gestureRecognizers[i];
+            if (g && g->_enabled &&
+                [g isKindOfClass:[UIScreenEdgePanGestureRecognizer class]] &&
+                iosim_edge_pan_matches(
+                    (UIScreenEdgePanGestureRecognizer *)g, point))
+            {
+                _edgePan = (UIScreenEdgePanGestureRecognizer *)g;
+                break;
+            }
+        }
+    }
     for (UIView *v = _touchHit; v; v = [v superview])
     {
         if (!_dragScroll && [v isKindOfClass:[UIScrollView class]])
@@ -8488,6 +8763,17 @@ int iosim_scroll_tick(void)
                 continue;
             if ([g isKindOfClass:[UIPanGestureRecognizer class]] && !_activePan)
             {
+                if (_edgePan)
+                {
+                    if (g != (UIGestureRecognizer *)_edgePan)
+                        continue;
+                    _activePan = _edgePan;
+                    _edgePanPending = YES;
+                    g->_location = point;
+                    g->_translation = CGPointMake(0, 0);
+                    g->_state = UIGestureRecognizerStatePossible;
+                    continue;
+                }
                 _activePan = (UIPanGestureRecognizer *)g;
                 g->_location = point;
                 g->_translation = CGPointMake(0, 0);
@@ -8530,12 +8816,22 @@ int iosim_scroll_tick(void)
     {
         CGPoint instant = CGPointMake(-(point.x - _lastMovePoint.x) / move_dt,
                                       -(point.y - _lastMovePoint.y) / move_dt);
+        CGPoint finger = CGPointMake((point.x - _lastMovePoint.x) / move_dt,
+                                     (point.y - _lastMovePoint.y) / move_dt);
         if (_dragMoved)
+        {
             _dragVelocity = CGPointMake(
                 _dragVelocity.x * 0.7 + instant.x * 0.3,
                 _dragVelocity.y * 0.7 + instant.y * 0.3);
+            _panVelocity = CGPointMake(
+                _panVelocity.x * 0.7 + finger.x * 0.3,
+                _panVelocity.y * 0.7 + finger.y * 0.3);
+        }
         else
+        {
             _dragVelocity = instant;
+            _panVelocity = finger;
+        }
     }
     _lastMovePoint = point;
     _lastMoveTime = move_time;
@@ -8562,15 +8858,44 @@ int iosim_scroll_tick(void)
             send_gesture_action(press, UIGestureRecognizerStateChanged);
         }
     }
-    if (_activePan)
+    int edgePending = 0;
+    if (_activePan && _edgePanPending &&
+        _activePan == (UIPanGestureRecognizer *)_edgePan)
+    {
+        double dx = point.x - _dragStartPoint.x;
+        double dy = point.y - _dragStartPoint.y;
+        if (dx * dx + dy * dy >= 100.0)
+        {
+            if (__builtin_fabs(dx) > __builtin_fabs(dy))
+            {
+                _edgePanPending = NO;
+                _dragScroll = nil;
+                _activePan->_location = point;
+                _activePan->_translation = CGPointMake(dx, dy);
+                _activePan->_panVelocity = _panVelocity;
+                send_gesture_action(_activePan, UIGestureRecognizerStateBegan);
+            }
+            else
+            {
+                _edgePanPending = NO;
+                _activePan->_state = UIGestureRecognizerStateFailed;
+                _activePan = nil;
+                _edgePan = nil;
+            }
+        }
+        else
+            edgePending = 1;
+    }
+    if (_activePan && !edgePending)
     {
         _activePan->_location = point;
         _activePan->_translation =
             CGPointMake(point.x - _dragStartPoint.x,
                         point.y - _dragStartPoint.y);
+        _activePan->_panVelocity = _panVelocity;
         send_gesture_action(_activePan, UIGestureRecognizerStateChanged);
     }
-    if (_dragScroll && _dragScroll->_scrollEnabled)
+    if (_dragScroll && !edgePending && _dragScroll->_scrollEnabled)
     {
         UIScrollView *scroll = _dragScroll;
         if (!scroll->_dragging)
@@ -8640,12 +8965,27 @@ int iosim_scroll_tick(void)
     }
     if (_activePan)
     {
-        _activePan->_location = point;
-        _activePan->_translation =
-            CGPointMake(point.x - _dragStartPoint.x,
-                        point.y - _dragStartPoint.y);
-        send_gesture_action(_activePan, UIGestureRecognizerStateEnded);
-        _activePan = nil;
+        if (_edgePanPending)
+        {
+            /* The finger lifted before the edge pan reached its threshold. */
+            _activePan->_state = UIGestureRecognizerStateFailed;
+            _edgePanPending = NO;
+            _activePan = nil;
+            _edgePan = nil;
+            _dragScroll = nil;
+        }
+        else
+        {
+            if (iosim_now() - _lastMoveTime > 0.1)
+                _panVelocity = CGPointMake(0, 0);
+            _activePan->_location = point;
+            _activePan->_translation =
+                CGPointMake(point.x - _dragStartPoint.x,
+                            point.y - _dragStartPoint.y);
+            _activePan->_panVelocity = _panVelocity;
+            send_gesture_action(_activePan, UIGestureRecognizerStateEnded);
+            _activePan = nil;
+        }
     }
     if (_dragScroll)
     {
@@ -15701,6 +16041,8 @@ int UIApplicationMain(int argc, char **argv, id principal, id delegateName)
             if (iosim_animation_tick())
                 redraw = 1;
             if (iosim_modal_tick())
+                redraw = 1;
+            if (iosim_nav_tick())
                 redraw = 1;
             if (iosim_scroll_tick())
                 redraw = 1;
