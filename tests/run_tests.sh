@@ -328,6 +328,18 @@ check "[pb] color 1.00 0.50 0.25 0.75" "$out" \
     "the pasteboard stores UIColor components under the UIKit color type"
 check "[pb] types 1 1" "$out" \
     "types and containsPasteboardTypes report the stored type"
+"$ROOT/tools/build_app.sh" "$ROOT/tests/pasteboard_image_test.m" \
+    "$T/pasteboard_image_test" >/dev/null
+out="$(SIMULATOR_SHARED_RESOURCES_DIRECTORY="$PB_SHARED" \
+    DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/pasteboard_image_test" 2>&1)"
+check "[pbimg] bytes 2018" "$out" \
+    "the image fixture reads the bundle PNG bytes"
+check "[pbimg] decode 1 132 132" "$out" \
+    "UIImage imageWithData decodes PNG bytes in memory"
+check "[pbimg] image 1 132 132 1" "$out" \
+    "setImage/image round-trip through public.png data"
+check "[pbimg] images 2 1" "$out" \
+    "setImages stores multiple images under public.png"
 
 # ---------- 4g. NSCalendar components ----------
 "$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \

@@ -884,3 +884,7 @@ components.
   over the same storage: strings use the plain-text key, URLs the public.url
   key, and colors a 32-byte big-endian-agnostic native double array under
   com.apple.uikit.color. Type queries union the item keys in order.
+- `UIImage imageWithData:` decodes PNG bytes through libpng's
+  `png_image_begin_read_from_memory`, keeping image decoding in the loader.
+  Pasteboard images are PNG data under `public.png`, so `setImage:`/`image`
+  and `setImages:`/`images` round-trip decoded pixels.

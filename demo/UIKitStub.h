@@ -2017,6 +2017,9 @@ extern id UIPasteboardTypeListColor;
 + (UIPasteboard *)generalPasteboard;
 @property(nonatomic, retain) id string;
 @property(nonatomic, retain) NSArray *strings;
+@property(nonatomic, retain) UIImage *image;
+@property(nonatomic, retain) NSArray *images;
+@property(readonly) BOOL hasImages;
 @property(nonatomic, retain) NSURL *URL;
 @property(nonatomic, retain) NSArray *URLs;
 @property(nonatomic, retain) UIColor *color;
@@ -2100,6 +2103,7 @@ extern int UIApplicationMain(int argc, char **argv, id principal,
     int _height;
 }
 + (UIImage *)imageNamed:(NSString *)name;
++ (UIImage *)imageWithData:(NSData *)data;
 + (UIImage *)imageWithCGImage:(CGImageRef)image;
 - (int)width;
 - (int)height;

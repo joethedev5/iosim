@@ -1098,6 +1098,11 @@ reports `[pb] strings 2 one 1`, `[pb] urls 2 https://example.com/b 1`,
 `[pb] color 1.00 0.50 0.25 0.75` and `[pb] types 1 1`: `strings`, `URLs`,
 `colors`, `types` and `containsPasteboardTypes:` read back the typed item
 values, and color components survive as a 32-byte data value in the plist.
+`tests/pasteboard_image_test.m` reads `demo/Assets/badge.png` into `NSData`,
+decodes it with `UIImage imageWithData:` (in-memory libpng) and reports
+`[pbimg] decode 1 132 132`; a `setImage:`/`image` round trip reports
+`[pbimg] image 1 132 132 1`, and `setImages:` with two images reports
+`[pbimg] images 2 1` with `public.png` present.
 
 ### Services: dispatch, Mach, bootstrap and XPC
 

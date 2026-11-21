@@ -1479,3 +1479,6 @@ object refs through the offset table, and caps recursion depth.
 `UIPasteboard.strings`, `URLs` and `colors` build items with their public type
 keys and parse them back from the shared plist; `types` unions item keys and
 `containsPasteboardTypes:` checks the union.
+The loader exports both file and memory PNG decoders; UIKit's
+`UIImage imageWithData:` uses the memory entry point, and the pasteboard
+stores image items as `public.png` data.

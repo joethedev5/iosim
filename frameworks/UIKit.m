@@ -104,6 +104,10 @@ extern double iosim_wall_time(void);
 static void shell_badge_store(const char *bundle, int count);
 extern int  iosim_png_load(const char *path, unsigned char **out_rgba,
                            int *out_width, int *out_height);
+extern int  iosim_png_load_memory(const unsigned char *bytes,
+                                  unsigned long length,
+                                  unsigned char **out_rgba,
+                           int *out_width, int *out_height);
 extern void *_Block_copy(void *block);
 extern void _Block_release(void *block);
 extern void iosim_fb_fill_ellipse(int cx, int cy, int rx, int ry,
@@ -420,6 +424,7 @@ struct layer_anim {
 }
 + (id)imageNamed:(id)name;
 + (id)imageWithContentsOfFile:(id)path;
++ (id)imageWithData:(id)data;
 + (id)imageWithCGImage:(CGImageRef)image;
 - (int)width;
 - (int)height;
@@ -3820,6 +3825,11 @@ extern id UIPasteboardTypeListColor;
 - (BOOL)hasStrings;
 - (id)strings;
 - (void)setStrings:(id)strings;
+- (id)image;
+- (void)setImage:(id)image;
+- (id)images;
+- (void)setImages:(id)images;
+- (BOOL)hasImages;
 - (id)URL;
 - (void)setURL:(id)url;
 - (id)URLs;
@@ -10400,6 +10410,20 @@ static void cg_to_bezier_applier(void *info, const CGPathElement *element)
     image->_height = h;
     return image;
 }
++ (id)imageWithData:(id)data
+{
+    if (!data || [data length] == 0)
+        return nil;
+    unsigned char *rgba = 0;
+    int w = 0, h = 0;
+    if (iosim_png_load_memory([data bytes], [data length], &rgba, &w, &h) != 0)
+        return nil;
+    UIImage *image = [[self alloc] init];
+    image->_rgba = rgba;
+    image->_width = w;
+    image->_height = h;
+    return image;
+}
 + (id)imageWithCGImage:(CGImageRef)cgImage
 {
     int w = 0, h = 0;
@@ -16628,6 +16652,64 @@ static void pasteboard_path(char *out, unsigned long cap)
     _items = items;
     _changeCount++;
     [self save];
+}
+- (id)image
+{
+    id data = [self dataForPasteboardType:@"public.png"];
+    return data ? [UIImage imageWithData:data] : nil;
+}
+- (void)setImage:(id)image
+{
+    NSMutableArray *items = [NSMutableArray array];
+    NSData *data = image ? UIImagePNGRepresentation(image) : nil;
+    if (data)
+    {
+        NSMutableDictionary *item = [NSMutableDictionary dictionary];
+        [item setObject:data forKey:@"public.png"];
+        [items addObject:item];
+    }
+    _items = items;
+    _changeCount++;
+    [self save];
+}
+- (id)images
+{
+    NSMutableArray *images = [NSMutableArray array];
+    id items = [self items];
+    for (unsigned long i = 0; i < [items count]; i++)
+    {
+        id item = [items objectAtIndex:i];
+        if (![item isKindOfClass:[NSDictionary class]])
+            continue;
+        id data = [(NSDictionary *)item objectForKey:@"public.png"];
+        id image = data ? [UIImage imageWithData:data] : nil;
+        if (image)
+            [images addObject:image];
+    }
+    return images;
+}
+- (void)setImages:(id)images
+{
+    NSMutableArray *items = [NSMutableArray array];
+    if (images && [images isKindOfClass:[NSArray class]])
+    {
+        for (unsigned long i = 0; i < [images count]; i++)
+        {
+            NSData *data = UIImagePNGRepresentation([images objectAtIndex:i]);
+            if (!data)
+                continue;
+            NSMutableDictionary *item = [NSMutableDictionary dictionary];
+            [item setObject:data forKey:@"public.png"];
+            [items addObject:item];
+        }
+    }
+    _items = items;
+    _changeCount++;
+    [self save];
+}
+- (BOOL)hasImages
+{
+    return [self image] != nil;
 }
 - (id)URL
 {
