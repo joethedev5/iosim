@@ -1017,7 +1017,17 @@ enum {
 @property(readonly) UIViewController *presentedViewController;
 @property(readonly) UIViewController *presentingViewController;
 @property(readonly) UIView *containerView;
+@property(readonly) UIView *presentedView;
 @property(readonly) CGRect frameOfPresentedViewInContainerView;
+@property(readonly) long presentationStyle;
+- (void)presentationTransitionWillBegin;
+- (void)presentationTransitionDidEnd:(BOOL)completed;
+- (void)dismissalTransitionWillBegin;
+- (void)dismissalTransitionDidEnd:(BOOL)completed;
+- (void)containerViewWillLayoutSubviews;
+- (void)containerViewDidLayoutSubviews;
+@property(readonly) BOOL shouldRemovePresentersView;
+@property(readonly) BOOL shouldPresentInFullscreen;
 @end
 
 extern NSString *const UITransitionContextFromViewControllerKey;

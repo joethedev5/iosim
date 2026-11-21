@@ -1772,11 +1772,23 @@ enum {
     id _presentedViewController;
     id _presentingViewController;
     UIView *_containerView;
+    UIView *_presentedView;
+    id _overrideTraitCollection;
 }
 - (id)presentedViewController;
 - (id)presentingViewController;
 - (UIView *)containerView;
+- (UIView *)presentedView;
 - (CGRect)frameOfPresentedViewInContainerView;
+- (long)presentationStyle;
+- (void)presentationTransitionWillBegin;
+- (void)presentationTransitionDidEnd:(BOOL)completed;
+- (void)dismissalTransitionWillBegin;
+- (void)dismissalTransitionDidEnd:(BOOL)completed;
+- (void)containerViewWillLayoutSubviews;
+- (void)containerViewDidLayoutSubviews;
+- (BOOL)shouldRemovePresentersView;
+- (BOOL)shouldPresentInFullscreen;
 @end
 
 @interface UIPopoverPresentationController : UIPresentationController {
@@ -1953,6 +1965,7 @@ extern NSString *const UITransitionContextToViewKey;
     id _parentController;
     id _popoverPresentationController;
     id _sheetPresentationController;
+    id _presentationController;
     id _children[16];
     int _childCount;
     unsigned long _edgesForExtendedLayout;
@@ -10748,12 +10761,35 @@ NSString *const UITransitionContextToViewKey =
 - (id)presentedViewController { return _presentedViewController; }
 - (id)presentingViewController { return _presentingViewController; }
 - (UIView *)containerView { return _containerView; }
+- (UIView *)presentedView
+{
+    if (_presentedView)
+        return _presentedView;
+    if (_presentedViewController)
+        return [(UIViewController *)_presentedViewController view];
+    return nil;
+}
 - (CGRect)frameOfPresentedViewInContainerView
 {
     if (_containerView)
         return _containerView->_frame;
     return CGRectMake(0, 0, 390, 844);
 }
+- (long)presentationStyle
+{
+    if (_presentedViewController)
+        return [(UIViewController *)_presentedViewController
+            modalPresentationStyle];
+    return -2;
+}
+- (void)presentationTransitionWillBegin { }
+- (void)presentationTransitionDidEnd:(BOOL)completed { (void)completed; }
+- (void)dismissalTransitionWillBegin { }
+- (void)dismissalTransitionDidEnd:(BOOL)completed { (void)completed; }
+- (void)containerViewWillLayoutSubviews { }
+- (void)containerViewDidLayoutSubviews { }
+- (BOOL)shouldRemovePresentersView { return NO; }
+- (BOOL)shouldPresentInFullscreen { return YES; }
 @end
 
 @implementation UIPopoverPresentationController
@@ -10917,6 +10953,8 @@ NSString *const UITransitionContextToViewKey =
 }
 - (UIPresentationController *)presentationController
 {
+    if (_presentationController)
+        return _presentationController;
     if (_modalPresentationStyle == 7)
         return [self sheetPresentationController];
     return [self popoverPresentationController];
@@ -11166,12 +11204,31 @@ NSString *const UITransitionContextToViewKey =
         _transitionContext = nil;
         _transitionAnimator = nil;
         UIView *container = [self view];
-        UIView *toView = [controller view];
-        toView.frame = container.bounds;
+        UIPresentationController *presentationController = nil;
+        if ([delegate respondsToSelector:@selector(presentationControllerForPresentedViewController:presentingViewController:sourceViewController:)])
+            presentationController =
+                [delegate presentationControllerForPresentedViewController:
+                    controller
+                    presentingViewController:self
+                    sourceViewController:self];
+        if (!presentationController)
+            presentationController = [[UIPresentationController alloc] init];
+        presentationController->_presentedViewController = controller;
+        presentationController->_presentingViewController = self;
+        presentationController->_containerView = container;
+        controller->_presentationController = presentationController;
+        [presentationController presentationTransitionWillBegin];
+        [presentationController containerViewWillLayoutSubviews];
+        UIView *toView = [presentationController presentedView];
+        if (!toView)
+            toView = [controller view];
+        toView.frame =
+            [presentationController frameOfPresentedViewInContainerView];
         if (toView.superview && toView.superview != container)
             [toView removeFromSuperview];
         if (!toView.superview)
             [container addSubview:toView];
+        [presentationController containerViewDidLayoutSubviews];
         _presentedController = controller;
         controller->_beingPresented = YES;
         [controller viewWillAppear:animated];
@@ -11191,7 +11248,9 @@ NSString *const UITransitionContextToViewKey =
                 [toView removeFromSuperview];
                 if (_presentedController == controller)
                     _presentedController = nil;
+                controller->_presentationController = nil;
             }
+            [presentationController presentationTransitionDidEnd:completed];
             if ([animator respondsToSelector:@selector(animationEnded:)])
                 [(id)animator animationEnded:completed];
             if (completion)
@@ -11252,6 +11311,9 @@ NSString *const UITransitionContextToViewKey =
         UIView *container = [self view];
         UIView *fromView = [controller view];
         (void)container;
+        UIPresentationController *presentationController =
+            (UIPresentationController *)controller->_presentationController;
+        [presentationController dismissalTransitionWillBegin];
         controller->_beingDismissed = YES;
         [controller viewWillDisappear:animated];
         _UIViewControllerTransitionContext *context =
@@ -11270,6 +11332,9 @@ NSString *const UITransitionContextToViewKey =
                 if (_presentedController == controller)
                     _presentedController = nil;
             }
+            [presentationController dismissalTransitionDidEnd:completed];
+            if (completed)
+                controller->_presentationController = nil;
             if ([animator respondsToSelector:@selector(animationEnded:)])
                 [(id)animator animationEnded:completed];
             if (completion)

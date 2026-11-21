@@ -47,10 +47,53 @@ static int g_animatorRuns;
 }
 @end
 
+@interface FoundationPresentationController : UIPresentationController {
+@public
+    int _willBegin;
+    int _didEnd;
+    int _dismissWillBegin;
+    int _dismissDidEnd;
+}
+@end
+
+@implementation FoundationPresentationController
+- (void)presentationTransitionWillBegin
+{
+    _willBegin++;
+    printf("[fnd] pres will\n");
+    fflush(0);
+}
+- (void)presentationTransitionDidEnd:(BOOL)completed
+{
+    if (completed)
+        _didEnd++;
+    printf("[fnd] pres did %d\n", completed);
+    fflush(0);
+}
+- (void)dismissalTransitionWillBegin
+{
+    _dismissWillBegin++;
+    printf("[fnd] pres dismiss will\n");
+    fflush(0);
+}
+- (void)dismissalTransitionDidEnd:(BOOL)completed
+{
+    if (completed)
+        _dismissDidEnd++;
+    printf("[fnd] pres dismiss did %d\n", completed);
+    fflush(0);
+}
+- (CGRect)frameOfPresentedViewInContainerView
+{
+    return CGRectMake(10, 20, 30, 40);
+}
+@end
+
 @interface FoundationTransitionDelegate : NSObject
     <UIViewControllerTransitioningDelegate> {
 @public
     FoundationTransitionAnimator *_animator;
+    FoundationPresentationController *_presentationController;
 }
 @end
 
@@ -68,6 +111,14 @@ static int g_animatorRuns;
 {
     (void)dismissed;
     return _animator;
+}
+- (UIPresentationController *)
+    presentationControllerForPresentedViewController:(UIViewController *)presented
+                            presentingViewController:(UIViewController *)presenting
+                                sourceViewController:(UIViewController *)source
+{
+    (void)presented; (void)presenting; (void)source;
+    return _presentationController;
 }
 @end
 
@@ -350,6 +401,9 @@ static int g_animatorRuns;
     FoundationTransitionDelegate *transitionDelegate =
         [[FoundationTransitionDelegate alloc] init];
     transitionDelegate->_animator = transitionAnimator;
+    FoundationPresentationController *presentationController =
+        [[FoundationPresentationController alloc] init];
+    transitionDelegate->_presentationController = presentationController;
     UIViewController *presented = [[UIViewController alloc] init];
     presented.view =
         [[UIView alloc] initWithFrame:CGRectMake(0, 0, 80, 80)];
@@ -360,10 +414,16 @@ static int g_animatorRuns;
         printf("[fnd] trans present done\n");
         fflush(0);
     }];
+    printf("[fnd] pres props %d %ld\n",
+           [presented presentationController] == presentationController,
+           [[presented presentationController] presentationStyle]);
     [self dismissViewControllerAnimated:YES completion:^{
         printf("[fnd] trans dismiss done\n");
         fflush(0);
     }];
+    printf("[fnd] pres frame %.0f %.0f %.0f %.0f\n",
+           presented.view.frame.origin.x, presented.view.frame.origin.y,
+           presented.view.frame.size.width, presented.view.frame.size.height);
 
     printf("[fnd] ready\n");
     fflush(0);

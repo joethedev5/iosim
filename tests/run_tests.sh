@@ -6041,10 +6041,16 @@ if wait_log "[fnd] trim 'Hello World'" &&
    wait_log "[fnd] animator start 0.1 0.0 0 0" &&
    wait_log "[fnd] animator done 0 0 2" &&
    wait_log "[fnd] trans delegate 1" &&
+   wait_log "[fnd] pres will" &&
    wait_log "[fnd] trans anim 1 1 1 1 1 0" &&
+   wait_log "[fnd] pres did 1" &&
    wait_log "[fnd] trans present done" &&
+   wait_log "[fnd] pres props 1 -2" &&
+   wait_log "[fnd] pres dismiss will" &&
    wait_log "[fnd] trans anim 2 1 1 1 0 1" &&
-   wait_log "[fnd] trans dismiss done"; then
+   wait_log "[fnd] pres dismiss did 1" &&
+   wait_log "[fnd] trans dismiss done" &&
+   wait_log "[fnd] pres frame 10 20 30 40"; then
     echo "ok   Foundation helpers, colors, fonts and readable guides"
 else
     echo "FAIL Foundation helpers"; fails=$((fails+1))

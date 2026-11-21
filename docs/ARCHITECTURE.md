@@ -1425,3 +1425,8 @@ transitioning delegate for an animator, build a
 `_UIViewControllerTransitionContext` with the from/to controllers and the
 presenting view as container, and let the animator call
 `completeTransition:`. The standard page-sheet path remains the fallback.
+`UIPresentationController` owns the container/presented views and the
+presentation-style query; custom transitions ask the transitioning delegate
+for one, set its container and controller pointers, and bracket the animator
+with the four transition lifecycle methods. The default `presentedView` is the
+presented controller's view.

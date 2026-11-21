@@ -816,3 +816,9 @@ management.
   `completeTransition:`; the runtime then runs the appearance callbacks and
   user completion. `isBeingPresented`/`isBeingDismissed` are true only for the
   duration of that handoff, including the synchronous case.
+- A transitioning delegate can also supply the `UIPresentationController`.
+  The runtime installs it with the presenting view as container, lets it
+  choose `frameOfPresentedViewInContainerView`, and sends the presentation
+  and dismissal will/did callbacks around the animator handoff. Its
+  `presentedView` defaults to the presented controller's view; a subclass can
+  override it or the frame.
