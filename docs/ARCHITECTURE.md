@@ -1444,3 +1444,7 @@ the container, controllers and duration, and the default
 `NSIndexPath` holds a small fixed index vector with row/section and
 item/section constructors; equality and ordering compare the vector
 lexicographically.
+Display-P3 colors carry a flag on `UIColor`; `ui_components:` converts their
+RGB to sRGB through the linear P3→sRGB matrix and the sRGB transfer curve, so
+every framebuffer/CGColor path renders in the software framebuffer's sRGB
+space while `getRed:` still reports the original components.

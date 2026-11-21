@@ -6005,6 +6005,7 @@ if wait_log "[fnd] trim 'Hello World'" &&
    wait_log "[fnd] rep abXYef" &&
    wait_log "[fnd] range 6 5 1" &&
    wait_log "[fnd] font 14 System 20" &&
+   wait_log "[fnd] p3srgb 0.06 0.20 0.31 0.4" &&
    wait_log "[fnd] color 1 0 0 1.0 0.1 0.4 1.0 0.25" &&
    wait_log "[fnd] desc 17 17" &&
    wait_log "[fnd] readable 16 0 370 874" &&

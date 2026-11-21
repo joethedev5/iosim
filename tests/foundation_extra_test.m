@@ -253,6 +253,9 @@ static int g_animatorRuns;
     UIColor *dim = [[UIColor whiteColor] colorWithAlphaComponent:0.25];
     double dr = 0, dg = 0, db = 0, da = 0;
     [dim getRed:&dr green:&dg blue:&db alpha:&da];
+    const double *p3Components = CGColorGetComponents([p3 CGColor]);
+    printf("[fnd] p3srgb %.2f %.2f %.2f %.1f\n", p3Components[0],
+           p3Components[1], p3Components[2], p3Components[3]);
     printf("[fnd] color %.0f %.0f %.0f %.1f %.1f %.1f %.1f %.2f\n", red,
            green, blue, alpha, pr, pa, dr, da);
 

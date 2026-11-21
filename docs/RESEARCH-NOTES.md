@@ -281,8 +281,10 @@ segments). CGGradient
 stores multiple stops with alpha and CGContextDrawLinearGradient interpolates
 them per-pixel through clip and mask; CALayer masks push 8-bit coverage for
 whole layer trees; CAGradientLayer interpolates multiple stops with explicit
-or even locations, including clear-to-opaque fade masks. Still missing: color
-management.
+or even locations, including clear-to-opaque fade masks. Display-P3 colors
+are now converted to sRGB for framebuffer rendering (linear P3 -> linear sRGB
+matrix plus the sRGB transfer curve), while `getRed:` keeps the original P3
+components.
 
 ## 2026-11-20: CALayer masks
 

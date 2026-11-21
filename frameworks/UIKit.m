@@ -17,6 +17,7 @@ extern void *stderr;
 extern char *getenv(const char *name);
 extern int atoi(const char *s);
 extern double atof(const char *s);
+extern double pow(double base, double exponent);
 void UIAccessibilityPostNotification(unsigned int notification, id argument)
 {
     (void)notification;
@@ -758,6 +759,7 @@ enum {
     double _r, _g, _b, _a;
     double _dark_r, _dark_g, _dark_b, _dark_a;
     BOOL _dynamic;
+    BOOL _displayP3;
     void *_provider;
 }
 + (UIColor *)colorWithRed:(double)r green:(double)g blue:(double)b
@@ -4853,11 +4855,16 @@ NSString *const UITraitCollectionDidChangeNotification =
 + (UIColor *)colorWithDisplayP3Red:(double)r green:(double)g blue:(double)b
                              alpha:(double)a
 {
-    return [self colorWithRed:r green:g blue:b alpha:a];
+    UIColor *color = [self colorWithRed:r green:g blue:b alpha:a];
+    color->_displayP3 = YES;
+    return color;
 }
 - (UIColor *)colorWithAlphaComponent:(double)alpha
 {
-    return [[self class] colorWithRed:_r green:_g blue:_b alpha:alpha];
+    UIColor *color = [[self class] colorWithRed:_r green:_g blue:_b
+                                          alpha:alpha];
+    color->_displayP3 = _displayP3;
+    return color;
 }
 + (UIColor *)ui_colorWithLightRed:(double)lr lightGreen:(double)lg
                         lightBlue:(double)lb lightAlpha:(double)la
@@ -5129,6 +5136,35 @@ NSString *const UITraitCollectionDidChangeNotification =
                            lightAlpha:1.0 darkRed:0.0392 darkGreen:0.5176
                              darkBlue:1.0 darkAlpha:1.0];
 }
+static double displayp3_to_linear(double value)
+{
+    return value <= 0.04045 ? value / 12.92
+                            : pow((value + 0.055) / 1.055, 2.4);
+}
+
+static double linear_to_srgb(double value)
+{
+    if (value <= 0.0031308)
+        return 12.92 * value;
+    return 1.055 * pow(value, 1.0 / 2.4) - 0.055;
+}
+
+static void displayp3_components_to_srgb(double *components)
+{
+    double r = displayp3_to_linear(components[0]);
+    double g = displayp3_to_linear(components[1]);
+    double b = displayp3_to_linear(components[2]);
+    double sr = 1.2249401 * r - 0.2249404 * g;
+    double sg = -0.0420569 * r + 1.0420571 * g;
+    double sb = -0.0196376 * r - 0.0786361 * g + 1.0982735 * b;
+    if (sr < 0) sr = 0; if (sr > 1) sr = 1;
+    if (sg < 0) sg = 0; if (sg > 1) sg = 1;
+    if (sb < 0) sb = 0; if (sb > 1) sb = 1;
+    components[0] = linear_to_srgb(sr);
+    components[1] = linear_to_srgb(sg);
+    components[2] = linear_to_srgb(sb);
+}
+
 - (void)ui_components:(double *)components
 {
     if (_provider)
@@ -5148,12 +5184,16 @@ NSString *const UITraitCollectionDidChangeNotification =
         components[1] = _dark_g;
         components[2] = _dark_b;
         components[3] = _dark_a;
+        if (_displayP3)
+            displayp3_components_to_srgb(components);
         return;
     }
     components[0] = _r;
     components[1] = _g;
     components[2] = _b;
     components[3] = _a;
+    if (_displayP3)
+        displayp3_components_to_srgb(components);
 }
 - (UIColor *)resolvedColorWithTraitCollection:(UITraitCollection *)traits
 {
