@@ -8,6 +8,8 @@ typedef struct {
     unsigned long length;
 } NSRange;
 
+#define NSNotFound ((unsigned long)-1)
+
 static inline NSRange NSMakeRange(unsigned long location,
                                   unsigned long length)
 {
@@ -117,6 +119,12 @@ typedef enum {
     NSOrderedDescending = 1
 } NSComparisonResult;
 
+@class NSCharacterSet;
+
+extern id NSFontAttributeName;
+extern id NSForegroundColorAttributeName;
+extern id NSBackgroundColorAttributeName;
+
 @interface NSString : NSObject {
 @public
     char *_cstr;
@@ -151,6 +159,59 @@ typedef enum {
 - (id)dataUsingEncoding:(unsigned long)encoding;
 - (id)initWithData:(id)data encoding:(unsigned long)encoding;
 - (BOOL)containsString:(id)needle;
+- (id)stringByTrimmingCharactersInSet:(NSCharacterSet *)set;
+- (id)stringByReplacingCharactersInRange:(NSRange)range withString:(id)replacement;
+- (NSRange)rangeOfString:(id)needle;
+- (id)capitalizedString;
+- (id)stringByRemovingPercentEncoding;
+- (long)integerValue;
+- (int)intValue;
+- (double)doubleValue;
+- (float)floatValue;
+- (BOOL)boolValue;
+@end
+
+@interface NSAttributedString : NSObject {
+@public
+    id _string;
+    id _attributes;
+}
+- (id)initWithString:(id)string;
+- (id)initWithString:(id)string attributes:(id)attributes;
+- (id)string;
+- (unsigned long)length;
+- (id)attributesAtIndex:(unsigned long)index
+         effectiveRange:(NSRange *)range;
+@end
+
+@interface NSMutableAttributedString : NSAttributedString
+- (id)initWithString:(id)string;
+- (void)addAttribute:(id)name value:(id)value range:(NSRange)range;
+- (void)addAttributes:(id)attributes range:(NSRange)range;
+- (void)setAttributes:(id)attributes range:(NSRange)range;
+- (void)replaceCharactersInRange:(NSRange)range withString:(id)string;
+- (void)appendAttributedString:(id)other;
+@end
+
+@interface NSCharacterSet : NSObject {
+@public
+    char *_cstr;
+    unsigned long _length;
+}
++ (id)whitespaceCharacterSet;
++ (id)whitespaceAndNewlineCharacterSet;
++ (id)newlineCharacterSet;
++ (id)alphanumericCharacterSet;
++ (id)decimalDigitCharacterSet;
++ (id)letterCharacterSet;
++ (id)characterSetWithCharactersInString:(id)string;
+- (BOOL)characterIsMember:(unsigned short)character;
+- (id)mutableCopy;
+@end
+
+@interface NSMutableCharacterSet : NSCharacterSet
+- (void)addCharactersInString:(id)string;
+- (void)removeCharactersInString:(id)string;
 @end
 
 enum {

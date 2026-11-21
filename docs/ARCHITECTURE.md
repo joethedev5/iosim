@@ -438,6 +438,43 @@ bitmap at the format's scale, runs the actions block with a renderer context
 exposing the current `CGContext`, and returns the captured `UIImage` or a PNG
 `NSData`. `UIImagePNGRepresentation` emits a standards-compliant RGBA PNG
 using stored (uncompressed) deflate blocks, so no zlib dependency is needed.
+`UIViewController.additionalSafeAreaInsets` is copied onto the controller's
+view, so a root view reports the device insets plus the controller's addition
+and the safe-area guide uses the combined values.
+`UIView.layoutMargins` defaults to 8 points on every edge (and can inherit the
+superview's margins with `preservesSuperviewLayoutMargins`). The
+`layoutMarginsGuide` is a `UILayoutGuide` whose insets feed the Auto Layout
+linear forms, and its `layoutFrame*` accessors report the inset rectangle in
+the owning view's coordinates.
+`CAGradientLayer.type` selects axial (the default) or radial rendering; radial
+gradients sample the stop table per pixel from `startPoint` outward to the
+radius given by `endPoint`, then reuse the rounded-mask offscreen path.
+`NSAttributedString` keeps its string and one attribute dictionary;
+`UILabel` and `UIButton` read the font and foreground color from that
+dictionary and render the plain string. `UIViewController` keeps a small
+child list with parent links, and
+`UIPageViewController` installs the current page as a child view when its view
+loads and swaps pages by removing and adding subviews.
+`NSCharacterSet` stores a byte membership table, which backs string trimming
+and the mutable set operations. UIFont carries size, boldness and an optional
+face name, enough for weight, italic, monospaced, named and descriptor-based
+constructors. UIColor converts HSV to RGB and accepts Display P3 components as
+sRGB. `readableContentGuide` reserves 16pt side margins.
+`UIView.maskView` hands the mask view's layer to the target layer's mask slot
+and mirrors the mask view's background onto that layer, since masks are
+rendered from layers rather than views. Hit testing stops at a view with
+`userInteractionEnabled = NO`, so touches fall through to what is behind it.
+`UIWindow` records its scene, and `UIApplication` exposes the key window and
+the list of connected scenes created by `UIApplicationMain`.
+A view's backing layer comes from `+[UIView layerClass]`, so a subclass can
+return `CAGradientLayer` (or another layer type) and have the renderer draw it;
+the view path invokes the same gradient helper as standalone sublayers.
+`animationKeys`, `animationForKey:` and `removeAllAnimations` expose the
+per-layer animation slots.
+Layer animations queue their `CAAnimationDelegate` in a small event table at
+add time; the run-loop animation tick calls `animationDidStart:` at the
+begin time and `animationDidStop:finished:` after the duration (or with
+`finished:NO` when the animation is removed or replaced early).
 `CALayer.contents` accepts a `CGImage` or `UIImage`; the renderer crops it to
 `contentsRect` and honors `contentsGravity` (`resize`, `resizeAspect`,
 `resizeAspectFill` and `center`), blitting for both standalone sublayers and a

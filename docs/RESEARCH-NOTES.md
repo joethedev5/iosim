@@ -677,3 +677,23 @@ management.
   `UIColor.tintColor` (system blue). `setTintColor:` and `addSubview:` call
   `tintColorDidChange`; UIButton tracks whether a title color was set
   explicitly and otherwise repaints its title with the inherited tint.
+- `+[UIView layerClass]` is consulted once in `initWithFrame:`; a custom
+  backing layer still has its frame/owner fields set by UIView. The view
+  renderer draws the backing layer's background/contents itself, so custom
+  layer types need an explicit branch there — CAGradientLayer shares
+  `render_gradient_layer` between the view and sublayer paths.
+- `UIView.subviews` was missing even though the renderer walks `_subviews`
+  directly; adding it unblocked container code that rebuilds pages.
+- `UIViewController` containment is a child array with parent back-links.
+  `UIPageViewController` installs its current page as a child when its view
+  loads and swaps pages by removing and re-adding subviews.
+- `NSAttributedString` stores one attribute dictionary; labels/buttons read
+  `NSFontAttributeName` and `NSForegroundColorAttributeName` from it and
+  render the plain string. Attribute-name symbols live in UIKit, not as
+  macros, because UIKit already defines them as globals.
+- CAAnimationDelegate is a queued event, not a per-frame callback: start is
+  due at `now + delay`, stop at `now + delay + duration * repeatCount`, and
+  removal/replacement of the same key fires `finished:NO` immediately. An
+  infinite animation is only stopped by removal. `[UIColor redColor]` and
+  the other fixed palette colors are plain constants; only `system*` colors
+  carry light/dark variants.

@@ -11,6 +11,8 @@ typedef struct {
     unsigned long length;
 } NSRange;
 
+#define NSNotFound ((unsigned long)-1)
+
 static inline NSRange NSMakeRange(unsigned long location,
                                   unsigned long length)
 {
@@ -37,6 +39,48 @@ __attribute__((objc_root_class))
 - (const char *)UTF8String;
 - (unsigned long)length;
 - (id)initWithData:(id)data encoding:(unsigned long)encoding;
+- (id)stringByTrimmingCharactersInSet:(id)set;
+- (id)stringByReplacingCharactersInRange:(NSRange)range withString:(id)string;
+- (NSRange)rangeOfString:(id)string;
+- (id)capitalizedString;
+- (id)stringByRemovingPercentEncoding;
+- (long)integerValue;
+- (double)doubleValue;
+- (BOOL)boolValue;
+@end
+
+@interface NSCharacterSet : NSObject
++ (id)whitespaceCharacterSet;
++ (id)whitespaceAndNewlineCharacterSet;
++ (id)newlineCharacterSet;
++ (id)alphanumericCharacterSet;
++ (id)decimalDigitCharacterSet;
++ (id)letterCharacterSet;
++ (id)characterSetWithCharactersInString:(id)string;
+- (BOOL)characterIsMember:(unsigned short)character;
+- (id)mutableCopy;
+@end
+
+@interface NSMutableCharacterSet : NSCharacterSet
+- (void)addCharactersInString:(id)string;
+- (void)removeCharactersInString:(id)string;
+@end
+
+@interface NSAttributedString : NSObject
+- (id)initWithString:(id)string;
+- (id)initWithString:(id)string attributes:(id)attributes;
+- (id)string;
+- (unsigned long)length;
+- (id)attributesAtIndex:(unsigned long)index effectiveRange:(NSRange *)range;
+@end
+
+@interface NSMutableAttributedString : NSAttributedString
+- (id)initWithString:(id)string;
+- (void)addAttribute:(id)name value:(id)value range:(NSRange)range;
+- (void)addAttributes:(id)attributes range:(NSRange)range;
+- (void)setAttributes:(id)attributes range:(NSRange)range;
+- (void)replaceCharactersInRange:(NSRange)range withString:(id)string;
+- (void)appendAttributedString:(id)other;
 @end
 
 @interface NSData : NSObject
@@ -163,6 +207,7 @@ typedef enum {
 @end
 
 @class UIImage;
+@class CAAnimation;
 
 @interface CALayer : NSObject
 @property CGRect frame;
@@ -190,6 +235,9 @@ typedef enum {
 - (void)addSublayer:(CALayer *)layer;
 - (void)addAnimation:(id)animation forKey:(id)key;
 - (void)removeAnimationForKey:(id)key;
+- (void)removeAllAnimations;
+- (id)animationKeys;
+- (CAAnimation *)animationForKey:(id)key;
 - (CALayer *)presentationLayer;
 @end
 
@@ -249,13 +297,25 @@ typedef enum {
 
 @class NSArray;
 
+@class CAAnimation;
+@protocol CAAnimationDelegate
+@optional
+- (void)animationDidStart:(CAAnimation *)anim;
+- (void)animationDidStop:(CAAnimation *)anim finished:(BOOL)finished;
+@end
+
 @interface CAAnimation : NSObject
 + (id)animationWithKeyPath:(id)path;
 - (void)setFromValue:(id)value;
 - (void)setToValue:(id)value;
 - (void)setDuration:(double)duration;
+- (double)duration;
 - (void)setRepeatCount:(double)count;
+- (double)repeatCount;
 - (void)setTimingFunction:(id)function;
+- (id)timingFunction;
+- (id)fromValue;
+- (id)toValue;
 - (void)setBeginTime:(double)time;
 - (double)beginTime;
 - (void)setSpeed:(double)speed;
@@ -268,6 +328,7 @@ typedef enum {
 - (BOOL)removedOnCompletion;
 - (void)setFillMode:(id)fillMode;
 - (id)fillMode;
+@property(nonatomic, assign) id<CAAnimationDelegate> delegate;
 @end
 
 @interface CABasicAnimation : CAAnimation
@@ -338,8 +399,30 @@ enum {
 @interface UIColor : NSObject
 + (UIColor *)colorWithRed:(double)r green:(double)g blue:(double)b
                     alpha:(double)a;
++ (UIColor *)colorWithWhite:(double)white alpha:(double)alpha;
++ (UIColor *)colorWithHue:(double)hue saturation:(double)saturation
+               brightness:(double)brightness alpha:(double)alpha;
++ (UIColor *)colorWithDisplayP3Red:(double)r green:(double)g blue:(double)b
+                             alpha:(double)a;
+- (UIColor *)colorWithAlphaComponent:(double)alpha;
+- (BOOL)getRed:(double *)red green:(double *)green blue:(double *)blue
+         alpha:(double *)alpha;
+- (BOOL)getWhite:(double *)white alpha:(double *)alpha;
 + (UIColor *)whiteColor;
 + (UIColor *)blackColor;
++ (UIColor *)clearColor;
++ (UIColor *)redColor;
++ (UIColor *)greenColor;
++ (UIColor *)blueColor;
++ (UIColor *)orangeColor;
++ (UIColor *)yellowColor;
++ (UIColor *)purpleColor;
++ (UIColor *)brownColor;
++ (UIColor *)cyanColor;
++ (UIColor *)magentaColor;
++ (UIColor *)grayColor;
++ (UIColor *)darkGrayColor;
++ (UIColor *)lightGrayColor;
 + (UIColor *)systemBlueColor;
 + (UIColor *)tintColor;
 + (UIColor *)systemRedColor;
@@ -364,9 +447,47 @@ enum {
 @property(readonly) id CGColor;
 @end
 
+#define UIFontWeightUltraLight (-0.8)
+#define UIFontWeightThin (-0.6)
+#define UIFontWeightLight (-0.4)
+#define UIFontWeightRegular (0.0)
+#define UIFontWeightMedium (0.23)
+#define UIFontWeightSemibold (0.3)
+#define UIFontWeightBold (0.4)
+#define UIFontWeightHeavy (0.56)
+#define UIFontWeightBlack (0.62)
+
+#define UIFontTextStyleBody ((id)@"UICTFontTextStyleBody")
+#define UIFontTextStyleHeadline ((id)@"UICTFontTextStyleHeadline")
+#define UIFontTextStyleCaption1 ((id)@"UICTFontTextStyleCaption1")
+#define UIFontTextStyleFootnote ((id)@"UICTFontTextStyleFootnote")
+#define UIFontTextStyleTitle1 ((id)@"UICTFontTextStyleTitle1")
+#define UIFontTextStyleTitle2 ((id)@"UICTFontTextStyleTitle2")
+
+@class UIFontDescriptor;
+
 @interface UIFont : NSObject
 + (UIFont *)systemFontOfSize:(double)size;
++ (UIFont *)systemFontOfSize:(double)size weight:(double)weight;
 + (UIFont *)boldSystemFontOfSize:(double)size;
++ (UIFont *)italicSystemFontOfSize:(double)size;
++ (UIFont *)monospacedSystemFontOfSize:(double)size weight:(double)weight;
++ (UIFont *)fontWithName:(id)name size:(double)size;
+- (double)pointSize;
+- (id)fontName;
+- (id)familyName;
+- (UIFont *)fontWithSize:(double)size;
++ (UIFont *)fontWithDescriptor:(UIFontDescriptor *)descriptor
+                          size:(double)size;
+- (UIFontDescriptor *)fontDescriptor;
+@end
+
+@interface UIFontDescriptor : NSObject
++ (UIFontDescriptor *)preferredFontDescriptorWithTextStyle:(id)style;
+- (UIFontDescriptor *)fontDescriptorWithSize:(double)size;
+- (UIFontDescriptor *)fontDescriptorWithSymbolicTraits:(unsigned long)traits;
+- (double)pointSize;
+- (id)fontAttributes;
 @end
 
 @interface UIScreen : NSObject
@@ -411,12 +532,17 @@ enum {
 @end
 
 @interface UILayoutGuide : NSObject
+@property(nonatomic, retain) id identifier;
 @property(readonly) NSLayoutAnchor *leadingAnchor;
 @property(readonly) NSLayoutAnchor *trailingAnchor;
 @property(readonly) NSLayoutAnchor *topAnchor;
 @property(readonly) NSLayoutAnchor *bottomAnchor;
 @property(readonly) NSLayoutAnchor *centerXAnchor;
 @property(readonly) NSLayoutAnchor *centerYAnchor;
+@property(readonly) double layoutFrameX;
+@property(readonly) double layoutFrameY;
+@property(readonly) double layoutFrameWidth;
+@property(readonly) double layoutFrameHeight;
 @end
 
 enum {
@@ -437,12 +563,40 @@ enum {
     UIViewAnimationOptionCurveLinear = 3 << 16
 };
 
+enum {
+    UIViewContentModeScaleToFill = 0,
+    UIViewContentModeScaleAspectFit = 1,
+    UIViewContentModeScaleAspectFill = 2,
+    UIViewContentModeRedraw = 3,
+    UIViewContentModeCenter = 4,
+    UIViewContentModeTop = 5,
+    UIViewContentModeBottom = 6,
+    UIViewContentModeLeft = 7,
+    UIViewContentModeRight = 8,
+    UIViewContentModeTopLeft = 9,
+    UIViewContentModeTopRight = 10,
+    UIViewContentModeBottomLeft = 11,
+    UIViewContentModeBottomRight = 12
+};
+
+enum {
+    UIViewAutoresizingNone = 0,
+    UIViewAutoresizingFlexibleLeftMargin = 1 << 0,
+    UIViewAutoresizingFlexibleWidth = 1 << 1,
+    UIViewAutoresizingFlexibleRightMargin = 1 << 2,
+    UIViewAutoresizingFlexibleTopMargin = 1 << 3,
+    UIViewAutoresizingFlexibleHeight = 1 << 4,
+    UIViewAutoresizingFlexibleBottomMargin = 1 << 5
+};
+
 @interface UIView : UIResponder
 - (id)initWithFrame:(CGRect)frame;
 - (CGRect)bounds;
 - (void)setBounds:(CGRect)bounds;
 @property CGRect frame;
 @property CGPoint center;
+@property(readonly) UIView *superview;
+@property(readonly) NSArray *subviews;
 - (CGPoint)convertPoint:(CGPoint)point toView:(UIView *)view;
 - (CGPoint)convertPoint:(CGPoint)point fromView:(UIView *)view;
 - (CGRect)convertRect:(CGRect)rect toView:(UIView *)view;
@@ -450,9 +604,21 @@ enum {
 @property double alpha;
 @property CGAffineTransform transform;
 @property(nonatomic, retain) UIColor *backgroundColor;
+@property BOOL clipsToBounds;
+@property(nonatomic, getter=isUserInteractionEnabled) BOOL userInteractionEnabled;
+@property(nonatomic, getter=isOpaque) BOOL opaque;
+@property long contentMode;
+@property BOOL clearsContextBeforeDrawing;
+@property(nonatomic, getter=isExclusiveTouch) BOOL exclusiveTouch;
+@property(nonatomic, getter=isMultipleTouchEnabled) BOOL multipleTouchEnabled;
+@property BOOL autoresizesSubviews;
+@property unsigned long autoresizingMask;
+@property double contentScaleFactor;
+@property(nonatomic, retain) UIView *maskView;
 @property(readonly) UITraitCollection *traitCollection;
 @property(nonatomic) long overrideUserInterfaceStyle;
 - (void)traitCollectionDidChange:(UITraitCollection *)previous;
++ (Class)layerClass;
 @property(readonly) CALayer *layer;
 - (void)drawRect:(CGRect)rect;
 - (void)addSubview:(UIView *)view;
@@ -470,6 +636,10 @@ enum {
 @property(readonly) NSLayoutDimension *widthAnchor;
 @property(readonly) NSLayoutDimension *heightAnchor;
 @property(readonly) UILayoutGuide *safeAreaLayoutGuide;
+@property UIEdgeInsets layoutMargins;
+@property(readonly) UILayoutGuide *layoutMarginsGuide;
+@property(readonly) UILayoutGuide *readableContentGuide;
+@property BOOL preservesSuperviewLayoutMargins;
 + (void)animateWithDuration:(double)duration animations:(void (^)(void))animations;
 + (void)animateWithDuration:(double)duration animations:(void (^)(void))animations
                  completion:(void (^)(BOOL finished))completion;
@@ -524,6 +694,7 @@ enum {
 
 @interface UITextView : UIView
 @property(nonatomic, retain) id text;
+@property(nonatomic, retain) NSAttributedString *attributedText;
 @property(nonatomic, retain) UIColor *textColor;
 @property(nonatomic, retain) UIFont *font;
 @property NSRange selectedRange;
@@ -546,6 +717,7 @@ enum {
 
 @interface UILabel : UIView
 @property(nonatomic, retain) id text;
+@property(nonatomic, retain) NSAttributedString *attributedText;
 @property(nonatomic, retain) UIColor *textColor;
 @property(nonatomic, retain) UIFont *font;
 @property int textAlignment;
@@ -566,9 +738,19 @@ enum {
 - (id)init;
 @property(nonatomic) long modalPresentationStyle;
 @property(nonatomic, retain) UIView *view;
+@property(readonly) UIView *viewIfLoaded;
+@property(readonly, getter=isViewLoaded) BOOL viewLoaded;
+@property(readonly) UIViewController *parentViewController;
+@property(readonly) NSArray *children;
+- (void)addChildViewController:(UIViewController *)controller;
+- (void)removeFromParentViewController;
+- (void)willMoveToParentViewController:(UIViewController *)parent;
+- (void)didMoveToParentViewController:(UIViewController *)parent;
 @property(readonly) UITraitCollection *traitCollection;
 @property(nonatomic) long overrideUserInterfaceStyle;
 - (void)traitCollectionDidChange:(UITraitCollection *)previous;
+@property UIEdgeInsets additionalSafeAreaInsets;
+- (void)viewSafeAreaInsetsDidChange;
 - (long)preferredStatusBarStyle;
 - (BOOL)prefersStatusBarHidden;
 - (UIViewController *)childForStatusBarStyle;
@@ -621,6 +803,9 @@ enum {
 @interface UIButton : UIControl
 + (id)buttonWithType:(int)type;
 - (void)setTitle:(id)title forState:(unsigned long)state;
+- (void)setAttributedTitle:(NSAttributedString *)title
+                  forState:(unsigned long)state;
+- (NSAttributedString *)attributedTitleForState:(unsigned long)state;
 - (void)setTitleColor:(UIColor *)color forState:(unsigned long)state;
 @property(readonly) UILabel *titleLabel;
 @end
@@ -856,6 +1041,54 @@ enum {
     forControlEvents:(unsigned long)events;
 @end
 
+enum {
+    UIPageViewControllerNavigationDirectionForward = 0,
+    UIPageViewControllerNavigationDirectionReverse = 1
+};
+
+enum {
+    UIPageViewControllerTransitionStylePageCurl = 0,
+    UIPageViewControllerTransitionStyleScroll = 1
+};
+
+enum {
+    UIPageViewControllerNavigationOrientationHorizontal = 0,
+    UIPageViewControllerNavigationOrientationVertical = 1
+};
+
+@class UIPageViewController;
+
+@protocol UIPageViewControllerDelegate
+@optional
+- (void)pageViewController:(UIPageViewController *)pageViewController
+    didFinishAnimating:(BOOL)finished
+   previousViewControllers:(NSArray *)previousViewControllers
+       transitionCompleted:(BOOL)completed;
+@end
+
+@protocol UIPageViewControllerDataSource
+- (UIViewController *)pageViewController:(UIPageViewController *)pageViewController
+      viewControllerBeforeViewController:(UIViewController *)viewController;
+- (UIViewController *)pageViewController:(UIPageViewController *)pageViewController
+       viewControllerAfterViewController:(UIViewController *)viewController;
+@end
+
+@interface UIPageViewController : UIViewController
+- (id)initWithTransitionStyle:(long)style
+        navigationOrientation:(long)orientation
+                      options:(id)options;
+- (void)setViewControllers:(NSArray *)viewControllers
+                 direction:(long)direction
+                  animated:(BOOL)animated
+                completion:(void (^)(BOOL finished))completion;
+@property(readonly) NSArray *viewControllers;
+@property(nonatomic, assign) id<UIPageViewControllerDelegate> delegate;
+@property(nonatomic, assign) id<UIPageViewControllerDataSource> dataSource;
+@property(readonly) long transitionStyle;
+@property(readonly) long navigationOrientation;
+@property(getter=isDoubleSided) BOOL doubleSided;
+@end
+
 @interface UISegmentedControl : UIView
 - (id)initWithItems:(NSArray *)items;
 - (void)setSelectedSegmentIndex:(long)index;
@@ -982,8 +1215,19 @@ extern id UIWindowSceneSessionRoleApplication;
 - (void)zoomToRect:(CGRect)rect animated:(BOOL)animated;
 @end
 
+enum {
+    UIWindowLevelNormal = 0,
+    UIWindowLevelStatusBar = 1000,
+    UIWindowLevelAlert = 2000
+};
+
 @interface UIWindow : UIView
++ (UIWindow *)keyWindow;
 @property(nonatomic, retain) UIViewController *rootViewController;
+@property(readonly) UIWindowScene *windowScene;
+@property double windowLevel;
+@property(readonly, getter=isKeyWindow) BOOL keyWindow;
+- (void)makeKeyWindow;
 - (id)initWithWindowScene:(UIWindowScene *)scene;
 - (void)makeKeyAndVisible;
 - (void)dispatchTouchDownX:(int)x y:(int)y;
@@ -1031,6 +1275,9 @@ enum {
 - (void)openURL:(id)url options:(id)options
     completionHandler:(void (^)(BOOL success))completion;
 @property(nonatomic, getter=isIdleTimerDisabled) BOOL idleTimerDisabled;
+@property(readonly) NSArray *windows;
+@property(readonly) UIWindow *keyWindow;
+@property(readonly) NSArray *connectedScenes;
 @end
 
 @interface UIPasteboard : NSObject
@@ -1091,6 +1338,7 @@ extern int UIApplicationMain(int argc, char **argv, id principal,
 @property(nonatomic, retain) id locations;
 @property CGPoint startPoint;
 @property CGPoint endPoint;
+@property(nonatomic, retain) id type;
 @end
 
 @interface UIImage : NSObject {
@@ -1331,7 +1579,6 @@ extern id NSBackgroundColorAttributeName;
 @interface UIImageView : UIView
 - (instancetype)initWithImage:(UIImage *)image;
 @property(nonatomic, retain) UIImage *image;
-@property int contentMode;
 @end
 
 

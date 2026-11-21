@@ -140,6 +140,7 @@ extern void iosim_fb_fill_linear_gradient_round_rect(int x, int y, int w,
 @class UIWindowScene;
 
 @class UIColor;
+@class CAAnimation;
 
 /* A layer can carry several explicit animations at once, keyed the way
  * CALayer keys them: adding with an existing key replaces that animation, and
@@ -156,6 +157,7 @@ struct layer_anim {
     id keyTimes;
     id timingFunction;
     id key;
+    id animation;
     double start;
     double duration;
     double repeatCount;
@@ -235,6 +237,9 @@ struct layer_anim {
 - (void)removeFromSuperlayer;
 - (void)addAnimation:(id)animation forKey:(id)key;
 - (void)removeAnimationForKey:(id)key;
+- (void)removeAllAnimations;
+- (NSArray *)animationKeys;
+- (CAAnimation *)animationForKey:(id)key;
 - (CALayer *)presentationLayer;
 - (CALayer *)modelLayer;
 - (CGRect)contentsRect;
@@ -304,6 +309,7 @@ struct layer_anim {
     NSArray *_locations;
     CGPoint _startPoint;
     CGPoint _endPoint;
+    id _type;
 }
 - (void)setColors:(NSArray *)colors;
 - (NSArray *)colors;
@@ -313,6 +319,8 @@ struct layer_anim {
 - (CGPoint)startPoint;
 - (void)setEndPoint:(CGPoint)point;
 - (CGPoint)endPoint;
+- (void)setType:(id)type;
+- (id)type;
 @end
 
 @interface UIBezierPath : NSObject {
@@ -373,8 +381,16 @@ extern id kCAMediaTimingFunctionEaseIn;
 extern id kCAMediaTimingFunctionEaseOut;
 extern id kCAMediaTimingFunctionEaseInEaseOut;
 
+@class CAAnimation;
+@protocol CAAnimationDelegate
+@optional
+- (void)animationDidStart:(CAAnimation *)anim;
+- (void)animationDidStop:(CAAnimation *)anim finished:(BOOL)finished;
+@end
+
 @interface CAAnimation : NSObject {
 @public
+    id _delegate;
     id _keyPath;
     id _fromValue;
     id _toValue;
@@ -392,8 +408,13 @@ extern id kCAMediaTimingFunctionEaseInEaseOut;
 - (void)setFromValue:(id)value;
 - (void)setToValue:(id)value;
 - (void)setDuration:(double)duration;
+- (double)duration;
 - (void)setRepeatCount:(double)count;
+- (double)repeatCount;
 - (void)setTimingFunction:(id)function;
+- (id)timingFunction;
+- (id)fromValue;
+- (id)toValue;
 - (void)setBeginTime:(double)time;
 - (double)beginTime;
 - (void)setSpeed:(double)speed;
@@ -406,6 +427,8 @@ extern id kCAMediaTimingFunctionEaseInEaseOut;
 - (BOOL)removedOnCompletion;
 - (void)setFillMode:(id)fillMode;
 - (id)fillMode;
+- (void)setDelegate:(id)delegate;
+- (id)delegate;
 @end
 
 @interface CABasicAnimation : CAAnimation
@@ -666,10 +689,31 @@ enum {
 }
 + (UIColor *)colorWithRed:(double)r green:(double)g blue:(double)b
                     alpha:(double)a;
++ (UIColor *)colorWithWhite:(double)white alpha:(double)alpha;
++ (UIColor *)colorWithHue:(double)hue saturation:(double)saturation
+               brightness:(double)brightness alpha:(double)alpha;
++ (UIColor *)colorWithDisplayP3Red:(double)r green:(double)g blue:(double)b
+                             alpha:(double)a;
+- (UIColor *)colorWithAlphaComponent:(double)alpha;
+- (BOOL)getRed:(double *)red green:(double *)green blue:(double *)blue
+         alpha:(double *)alpha;
+- (BOOL)getWhite:(double *)white alpha:(double *)alpha;
 + (UIColor *)colorWithDynamicProvider:(id (^)(UITraitCollection *traits))provider;
 + (UIColor *)whiteColor;
 + (UIColor *)blackColor;
 + (UIColor *)clearColor;
++ (UIColor *)redColor;
++ (UIColor *)greenColor;
++ (UIColor *)blueColor;
++ (UIColor *)orangeColor;
++ (UIColor *)yellowColor;
++ (UIColor *)purpleColor;
++ (UIColor *)brownColor;
++ (UIColor *)cyanColor;
++ (UIColor *)magentaColor;
++ (UIColor *)grayColor;
++ (UIColor *)darkGrayColor;
++ (UIColor *)lightGrayColor;
 + (UIColor *)systemBlueColor;
 + (UIColor *)tintColor;
 + (UIColor *)systemRedColor;
@@ -708,13 +752,49 @@ enum {
 - (CGColorRef)CGColor;
 @end
 
+#define UIFontWeightUltraLight (-0.8)
+#define UIFontWeightThin (-0.6)
+#define UIFontWeightLight (-0.4)
+#define UIFontWeightRegular (0.0)
+#define UIFontWeightMedium (0.23)
+#define UIFontWeightSemibold (0.3)
+#define UIFontWeightBold (0.4)
+#define UIFontWeightHeavy (0.56)
+#define UIFontWeightBlack (0.62)
+
+@class UIFontDescriptor;
+
 @interface UIFont : NSObject {
 @public
     double _size;
     BOOL _bold;
+    id _name;
 }
 + (UIFont *)systemFontOfSize:(double)size;
++ (UIFont *)systemFontOfSize:(double)size weight:(double)weight;
 + (UIFont *)boldSystemFontOfSize:(double)size;
++ (UIFont *)italicSystemFontOfSize:(double)size;
++ (UIFont *)monospacedSystemFontOfSize:(double)size weight:(double)weight;
++ (UIFont *)fontWithName:(id)name size:(double)size;
++ (UIFont *)fontWithDescriptor:(UIFontDescriptor *)descriptor
+                          size:(double)size;
+- (double)pointSize;
+- (id)fontName;
+- (id)familyName;
+- (UIFont *)fontWithSize:(double)size;
+- (UIFontDescriptor *)fontDescriptor;
+@end
+
+@interface UIFontDescriptor : NSObject {
+@public
+    double _size;
+    id _name;
+}
++ (UIFontDescriptor *)preferredFontDescriptorWithTextStyle:(id)style;
+- (UIFontDescriptor *)fontDescriptorWithSize:(double)size;
+- (UIFontDescriptor *)fontDescriptorWithSymbolicTraits:(unsigned long)traits;
+- (double)pointSize;
+- (id)fontAttributes;
 @end
 
 @interface UIScreen : NSObject {
@@ -861,8 +941,11 @@ enum {
     double _bottomInset;
     double _leftInset;
     double _rightInset;
+    id _identifier;
 }
 - (id)owningView;
+- (id)identifier;
+- (void)setIdentifier:(id)identifier;
 - (double)layoutFrameX;
 - (double)layoutFrameY;
 - (double)layoutFrameWidth;
@@ -1008,6 +1091,32 @@ typedef enum {
     UIViewAnimationOptionCurveLinear = 3 << 16
 } UIViewAnimationOptions;
 
+typedef enum {
+    UIViewContentModeScaleToFill = 0,
+    UIViewContentModeScaleAspectFit = 1,
+    UIViewContentModeScaleAspectFill = 2,
+    UIViewContentModeRedraw = 3,
+    UIViewContentModeCenter = 4,
+    UIViewContentModeTop = 5,
+    UIViewContentModeBottom = 6,
+    UIViewContentModeLeft = 7,
+    UIViewContentModeRight = 8,
+    UIViewContentModeTopLeft = 9,
+    UIViewContentModeTopRight = 10,
+    UIViewContentModeBottomLeft = 11,
+    UIViewContentModeBottomRight = 12
+} UIViewContentMode;
+
+typedef enum {
+    UIViewAutoresizingNone = 0,
+    UIViewAutoresizingFlexibleLeftMargin = 1 << 0,
+    UIViewAutoresizingFlexibleWidth = 1 << 1,
+    UIViewAutoresizingFlexibleRightMargin = 1 << 2,
+    UIViewAutoresizingFlexibleTopMargin = 1 << 3,
+    UIViewAutoresizingFlexibleHeight = 1 << 4,
+    UIViewAutoresizingFlexibleBottomMargin = 1 << 5
+} UIViewAutoresizing;
+
 @interface UIView : UIResponder {
 @public
     CGRect _frame;
@@ -1018,6 +1127,14 @@ typedef enum {
     id _subviews[32];
     int _subviewCount;
     BOOL _hidden;
+    BOOL _userInteractionEnabled;
+    BOOL _opaque;
+    long _contentMode;
+    BOOL _clearsContextBeforeDrawing;
+    BOOL _exclusiveTouch;
+    BOOL _multipleTouchEnabled;
+    BOOL _autoresizesSubviews;
+    unsigned long _autoresizingMask;
     double _alpha;
     CALayer *_layer;
     BOOL _animatingAlpha;
@@ -1038,10 +1155,16 @@ typedef enum {
     id _constraints[32];
     int _constraintCount;
     UILayoutGuide *_safeAreaGuide;
+    UIEdgeInsets _layoutMargins;
+    UIEdgeInsets _additionalSafeAreaInsets;
+    UILayoutGuide *_layoutMarginsGuide;
+    UILayoutGuide *_readableGuide;
+    BOOL _preservesSuperviewLayoutMargins;
     BOOL _needsConstraintsUpdate;
     id _gestureRecognizers[8];
     int _gestureRecognizerCount;
     BOOL _clipsToBounds;
+    UIView *_maskView;
     id _interactions[8];
     int _interactionCount;
 }
@@ -1068,6 +1191,7 @@ typedef enum {
 - (void)setOverrideUserInterfaceStyle:(long)style;
 - (void)traitCollectionDidChange:(UITraitCollection *)previous;
 - (void)addSubview:(UIView *)view;
+- (NSArray *)subviews;
 - (void)insertSubview:(UIView *)view atIndex:(long)index;
 - (void)bringSubviewToFront:(UIView *)view;
 - (void)sendSubviewToBack:(UIView *)view;
@@ -1075,9 +1199,28 @@ typedef enum {
 - (void)addInteraction:(id)interaction;
 - (void)removeInteraction:(id)interaction;
 - (NSArray *)interactions;
++ (Class)layerClass;
 - (CALayer *)layer;
 - (void)setHidden:(BOOL)hidden;
 - (BOOL)isHidden;
+- (BOOL)isUserInteractionEnabled;
+- (void)setUserInteractionEnabled:(BOOL)enabled;
+- (BOOL)isOpaque;
+- (void)setOpaque:(BOOL)opaque;
+- (long)contentMode;
+- (void)setContentMode:(long)mode;
+- (BOOL)clearsContextBeforeDrawing;
+- (void)setClearsContextBeforeDrawing:(BOOL)clears;
+- (BOOL)isExclusiveTouch;
+- (void)setExclusiveTouch:(BOOL)exclusive;
+- (BOOL)isMultipleTouchEnabled;
+- (void)setMultipleTouchEnabled:(BOOL)enabled;
+- (BOOL)autoresizesSubviews;
+- (void)setAutoresizesSubviews:(BOOL)resizes;
+- (unsigned long)autoresizingMask;
+- (void)setAutoresizingMask:(unsigned long)mask;
+- (double)contentScaleFactor;
+- (void)setContentScaleFactor:(double)scale;
 - (void)setAlpha:(double)alpha;
 - (double)alpha;
 - (BOOL)pointInside:(CGPoint)point;
@@ -1109,8 +1252,16 @@ typedef enum {
 - (UILayoutGuide *)safeAreaLayoutGuide;
 - (UIEdgeInsets)safeAreaInsets;
 - (void)safeAreaInsetsDidChange;
+- (UIEdgeInsets)layoutMargins;
+- (void)setLayoutMargins:(UIEdgeInsets)margins;
+- (UILayoutGuide *)layoutMarginsGuide;
+- (UILayoutGuide *)readableContentGuide;
+- (BOOL)preservesSuperviewLayoutMargins;
+- (void)setPreservesSuperviewLayoutMargins:(BOOL)preserves;
 - (void)setClipsToBounds:(BOOL)clips;
 - (BOOL)clipsToBounds;
+- (UIView *)maskView;
+- (void)setMaskView:(UIView *)view;
 - (void)addGestureRecognizer:(UIGestureRecognizer *)recognizer;
 - (void)removeGestureRecognizer:(UIGestureRecognizer *)recognizer;
 - (NSArray *)gestureRecognizers;
@@ -1138,6 +1289,7 @@ typedef enum {
 @interface UILabel : UIView {
 @public
     id _text;
+    id _attributedText;
     UIColor *_textColor;
     UIFont *_font;
     int _textAlignment;
@@ -1145,6 +1297,8 @@ typedef enum {
 }
 - (void)setText:(id)text;
 - (id)text;
+- (void)setAttributedText:(id)text;
+- (id)attributedText;
 - (void)setTextColor:(UIColor *)color;
 - (UIColor *)textColor;
 - (void)setFont:(UIFont *)font;
@@ -1160,6 +1314,7 @@ typedef enum {
 @interface UITextView : UIView {
 @public
     id _text;
+    id _attributedText;
     UIColor *_textColor;
     UIFont *_font;
     BOOL _editable;
@@ -1176,6 +1331,8 @@ typedef enum {
 }
 - (id)text;
 - (void)setText:(id)text;
+- (void)setAttributedText:(id)text;
+- (id)attributedText;
 - (NSRange)selectedRange;
 - (void)setSelectedRange:(NSRange)range;
 - (UIFont *)font;
@@ -1200,7 +1357,6 @@ static UITextView *g_pendingPressEditor;
 @interface UIImageView : UIView {
 @public
     UIImage *_image;
-    int _contentMode;
 }
 - (id)initWithImage:(UIImage *)image;
 - (void)setImage:(UIImage *)image;
@@ -1315,6 +1471,10 @@ enum {
     id _tabBarItem;
     id _navigationItem;
     long _modalPresentationStyle;
+    UIEdgeInsets _additionalSafeAreaInsets;
+    id _parentController;
+    id _children[16];
+    int _childCount;
 }
 - (id)init;
 - (id)title;
@@ -1326,7 +1486,15 @@ enum {
 - (void)setTabBarItem:(id)item;
 - (id)navigationItem;
 - (UIView *)view;
+- (UIView *)viewIfLoaded;
+- (BOOL)isViewLoaded;
 - (void)setView:(UIView *)view;
+- (UIViewController *)parentViewController;
+- (NSArray *)children;
+- (void)addChildViewController:(UIViewController *)controller;
+- (void)removeFromParentViewController;
+- (void)willMoveToParentViewController:(UIViewController *)parent;
+- (void)didMoveToParentViewController:(UIViewController *)parent;
 - (void)loadView;
 - (void)viewDidLoad;
 - (void)viewWillAppear:(BOOL)animated;
@@ -1349,6 +1517,9 @@ enum {
 - (long)overrideUserInterfaceStyle;
 - (void)setOverrideUserInterfaceStyle:(long)style;
 - (void)traitCollectionDidChange:(UITraitCollection *)previous;
+- (UIEdgeInsets)additionalSafeAreaInsets;
+- (void)setAdditionalSafeAreaInsets:(UIEdgeInsets)insets;
+- (void)viewSafeAreaInsetsDidChange;
 @end
 
 enum {
@@ -1814,12 +1985,15 @@ enum {
 @interface UIButton : UIControl {
 @public
     id _title;
+    id _attributedTitle;
     UIColor *_titleColor;
     UILabel *_titleLabel;
     BOOL _titleColorCustom;
 }
 + (id)buttonWithType:(int)type;
 - (void)setTitle:(id)title forState:(unsigned long)state;
+- (void)setAttributedTitle:(id)title forState:(unsigned long)state;
+- (id)attributedTitleForState:(unsigned long)state;
 - (void)setTitleColor:(UIColor *)color forState:(unsigned long)state;
 @end
 
@@ -2089,6 +2263,79 @@ enum {
 - (void)setCurrentPageTintColor:(UIColor *)color;
 - (UIColor *)currentPageTintColor;
 - (void)selectPageAtPoint:(CGPoint)point;
+@end
+
+enum {
+    UIPageViewControllerNavigationDirectionForward = 0,
+    UIPageViewControllerNavigationDirectionReverse = 1
+};
+
+enum {
+    UIPageViewControllerTransitionStylePageCurl = 0,
+    UIPageViewControllerTransitionStyleScroll = 1
+};
+
+enum {
+    UIPageViewControllerNavigationOrientationHorizontal = 0,
+    UIPageViewControllerNavigationOrientationVertical = 1
+};
+
+enum {
+    UIPageViewControllerSpineLocationMin = 1,
+    UIPageViewControllerSpineLocationMid = 2,
+    UIPageViewControllerSpineLocationMax = 3
+};
+
+#define UIPageViewControllerOptionInterPageSpacingKey \
+    ((id)@"UIPageViewControllerOptionInterPageSpacingKey")
+#define UIPageViewControllerOptionSpineLocationKey \
+    ((id)@"UIPageViewControllerOptionSpineLocationKey")
+
+@class UIPageViewController;
+
+@protocol UIPageViewControllerDelegate
+@optional
+- (void)pageViewController:(UIPageViewController *)pageViewController
+    didFinishAnimating:(BOOL)finished
+   previousViewControllers:(NSArray *)previousViewControllers
+       transitionCompleted:(BOOL)completed;
+@end
+
+@protocol UIPageViewControllerDataSource
+- (UIViewController *)pageViewController:(UIPageViewController *)pageViewController
+      viewControllerBeforeViewController:(UIViewController *)viewController;
+- (UIViewController *)pageViewController:(UIPageViewController *)pageViewController
+       viewControllerAfterViewController:(UIViewController *)viewController;
+@end
+
+@interface UIPageViewController : UIViewController {
+@public
+    id _pageDelegate;
+    id _dataSource;
+    NSArray *_pageControllers;
+    long _transitionStyle;
+    long _navigationOrientation;
+    long _spineLocation;
+    BOOL _doubleSided;
+}
+- (id)initWithTransitionStyle:(long)style
+        navigationOrientation:(long)orientation
+                      options:(id)options;
+- (void)setViewControllers:(NSArray *)viewControllers
+                 direction:(long)direction
+                  animated:(BOOL)animated
+                completion:(void (^)(BOOL finished))completion;
+- (NSArray *)viewControllers;
+- (id)delegate;
+- (void)setDelegate:(id)delegate;
+- (id)dataSource;
+- (void)setDataSource:(id)dataSource;
+- (long)transitionStyle;
+- (long)navigationOrientation;
+- (long)spineLocation;
+- (BOOL)isDoubleSided;
+- (void)setDoubleSided:(BOOL)doubleSided;
+- (void)installCurrentPage;
 @end
 
 @class UIScrollView;
@@ -2375,9 +2622,17 @@ enum {
 - (void)handleTapAtPoint:(CGPoint)point;
 @end
 
+enum {
+    UIWindowLevelNormal = 0,
+    UIWindowLevelStatusBar = 1000,
+    UIWindowLevelAlert = 2000
+};
+
 @interface UIWindow : UIView {
 @public
     UIViewController *_rootViewController;
+    double _windowLevel;
+    id _windowScene;
     UIScrollView *_dragScroll;
     CGPoint _dragStartContent;
     CGPoint _dragStartPoint;
@@ -2410,6 +2665,9 @@ enum {
     BOOL _contextCandidate;
 }
 - (id)initWithWindowScene:(UIWindowScene *)scene;
+- (UIWindowScene *)windowScene;
+- (double)windowLevel;
+- (void)setWindowLevel:(double)level;
 - (void)setRootViewController:(UIViewController *)controller;
 - (UIViewController *)rootViewController;
 - (void)dispatchTapX:(int)x y:(int)y;
@@ -2422,6 +2680,8 @@ enum {
 - (void)moveTwoFingerX1:(double)x1 y1:(double)y1 x2:(double)x2 y2:(double)y2;
 - (void)endTwoFingerX1:(double)x1 y1:(double)y1 x2:(double)x2 y2:(double)y2;
 - (void)makeKeyAndVisible;
+- (void)makeKeyWindow;
+- (BOOL)isKeyWindow;
 + (UIWindow *)keyWindow;
 @end
 
@@ -2461,6 +2721,9 @@ enum {
     completionHandler:(void (^)(BOOL success))completion;
 - (BOOL)isIdleTimerDisabled;
 - (void)setIdleTimerDisabled:(BOOL)disabled;
+- (NSArray *)windows;
+- (UIWindow *)keyWindow;
+- (NSArray *)connectedScenes;
 @end
 
 /* The system pasteboard lives in the device's shared resources directory so
@@ -2550,6 +2813,120 @@ static double current_alpha(UIView *view);
 static CGAffineTransform current_transform(UIView *view);
 static CGPoint view_untransform_point(UIView *view, CGPoint point);
 static double layer_key_value(CALayer *layer, const char *key, double base);
+
+/* CAAnimationDelegate callbacks are queued when an animation is added and
+ * fired from the run-loop animation tick, so a delegate sees start before
+ * the first animated frame and stop once the duration has elapsed. */
+#define MAX_ANIM_DELEGATES 32
+struct anim_delegate_event {
+    int used;
+    id delegate;
+    id animation;
+    CALayer *layer;
+    id key;
+    double startDue;
+    double stopDue;
+    int started;
+    int infinite;
+};
+static struct anim_delegate_event g_animDelegates[MAX_ANIM_DELEGATES];
+
+static void anim_delegate_call_start(id delegate, id animation)
+{
+    if (delegate && [delegate respondsToSelector:@selector(animationDidStart:)])
+        [delegate animationDidStart:(CAAnimation *)animation];
+}
+
+static void anim_delegate_call_stop(id delegate, id animation, BOOL finished)
+{
+    if (delegate && [delegate respondsToSelector:
+        @selector(animationDidStop:finished:)])
+        [delegate animationDidStop:(CAAnimation *)animation
+                          finished:finished];
+}
+
+static void anim_delegate_cancel_key(CALayer *layer, id key)
+{
+    const char *wanted = key ? iosim_string_cstr(key) : 0;
+    if (!wanted)
+        return;
+    unsigned long wlen = strlen(wanted);
+    for (int i = 0; i < MAX_ANIM_DELEGATES; i++)
+    {
+        struct anim_delegate_event *event = &g_animDelegates[i];
+        if (!event->used || event->layer != layer || !event->key)
+            continue;
+        const char *held = iosim_string_cstr(event->key);
+        if (!held)
+            continue;
+        int match = strcmp(held, wanted) == 0 ||
+                    (strncmp(held, wanted, wlen) == 0 && held[wlen] == ':');
+        if (!match)
+            continue;
+        if (event->started)
+            anim_delegate_call_stop(event->delegate, event->animation, NO);
+        memset(event, 0, sizeof(*event));
+    }
+}
+
+static void anim_delegate_add(CALayer *layer, CAAnimation *animation, id key,
+                              double delay)
+{
+    if (!animation->_delegate)
+        return;
+    int slot = -1;
+    for (int i = 0; i < MAX_ANIM_DELEGATES && slot < 0; i++)
+        if (!g_animDelegates[i].used)
+            slot = i;
+    if (slot < 0)
+        return;
+    struct anim_delegate_event *event = &g_animDelegates[slot];
+    memset(event, 0, sizeof(*event));
+    event->used = 1;
+    event->delegate = animation->_delegate;
+    event->animation = animation;
+    event->layer = layer;
+    event->key = key;
+    event->startDue = iosim_now() + delay;
+    double repeat = animation->_repeatCount;
+    event->infinite = repeat < 0;
+    double span = animation->_duration > 0 ? animation->_duration : 0.25;
+    event->stopDue = event->startDue + span * (repeat > 1 ? repeat : 1);
+}
+
+static int anim_delegate_tick(double now)
+{
+    int fired = 0;
+    for (int i = 0; i < MAX_ANIM_DELEGATES; i++)
+    {
+        struct anim_delegate_event *event = &g_animDelegates[i];
+        if (!event->used)
+            continue;
+        if (!event->started && now >= event->startDue)
+        {
+            event->started = 1;
+            anim_delegate_call_start(event->delegate, event->animation);
+            fired = 1;
+        }
+        if (event->started && !event->infinite && now >= event->stopDue)
+        {
+            id delegate = event->delegate;
+            id animation = event->animation;
+            memset(event, 0, sizeof(*event));
+            anim_delegate_call_stop(delegate, animation, YES);
+            fired = 1;
+        }
+    }
+    return fired;
+}
+
+static int anim_delegates_pending(void)
+{
+    for (int i = 0; i < MAX_ANIM_DELEGATES; i++)
+        if (g_animDelegates[i].used)
+            return 1;
+    return 0;
+}
 
 @implementation CALayer
 - (id)init
@@ -2685,6 +3062,8 @@ static double layer_key_value(CALayer *layer, const char *key, double base);
         }
         return;
     }
+    if (key)
+        anim_delegate_cancel_key(self, key);
     BOOL keyframe = [anim isKindOfClass:[CAKeyframeAnimation class]];
     BOOL spring = [anim isKindOfClass:[CASpringAnimation class]];
     int slot = -1;
@@ -2726,6 +3105,7 @@ static double layer_key_value(CALayer *layer, const char *key, double base);
     }
     entry->timingFunction = anim->_timingFunction;
     entry->key = key;
+    entry->animation = anim;
     entry->duration = anim->_duration;
     entry->repeatCount = anim->_repeatCount;
     entry->start = iosim_now();
@@ -2741,6 +3121,7 @@ static double layer_key_value(CALayer *layer, const char *key, double base);
     if (entry->duration <= 0)
         entry->duration = 0.25;
     animation_mark_active(entry->delay + entry->duration, entry->repeatCount);
+    anim_delegate_add(self, anim, key, entry->delay);
 }
 - (void)removeAnimationForKey:(id)key
 {
@@ -2762,10 +3143,49 @@ static double layer_key_value(CALayer *layer, const char *key, double base);
                     (strncmp(held, wanted, wlen) == 0 && held[wlen] == ':');
         if (!match)
             continue;
+        anim_delegate_cancel_key(self, key);
         if (entry->infinite)
             animation_unmark_infinite();
         memset(entry, 0, sizeof(*entry));
     }
+}
+- (void)removeAllAnimations
+{
+    for (int i = 0; i < LAYER_ANIM_SLOTS; i++)
+    {
+        struct layer_anim *entry = &_anims[i];
+        if (!entry->used)
+            continue;
+        if (entry->key)
+            anim_delegate_cancel_key(self, entry->key);
+        if (entry->infinite)
+            animation_unmark_infinite();
+        memset(entry, 0, sizeof(*entry));
+    }
+}
+- (NSArray *)animationKeys
+{
+    NSMutableArray *keys = [NSMutableArray array];
+    for (int i = 0; i < LAYER_ANIM_SLOTS; i++)
+        if (_anims[i].used && _anims[i].key)
+            [keys addObject:_anims[i].key];
+    return keys;
+}
+- (CAAnimation *)animationForKey:(id)key
+{
+    if (!key)
+        return nil;
+    const char *wanted = iosim_string_cstr(key);
+    for (int i = 0; i < LAYER_ANIM_SLOTS; i++)
+    {
+        struct layer_anim *entry = &_anims[i];
+        if (!entry->used || !entry->key)
+            continue;
+        const char *held = iosim_string_cstr(entry->key);
+        if (held && wanted && strcmp(held, wanted) == 0)
+            return (CAAnimation *)entry->animation;
+    }
+    return nil;
 }
 - (CALayer *)presentationLayer
 {
@@ -2975,8 +3395,13 @@ id kCAMediaTimingFunctionEaseInEaseOut = @"easeInEaseOut";
 - (void)setFromValue:(id)value { _fromValue = value; }
 - (void)setToValue:(id)value { _toValue = value; }
 - (void)setDuration:(double)duration { _duration = duration; }
+- (double)duration { return _duration; }
 - (void)setRepeatCount:(double)count { _repeatCount = count; }
+- (double)repeatCount { return _repeatCount; }
 - (void)setTimingFunction:(id)function { _timingFunction = function; }
+- (id)timingFunction { return _timingFunction; }
+- (id)fromValue { return _fromValue; }
+- (id)toValue { return _toValue; }
 - (void)setBeginTime:(double)time { _beginTime = time; }
 - (double)beginTime { return _beginTime; }
 - (void)setSpeed:(double)speed { _speed = speed; }
@@ -2989,6 +3414,8 @@ id kCAMediaTimingFunctionEaseInEaseOut = @"easeInEaseOut";
 - (BOOL)removedOnCompletion { return _removedOnCompletion; }
 - (void)setFillMode:(id)fillMode { _fillMode = fillMode; }
 - (id)fillMode { return _fillMode; }
+- (void)setDelegate:(id)delegate { _delegate = delegate; }
+- (id)delegate { return _delegate; }
 @end
 
 double CACurrentMediaTime(void)
@@ -3293,6 +3720,41 @@ NSString *const UITraitCollectionDidChangeNotification =
     c->_a = a;
     return c;
 }
++ (UIColor *)colorWithHue:(double)hue saturation:(double)saturation
+               brightness:(double)brightness alpha:(double)alpha
+{
+    if (saturation <= 0)
+        return [self colorWithWhite:brightness alpha:alpha];
+    double h = hue - (double)(long)hue;
+    if (h < 0)
+        h += 1;
+    h *= 6;
+    int sector = (int)h;
+    double f = h - sector;
+    double p = brightness * (1 - saturation);
+    double q = brightness * (1 - f * saturation);
+    double t = brightness * (1 - (1 - f) * saturation);
+    double r = 0, g = 0, b = 0;
+    switch (sector % 6)
+    {
+    case 0: r = brightness; g = t; b = p; break;
+    case 1: r = q; g = brightness; b = p; break;
+    case 2: r = p; g = brightness; b = t; break;
+    case 3: r = p; g = q; b = brightness; break;
+    case 4: r = t; g = p; b = brightness; break;
+    default: r = brightness; g = p; b = q; break;
+    }
+    return [self colorWithRed:r green:g blue:b alpha:alpha];
+}
++ (UIColor *)colorWithDisplayP3Red:(double)r green:(double)g blue:(double)b
+                             alpha:(double)a
+{
+    return [self colorWithRed:r green:g blue:b alpha:a];
+}
+- (UIColor *)colorWithAlphaComponent:(double)alpha
+{
+    return [[self class] colorWithRed:_r green:_g blue:_b alpha:alpha];
+}
 + (UIColor *)ui_colorWithLightRed:(double)lr lightGreen:(double)lg
                         lightBlue:(double)lb lightAlpha:(double)la
                           darkRed:(double)dr darkGreen:(double)dg
@@ -3321,6 +3783,54 @@ NSString *const UITraitCollectionDidChangeNotification =
 + (UIColor *)whiteColor { return [self colorWithRed:1 green:1 blue:1 alpha:1]; }
 + (UIColor *)blackColor { return [self colorWithRed:0 green:0 blue:0 alpha:1]; }
 + (UIColor *)clearColor { return [self colorWithRed:0 green:0 blue:0 alpha:0]; }
++ (UIColor *)colorWithWhite:(double)white alpha:(double)alpha
+{
+    return [self colorWithRed:white green:white blue:white alpha:alpha];
+}
+- (BOOL)getRed:(double *)red green:(double *)green blue:(double *)blue
+         alpha:(double *)alpha
+{
+    if (red) *red = _r;
+    if (green) *green = _g;
+    if (blue) *blue = _b;
+    if (alpha) *alpha = _a;
+    return YES;
+}
+- (BOOL)getWhite:(double *)white alpha:(double *)alpha
+{
+    if (_r != _g || _r != _b)
+        return NO;
+    if (white) *white = _r;
+    if (alpha) *alpha = _a;
+    return YES;
+}
++ (UIColor *)redColor { return [self colorWithRed:1 green:0 blue:0 alpha:1]; }
++ (UIColor *)greenColor { return [self colorWithRed:0 green:1 blue:0 alpha:1]; }
++ (UIColor *)blueColor { return [self colorWithRed:0 green:0 blue:1 alpha:1]; }
++ (UIColor *)orangeColor
+{
+    return [self colorWithRed:1 green:0.5 blue:0 alpha:1];
+}
++ (UIColor *)yellowColor { return [self colorWithRed:1 green:1 blue:0 alpha:1]; }
++ (UIColor *)purpleColor
+{
+    return [self colorWithRed:0.5 green:0 blue:0.5 alpha:1];
+}
++ (UIColor *)brownColor
+{
+    return [self colorWithRed:0.6 green:0.4 blue:0.2 alpha:1];
+}
++ (UIColor *)cyanColor { return [self colorWithRed:0 green:1 blue:1 alpha:1]; }
++ (UIColor *)magentaColor { return [self colorWithRed:1 green:0 blue:1 alpha:1]; }
++ (UIColor *)grayColor { return [self colorWithRed:0.5 green:0.5 blue:0.5 alpha:1]; }
++ (UIColor *)darkGrayColor
+{
+    return [self colorWithRed:0.3333 green:0.3333 blue:0.3333 alpha:1];
+}
++ (UIColor *)lightGrayColor
+{
+    return [self colorWithRed:0.6667 green:0.6667 blue:0.6667 alpha:1];
+}
 + (UIColor *)systemBlueColor
 {
     return [self ui_colorWithLightRed:0.0 lightGreen:0.4784 lightBlue:1.0
@@ -3778,6 +4288,13 @@ static int text_wrap_lines(const char *text, double max_width, UIFont *font,
     f->_bold = NO;
     return f;
 }
++ (UIFont *)systemFontOfSize:(double)size weight:(double)weight
+{
+    UIFont *f = [[self alloc] init];
+    f->_size = size;
+    f->_bold = weight >= UIFontWeightSemibold;
+    return f;
+}
 + (UIFont *)boldSystemFontOfSize:(double)size
 {
     UIFont *f = [[self alloc] init];
@@ -3785,6 +4302,73 @@ static int text_wrap_lines(const char *text, double max_width, UIFont *font,
     f->_bold = YES;
     return f;
 }
++ (UIFont *)italicSystemFontOfSize:(double)size
+{
+    return [self systemFontOfSize:size];
+}
++ (UIFont *)monospacedSystemFontOfSize:(double)size weight:(double)weight
+{
+    UIFont *f = [self systemFontOfSize:size weight:weight];
+    f->_name = @"Menlo";
+    return f;
+}
++ (UIFont *)fontWithName:(id)name size:(double)size
+{
+    UIFont *f = [[self alloc] init];
+    f->_size = size;
+    f->_name = name;
+    return f;
+}
+- (double)pointSize { return _size; }
+- (id)fontName { return _name ? _name : @"System"; }
+- (id)familyName { return _name ? _name : @"System"; }
+- (UIFont *)fontWithSize:(double)size
+{
+    UIFont *f = [[[self class] alloc] init];
+    f->_size = size;
+    f->_bold = _bold;
+    f->_name = _name;
+    return f;
+}
++ (UIFont *)fontWithDescriptor:(UIFontDescriptor *)descriptor
+                          size:(double)size
+{
+    UIFont *f = [[self alloc] init];
+    f->_size = size > 0 ? size : (descriptor ? descriptor->_size : 12);
+    f->_name = descriptor ? descriptor->_name : nil;
+    return f;
+}
+- (UIFontDescriptor *)fontDescriptor
+{
+    UIFontDescriptor *descriptor = [[UIFontDescriptor alloc] init];
+    descriptor->_size = _size;
+    descriptor->_name = _name;
+    return descriptor;
+}
+@end
+
+@implementation UIFontDescriptor
++ (UIFontDescriptor *)preferredFontDescriptorWithTextStyle:(id)style
+{
+    (void)style;
+    UIFontDescriptor *descriptor = [[self alloc] init];
+    descriptor->_size = 17;
+    return descriptor;
+}
+- (UIFontDescriptor *)fontDescriptorWithSize:(double)size
+{
+    UIFontDescriptor *descriptor = [[[self class] alloc] init];
+    descriptor->_size = size;
+    descriptor->_name = _name;
+    return descriptor;
+}
+- (UIFontDescriptor *)fontDescriptorWithSymbolicTraits:(unsigned long)traits
+{
+    (void)traits;
+    return [self fontDescriptorWithSize:_size];
+}
+- (double)pointSize { return _size; }
+- (id)fontAttributes { return [NSDictionary dictionary]; }
 @end
 
 /* --------------------------------------------------------------- screens */
@@ -3923,6 +4507,7 @@ int iosim_animation_tick(void)
 {
     int fired = 0;
     double now = iosim_now();
+    fired |= anim_delegate_tick(now);
     int k = 0;
     while (k < g_keyframeCount)
     {
@@ -3964,7 +4549,7 @@ int iosim_animations_active(void)
 {
     return g_animInfiniteCount > 0 || iosim_now() < g_animActiveUntil ||
            g_completionCount > 0 || g_keyframeCount > 0 ||
-           display_links_active();
+           anim_delegates_pending() || display_links_active();
 }
 
 @implementation UIResponder
@@ -4233,10 +4818,24 @@ static NSLayoutConstraint *make_layout_constraint(id item1, long attr1,
 
 @implementation UILayoutGuide
 - (id)owningView { return _owningView; }
-- (double)layoutFrameX { return 0; }
-- (double)layoutFrameY { return 0; }
-- (double)layoutFrameWidth { return 0; }
-- (double)layoutFrameHeight { return 0; }
+- (id)identifier { return _identifier; }
+- (void)setIdentifier:(id)identifier { _identifier = identifier; }
+- (double)layoutFrameX { return _leftInset; }
+- (double)layoutFrameY { return _topInset; }
+- (double)layoutFrameWidth
+{
+    UIView *owner = (UIView *)_owningView;
+    double width = owner ? owner->_frame.size.width : 0;
+    width -= _leftInset + _rightInset;
+    return width > 0 ? width : 0;
+}
+- (double)layoutFrameHeight
+{
+    UIView *owner = (UIView *)_owningView;
+    double height = owner ? owner->_frame.size.height : 0;
+    height -= _topInset + _bottomInset;
+    return height > 0 ? height : 0;
+}
 - (NSLayoutAnchor *)leadingAnchor
 {
     return [[NSLayoutAnchor alloc] initWithItem:self
@@ -4585,6 +5184,7 @@ static void ui_trait_children(UIView *view, int oldParent, int newParent)
 }
 
 @implementation UIView
++ (Class)layerClass { return [CALayer class]; }
 - (id)initWithFrame:(CGRect)frame
 {
     self = [super init];
@@ -4593,11 +5193,17 @@ static void ui_trait_children(UIView *view, int oldParent, int newParent)
         _frame = frame;
         _alpha = 1.0;
         _hidden = NO;
-        _layer = [[CALayer alloc] init];
+        _userInteractionEnabled = YES;
+        _opaque = YES;
+        _clearsContextBeforeDrawing = YES;
+        _autoresizesSubviews = YES;
+        _layer = [[[self class] layerClass] alloc];
+        _layer = [_layer init];
         _layer->_frame = CGRectMake(0, 0, frame.size.width, frame.size.height);
         _layer->_ownerView = self;
         _transform = CGAffineTransformIdentityValue();
         _translatesAutoresizingMaskIntoConstraints = YES;
+        _layoutMargins = UIEdgeInsetsMake(8, 8, 8, 8);
     }
     return self;
 }
@@ -4744,6 +5350,15 @@ static CGPoint window_point_for_view(UIView *view, CGPoint point)
 }
 - (void)setClipsToBounds:(BOOL)clips { _clipsToBounds = clips; }
 - (BOOL)clipsToBounds { return _clipsToBounds; }
+- (UIView *)maskView { return _maskView; }
+- (void)setMaskView:(UIView *)view
+{
+    _maskView = view;
+    if (view && view->_layer)
+        view->_layer->_backgroundColor = view->_backgroundColor;
+    if (_layer)
+        _layer->_mask = view ? view->_layer : nil;
+}
 - (void)addSubview:(UIView *)view
 {
     if (!view)
@@ -4752,6 +5367,13 @@ static CGPoint window_point_for_view(UIView *view, CGPoint point)
     if (_subviewCount < 32)
         _subviews[_subviewCount++] = view;
     [view tintColorDidChange];
+}
+- (NSArray *)subviews
+{
+    NSMutableArray *array = [NSMutableArray array];
+    for (int i = 0; i < _subviewCount; i++)
+        [array addObject:_subviews[i]];
+    return array;
 }
 - (void)addInteraction:(id)interaction
 {
@@ -4849,6 +5471,36 @@ static CGPoint window_point_for_view(UIView *view, CGPoint point)
 - (CALayer *)layer { return _layer; }
 - (void)setHidden:(BOOL)hidden { _hidden = hidden; }
 - (BOOL)isHidden { return _hidden; }
+- (BOOL)isUserInteractionEnabled { return _userInteractionEnabled; }
+- (void)setUserInteractionEnabled:(BOOL)enabled
+{
+    _userInteractionEnabled = enabled;
+}
+- (BOOL)isOpaque { return _opaque; }
+- (void)setOpaque:(BOOL)opaque { _opaque = opaque; }
+- (long)contentMode { return _contentMode; }
+- (void)setContentMode:(long)mode { _contentMode = mode; }
+- (BOOL)clearsContextBeforeDrawing { return _clearsContextBeforeDrawing; }
+- (void)setClearsContextBeforeDrawing:(BOOL)clears
+{
+    _clearsContextBeforeDrawing = clears;
+}
+- (BOOL)isExclusiveTouch { return _exclusiveTouch; }
+- (void)setExclusiveTouch:(BOOL)exclusive { _exclusiveTouch = exclusive; }
+- (BOOL)isMultipleTouchEnabled { return _multipleTouchEnabled; }
+- (void)setMultipleTouchEnabled:(BOOL)enabled
+{
+    _multipleTouchEnabled = enabled;
+}
+- (BOOL)autoresizesSubviews { return _autoresizesSubviews; }
+- (void)setAutoresizesSubviews:(BOOL)resizes
+{
+    _autoresizesSubviews = resizes;
+}
+- (unsigned long)autoresizingMask { return _autoresizingMask; }
+- (void)setAutoresizingMask:(unsigned long)mask { _autoresizingMask = mask; }
+- (double)contentScaleFactor { return [[UIScreen mainScreen] scale]; }
+- (void)setContentScaleFactor:(double)scale { (void)scale; }
 - (void)setAlpha:(double)alpha
 {
     if (g_animating && alpha != _alpha)
@@ -5000,23 +5652,78 @@ static CGPoint window_point_for_view(UIView *view, CGPoint point)
     {
         _safeAreaGuide = [[UILayoutGuide alloc] init];
         _safeAreaGuide->_owningView = self;
-        const char *top = getenv("IOSIM_SAFE_TOP");
-        const char *bottom = getenv("IOSIM_SAFE_BOTTOM");
-        _safeAreaGuide->_topInset = top ? atof(top) : 62.0;
-        _safeAreaGuide->_bottomInset = bottom ? atof(bottom) : 34.0;
     }
+    UIEdgeInsets insets = [self safeAreaInsets];
+    _safeAreaGuide->_topInset = insets.top;
+    _safeAreaGuide->_bottomInset = insets.bottom;
+    _safeAreaGuide->_leftInset = insets.left;
+    _safeAreaGuide->_rightInset = insets.right;
     return _safeAreaGuide;
 }
 - (UIEdgeInsets)safeAreaInsets
 {
-    if (_superview)
-        return UIEdgeInsetsMake(0, 0, 0, 0);
-    const char *top = getenv("IOSIM_SAFE_TOP");
-    const char *bottom = getenv("IOSIM_SAFE_BOTTOM");
-    return UIEdgeInsetsMake(top ? atof(top) : 62.0, 0,
-                            bottom ? atof(bottom) : 34.0, 0);
+    UIEdgeInsets base = UIEdgeInsetsMake(0, 0, 0, 0);
+    if (!_superview)
+    {
+        const char *top = getenv("IOSIM_SAFE_TOP");
+        const char *bottom = getenv("IOSIM_SAFE_BOTTOM");
+        base = UIEdgeInsetsMake(top ? atof(top) : 62.0, 0,
+                                bottom ? atof(bottom) : 34.0, 0);
+    }
+    return UIEdgeInsetsMake(base.top + _additionalSafeAreaInsets.top,
+                            base.left + _additionalSafeAreaInsets.left,
+                            base.bottom + _additionalSafeAreaInsets.bottom,
+                            base.right + _additionalSafeAreaInsets.right);
 }
 - (void)safeAreaInsetsDidChange { }
+- (UIEdgeInsets)layoutMargins
+{
+    if (_preservesSuperviewLayoutMargins && _superview)
+    {
+        UIEdgeInsets parent = [(UIView *)_superview layoutMargins];
+        return UIEdgeInsetsMake(parent.top, parent.left, parent.bottom,
+                                parent.right);
+    }
+    return _layoutMargins;
+}
+- (void)setLayoutMargins:(UIEdgeInsets)margins
+{
+    _layoutMargins = margins;
+}
+- (UILayoutGuide *)layoutMarginsGuide
+{
+    if (!_layoutMarginsGuide)
+    {
+        _layoutMarginsGuide = [[UILayoutGuide alloc] init];
+        _layoutMarginsGuide->_owningView = self;
+    }
+    UIEdgeInsets margins = [self layoutMargins];
+    _layoutMarginsGuide->_topInset = margins.top;
+    _layoutMarginsGuide->_bottomInset = margins.bottom;
+    _layoutMarginsGuide->_leftInset = margins.left;
+    _layoutMarginsGuide->_rightInset = margins.right;
+    return _layoutMarginsGuide;
+}
+- (UILayoutGuide *)readableContentGuide
+{
+    if (!_readableGuide)
+    {
+        _readableGuide = [[UILayoutGuide alloc] init];
+        _readableGuide->_owningView = self;
+        _readableGuide->_leftInset = 16;
+        _readableGuide->_rightInset = 16;
+        _readableGuide->_identifier = @"ReadableContentGuide";
+    }
+    return _readableGuide;
+}
+- (BOOL)preservesSuperviewLayoutMargins
+{
+    return _preservesSuperviewLayoutMargins;
+}
+- (void)setPreservesSuperviewLayoutMargins:(BOOL)preserves
+{
+    _preservesSuperviewLayoutMargins = preserves;
+}
 - (void)addGestureRecognizer:(UIGestureRecognizer *)recognizer
 {
     if (!recognizer)
@@ -5059,7 +5766,7 @@ static CGPoint window_point_for_view(UIView *view, CGPoint point)
 }
 - (UIView *)hitTest:(CGPoint)point
 {
-    if (_hidden || current_alpha(self) < 0.01)
+    if (_hidden || !_userInteractionEnabled || current_alpha(self) < 0.01)
         return nil;
     /* The point arrives in this view's frame box; invert the (possibly
      * animating) transform around the box center to reach the untransformed
@@ -5179,8 +5886,22 @@ static CGPoint window_point_for_view(UIView *view, CGPoint point)
         _numberOfLines = 1;
     return self;
 }
-- (void)setText:(id)text { _text = text; }
+- (void)setText:(id)text { _text = text; _attributedText = nil; }
 - (id)text { return _text; }
+- (void)setAttributedText:(id)text
+{
+    _attributedText = text;
+    _text = [text string];
+    NSRange range;
+    id attributes = [text attributesAtIndex:0 effectiveRange:&range];
+    id font = [attributes objectForKey:NSFontAttributeName];
+    if (font)
+        _font = font;
+    id color = [attributes objectForKey:NSForegroundColorAttributeName];
+    if (color)
+        _textColor = color;
+}
+- (id)attributedText { return _attributedText; }
 - (void)setTextColor:(UIColor *)color { _textColor = color; }
 - (UIColor *)textColor { return _textColor; }
 - (void)setFont:(UIFont *)font { _font = font; }
@@ -5461,9 +6182,18 @@ static void text_view_show_edit_menu(UITextView *editor)
 - (void)setText:(id)text
 {
     _text = text;
+    _attributedText = nil;
     _selectedRange = NSMakeRange(text_byte_length(text), 0);
     _needsLayout = YES;
 }
+- (void)setAttributedText:(id)text
+{
+    _attributedText = text;
+    _text = [text string];
+    _selectedRange = NSMakeRange(text_byte_length(_text), 0);
+    _needsLayout = YES;
+}
+- (id)attributedText { return _attributedText; }
 - (NSRange)selectedRange { return _selectedRange; }
 - (void)setSelectedRange:(NSRange)range
 {
@@ -6176,6 +6906,72 @@ static int iosim_text_press_tick(void)
 {
     return CGSizeMake(_numberOfPages * 17.5, 20);
 }
+@end
+
+@implementation UIPageViewController
+- (id)initWithTransitionStyle:(long)style
+        navigationOrientation:(long)orientation
+                      options:(id)options
+{
+    self = [super init];
+    if (self)
+    {
+        _transitionStyle = style;
+        _navigationOrientation = orientation;
+        _spineLocation = UIPageViewControllerSpineLocationMin;
+        (void)options;
+    }
+    return self;
+}
+- (void)loadView
+{
+    UIView *root =
+        [[UIView alloc] initWithFrame:[[UIScreen mainScreen] bounds]];
+    root.backgroundColor = [UIColor clearColor];
+    self.view = root;
+    [self installCurrentPage];
+}
+- (void)viewDidLoad
+{
+    [self installCurrentPage];
+}
+- (void)installCurrentPage
+{
+    if (!_view)
+        return;
+    NSArray *existing = [_view subviews];
+    for (unsigned long i = 0; i < [existing count]; i++)
+        [[existing objectAtIndex:i] removeFromSuperview];
+    if (!_pageControllers || [_pageControllers count] == 0)
+        return;
+    UIViewController *current = [_pageControllers objectAtIndex:0];
+    [self addChildViewController:current];
+    UIView *page = [current view];
+    page.frame = _view.bounds;
+    [_view addSubview:page];
+}
+- (void)setViewControllers:(NSArray *)viewControllers
+                 direction:(long)direction
+                  animated:(BOOL)animated
+                completion:(void (^)(BOOL finished))completion
+{
+    (void)direction;
+    (void)animated;
+    _pageControllers = viewControllers;
+    [self installCurrentPage];
+    if (completion)
+        completion(YES);
+}
+- (NSArray *)viewControllers { return _pageControllers; }
+- (id)delegate { return _pageDelegate; }
+- (void)setDelegate:(id)delegate { _pageDelegate = delegate; }
+- (id)dataSource { return _dataSource; }
+- (void)setDataSource:(id)dataSource { _dataSource = dataSource; }
+- (long)transitionStyle { return _transitionStyle; }
+- (long)navigationOrientation { return _navigationOrientation; }
+- (long)spineLocation { return _spineLocation; }
+- (BOOL)isDoubleSided { return _doubleSided; }
+- (void)setDoubleSided:(BOOL)doubleSided { _doubleSided = doubleSided; }
 @end
 
 @implementation UIStepper
@@ -7359,6 +8155,7 @@ static void cg_to_bezier_applier(void *info, const CGPathElement *element)
     {
         _startPoint = CGPointMake(0.5, 0.0);
         _endPoint = CGPointMake(0.5, 1.0);
+        _type = @"axial";
     }
     return self;
 }
@@ -7370,6 +8167,8 @@ static void cg_to_bezier_applier(void *info, const CGPathElement *element)
 - (CGPoint)startPoint { return _startPoint; }
 - (void)setEndPoint:(CGPoint)point { _endPoint = point; }
 - (CGPoint)endPoint { return _endPoint; }
+- (void)setType:(id)type { _type = type; }
+- (id)type { return _type; }
 @end
 
 /* ------------------------------------------------------------ image views */
@@ -7733,8 +8532,6 @@ NSData *UIImagePNGRepresentation(UIImage *image)
 }
 - (void)setImage:(UIImage *)image { _image = image; }
 - (UIImage *)image { return _image; }
-- (void)setContentMode:(int)mode { _contentMode = mode; }
-- (int)contentMode { return _contentMode; }
 @end
 
 @implementation UIBlurEffect
@@ -7923,15 +8720,75 @@ static int app_status_bar_hidden(void);
     }
     return _view;
 }
+- (UIView *)viewIfLoaded { return _view; }
+- (BOOL)isViewLoaded { return _view != nil; }
+- (UIViewController *)parentViewController { return _parentController; }
+- (NSArray *)children
+{
+    NSMutableArray *array = [NSMutableArray array];
+    for (int i = 0; i < _childCount; i++)
+        [array addObject:_children[i]];
+    return array;
+}
+- (void)addChildViewController:(UIViewController *)controller
+{
+    if (!controller || controller->_parentController == self)
+        return;
+    if (_childCount < 16)
+        _children[_childCount++] = controller;
+    controller->_parentController = self;
+}
+- (void)removeFromParentViewController
+{
+    UIViewController *parent = _parentController;
+    if (!parent)
+        return;
+    for (int i = 0; i < parent->_childCount; i++)
+    {
+        if (parent->_children[i] == self)
+        {
+            for (int j = i; j + 1 < parent->_childCount; j++)
+                parent->_children[j] = parent->_children[j + 1];
+            parent->_childCount--;
+            break;
+        }
+    }
+    _parentController = nil;
+}
+- (void)willMoveToParentViewController:(UIViewController *)parent
+{
+    (void)parent;
+}
+- (void)didMoveToParentViewController:(UIViewController *)parent
+{
+    (void)parent;
+}
 - (void)setView:(UIView *)view
 {
     _view = view;
+    if (_view)
+        _view->_additionalSafeAreaInsets = _additionalSafeAreaInsets;
     if (_view && !_viewLoaded)
     {
         _viewLoaded = YES;
         [self viewDidLoad];
     }
 }
+- (UIEdgeInsets)additionalSafeAreaInsets
+{
+    return _additionalSafeAreaInsets;
+}
+- (void)setAdditionalSafeAreaInsets:(UIEdgeInsets)insets
+{
+    _additionalSafeAreaInsets = insets;
+    if (_view)
+    {
+        _view->_additionalSafeAreaInsets = insets;
+        [_view safeAreaInsetsDidChange];
+        [self viewSafeAreaInsetsDidChange];
+    }
+}
+- (void)viewSafeAreaInsetsDidChange { }
 - (void)viewWillAppear:(BOOL)animated { (void)animated; }
 - (void)viewDidAppear:(BOOL)animated { (void)animated; }
 - (void)viewWillDisappear:(BOOL)animated { (void)animated; }
@@ -9345,8 +10202,22 @@ static UIControl *toolbar_text_control(UIBarButtonItem *item, CGRect frame,
 {
     (void)state;
     _title = title;
+    _attributedTitle = nil;
     if (_titleLabel)
         _titleLabel->_text = title;
+}
+- (void)setAttributedTitle:(id)title forState:(unsigned long)state
+{
+    _attributedTitle = title;
+    [self setTitle:[title string] forState:state];
+    _attributedTitle = title;
+    if (_titleLabel)
+        [_titleLabel setAttributedText:title];
+}
+- (id)attributedTitleForState:(unsigned long)state
+{
+    (void)state;
+    return _attributedTitle;
 }
 - (UILabel *)titleLabel { return _titleLabel; }
 - (void)setTitleColor:(UIColor *)color forState:(unsigned long)state
@@ -10283,6 +11154,7 @@ static long collection_flat_index(UICollectionView *collectionView,
 @end
 
 static UIWindow *g_keyWindow;
+static NSMutableArray *g_connectedScenes;
 id UIApplicationDidBecomeActiveNotification = @"UIApplicationDidBecomeActiveNotification";
 id UIApplicationWillResignActiveNotification = @"UIApplicationWillResignActiveNotification";
 id UIApplicationDidEnterBackgroundNotification = @"UIApplicationDidEnterBackgroundNotification";
@@ -11097,9 +11969,14 @@ static int context_menu_handle_tap(int px, int py)
 @implementation UIWindow
 - (id)initWithWindowScene:(UIWindowScene *)scene
 {
-    (void)scene;
-    return [self initWithFrame:[[UIScreen mainScreen] bounds]];
+    self = [self initWithFrame:[[UIScreen mainScreen] bounds]];
+    if (self)
+        _windowScene = scene;
+    return self;
 }
+- (UIWindowScene *)windowScene { return (UIWindowScene *)_windowScene; }
+- (double)windowLevel { return _windowLevel; }
+- (void)setWindowLevel:(double)level { _windowLevel = level; }
 - (void)setRootViewController:(UIViewController *)controller
 {
     _rootViewController = controller;
@@ -11837,6 +12714,8 @@ static double two_finger_angle(double x1, double y1, double x2, double y2)
     }
 }
 - (void)makeKeyAndVisible { g_keyWindow = self; }
+- (void)makeKeyWindow { g_keyWindow = self; }
+- (BOOL)isKeyWindow { return g_keyWindow == self; }
 + (UIWindow *)keyWindow { return g_keyWindow; }
 @end
 
@@ -11964,6 +12843,17 @@ int iosim_ui_appearance_tick(void)
 }
 - (BOOL)isIdleTimerDisabled { return _idleTimerDisabled; }
 - (void)setIdleTimerDisabled:(BOOL)disabled { _idleTimerDisabled = disabled; }
+- (NSArray *)windows
+{
+    if (g_keyWindow)
+        return [NSArray arrayWithObject:g_keyWindow];
+    return [NSArray array];
+}
+- (UIWindow *)keyWindow { return g_keyWindow; }
+- (NSArray *)connectedScenes
+{
+    return g_connectedScenes ? g_connectedScenes : [NSArray array];
+}
 @end
 
 static id g_pasteboard_text_type;
@@ -13311,6 +14201,142 @@ static void render_layer_contents(CALayer *layer, int x, int y, int w,
     }
 }
 
+static void gradient_sample(const unsigned *colors,
+                            const unsigned char *alphas,
+                            const double *locations, int count, double t,
+                            unsigned *rgb, unsigned char *a)
+{
+    if (t < 0) t = 0;
+    if (t > 1) t = 1;
+    int index = 0;
+    while (index + 1 < count && t > locations[index + 1])
+        index++;
+    int next = index + 1 < count ? index + 1 : index;
+    double span = locations[next] - locations[index];
+    double f = span > 0 ? (t - locations[index]) / span : 0;
+    if (f < 0) f = 0;
+    if (f > 1) f = 1;
+    unsigned ca = colors[index], cb = colors[next];
+    int r = (int)(((ca >> 16) & 255) +
+                  (((int)((cb >> 16) & 255) - (int)((ca >> 16) & 255)) * f));
+    int gg = (int)(((ca >> 8) & 255) +
+                   (((int)((cb >> 8) & 255) - (int)((ca >> 8) & 255)) * f));
+    int b = (int)((ca & 255) + ((int)(cb & 255) - (int)(ca & 255)) * f);
+    *rgb = ((unsigned)r << 16) | ((unsigned)gg << 8) | (unsigned)b;
+    *a = (unsigned char)(alphas[index] +
+        (alphas[next] - alphas[index]) * f);
+}
+
+static void render_gradient_layer(CAGradientLayer *g, int x, int y, int w,
+                                  int h, double scale, double alpha,
+                                  double cornerRadius)
+{
+    long total = g->_colors ? (long)g->_colors->_count : 0;
+    if (total <= 0 || w <= 0 || h <= 0)
+        return;
+    enum { MAX_STOPS = 32 };
+    unsigned colors[MAX_STOPS];
+    unsigned char alphas[MAX_STOPS];
+    double locations[MAX_STOPS];
+    int count = total < MAX_STOPS ? (int)total : MAX_STOPS;
+    long loc_count = g->_locations ? (long)g->_locations->_count : 0;
+    int explicit_locations = loc_count == total;
+    for (int i = 0; i < count; i++)
+    {
+        id entry = [g->_colors objectAtIndex:i];
+        colors[i] = gradient_entry_rgb(entry);
+        alphas[i] = gradient_entry_alpha(entry);
+        if (explicit_locations)
+            locations[i] = number_value([g->_locations objectAtIndex:i], 0.0);
+        else
+            locations[i] = total > 1 ? (double)i / (double)(total - 1) : 0.0;
+    }
+    const char *type = g->_type ? iosim_string_cstr(g->_type) : 0;
+    if (type && strcmp(type, "radial") == 0)
+    {
+        double cx = g->_startPoint.x * w;
+        double cy = g->_startPoint.y * h;
+        double rx = (g->_endPoint.x - g->_startPoint.x) * w;
+        double ry = (g->_endPoint.y - g->_startPoint.y) * h;
+        double radius = __builtin_sqrt(rx * rx + ry * ry);
+        if (radius <= 0)
+            radius = (w > h ? w : h) / 2.0;
+        unsigned char *pixels = malloc((unsigned long)w * h * 4);
+        if (!pixels)
+            return;
+        for (int py = 0; py < h; py++)
+        {
+            double dy = py - cy;
+            for (int px = 0; px < w; px++)
+            {
+                double dx = px - cx;
+                double t = __builtin_sqrt(dx * dx + dy * dy) / radius;
+                unsigned rgb = 0;
+                unsigned char a = 0;
+                gradient_sample(colors, alphas, locations, count, t, &rgb, &a);
+                unsigned char *out = pixels + ((unsigned long)py * w + px) * 4;
+                out[0] = (unsigned char)((rgb >> 16) & 255);
+                out[1] = (unsigned char)((rgb >> 8) & 255);
+                out[2] = (unsigned char)(rgb & 255);
+                out[3] = a;
+            }
+        }
+        if (cornerRadius > 0)
+        {
+            int radius_px = (int)(cornerRadius * scale + 0.5);
+            void *state = iosim_fb_begin_offscreen((unsigned)w, (unsigned)h);
+            if (state)
+            {
+                iosim_fb_blit_rgba_scaled(0, 0, w, h, pixels, w, h, w * 4);
+                iosim_fb_mask_round_rect(0, 0, w, h, radius_px);
+                int bw = 0, bh = 0;
+                unsigned *buf = iosim_fb_end_offscreen(state, &bw, &bh);
+                if (buf)
+                {
+                    iosim_fb_blit_affine(buf, bw, bh, 1.0, 0.0, 0.0, 1.0,
+                                         x, y, alpha);
+                    iosim_fb_free_offscreen(buf);
+                }
+            }
+        }
+        else
+        {
+            iosim_fb_set_opacity(alpha);
+            iosim_fb_blit_rgba_scaled(x, y, w, h, pixels, w, h, w * 4);
+        }
+        free(pixels);
+        return;
+    }
+    if (cornerRadius > 0)
+    {
+        int radius = (int)(cornerRadius * scale + 0.5);
+        void *state = iosim_fb_begin_offscreen((unsigned)w, (unsigned)h);
+        if (state)
+        {
+            iosim_fb_fill_gradient_stops_alpha(
+                0, 0, w, h, colors, alphas, locations, count,
+                g->_startPoint.x * w, g->_startPoint.y * h,
+                g->_endPoint.x * w, g->_endPoint.y * h);
+            iosim_fb_mask_round_rect(0, 0, w, h, radius);
+            int bw = 0, bh = 0;
+            unsigned *buf = iosim_fb_end_offscreen(state, &bw, &bh);
+            if (buf)
+            {
+                iosim_fb_blit_affine(buf, bw, bh, 1.0, 0.0, 0.0, 1.0, x, y,
+                                     alpha);
+                iosim_fb_free_offscreen(buf);
+            }
+        }
+    }
+    else
+    {
+        iosim_fb_fill_gradient_stops_alpha(
+            x, y, w, h, colors, alphas, locations, count,
+            x + g->_startPoint.x * w, y + g->_startPoint.y * h,
+            x + g->_endPoint.x * w, y + g->_endPoint.y * h);
+    }
+}
+
 static void render_layer(CALayer *layer, double parentX, double parentY,
                          double scale, double parentAlpha);
 static void render_replicator(CAReplicatorLayer *rep, int x, int y, int w,
@@ -13424,61 +14450,8 @@ static void render_layer(CALayer *layer, double parentX, double parentY,
     }
     render_layer_contents(layer, x, y, w, h, alpha);
     if ([layer isKindOfClass:[CAGradientLayer class]])
-    {
-        CAGradientLayer *g = (CAGradientLayer *)layer;
-        long total = g->_colors ? (long)g->_colors->_count : 0;
-        if (total > 0)
-        {
-            enum { MAX_STOPS = 32 };
-            unsigned colors[MAX_STOPS];
-            unsigned char alphas[MAX_STOPS];
-            double locations[MAX_STOPS];
-            int count = total < MAX_STOPS ? (int)total : MAX_STOPS;
-            long loc_count = g->_locations ? (long)g->_locations->_count : 0;
-            int explicit_locations = loc_count == total;
-            for (int i = 0; i < count; i++)
-            {
-                id entry = [g->_colors objectAtIndex:i];
-                colors[i] = gradient_entry_rgb(entry);
-                alphas[i] = gradient_entry_alpha(entry);
-                if (explicit_locations)
-                    locations[i] = number_value(
-                        [g->_locations objectAtIndex:i], 0.0);
-                else
-                    locations[i] = total > 1 ? (double)i / (double)(total - 1)
-                                             : 0.0;
-            }
-            if (layer->_cornerRadius > 0)
-            {
-                int radius = (int)(layer->_cornerRadius * scale + 0.5);
-                void *state = iosim_fb_begin_offscreen((unsigned)w,
-                                                       (unsigned)h);
-                if (state)
-                {
-                    iosim_fb_fill_gradient_stops_alpha(
-                        0, 0, w, h, colors, alphas, locations, count,
-                        g->_startPoint.x * w, g->_startPoint.y * h,
-                        g->_endPoint.x * w, g->_endPoint.y * h);
-                    iosim_fb_mask_round_rect(0, 0, w, h, radius);
-                    int bw = 0, bh = 0;
-                    unsigned *buf = iosim_fb_end_offscreen(state, &bw, &bh);
-                    if (buf)
-                    {
-                        iosim_fb_blit_affine(buf, bw, bh, 1.0, 0.0, 0.0,
-                                             1.0, x, y, alpha);
-                        iosim_fb_free_offscreen(buf);
-                    }
-                }
-            }
-            else
-            {
-                iosim_fb_fill_gradient_stops_alpha(
-                    x, y, w, h, colors, alphas, locations, count,
-                    x + g->_startPoint.x * w, y + g->_startPoint.y * h,
-                    x + g->_endPoint.x * w, y + g->_endPoint.y * h);
-            }
-        }
-    }
+        render_gradient_layer((CAGradientLayer *)layer, x, y, w, h, scale,
+                              alpha, layer->_cornerRadius);
     else if ([layer isKindOfClass:[CAShapeLayer class]])
     {
         CAShapeLayer *sl = (CAShapeLayer *)layer;
@@ -13937,6 +14910,12 @@ static void render_view(UIView *view, double originX, double originY,
 
     if (view->_layer)
         render_layer_contents(view->_layer, x, y, w, h, alpha);
+    if (view->_layer &&
+        [view->_layer isKindOfClass:[CAGradientLayer class]])
+        render_gradient_layer((CAGradientLayer *)view->_layer, x, y, w, h,
+                              scale, alpha,
+                              layer_key_value(view->_layer, "cornerRadius",
+                                              view->_layer->_cornerRadius));
 
     if (w > 0 && h > 0)
     {
@@ -20874,6 +21853,9 @@ int UIApplicationMain(int argc, char **argv, id principal, id delegateName)
                 configuration, sceneClass, objc_getClass("SceneDelegate"),
                 sceneDelegate);
     UIWindowScene *scene = [[UIWindowScene alloc] init];
+    if (!g_connectedScenes)
+        g_connectedScenes = [NSMutableArray array];
+    [g_connectedScenes addObject:scene];
     if (sceneDelegate)
         [scene setDelegate:sceneDelegate];
     SEL willConnect = @selector(scene:willConnectToSession:options:);

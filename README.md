@@ -32,8 +32,8 @@ runners**, combined with the public Darling and Apple dyld sources.
 | Touch hit-testing, target/action, table selection, event FIFO run loop | ✅ |
 | `UITouch`/`UIEvent` responder delivery, continuous control tracking | ✅ |
 | Drag scrolling with rubber-band clamp, tap/pan/swipe/pinch/rotation/screen-edge gesture recognizers with pan velocity | ✅ |
-| Auto Layout: NSLayoutConstraint, anchors, guides, intrinsic sizing, priorities | ✅ (subset) |
-| Appearance: `UITraitCollection`, `overrideUserInterfaceStyle`, `traitCollectionDidChange:`, dynamic system colors resolved at draw time, tint-color inheritance and `tintColorDidChange`, status bar styles and hiding (including Info.plist), appearance-aware system material blur, and device-wide light/dark switching that also darkens SpringBoard's glass | ✅ |
+| Auto Layout: NSLayoutConstraint, anchors, guides, intrinsic sizing, priorities, `layoutMargins`/`layoutMarginsGuide` with inset guide frames | ✅ (subset) |
+| Appearance: `UITraitCollection`, `overrideUserInterfaceStyle`, `traitCollectionDidChange:`, dynamic system colors resolved at draw time, the fixed UIColor palette plus `getRed:green:blue:alpha:`/`getWhite:alpha:`, tint-color inheritance and `tintColorDidChange`, status bar styles and hiding (including Info.plist), appearance-aware system material blur, and device-wide light/dark switching that also darkens SpringBoard's glass | ✅ |
 | Multiline UILabel wrapping, UITextField/UITextView editing and delegates, UITextView drag selection, long press, draggable handles and a Copy/Paste edit menu, software keyboard | ✅ |
 | UISwitch, UISlider, UISegmentedControl, UIPageControl, UIActivityIndicatorView, UIProgressView | ✅ |
 | UIAlertController alerts and actions, UIActivityViewController share sheet with Copy and application activities, animated page-sheet modal presentation and dismissal | ✅ |
@@ -42,15 +42,15 @@ runners**, combined with the public Darling and Apple dyld sources.
 | `CADisplayLink`, presentation layers, multiple concurrent layer animations | ✅ |
 | `CAAnimationGroup`: grouped opacity/corner animations, group removal clears children | ✅ |
 | `CASpringAnimation`: mass/stiffness/damping/initial velocity, settling duration | ✅ |
-| CAAnimation timing (`beginTime`, `speed`, `timeOffset`, `autoreverses`, `fillMode`), `CACurrentMediaTime`, `CATransaction` completion, `performWithoutAnimation:` | ✅ |
+| CAAnimation timing (`beginTime`, `speed`, `timeOffset`, `autoreverses`, `fillMode`) and value getters, `CAAnimationDelegate` start/stop callbacks, `animationKeys`/`animationForKey:`/`removeAllAnimations`, `CACurrentMediaTime`, `CATransaction` completion, `performWithoutAnimation:` | ✅ |
 | UIView keyframe animations: relative start/duration segments and a completion block | ✅ |
 | `NSString` `sizeWithAttributes:`, `boundingRectWithSize:`, `drawAtPoint:`/`drawInRect:` wrapping through CGContext | ✅ (subset) |
 | ObjC categories from `__objc_catlist`, resolved by category symbol name | ✅ |
-| CoreAnimation paths, multi-stop gradients, layer geometry/contents (`contentsGravity` aspect fit/fill/center, `contentsRect` cropping), CALayer masks, 2D CATransform3D layer transforms, shape stroke trimming and round caps, sublayers (z-ordered), PNG images, `CAReplicatorLayer` copies with instance transforms/colors, `CAEmitterLayer` steady particle fields with emission/velocity/scale/color ranges | ✅ |
+| CoreAnimation paths, multi-stop axial/radial gradients (including custom `+[UIView layerClass]` backing), layer geometry/contents (`contentsGravity` aspect fit/fill/center, `contentsRect` cropping), CALayer masks, 2D CATransform3D layer transforms, shape stroke trimming and round caps, sublayers (z-ordered), PNG images, `CAReplicatorLayer` copies with instance transforms/colors, `CAEmitterLayer` steady particle fields with emission/velocity/scale/color ranges | ✅ |
 | CoreGraphics `CGContext` fills, strokes, ellipses, paths, adaptively flattened quadratic/cubic curves, mutable `CGPath` (bounding box/contains/copies), `CGColor`, device RGB/gray `CGColorSpace`, multi-stop `CGGradient` linear fills with alpha stops, `CGImage`, rect and polygon clipping, push/pop contexts, state stack, UIView `drawRect:` and `UIGraphics` image contexts | ✅ (subset) |
 | `UIGraphicsImageRenderer` with format scale/opaque, `imageWithActions:`, `PNGDataWithActions:`, and `UIImagePNGRepresentation` using stored-deflate PNG output | ✅ |
-| `safeAreaInsets`, `UIScreen` native bounds/scale/brightness, `idleTimerDisabled`, UIFeedbackGenerator family (no-op haptics), `UIApplication` `canOpenURL:`/`openURL:options:completionHandler:` | ✅ |
-| Foundation collections, sorting, NSPredicate filtering, NSRegularExpression, NSScanner, notifications, timers | ✅ |
+| `NSAttributedString`/`NSMutableAttributedString` with `UILabel.attributedText` and `UIButton` attributed titles, view controller containment (`addChildViewController:`, `children`, `parentViewController`) and `UIPageViewController` page replacement, `UIView.maskView` (masked by the view's layer alpha), `userInteractionEnabled` hit-test passthrough, `safeAreaInsets` with controller `additionalSafeAreaInsets`, `UIScreen` native bounds/scale/brightness, `idleTimerDisabled`, UIFeedbackGenerator family (no-op haptics), `UIApplication` `canOpenURL:`/`openURL:options:completionHandler:`, `windows`/`keyWindow`/`connectedScenes`, `UIWindow.windowScene`/`windowLevel` | ✅ |
+| Foundation collections, sorting, NSPredicate filtering, NSRegularExpression, NSScanner, notifications, timers, `NSCharacterSet` with string trimming/number/percent/range helpers, UIFont weights/named fonts/descriptors, UIColor HSV/P3/alpha constructors, readable content guides and UIView layout properties | ✅ |
 | Foundation fast enumeration (`for-in`) and indexed/keyed collection subscripting | ✅ |
 | `NSURLSession` data tasks with headers, bodies, status and response headers over a host HTTP/1.0 client, including HTTPS via OpenSSL | ✅ |
 | Key-value coding (accessors, boxing, key paths, collection operators) and automatic KVO | ✅ |

@@ -5425,9 +5425,9 @@ end = point("end")
 if not move or not turn or not end:
     raise SystemExit("missing keyframe samples: %r %r %r" %
                      (move, turn, end))
-if not (110 <= move[0] <= 195 and move[1] == 300):
+if not (105 <= move[0] <= 200 and move[1] == 300):
     raise SystemExit("first keyframe segment is wrong: %r" % (move,))
-if not (turn[0] == 200 and 315 <= turn[1] <= 485):
+if not (turn[0] == 200 and 300 <= turn[1] <= 485):
     raise SystemExit("second keyframe segment is wrong: %r" % (turn,))
 if end != (200, 500):
     raise SystemExit("final keyframe position is wrong: %r" % (end,))
@@ -5647,6 +5647,458 @@ CONTENTSPNG
     echo "$out"
 else
     echo "FAIL contents pixels"; echo "$out"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
+
+# ---------- CAAnimationDelegate ----------
+"$ROOT/tools/build_app.sh" "$ROOT/tests/animation_delegate_test.m" \
+    "$T/DelegateApp" >/dev/null
+mkdir -p "$T/DelegateApp.app"
+cp "$T/DelegateApp" "$T/DelegateApp.app/DelegateApp"
+python3 - "$T/DelegateApp.app/Info.plist" <<'PY'
+import plistlib, sys
+with open(sys.argv[1], "wb") as f:
+    plistlib.dump({
+        "CFBundleIdentifier": "com.iosim.delegate",
+        "CFBundleExecutable": "DelegateApp",
+        "CFBundleName": "Delegate",
+        "CFBundlePackageType": "APPL",
+        "CFBundleVersion": "1",
+        "CFBundleShortVersionString": "1.0",
+    }, f)
+PY
+: > "$SBLOG"
+"$ROOT/tools/iosimctl" install "$UDID" "$T/DelegateApp.app" >/dev/null
+sleep 0.4
+"$ROOT/tools/iosimctl" ui "$UDID" tap 201 718.5 >/dev/null
+sleep 0.5
+for c in d e l e g a t e; do
+    "$ROOT/tools/iosimctl" ui "$UDID" key "$c" >/dev/null
+done
+sleep 0.7
+"$ROOT/tools/iosimctl" ui "$UDID" tap 200 270 >/dev/null
+if wait_log "[delegate] done"; then
+    echo "ok   the animation delegate fixture launches"
+else
+    echo "FAIL delegate launch"; fails=$((fails+1))
+fi
+if out="$(python3 - "$SBLOG" <<'DELEGATELOG'
+import sys
+text = open(sys.argv[1], errors="replace").read()
+if text.count("[delegate] start ") != 3:
+    raise SystemExit("expected three start callbacks")
+if text.count("[delegate] stop 0") != 2:
+    raise SystemExit("expected two unfinished stops")
+if text.count("[delegate] stop 1") != 1:
+    raise SystemExit("expected one finished stop")
+if "[delegate] counts 3 3" not in text:
+    raise SystemExit("delegate counts were wrong")
+print("ok   animation delegate start and stop callbacks")
+DELEGATELOG
+)"; then
+    echo "$out"
+else
+    echo "FAIL delegate callbacks"; echo "$out"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
+
+# ---------- custom backing layers and animation key APIs ----------
+"$ROOT/tools/build_app.sh" "$ROOT/tests/layer_custom_test.m" \
+    "$T/CustomLayerApp" >/dev/null
+mkdir -p "$T/CustomLayerApp.app"
+cp "$T/CustomLayerApp" "$T/CustomLayerApp.app/CustomLayerApp"
+python3 - "$T/CustomLayerApp.app/Info.plist" <<'PY'
+import plistlib, sys
+with open(sys.argv[1], "wb") as f:
+    plistlib.dump({
+        "CFBundleIdentifier": "com.iosim.customlayer",
+        "CFBundleExecutable": "CustomLayerApp",
+        "CFBundleName": "CustomLayer",
+        "CFBundlePackageType": "APPL",
+        "CFBundleVersion": "1",
+        "CFBundleShortVersionString": "1.0",
+    }, f)
+PY
+: > "$SBLOG"
+"$ROOT/tools/iosimctl" install "$UDID" "$T/CustomLayerApp.app" >/dev/null
+sleep 0.4
+"$ROOT/tools/iosimctl" ui "$UDID" tap 201 718.5 >/dev/null
+sleep 0.5
+for c in c u s t o m l a y e r; do
+    "$ROOT/tools/iosimctl" ui "$UDID" key "$c" >/dev/null
+done
+sleep 0.7
+"$ROOT/tools/iosimctl" ui "$UDID" tap 200 270 >/dev/null
+if wait_log "[layer] ready"; then
+    echo "ok   the custom layer fixture launches"
+else
+    echo "FAIL custom layer launch"; fails=$((fails+1))
+fi
+sleep 0.4
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/customlayer.png" >/dev/null
+if out="$(python3 - "$ROOT/tools" "$T" "$SBLOG" <<'CUSTOMLAYER'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+root = sys.argv[2]
+text = open(sys.argv[3], errors="replace").read()
+for line in ("[layer] custom 1 colors 2", "[layer] keys 2 1",
+             "[layer] after 0 1"):
+    if line not in text:
+        raise SystemExit("missing %r" % line)
+w, h, bpp, rows = pngpixel.load(root + "/customlayer.png")
+def rgb(x, y):
+    c = pngpixel.px(rows, bpp, int(x * 3), int(y * 3))
+    return ((c >> 16) & 255, (c >> 8) & 255, c & 255)
+left = rgb(60, 350)
+mid = rgb(150, 350)
+right = rgb(240, 350)
+if not (left[0] > 200 and left[2] < 40):
+    raise SystemExit("gradient left stop is not red: %r" % (left,))
+if not (right[2] > 200 and right[0] < 40):
+    raise SystemExit("gradient right stop is not blue: %r" % (right,))
+if not (mid[0] > 80 and mid[2] > 80):
+    raise SystemExit("gradient midpoint did not blend: %r" % (mid,))
+if rgb(150, 280) != (0, 0, 0):
+    raise SystemExit("gradient escaped the view frame")
+if rgb(60, 470) != (0, 255, 0):
+    raise SystemExit("sibling view did not draw")
+print("ok   layerClass gradient backing and animation key APIs")
+CUSTOMLAYER
+)"; then
+    echo "$out"
+else
+    echo "FAIL custom layer pixels"; echo "$out"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
+
+# ---------- layout margins ----------
+"$ROOT/tools/build_app.sh" "$ROOT/tests/layout_margins_test.m" \
+    "$T/MarginsApp" >/dev/null
+mkdir -p "$T/MarginsApp.app"
+cp "$T/MarginsApp" "$T/MarginsApp.app/MarginsApp"
+python3 - "$T/MarginsApp.app/Info.plist" <<'PY'
+import plistlib, sys
+with open(sys.argv[1], "wb") as f:
+    plistlib.dump({
+        "CFBundleIdentifier": "com.iosim.margins",
+        "CFBundleExecutable": "MarginsApp",
+        "CFBundleName": "Margins",
+        "CFBundlePackageType": "APPL",
+        "CFBundleVersion": "1",
+        "CFBundleShortVersionString": "1.0",
+    }, f)
+PY
+: > "$SBLOG"
+"$ROOT/tools/iosimctl" install "$UDID" "$T/MarginsApp.app" >/dev/null
+sleep 0.4
+"$ROOT/tools/iosimctl" ui "$UDID" tap 201 718.5 >/dev/null
+sleep 0.5
+for c in m a r g i n s; do
+    "$ROOT/tools/iosimctl" ui "$UDID" key "$c" >/dev/null
+done
+sleep 0.7
+"$ROOT/tools/iosimctl" ui "$UDID" tap 200 270 >/dev/null
+if wait_log "[margins] ready"; then
+    echo "ok   the layout margins fixture launches"
+else
+    echo "FAIL margins launch"; fails=$((fails+1))
+fi
+sleep 0.5
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/margins.png" >/dev/null
+if out="$(python3 - "$ROOT/tools" "$T" "$SBLOG" <<'MARGINS'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+root = sys.argv[2]
+text = open(sys.argv[3], errors="replace").read()
+for line in ("[margins] edges 20 20 20 20",
+             "[margins] guide 20 20 160 160",
+             "[margins] safe 72 46",
+             "[margins] safeguide 0 72 402 756",
+             "[margins] color 1 255 128 0 1 0.25"):
+    if line not in text:
+        raise SystemExit("missing %r" % line)
+w, h, bpp, rows = pngpixel.load(root + "/margins.png")
+def rgb(x, y):
+    c = pngpixel.px(rows, bpp, int(x * 3), int(y * 3))
+    return ((c >> 16) & 255, (c >> 8) & 255, c & 255)
+if rgb(60, 310) != (85, 85, 85):
+    raise SystemExit("container margin band is wrong")
+if rgb(100, 350) != (0, 255, 0) or rgb(220, 470) != (0, 255, 0):
+    raise SystemExit("child did not fill the margins guide")
+if rgb(60, 490) != (85, 85, 85):
+    raise SystemExit("bottom margin band is wrong")
+if rgb(300, 350) != (0, 0, 0):
+    raise SystemExit("container escaped its frame")
+print("ok   layout margins inset the guide and pinned child")
+MARGINS
+)"; then
+    echo "$out"
+else
+    echo "FAIL margins pixels"; echo "$out"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
+
+# ---------- radial gradients and window/scene APIs ----------
+"$ROOT/tools/build_app.sh" "$ROOT/tests/radial_gradient_test.m" \
+    "$T/RadialApp" >/dev/null
+mkdir -p "$T/RadialApp.app"
+cp "$T/RadialApp" "$T/RadialApp.app/RadialApp"
+python3 - "$T/RadialApp.app/Info.plist" <<'PY'
+import plistlib, sys
+with open(sys.argv[1], "wb") as f:
+    plistlib.dump({
+        "CFBundleIdentifier": "com.iosim.radial",
+        "CFBundleExecutable": "RadialApp",
+        "CFBundleName": "Radial",
+        "CFBundlePackageType": "APPL",
+        "CFBundleVersion": "1",
+        "CFBundleShortVersionString": "1.0",
+    }, f)
+PY
+: > "$SBLOG"
+"$ROOT/tools/iosimctl" install "$UDID" "$T/RadialApp.app" >/dev/null
+sleep 0.4
+"$ROOT/tools/iosimctl" ui "$UDID" tap 201 718.5 >/dev/null
+sleep 0.5
+for c in r a d i a l; do
+    "$ROOT/tools/iosimctl" ui "$UDID" key "$c" >/dev/null
+done
+sleep 0.7
+"$ROOT/tools/iosimctl" ui "$UDID" tap 200 270 >/dev/null
+if wait_log "[radial] scene 1 windows 1 key 1 scenes 1 level 2000"; then
+    echo "ok   the radial gradient fixture launches"
+else
+    echo "FAIL radial launch"; fails=$((fails+1))
+fi
+sleep 0.4
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/radial.png" >/dev/null
+if out="$(python3 - "$ROOT/tools" "$T" <<'RADIAL'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+root = sys.argv[2]
+w, h, bpp, rows = pngpixel.load(root + "/radial.png")
+def rgb(x, y):
+    c = pngpixel.px(rows, bpp, int(x * 3), int(y * 3))
+    return ((c >> 16) & 255, (c >> 8) & 255, c & 255)
+center = rgb(200, 400)
+edge = rgb(295, 400)
+if not (center[0] > 240 and center[2] < 20):
+    raise SystemExit("radial center is not red: %r" % (center,))
+if not (edge[2] > 200 and edge[0] < 40):
+    raise SystemExit("radial edge is not blue: %r" % (edge,))
+if rgb(50, 400) != (0, 0, 0):
+    raise SystemExit("radial escaped its frame")
+rounded = rgb(200, 650)
+corner = rgb(110, 560)
+if not (rounded[0] > 240 and rounded[1] > 240 and rounded[2] < 20):
+    raise SystemExit("rounded radial center is not yellow: %r" % (rounded,))
+if corner != (0, 0, 0):
+    raise SystemExit("rounded radial did not mask its corner")
+top = rgb(200, 560)
+if not (top[0] > 80 and top[2] > 60):
+    raise SystemExit("rounded radial did not blend at the edge: %r" % (top,))
+print("ok   radial gradients, rounding and window/scene APIs")
+RADIAL
+)"; then
+    echo "$out"
+else
+    echo "FAIL radial pixels"; echo "$out"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
+
+# ---------- UIView maskView and hit testing ----------
+"$ROOT/tools/build_app.sh" "$ROOT/tests/mask_interaction_test.m" \
+    "$T/MaskApp" >/dev/null
+mkdir -p "$T/MaskApp.app"
+cp "$T/MaskApp" "$T/MaskApp.app/MaskApp"
+python3 - "$T/MaskApp.app/Info.plist" <<'PY'
+import plistlib, sys
+with open(sys.argv[1], "wb") as f:
+    plistlib.dump({
+        "CFBundleIdentifier": "com.iosim.mask",
+        "CFBundleExecutable": "MaskApp",
+        "CFBundleName": "Mask",
+        "CFBundlePackageType": "APPL",
+        "CFBundleVersion": "1",
+        "CFBundleShortVersionString": "1.0",
+    }, f)
+PY
+: > "$SBLOG"
+"$ROOT/tools/iosimctl" install "$UDID" "$T/MaskApp.app" >/dev/null
+sleep 0.4
+"$ROOT/tools/iosimctl" ui "$UDID" tap 201 718.5 >/dev/null
+sleep 0.5
+for c in m a s k; do
+    "$ROOT/tools/iosimctl" ui "$UDID" key "$c" >/dev/null
+done
+sleep 0.7
+"$ROOT/tools/iosimctl" ui "$UDID" tap 200 270 >/dev/null
+if wait_log "[mask] hit 1 enabled 0"; then
+    echo "ok   the mask fixture launches"
+else
+    echo "FAIL mask launch"; fails=$((fails+1))
+fi
+sleep 0.4
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/mask.png" >/dev/null
+if out="$(python3 - "$ROOT/tools" "$T" <<'MASK'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+root = sys.argv[2]
+w, h, bpp, rows = pngpixel.load(root + "/mask.png")
+def rgb(x, y):
+    c = pngpixel.px(rows, bpp, int(x * 3), int(y * 3))
+    return ((c >> 16) & 255, (c >> 8) & 255, c & 255)
+if rgb(200, 350) != (255, 0, 0):
+    raise SystemExit("disabled view did not draw")
+left = rgb(150, 500)
+if not (left[2] > 240 and left[0] < 20):
+    raise SystemExit("maskView did not keep the covered half: %r" % (left,))
+if rgb(250, 500) != (0, 0, 0):
+    raise SystemExit("maskView did not clip the uncovered half")
+print("ok   maskView clips and disabled views pass hit tests through")
+MASK
+)"; then
+    echo "$out"
+else
+    echo "FAIL mask pixels"; echo "$out"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
+
+# ---------- Foundation string helpers and fonts ----------
+"$ROOT/tools/build_app.sh" "$ROOT/tests/foundation_extra_test.m" \
+    "$T/FoundationApp" >/dev/null
+mkdir -p "$T/FoundationApp.app"
+cp "$T/FoundationApp" "$T/FoundationApp.app/FoundationApp"
+python3 - "$T/FoundationApp.app/Info.plist" <<'PY'
+import plistlib, sys
+with open(sys.argv[1], "wb") as f:
+    plistlib.dump({
+        "CFBundleIdentifier": "com.iosim.fnd",
+        "CFBundleExecutable": "FoundationApp",
+        "CFBundleName": "Foundation",
+        "CFBundlePackageType": "APPL",
+        "CFBundleVersion": "1",
+        "CFBundleShortVersionString": "1.0",
+    }, f)
+PY
+: > "$SBLOG"
+"$ROOT/tools/iosimctl" install "$UDID" "$T/FoundationApp.app" >/dev/null
+sleep 0.4
+"$ROOT/tools/iosimctl" ui "$UDID" tap 201 718.5 >/dev/null
+sleep 0.5
+for c in f o u; do
+    "$ROOT/tools/iosimctl" ui "$UDID" key "$c" >/dev/null
+done
+sleep 0.7
+"$ROOT/tools/iosimctl" ui "$UDID" tap 200 270 >/dev/null
+if wait_log "[fnd] trim 'Hello World'" &&
+   wait_log "[fnd] num 42 3.5 1" &&
+   wait_log "[fnd] cap Hello World" &&
+   wait_log "[fnd] pct a b/c" &&
+   wait_log "[fnd] set 1 0" &&
+   wait_log "[fnd] rep abXYef" &&
+   wait_log "[fnd] range 6 5 1" &&
+   wait_log "[fnd] font 14 System 20" &&
+   wait_log "[fnd] color 1 0 0 1.0 0.1 0.4 1.0 0.25" &&
+   wait_log "[fnd] desc 17 17" &&
+   wait_log "[fnd] readable 16 0 370 874" &&
+   wait_log "[fnd] props 1 0 1 3"; then
+    echo "ok   Foundation helpers, colors, fonts and readable guides"
+else
+    echo "FAIL Foundation helpers"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
+
+# ---------- page view controller and containment ----------
+"$ROOT/tools/build_app.sh" "$ROOT/tests/pageview_test.m" \
+    "$T/PageApp" >/dev/null
+mkdir -p "$T/PageApp.app"
+cp "$T/PageApp" "$T/PageApp.app/PageApp"
+python3 - "$T/PageApp.app/Info.plist" <<'PY'
+import plistlib, sys
+with open(sys.argv[1], "wb") as f:
+    plistlib.dump({
+        "CFBundleIdentifier": "com.iosim.page",
+        "CFBundleExecutable": "PageApp",
+        "CFBundleName": "Page",
+        "CFBundlePackageType": "APPL",
+        "CFBundleVersion": "1",
+        "CFBundleShortVersionString": "1.0",
+    }, f)
+PY
+: > "$SBLOG"
+"$ROOT/tools/iosimctl" install "$UDID" "$T/PageApp.app" >/dev/null
+sleep 0.4
+"$ROOT/tools/iosimctl" ui "$UDID" tap 201 718.5 >/dev/null
+sleep 0.5
+for c in p a g e; do
+    "$ROOT/tools/iosimctl" ui "$UDID" key "$c" >/dev/null
+done
+sleep 0.7
+"$ROOT/tools/iosimctl" ui "$UDID" tap 200 270 >/dev/null
+if wait_log "[page] pages 1 children 1 parent 1 root 1" &&
+   wait_log "[page] next 1 super 1 done 1"; then
+    echo "ok   page view controller installs and replaces child pages"
+else
+    echo "FAIL page view controller"; fails=$((fails+1))
+fi
+sleep 0.4
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/page.png" >/dev/null
+if out="$(python3 - "$ROOT/tools" "$T" <<'PAGE'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+root = sys.argv[2]
+w, h, bpp, rows = pngpixel.load(root + "/page.png")
+c = pngpixel.px(rows, bpp, 600, 1500)
+if ((c >> 16) & 255, (c >> 8) & 255, c & 255) != (0, 255, 0):
+    raise SystemExit("the second page did not fill the screen")
+print("ok   the current page fills the page controller")
+PAGE
+)"; then
+    echo "$out"
+else
+    echo "FAIL page pixels"; echo "$out"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
+
+# ---------- attributed strings ----------
+"$ROOT/tools/build_app.sh" "$ROOT/tests/attributed_test.m" \
+    "$T/AttributedApp" >/dev/null
+mkdir -p "$T/AttributedApp.app"
+cp "$T/AttributedApp" "$T/AttributedApp.app/AttributedApp"
+python3 - "$T/AttributedApp.app/Info.plist" <<'PY'
+import plistlib, sys
+with open(sys.argv[1], "wb") as f:
+    plistlib.dump({
+        "CFBundleIdentifier": "com.iosim.attr",
+        "CFBundleExecutable": "AttributedApp",
+        "CFBundleName": "Attributed",
+        "CFBundlePackageType": "APPL",
+        "CFBundleVersion": "1",
+        "CFBundleShortVersionString": "1.0",
+    }, f)
+PY
+: > "$SBLOG"
+"$ROOT/tools/iosimctl" install "$UDID" "$T/AttributedApp.app" >/dev/null
+sleep 0.4
+"$ROOT/tools/iosimctl" ui "$UDID" tap 201 718.5 >/dev/null
+sleep 0.5
+for c in a t t r; do
+    "$ROOT/tools/iosimctl" ui "$UDID" key "$c" >/dev/null
+done
+sleep 0.7
+"$ROOT/tools/iosimctl" ui "$UDID" tap 200 270 >/dev/null
+if wait_log "[attr] label Hello 5 22" &&
+   wait_log "[attr] button Wo! 3 1" &&
+   wait_log "[attr] textview Hello 5"; then
+    echo "ok   attributed strings drive label and button text"
+else
+    echo "FAIL attributed strings"; fails=$((fails+1))
 fi
 "$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
 

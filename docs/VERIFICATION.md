@@ -1450,6 +1450,77 @@ uses `PNGDataWithActions:` to write a 40x40 green PNG to
 checks the log's `written 1`, samples the image view for blue and red pixels,
 then loads the PNG file with Python and requires its center pixel to be green.
 
+### Attributed strings
+
+`tests/attributed_test.m` assigns an attributed string with a bold 22pt red
+font to a label, and a mutated attributed string to a button. The suite
+requires `[attr] label Hello 5 22` and `[attr] button Wo! 3 1`.
+
+### Page view controllers
+
+`tests/pageview_test.m` installs a scroll-style horizontal page controller as a
+child of the root controller, sets a red page, then replaces it with a green
+one. The suite requires `[page] pages 1 children 1 parent 1 root 1`,
+`[page] next 1 super 1 done 1` and a green center pixel.
+
+### Foundation helpers
+
+`tests/foundation_extra_test.m` exercises `NSCharacterSet` trimming, numeric
+string conversion, capitalization, percent decoding, mutable character sets,
+range replacement and lookup, and UIFont weights. The suite requires every
+logged result, including `[fnd] trim 'Hello World'`,
+`[fnd] font 14 System 20`, `[fnd] color 1 0 0 1.0 0.1 0.4 1.0 0.25`,
+`[fnd] desc 17 17`, `[fnd] readable 16 0 370 874` and
+`[fnd] props 1 0 1 3`.
+
+### Mask views and interaction
+
+`tests/mask_interaction_test.m` overlays a disabled red view on a green view
+and masks a blue view with a white half-width view. The suite requires the
+hit test to return the green view with `[mask] hit 1 enabled 0`, the red
+overlay to still draw, the masked view blue on the covered half and black on
+the other.
+
+### Radial gradients
+
+`tests/radial_gradient_test.m` draws a red-to-blue radial layer and a rounded
+yellow-to-purple one. The suite requires a red center and blue edge on the
+first, a yellow center, black rounded corner and blended top edge on the
+second, and the log line
+`[radial] scene 1 windows 1 key 1 scenes 1 level 2000` from the window/scene
+APIs.
+
+### Layout margins
+
+`tests/layout_margins_test.m` gives a 200x200 container 20-point margins and
+pins a green child to all four edges of its `layoutMarginsGuide`. The suite
+requires the log lines `[margins] edges 20 20 20 20` and
+`[margins] guide 20 20 160 160`, a dark-gray margin band at (60, 310) and
+(60, 490), green through the child's inset rectangle, and black outside the
+container. The controller then adds 10/12 points of
+`additionalSafeAreaInsets`; the suite requires `[margins] safe 72 46`,
+`[margins] safeguide 0 72 402 756`, and `[margins] color 1 255 128 0 1 0.25`
+from the UIColor getters.
+
+### Custom backing layers
+
+`tests/layer_custom_test.m` subclasses `UIView` and returns
+`[CAGradientLayer class]` from `+layerClass`, then sets a red-to-blue horizontal
+gradient on the view's own layer. The suite screenshots and requires red at
+(60, 350), blue at (240, 350), a blended purple midpoint, black outside the
+frame and a green sibling view. The fixture also adds two keyed animations and
+logs `[layer] keys 2 1`, then calls `removeAllAnimations` and logs
+`[layer] after 0 1`.
+
+### Animation delegate callbacks
+
+`tests/animation_delegate_test.m` adds three opacity animations with a shared
+delegate: a 0.3 s fade, a 2 s fade and an infinite repeat. At 0.1 s it removes
+the two long-running animations. The suite requires exactly three start
+callbacks, one `animationDidStop:finished:YES` (the fade) and two
+`finished:NO` (the removals), and the fixture's final counts line to read
+`[delegate] counts 3 3`.
+
 ### Layer contents, safe areas and small APIs
 
 `tests/contents_test.m` renders a 40x20 red/blue image and puts it in two

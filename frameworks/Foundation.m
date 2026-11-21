@@ -15,6 +15,8 @@ extern int   iosim_dispatch_drain_main(void);
 extern double iosim_now(void);
 extern double iosim_wall_time(void);
 extern int usleep(unsigned int usec);
+extern long strtol(const char *s, char **end, int base);
+extern double strtod(const char *s, char **end);
 extern int pthread_main_np(void);
 extern void *_Block_copy(void *block);
 extern void _Block_release(void *block);
@@ -1545,6 +1547,306 @@ static char *format_va(const char *fmt, va_list ap)
     if (!n || !*n)
         return NO;
     return strstr(iosim_string_cstr(self), n) != 0;
+}
+- (id)stringByTrimmingCharactersInSet:(NSCharacterSet *)set
+{
+    const char *s = iosim_string_cstr(self);
+    unsigned long len = strlen(s);
+    unsigned long start = 0, end = len;
+    while (start < end && [set characterIsMember:(unsigned short)(unsigned char)s[start]])
+        start++;
+    while (end > start &&
+           [set characterIsMember:(unsigned short)(unsigned char)s[end - 1]])
+        end--;
+    char *buf = malloc(end - start + 1);
+    if (!buf)
+        return self;
+    memcpy(buf, s + start, end - start);
+    buf[end - start] = 0;
+    id result = [[[NSString alloc] initWithUTF8String:buf] autorelease];
+    free(buf);
+    return result;
+}
+- (id)stringByReplacingCharactersInRange:(NSRange)range withString:(id)replacement
+{
+    const char *s = iosim_string_cstr(self);
+    const char *r = iosim_string_cstr(replacement);
+    unsigned long len = strlen(s);
+    if (range.location > len)
+        range.location = len;
+    if (range.location + range.length > len)
+        range.length = len - range.location;
+    unsigned long rlen = r ? strlen(r) : 0;
+    char *buf = malloc(len - range.length + rlen + 1);
+    if (!buf)
+        return self;
+    memcpy(buf, s, range.location);
+    if (rlen)
+        memcpy(buf + range.location, r, rlen);
+    strcpy(buf + range.location + rlen, s + range.location + range.length);
+    id result = [[[NSString alloc] initWithUTF8String:buf] autorelease];
+    free(buf);
+    return result;
+}
+- (NSRange)rangeOfString:(id)needle
+{
+    const char *s = iosim_string_cstr(self);
+    const char *n = iosim_string_cstr(needle);
+    if (!n || !*n)
+        return NSMakeRange(NSNotFound, 0);
+    const char *found = strstr(s, n);
+    if (!found)
+        return NSMakeRange(NSNotFound, 0);
+    return NSMakeRange((unsigned long)(found - s), strlen(n));
+}
+- (id)capitalizedString
+{
+    char *buf = copy_cstr(iosim_string_cstr(self), 0);
+    if (!buf)
+        return self;
+    int start = 1;
+    for (char *p = buf; *p; p++)
+    {
+        char c = *p;
+        if (c >= 'A' && c <= 'Z')
+            c += 32;
+        if (start && c >= 'a' && c <= 'z')
+            c -= 32;
+        *p = c;
+        start = (c < 'a' || c > 'z') && (c < 'A' || c > 'Z');
+    }
+    id result = [[[NSString alloc] initWithUTF8String:buf] autorelease];
+    free(buf);
+    return result;
+}
+static int hex_digit(char c)
+{
+    if (c >= '0' && c <= '9')
+        return c - '0';
+    if (c >= 'a' && c <= 'f')
+        return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F')
+        return c - 'A' + 10;
+    return -1;
+}
+- (id)stringByRemovingPercentEncoding
+{
+    const char *s = iosim_string_cstr(self);
+    unsigned long len = strlen(s);
+    char *buf = malloc(len + 1);
+    if (!buf)
+        return self;
+    unsigned long out = 0;
+    for (unsigned long i = 0; i < len; i++)
+    {
+        if (s[i] == '%' && i + 2 < len)
+        {
+            int hi = hex_digit(s[i + 1]), lo = hex_digit(s[i + 2]);
+            if (hi >= 0 && lo >= 0)
+            {
+                buf[out++] = (char)((hi << 4) | lo);
+                i += 2;
+                continue;
+            }
+        }
+        buf[out++] = s[i];
+    }
+    buf[out] = 0;
+    id result = [[[NSString alloc] initWithUTF8String:buf] autorelease];
+    free(buf);
+    return result;
+}
+- (long)integerValue { return strtol(iosim_string_cstr(self), 0, 10); }
+- (int)intValue { return (int)[self integerValue]; }
+- (double)doubleValue { return strtod(iosim_string_cstr(self), 0); }
+- (float)floatValue { return (float)[self doubleValue]; }
+- (BOOL)boolValue
+{
+    const char *s = iosim_string_cstr(self);
+    while (*s == ' ' || *s == '\t' || *s == '\n' || *s == '\r')
+        s++;
+    if (*s == 'Y' || *s == 'y' || *s == 'T' || *s == 't')
+        return YES;
+    return *s >= '1' && *s <= '9';
+}
+@end
+
+static id character_set_from_cstr(const char *chars)
+{
+    NSCharacterSet *set = [[NSCharacterSet alloc] init];
+    set->_cstr = copy_cstr(chars, &set->_length);
+    return [set autorelease];
+}
+
+@implementation NSCharacterSet
++ (id)whitespaceCharacterSet { return character_set_from_cstr(" \t"); }
++ (id)whitespaceAndNewlineCharacterSet { return character_set_from_cstr(" \t\n\r\v\f"); }
++ (id)newlineCharacterSet { return character_set_from_cstr("\n\r"); }
++ (id)alphanumericCharacterSet
+{
+    char chars[63];
+    int n = 0;
+    for (char c = 'a'; c <= 'z'; c++) chars[n++] = c;
+    for (char c = 'A'; c <= 'Z'; c++) chars[n++] = c;
+    for (char c = '0'; c <= '9'; c++) chars[n++] = c;
+    chars[n] = 0;
+    return character_set_from_cstr(chars);
+}
++ (id)decimalDigitCharacterSet { return character_set_from_cstr("0123456789"); }
++ (id)letterCharacterSet
+{
+    char chars[53];
+    int n = 0;
+    for (char c = 'a'; c <= 'z'; c++) chars[n++] = c;
+    for (char c = 'A'; c <= 'Z'; c++) chars[n++] = c;
+    chars[n] = 0;
+    return character_set_from_cstr(chars);
+}
++ (id)characterSetWithCharactersInString:(id)string
+{
+    return character_set_from_cstr(iosim_string_cstr(string));
+}
+- (BOOL)characterIsMember:(unsigned short)character
+{
+    if (character == 0)
+        return NO;
+    return _cstr && strchr(_cstr, (int)character) != 0;
+}
+- (id)mutableCopy
+{
+    NSMutableCharacterSet *copy = [[NSMutableCharacterSet alloc] init];
+    copy->_cstr = _cstr ? copy_cstr(_cstr, &copy->_length) : 0;
+    return copy;
+}
+@end
+
+@implementation NSMutableCharacterSet
+- (void)addCharactersInString:(id)string
+{
+    const char *add = iosim_string_cstr(string);
+    if (!add)
+        return;
+    unsigned long alen = strlen(add);
+    unsigned long old = _cstr ? strlen(_cstr) : 0;
+    char *buf = malloc(old + alen + 1);
+    if (!buf)
+        return;
+    if (_cstr)
+        memcpy(buf, _cstr, old);
+    unsigned long out = old;
+    for (unsigned long i = 0; i < alen; i++)
+        if (!_cstr || !strchr(_cstr, add[i]))
+            buf[out++] = add[i];
+    buf[out] = 0;
+    free(_cstr);
+    _cstr = buf;
+    _length = out;
+}
+- (void)removeCharactersInString:(id)string
+{
+    const char *remove = iosim_string_cstr(string);
+    if (!_cstr || !remove)
+        return;
+    unsigned long out = 0;
+    for (unsigned long i = 0; _cstr[i]; i++)
+        if (!strchr(remove, _cstr[i]))
+            _cstr[out++] = _cstr[i];
+    _cstr[out] = 0;
+    _length = out;
+}
+@end
+
+@implementation NSAttributedString
+- (id)initWithString:(id)string
+{
+    self = [super init];
+    if (self)
+        _string = string;
+    return self;
+}
+- (id)initWithString:(id)string attributes:(id)attributes
+{
+    self = [self initWithString:string];
+    if (self)
+        _attributes = attributes;
+    return self;
+}
+- (id)string { return _string; }
+- (unsigned long)length { return _string ? [_string length] : 0; }
+- (id)attributesAtIndex:(unsigned long)index effectiveRange:(NSRange *)range
+{
+    (void)index;
+    if (range)
+        *range = NSMakeRange(0, [self length]);
+    return _attributes ? _attributes : [NSDictionary dictionary];
+}
+@end
+
+static id mutable_attribute_copy(id attributes)
+{
+    NSMutableDictionary *copy = [NSMutableDictionary dictionary];
+    if (!attributes)
+        return copy;
+    NSArray *keys = [attributes allKeys];
+    for (unsigned long i = 0; i < [keys count]; i++)
+    {
+        id key = [keys objectAtIndex:i];
+        [copy setObject:[attributes objectForKey:key] forKey:key];
+    }
+    return copy;
+}
+
+@implementation NSMutableAttributedString
+- (id)initWithString:(id)string
+{
+    self = [super initWithString:string];
+    if (self)
+        _attributes = [NSMutableDictionary dictionary];
+    return self;
+}
+- (id)initWithString:(id)string attributes:(id)attributes
+{
+    self = [super initWithString:string];
+    if (self)
+        _attributes = mutable_attribute_copy(attributes);
+    return self;
+}
+- (void)addAttribute:(id)name value:(id)value range:(NSRange)range
+{
+    (void)range;
+    if (!_attributes)
+        _attributes = [NSMutableDictionary dictionary];
+    [(NSMutableDictionary *)_attributes setObject:value forKey:name];
+}
+- (void)addAttributes:(id)attributes range:(NSRange)range
+{
+    (void)range;
+    if (!_attributes)
+        _attributes = [NSMutableDictionary dictionary];
+    NSArray *keys = [attributes allKeys];
+    for (unsigned long i = 0; i < [keys count]; i++)
+    {
+        id key = [keys objectAtIndex:i];
+        [(NSMutableDictionary *)_attributes
+            setObject:[attributes objectForKey:key] forKey:key];
+    }
+}
+- (void)setAttributes:(id)attributes range:(NSRange)range
+{
+    (void)range;
+    _attributes = mutable_attribute_copy(attributes);
+}
+- (void)replaceCharactersInRange:(NSRange)range withString:(id)string
+{
+    _string = [_string stringByReplacingCharactersInRange:range
+                                               withString:string];
+}
+- (void)appendAttributedString:(id)other
+{
+    if (!other)
+        return;
+    _string = _string ? [_string stringByAppendingString:[other string]]
+                      : [other string];
 }
 @end
 
