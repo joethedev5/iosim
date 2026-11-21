@@ -455,6 +455,10 @@ dictionary and render the plain string. `UIViewController` keeps a small
 child list with parent links, and
 `UIPageViewController` installs the current page as a child view when its view
 loads and swaps pages by removing and adding subviews.
+`UISplitViewController` installs primary and secondary controllers as
+children and a container view lays them out side by side at 700pt and wider,
+collapsing to the secondary controller below that width; `displayMode`,
+column-width settings and the will-change delegate callback are tracked.
 `NSCharacterSet` stores a byte membership table, which backs string trimming
 and the mutable set operations. UIFont carries size, boldness and an optional
 face name, enough for weight, italic, monospaced, named and descriptor-based

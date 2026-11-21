@@ -1437,6 +1437,64 @@ enum {
 @property(getter=isDoubleSided) BOOL doubleSided;
 @end
 
+enum {
+    UISplitViewControllerStyleAutomatic = 0,
+    UISplitViewControllerStyleDoubleColumn = 1,
+    UISplitViewControllerStyleTripleColumn = 2
+};
+
+enum {
+    UISplitViewControllerColumnPrimary = 0,
+    UISplitViewControllerColumnSupplementary = 1,
+    UISplitViewControllerColumnSecondary = 2,
+    UISplitViewControllerColumnCompact = 3
+};
+
+enum {
+    UISplitViewControllerDisplayModeAutomatic = 0,
+    UISplitViewControllerDisplayModeSecondaryOnly = 1,
+    UISplitViewControllerDisplayModePrimaryHidden = 1,
+    UISplitViewControllerDisplayModeOneBesideSecondary = 2,
+    UISplitViewControllerDisplayModeAllVisible = 2,
+    UISplitViewControllerDisplayModeOneOverSecondary = 3,
+    UISplitViewControllerDisplayModePrimaryOverlay = 3,
+    UISplitViewControllerDisplayModeTwoBesideSecondary = 4,
+    UISplitViewControllerDisplayModeTwoOverSecondary = 5,
+    UISplitViewControllerDisplayModeTwoDisplaceSecondary = 6
+};
+
+@class UISplitViewController;
+
+@protocol UISplitViewControllerDelegate
+@optional
+- (BOOL)splitViewController:(UISplitViewController *)splitViewController
+    collapseSecondaryViewController:(UIViewController *)secondaryViewController
+        ontoPrimaryViewController:(UIViewController *)primaryViewController;
+- (void)splitViewController:(UISplitViewController *)splitViewController
+       willChangeToDisplayMode:(long)displayMode;
+@end
+
+@interface UISplitViewController : UIViewController
+- (id)initWithStyle:(long)style;
+@property(copy) NSArray *viewControllers;
+@property(nonatomic, assign) id<UISplitViewControllerDelegate> delegate;
+@property(readonly) long style;
+@property long preferredDisplayMode;
+@property(readonly) long displayMode;
+@property(getter=isCollapsed, readonly) BOOL collapsed;
+@property(readonly) UIViewController *primaryViewController;
+@property(readonly) UIViewController *secondaryViewController;
+- (void)setViewController:(UIViewController *)viewController
+                 forColumn:(long)column;
+- (UIViewController *)viewControllerForColumn:(long)column;
+@property double preferredPrimaryColumnWidthFraction;
+@property(readonly) double primaryColumnWidth;
+@property double minimumPrimaryColumnWidth;
+@property double maximumPrimaryColumnWidth;
+- (void)toggleMasterVisible:(id)sender;
+- (void)viewWillLayoutSubviews;
+@end
+
 @interface UISegmentedControl : UIView
 - (id)initWithItems:(NSArray *)items;
 - (void)setSelectedSegmentIndex:(long)index;

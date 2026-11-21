@@ -235,6 +235,24 @@ extern int fflush(void *stream);
            [[[[NSURL fileURLWithPath:@"/tmp/a"]
                URLByAppendingPathExtension:@"txt"] path] UTF8String]);
 
+    UISplitViewController *split = [[UISplitViewController alloc]
+        initWithStyle:UISplitViewControllerStyleDoubleColumn];
+    UIViewController *left = [[UIViewController alloc] init];
+    UIViewController *right = [[UIViewController alloc] init];
+    left.view = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 100, 100)];
+    right.view = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 100, 100)];
+    [split setViewControllers:@[left, right]];
+    UIView *splitRoot = [split view];
+    splitRoot.frame = CGRectMake(0, 0, 1024, 768);
+    [split viewWillLayoutSubviews];
+    printf("[fnd] split %d %ld %.0f %.0f %.0f %lu %d\n",
+           [split isCollapsed], [split displayMode],
+           [left.view frame].size.width,
+           [right.view frame].origin.x, [right.view frame].size.width,
+           (unsigned long)[[split children] count],
+           [split viewControllerForColumn:UISplitViewControllerColumnPrimary]
+               == left);
+
     printf("[fnd] ready\n");
     fflush(0);
 }

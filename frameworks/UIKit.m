@@ -2896,6 +2896,96 @@ enum {
 - (void)installCurrentPage;
 @end
 
+enum {
+    UISplitViewControllerStyleAutomatic = 0,
+    UISplitViewControllerStyleDoubleColumn = 1,
+    UISplitViewControllerStyleTripleColumn = 2
+};
+
+enum {
+    UISplitViewControllerColumnPrimary = 0,
+    UISplitViewControllerColumnSupplementary = 1,
+    UISplitViewControllerColumnSecondary = 2,
+    UISplitViewControllerColumnCompact = 3
+};
+
+enum {
+    UISplitViewControllerDisplayModeAutomatic = 0,
+    UISplitViewControllerDisplayModeSecondaryOnly = 1,
+    UISplitViewControllerDisplayModePrimaryHidden = 1,
+    UISplitViewControllerDisplayModeOneBesideSecondary = 2,
+    UISplitViewControllerDisplayModeAllVisible = 2,
+    UISplitViewControllerDisplayModeOneOverSecondary = 3,
+    UISplitViewControllerDisplayModePrimaryOverlay = 3,
+    UISplitViewControllerDisplayModeTwoBesideSecondary = 4,
+    UISplitViewControllerDisplayModeTwoOverSecondary = 5,
+    UISplitViewControllerDisplayModeTwoDisplaceSecondary = 6
+};
+
+@class UISplitViewController;
+
+@protocol UISplitViewControllerDelegate
+@optional
+- (BOOL)splitViewController:(UISplitViewController *)splitViewController
+    collapseSecondaryViewController:(UIViewController *)secondaryViewController
+        ontoPrimaryViewController:(UIViewController *)primaryViewController;
+- (UIViewController *)primaryViewControllerForCollapsingSplitViewController:
+    (UISplitViewController *)splitViewController;
+- (UIViewController *)primaryViewControllerForExpandingSplitViewController:
+    (UISplitViewController *)splitViewController;
+- (void)splitViewController:(UISplitViewController *)splitViewController
+       willChangeToDisplayMode:(long)displayMode;
+- (long)splitViewController:(UISplitViewController *)splitViewController
+    displayModeForExpandingToProposedDisplayMode:(long)proposedDisplayMode;
+- (long)targetDisplayModeForActionInSplitViewController:
+    (UISplitViewController *)splitViewController;
+- (BOOL)splitViewController:(UISplitViewController *)splitViewController
+       showDetailViewController:(UIViewController *)viewController
+                         sender:(id)sender;
+- (BOOL)splitViewController:(UISplitViewController *)splitViewController
+           showViewController:(UIViewController *)viewController
+                         sender:(id)sender;
+@end
+
+@interface UISplitViewController : UIViewController {
+@public
+    UIViewController *_splitPrimary;
+    UIViewController *_splitSecondary;
+    id _splitDelegate;
+    long _splitStyle;
+    long _preferredDisplayMode;
+    double _preferredPrimaryColumnWidthFraction;
+    double _minimumPrimaryColumnWidth;
+    double _maximumPrimaryColumnWidth;
+}
+- (id)initWithStyle:(long)style;
+- (NSArray *)viewControllers;
+- (void)setViewControllers:(NSArray *)viewControllers;
+- (id)delegate;
+- (void)setDelegate:(id)delegate;
+- (long)style;
+- (long)preferredDisplayMode;
+- (void)setPreferredDisplayMode:(long)mode;
+- (long)displayMode;
+- (BOOL)isCollapsed;
+- (UIViewController *)primaryViewController;
+- (UIViewController *)secondaryViewController;
+- (void)setViewController:(UIViewController *)viewController
+                 forColumn:(long)column;
+- (UIViewController *)viewControllerForColumn:(long)column;
+- (double)preferredPrimaryColumnWidthFraction;
+- (void)setPreferredPrimaryColumnWidthFraction:(double)fraction;
+- (double)primaryColumnWidth;
+- (double)minimumPrimaryColumnWidth;
+- (void)setMinimumPrimaryColumnWidth:(double)width;
+- (double)maximumPrimaryColumnWidth;
+- (void)setMaximumPrimaryColumnWidth:(double)width;
+- (BOOL)showsSecondaryOnlyButton;
+- (void)toggleMasterVisible:(id)sender;
+- (void)installControllers;
+- (void)layoutColumns;
+@end
+
 @class UIScrollView;
 
 @protocol UIScrollViewDelegate
@@ -8193,6 +8283,275 @@ static int iosim_text_press_tick(void)
 - (long)spineLocation { return _spineLocation; }
 - (BOOL)isDoubleSided { return _doubleSided; }
 - (void)setDoubleSided:(BOOL)doubleSided { _doubleSided = doubleSided; }
+@end
+
+@interface UISplitContainerView : UIView {
+@public
+    UISplitViewController *_split;
+}
+@end
+
+@implementation UISplitContainerView
+- (void)layoutSubviews
+{
+    [super layoutSubviews];
+    if (_split)
+        [_split layoutColumns];
+}
+@end
+
+@implementation UISplitViewController
+- (id)init
+{
+    return [self initWithStyle:UISplitViewControllerStyleAutomatic];
+}
+- (id)initWithStyle:(long)style
+{
+    self = [super init];
+    if (self)
+    {
+        _splitStyle = style;
+        _preferredDisplayMode = UISplitViewControllerDisplayModeAutomatic;
+        _preferredPrimaryColumnWidthFraction = 0.3;
+        _minimumPrimaryColumnWidth = 0;
+        _maximumPrimaryColumnWidth = 1000000;
+    }
+    return self;
+}
+- (void)loadView
+{
+    UISplitContainerView *root = [[UISplitContainerView alloc]
+        initWithFrame:[[UIScreen mainScreen] bounds]];
+    root->_split = self;
+    root.backgroundColor = [UIColor clearColor];
+    self.view = root;
+    [self installControllers];
+}
+- (NSArray *)viewControllers
+{
+    NSMutableArray *controllers = [NSMutableArray array];
+    if (_splitPrimary)
+        [controllers addObject:_splitPrimary];
+    if (_splitSecondary)
+        [controllers addObject:_splitSecondary];
+    return controllers;
+}
+- (void)setViewControllers:(NSArray *)viewControllers
+{
+    _splitPrimary = [viewControllers count] > 0
+        ? [viewControllers objectAtIndex:0] : nil;
+    _splitSecondary = [viewControllers count] > 1
+        ? [viewControllers objectAtIndex:1] : nil;
+    if ([self isViewLoaded])
+        [self installControllers];
+}
+- (id)delegate { return _splitDelegate; }
+- (void)setDelegate:(id)delegate { _splitDelegate = delegate; }
+- (long)style { return _splitStyle; }
+- (long)preferredDisplayMode { return _preferredDisplayMode; }
+- (void)setPreferredDisplayMode:(long)mode
+{
+    if (_preferredDisplayMode == mode)
+        return;
+    long previous = [self displayMode];
+    _preferredDisplayMode = mode;
+    long current = [self displayMode];
+    if (previous != current && _splitDelegate &&
+        [_splitDelegate respondsToSelector:
+            @selector(splitViewController:willChangeToDisplayMode:)])
+        [_splitDelegate splitViewController:self
+                       willChangeToDisplayMode:current];
+    if ([self isViewLoaded])
+        [self layoutColumns];
+}
+- (long)displayMode
+{
+    if (_preferredDisplayMode != UISplitViewControllerDisplayModeAutomatic)
+        return _preferredDisplayMode;
+    return UISplitViewControllerDisplayModeAllVisible;
+}
+- (BOOL)isCollapsed
+{
+    if (!_view)
+        return NO;
+    return _view.bounds.size.width < 700;
+}
+- (UIViewController *)primaryViewController { return _splitPrimary; }
+- (UIViewController *)secondaryViewController { return _splitSecondary; }
+- (void)setViewController:(UIViewController *)viewController
+                forColumn:(long)column
+{
+    if (column == UISplitViewControllerColumnPrimary)
+        _splitPrimary = viewController;
+    else if (column == UISplitViewControllerColumnSecondary ||
+             column == UISplitViewControllerColumnSupplementary)
+        _splitSecondary = viewController;
+    if ([self isViewLoaded])
+        [self installControllers];
+}
+- (UIViewController *)viewControllerForColumn:(long)column
+{
+    if (column == UISplitViewControllerColumnPrimary)
+        return _splitPrimary;
+    if (column == UISplitViewControllerColumnSecondary ||
+        column == UISplitViewControllerColumnSupplementary)
+        return _splitSecondary;
+    return nil;
+}
+- (double)preferredPrimaryColumnWidthFraction
+{
+    return _preferredPrimaryColumnWidthFraction;
+}
+- (void)setPreferredPrimaryColumnWidthFraction:(double)fraction
+{
+    if (fraction < 0)
+        fraction = 0;
+    if (fraction > 1)
+        fraction = 1;
+    _preferredPrimaryColumnWidthFraction = fraction;
+    if ([self isViewLoaded])
+        [self layoutColumns];
+}
+- (double)primaryColumnWidth
+{
+    double width = _view ? _view.bounds.size.width
+                         : [[UIScreen mainScreen] bounds].size.width;
+    double column = width * _preferredPrimaryColumnWidthFraction;
+    if (column < _minimumPrimaryColumnWidth)
+        column = _minimumPrimaryColumnWidth;
+    if (column > _maximumPrimaryColumnWidth)
+        column = _maximumPrimaryColumnWidth;
+    if (column > width)
+        column = width;
+    return column;
+}
+- (double)minimumPrimaryColumnWidth { return _minimumPrimaryColumnWidth; }
+- (void)setMinimumPrimaryColumnWidth:(double)width
+{
+    _minimumPrimaryColumnWidth = width;
+    if ([self isViewLoaded])
+        [self layoutColumns];
+}
+- (double)maximumPrimaryColumnWidth { return _maximumPrimaryColumnWidth; }
+- (void)setMaximumPrimaryColumnWidth:(double)width
+{
+    _maximumPrimaryColumnWidth = width;
+    if ([self isViewLoaded])
+        [self layoutColumns];
+}
+- (BOOL)showsSecondaryOnlyButton { return NO; }
+- (void)toggleMasterVisible:(id)sender
+{
+    (void)sender;
+    _preferredDisplayMode = ([self displayMode] ==
+        UISplitViewControllerDisplayModeSecondaryOnly)
+        ? UISplitViewControllerDisplayModeAllVisible
+        : UISplitViewControllerDisplayModeSecondaryOnly;
+    if ([self isViewLoaded])
+        [self layoutColumns];
+}
+- (void)installControllers
+{
+    if (!_view)
+        return;
+    NSArray *subviews = [_view subviews];
+    for (unsigned long i = 0; i < [subviews count]; i++)
+        [[subviews objectAtIndex:i] removeFromSuperview];
+    NSArray *existing = [self children];
+    for (unsigned long i = 0; i < [existing count]; i++)
+    {
+        UIViewController *child = [existing objectAtIndex:i];
+        [child willMoveToParentViewController:nil];
+        [child removeFromParentViewController];
+        [child didMoveToParentViewController:nil];
+    }
+    if (_splitPrimary)
+    {
+        [self addChildViewController:_splitPrimary];
+        [_splitPrimary willMoveToParentViewController:self];
+        [_view addSubview:[_splitPrimary view]];
+        [_splitPrimary didMoveToParentViewController:self];
+    }
+    if (_splitSecondary)
+    {
+        [self addChildViewController:_splitSecondary];
+        [_splitSecondary willMoveToParentViewController:self];
+        [_view addSubview:[_splitSecondary view]];
+        [_splitSecondary didMoveToParentViewController:self];
+    }
+    [self layoutColumns];
+}
+- (void)layoutColumns
+{
+    if (!_view)
+        return;
+    CGRect bounds = _view.bounds;
+    UIView *primary = _splitPrimary ? [_splitPrimary view] : nil;
+    UIView *secondary = _splitSecondary ? [_splitSecondary view] : nil;
+    if ([self isCollapsed])
+    {
+        if (primary)
+        {
+            primary.hidden = secondary != nil;
+            primary.frame = bounds;
+        }
+        if (secondary)
+        {
+            secondary.hidden = NO;
+            secondary.frame = bounds;
+        }
+        return;
+    }
+    long mode = [self displayMode];
+    if (mode == UISplitViewControllerDisplayModeSecondaryOnly)
+    {
+        if (primary)
+            primary.hidden = YES;
+        if (secondary)
+        {
+            secondary.hidden = NO;
+            secondary.frame = bounds;
+        }
+        return;
+    }
+    if (!secondary)
+    {
+        if (primary)
+        {
+            primary.hidden = NO;
+            primary.frame = bounds;
+        }
+        return;
+    }
+    double width = [self primaryColumnWidth];
+    if (primary)
+    {
+        primary.hidden = NO;
+        primary.frame = CGRectMake(0, 0, width, bounds.size.height);
+    }
+    secondary.hidden = NO;
+    secondary.frame = CGRectMake(width, 0, bounds.size.width - width,
+                                 bounds.size.height);
+}
+- (void)viewWillLayoutSubviews
+{
+    [self layoutColumns];
+}
+- (void)showViewController:(UIViewController *)viewController sender:(id)sender
+{
+    (void)sender;
+    _splitPrimary = viewController;
+    if ([self isViewLoaded])
+        [self installControllers];
+}
+- (void)showDetailViewController:(UIViewController *)viewController
+                          sender:(id)sender
+{
+    (void)sender;
+    _splitSecondary = viewController;
+    if ([self isViewLoaded])
+        [self installControllers];
+}
 @end
 
 @implementation UIStepper

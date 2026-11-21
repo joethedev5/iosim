@@ -1767,7 +1767,9 @@ full 2D affine transform (translation, scale and rotation) through an offscreen
 composite; animating one interpolates decomposed rotation, scale and
 translation, and touch conversion and hit-testing invert the transform, but
 skewed transforms interpolate as their nearest rotation plus scale.
-`CATransform3D` is not supported. Core Animation keeps four
+`UISplitViewController` supports the double-column primary/secondary layout
+and its compact collapse; supplementary and triple-column layouts are not
+modeled. `CATransform3D` is not supported. Core Animation keeps four
 explicit animation slots per layer, and `CADisplayLink` ignores preferred
 frame-rate ranges. XPC carries dictionaries
 and value objects between processes but not connections, file descriptors or
