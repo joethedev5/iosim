@@ -1778,6 +1778,18 @@ fi
 "$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
 sleep 0.4
 
+# ---------- collection supplementary header/footer views ----------
+"$ROOT/tools/build_app.sh" "$ROOT/tests/collection_supplementary_test.m" \
+    "$T/collection_supplementary_test" >/dev/null
+out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" \
+    "$T/collection_supplementary_test" 2>&1)"
+check "[supp] frames 0 10 390 40 0 130 390 30" "$out" \
+    "flow layout places reusable headers and footers around the section"
+check "[supp] sections 0 0 content 170 subviews 4" "$out" \
+    "supplementary views join the collection and content size includes them"
+check "[supp] classes 1 1" "$out" \
+    "dequeue returns the registered header and footer classes"
+
 # ---------- 9n. UIPickerView wheels, taps and drags ----------
 "$ROOT/tools/build_app.sh" "$ROOT/demo/PickerApp.m" "$T/PickerApp" >/dev/null
 mkdir -p "$T/PickerApp.app"

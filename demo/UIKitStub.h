@@ -2210,6 +2210,8 @@ enum {
     UICollectionViewScrollDirectionVertical = 0,
     UICollectionViewScrollDirectionHorizontal = 1
 };
+extern id UICollectionElementKindSectionHeader;
+extern id UICollectionElementKindSectionFooter;
 
 @interface UICollectionViewLayout : NSObject
 @end
@@ -2220,6 +2222,13 @@ enum {
 @property double minimumLineSpacing;
 @property UIEdgeInsets sectionInset;
 @property long scrollDirection;
+@property CGSize headerReferenceSize;
+@property CGSize footerReferenceSize;
+@end
+
+@interface UICollectionReusableView : UIView
+@property(readonly) id reuseIdentifier;
+- (void)prepareForReuse;
 @end
 
 @interface UICollectionViewCell : UIView
@@ -2239,6 +2248,12 @@ enum {
     forCellWithReuseIdentifier:(id)identifier;
 - (id)dequeueReusableCellWithReuseIdentifier:(id)identifier
                                forIndexPath:(NSIndexPath *)indexPath;
+- (void)registerClass:(Class)viewClass
+    forSupplementaryViewOfKind:(id)kind
+           withReuseIdentifier:(id)identifier;
+- (id)dequeueReusableSupplementaryViewOfKind:(id)kind
+                         withReuseIdentifier:(id)identifier
+                                forIndexPath:(NSIndexPath *)indexPath;
 - (void)reloadData;
 @property(nonatomic, retain) id prefetchDataSource;
 @property(nonatomic, retain) id dragDelegate;

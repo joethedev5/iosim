@@ -864,3 +864,8 @@ components.
   transform (`X=m11x+m21y+m41`, `Y=m12x+m22y+m42`,
   `W=(m14+m34*m13)x+(m24+m34*m23)y+...`) and calls a projective blit that
   inverse-maps each destination pixel. Pure 2D matrices keep the affine blit.
+- Collection supplementary views use a kind-keyed class registry and a
+  per-section data-source callback. The flow layout reserves header and footer
+  heights around each section, adds the returned views as subviews, and
+  includes those heights in content size and tap cursor math. Reuse is
+  allocate-per-reload, like cells.

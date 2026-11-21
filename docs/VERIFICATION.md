@@ -178,6 +178,17 @@ and the inter-section line space. Tapping (240, 140) reports
 so hit-testing runs over the same section geometry and index paths carry the
 section.
 
+### UIKit: collection supplementary views
+
+`tests/collection_supplementary_test.m` gives a one-section flow layout a
+40 pt header and 30 pt footer and registers `SuppHeader`/`SuppFooter` reusable
+classes. The data source returns them from
+`collectionView:viewForSupplementaryElementOfKind:atIndexPath:`; after
+`reloadData`, the header frame is (0, 10, 390, 40) and the footer is
+(0, 130, 390, 30), the content height is 170 pt and the collection holds four
+subviews (header, two cells, footer). The suite checks all three lines, so
+supplementary registration, dequeue, placement and content sizing agree.
+
 ### UIKit layout: navigation and stack views
 
 `demo/NavApp.m` builds a `UINavigationController` around two view controllers.

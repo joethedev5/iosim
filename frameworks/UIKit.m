@@ -3576,6 +3576,8 @@ enum {
     UICollectionViewScrollDirectionVertical = 0,
     UICollectionViewScrollDirectionHorizontal = 1
 };
+id UICollectionElementKindSectionHeader = @"UICollectionElementKindSectionHeader";
+id UICollectionElementKindSectionFooter = @"UICollectionElementKindSectionFooter";
 
 @interface UICollectionViewLayout : NSObject
 @end
@@ -3587,6 +3589,8 @@ enum {
     double _minimumLineSpacing;
     UIEdgeInsets _sectionInset;
     long _scrollDirection;
+    CGSize _headerReferenceSize;
+    CGSize _footerReferenceSize;
 }
 - (CGSize)itemSize;
 - (void)setItemSize:(CGSize)size;
@@ -3598,6 +3602,18 @@ enum {
 - (void)setSectionInset:(UIEdgeInsets)insets;
 - (long)scrollDirection;
 - (void)setScrollDirection:(long)direction;
+- (CGSize)headerReferenceSize;
+- (void)setHeaderReferenceSize:(CGSize)size;
+- (CGSize)footerReferenceSize;
+- (void)setFooterReferenceSize:(CGSize)size;
+@end
+
+@interface UICollectionReusableView : UIView {
+@public
+    id _reuseIdentifier;
+}
+- (id)reuseIdentifier;
+- (void)prepareForReuse;
 @end
 
 @interface UICollectionViewCell : UIView {
@@ -3619,6 +3635,8 @@ enum {
     UICollectionViewLayout *_collectionLayout;
     id _cellClasses;
     id _cells;
+    id _supplementaryClasses;
+    id _supplementaryViews;
     long _selectedItem;
     long _selectedSection;
     id _prefetchDataSource;
@@ -3640,6 +3658,12 @@ enum {
     forCellWithReuseIdentifier:(id)identifier;
 - (id)dequeueReusableCellWithReuseIdentifier:(id)identifier
                                forIndexPath:(NSIndexPath *)indexPath;
+- (void)registerClass:(Class)viewClass
+    forSupplementaryViewOfKind:(id)kind
+           withReuseIdentifier:(id)identifier;
+- (id)dequeueReusableSupplementaryViewOfKind:(id)kind
+                         withReuseIdentifier:(id)identifier
+                                forIndexPath:(NSIndexPath *)indexPath;
 - (void)reloadData;
 - (void)handleTapAtPoint:(CGPoint)point;
 - (id)prefetchDataSource;
@@ -14130,6 +14154,15 @@ static int table_can_edit_row(UITableView *table, long section, long row)
 - (void)setSectionInset:(UIEdgeInsets)insets { _sectionInset = insets; }
 - (long)scrollDirection { return _scrollDirection; }
 - (void)setScrollDirection:(long)direction { _scrollDirection = direction; }
+- (CGSize)headerReferenceSize { return _headerReferenceSize; }
+- (void)setHeaderReferenceSize:(CGSize)size { _headerReferenceSize = size; }
+- (CGSize)footerReferenceSize { return _footerReferenceSize; }
+- (void)setFooterReferenceSize:(CGSize)size { _footerReferenceSize = size; }
+@end
+
+@implementation UICollectionReusableView
+- (id)reuseIdentifier { return _reuseIdentifier; }
+- (void)prepareForReuse { }
 @end
 
 @implementation UICollectionViewCell
@@ -14265,6 +14298,8 @@ static int collection_columns(double width, double itemW, double interitem,
         _collectionLayout = layout;
         _cellClasses = [NSMutableDictionary dictionary];
         _cells = [NSMutableArray array];
+        _supplementaryClasses = [NSMutableDictionary dictionary];
+        _supplementaryViews = [NSMutableArray array];
         _selectedItem = -1;
         _selectedSection = -1;
         _allowsSelection = YES;
@@ -14342,6 +14377,47 @@ static int collection_columns(double width, double itemW, double interitem,
     cell->_reuseIdentifier = identifier;
     return cell;
 }
+- (void)registerClass:(Class)viewClass
+    forSupplementaryViewOfKind:(id)kind
+           withReuseIdentifier:(id)identifier
+{
+    if (kind && viewClass)
+        [_supplementaryClasses setObject:viewClass forKey:kind];
+    (void)identifier;
+}
+- (id)dequeueReusableSupplementaryViewOfKind:(id)kind
+                         withReuseIdentifier:(id)identifier
+                                forIndexPath:(NSIndexPath *)indexPath
+{
+    (void)indexPath;
+    Class cls = kind ? (Class)[_supplementaryClasses objectForKey:kind] : 0;
+    if (!cls)
+        cls = (Class)objc_getClass("UICollectionReusableView");
+    UICollectionReusableView *view =
+        [[cls alloc] initWithFrame:CGRectMake(0, 0, 0, 0)];
+    view->_reuseIdentifier = identifier;
+    return view;
+}
+- (UICollectionReusableView *)supplementaryViewOfKind:(id)kind
+                                              section:(long)section
+{
+    NSIndexPath *path = [NSIndexPath indexPathForRow:0 inSection:section];
+    UICollectionReusableView *view = nil;
+    if (_dataSource &&
+        [_dataSource respondsToSelector:
+            @selector(collectionView:viewForSupplementaryElementOfKind:atIndexPath:)])
+    {
+        SEL sel = @selector(collectionView:viewForSupplementaryElementOfKind:atIndexPath:);
+        view = (UICollectionReusableView *)((id (*)(id, void *, id, id, id))
+            objc_msgSend)(_dataSource, (void *)sel, self, kind, path);
+    }
+    if (!view)
+        view = (UICollectionReusableView *)[self
+            dequeueReusableSupplementaryViewOfKind:kind
+                               withReuseIdentifier:kind
+                                      forIndexPath:path];
+    return view;
+}
 - (void)reloadData
 {
     for (unsigned long i = 0; i < [_cells count]; i++)
@@ -14351,6 +14427,13 @@ static int collection_columns(double width, double itemW, double interitem,
             [(UIView *)cell removeFromSuperview];
     }
     [_cells removeAllObjects];
+    for (unsigned long i = 0; i < [_supplementaryViews count]; i++)
+    {
+        id view = [_supplementaryViews objectAtIndex:i];
+        if ([view isKindOfClass:[UIView class]])
+            [(UIView *)view removeFromSuperview];
+    }
+    [_supplementaryViews removeAllObjects];
 
     double itemW, itemH, interitem, line, left, right, top, bottom;
     collection_metrics(self, &itemW, &itemH, &interitem, &line,
@@ -14358,11 +14441,32 @@ static int collection_columns(double width, double itemW, double interitem,
     int columns = collection_columns(_frame.size.width, itemW, interitem,
                                      left, right);
     long sections = collection_sections(self);
+    UICollectionViewFlowLayout *flow =
+        _collectionLayout &&
+                [_collectionLayout isKindOfClass:[UICollectionViewFlowLayout class]]
+            ? (UICollectionViewFlowLayout *)_collectionLayout
+            : nil;
+    double headerH = flow ? flow->_headerReferenceSize.height : 0.0;
+    double footerH = flow ? flow->_footerReferenceSize.height : 0.0;
     double cursor = 0;
     for (long section = 0; section < sections; section++)
     {
         long count = collection_items_in_section(self, section);
         cursor += top;
+        if (headerH > 0)
+        {
+            UICollectionReusableView *header = [self
+                supplementaryViewOfKind:UICollectionElementKindSectionHeader
+                                section:section];
+            if (header)
+            {
+                [header setFrame:CGRectMake(0, cursor, _frame.size.width,
+                                            headerH)];
+                [self addSubview:header];
+                [_supplementaryViews addObject:header];
+            }
+            cursor += headerH;
+        }
         for (long i = 0; i < count; i++)
         {
             NSIndexPath *path =
@@ -14394,6 +14498,20 @@ static int collection_columns(double width, double itemW, double interitem,
         long rows = (count + columns - 1) / columns;
         if (rows > 0)
             cursor += rows * itemH + (rows - 1) * line;
+        if (footerH > 0)
+        {
+            UICollectionReusableView *footer = [self
+                supplementaryViewOfKind:UICollectionElementKindSectionFooter
+                                section:section];
+            if (footer)
+            {
+                [footer setFrame:CGRectMake(0, cursor, _frame.size.width,
+                                            footerH)];
+                [self addSubview:footer];
+                [_supplementaryViews addObject:footer];
+            }
+            cursor += footerH;
+        }
         cursor += bottom;
         if (section + 1 < sections)
             cursor += line;
@@ -14416,11 +14534,19 @@ static long collection_flat_index(UICollectionView *collectionView,
     int columns = collection_columns(_frame.size.width, itemW, interitem,
                                      left, right);
     long sections = collection_sections(self);
+    UICollectionViewFlowLayout *flow =
+        _collectionLayout &&
+                [_collectionLayout isKindOfClass:[UICollectionViewFlowLayout class]]
+            ? (UICollectionViewFlowLayout *)_collectionLayout
+            : nil;
+    double headerH = flow ? flow->_headerReferenceSize.height : 0.0;
+    double footerH = flow ? flow->_footerReferenceSize.height : 0.0;
     double cursor = 0;
     for (long section = 0; section < sections; section++)
     {
         long count = collection_items_in_section(self, section);
         cursor += top;
+        cursor += headerH;
         for (long i = 0; i < count; i++)
         {
             int column = (int)(i % columns), row = (int)(i / columns);
@@ -14469,6 +14595,7 @@ static long collection_flat_index(UICollectionView *collectionView,
         long rows = (count + columns - 1) / columns;
         if (rows > 0)
             cursor += rows * itemH + (rows - 1) * line;
+        cursor += footerH;
         cursor += bottom;
         if (section + 1 < sections)
             cursor += line;

@@ -1459,3 +1459,7 @@ A 3D `CALayer.transform` builds a 3x3 homography from the row-vector
 CATransform3D, including the m34 perspective term applied to the rotated z
 coordinate, and renders through `iosim_fb_blit_homography`; 2D-only matrices
 stay on `iosim_fb_blit_affine`.
+`UICollectionView` registers supplementary classes by element kind, asks its
+data source for a header/footer view at the section's zero item path, and
+places it at the flow layout's `headerReferenceSize`/`footerReferenceSize`
+band while accumulating the same cursor used by hit testing.
