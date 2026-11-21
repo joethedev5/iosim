@@ -84,6 +84,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | UICollectionView flow layout, multiple sections, reusable cells, selection, drag scrolling | ✅ |
 | UITableView sections, headers, per-row heights, selection, swipe-to-delete and editing mode | ✅ |
 | UILongPressGestureRecognizer duration, movement tolerance and state changes | ✅ |
+| UIContextMenuInteraction context menus on table rows, collection items and views: blurred backdrop, lifted preview, action menus | ✅ |
 | UIBarButtonItem/UINavigationItem, right bar buttons and automatic back button | ✅ |
 | UISearchBar with delegate edits, Return action, Cancel and keyboard focus | ✅ |
 | UIStepper plus/minus halves, stepping, limits and ValueChanged | ✅ |

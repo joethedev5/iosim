@@ -409,6 +409,22 @@ completion handler receives `com.apple.UIKit.activity.CopyToPasteboard` with
 The suite accepts a settled top edge within 600–660 pt and the rowless sheet
 within 660–710 pt.
 
+### Context menus
+
+`tests/context_menu_test.m` holds a first table row for half a second and
+captures the lifted menu: the row's blue cell (`#263359`) renders as the
+preview at (201,90), the action card (`#23242d`) sits at (201,150), and the
+backdrop is the blurred, dimmed table green `#149f3c` rather than the crisp
+`#1acc4d`. Tapping Favorite runs its handler and restores the table (blue
+cell at (201,66), exact green at (201,600)). A second row shows its purple
+cell (`#592673`) and dismisses from an outside tap. A plain orange view
+(120x80 at 30,400) with a `UIContextMenuInteraction` produces a snapshot
+preview at (201,440) and a one-action Ping card at (201,510); Ping restores
+the view at (90,440). A collection item at (70,670) renders its cyan cell
+(`#1a99b3`) as the preview and its Tag card at (201,760); Tag restores the
+item and the collection background (`#0d0d14`). The suite checks all six
+captures against those colors.
+
 ### Numeric keypad
 
 `demo/NumberPadApp.m` is the text-input fixture with the number-pad trait

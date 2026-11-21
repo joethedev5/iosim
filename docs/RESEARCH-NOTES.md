@@ -518,6 +518,34 @@ management.
   ~778 pt, settled 626 pt, rowless 684 pt, exact green after both
   dismissals.
 
+## 2026-11-21: context menus
+
+- API surface: `UIContextMenuInteraction` delegates return a
+  `UIContextMenuConfiguration`; its previewProvider supplies the lifted view
+  controller and actionProvider returns a `UIMenu` of `UIAction`s. Menus can
+  nest and mark children inline; action attributes carry Destructive and
+  Disabled. The `UITableViewDelegate`/`UICollectionViewDelegate` convenience
+  selectors are asked when no view interaction matches.
+- Trigger: a stationary touch held for 0.5 s; movement past 10 pt cancels
+  the candidate, and a firing `UILongPressGestureRecognizer` takes priority.
+  The lift that ends the opening press must not dismiss the menu (the window
+  remembers that one up).
+- Presentation: snapshot the crisp frame, box-blur (radius 20 pt, two
+  passes), dim 22 %, redraw the status bar, then draw the preview and the
+  menu card. Re-rendered table/collection cell previews have square
+  backgrounds, so the draw pass clears pixels outside a rounded-rect
+  distance test back to the saved blurred backdrop.
+- Layout: preview width is the source width capped to `W - 24`, menu width is
+  `max(250, preview width)`, action rows are 46 pt, headers 28 pt, vertical
+  padding 8 pt. The stack is centered on the touch and clamped between 70 pt
+  and `H - 48`.
+- Fixture `tests/context_menu_test.m` covers a table row (Favorite/Delete,
+  outside-tap cancel), a plain view (snapshot + Ping) and a collection item
+  (Tag), sampling preview, card and backdrop colors in six captures.
+- Known limitation: nested non-inline menus are flattened under their title
+  rather than opening a submenu, and menu dismissal is immediate (no return
+  animation yet).
+
 ## Open directions
 
 - `metal-cpp` + macOS SDK Metal headers make it possible to implement a

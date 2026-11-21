@@ -4138,6 +4138,124 @@ else
     echo "FAIL UIActivityViewController share sheet"; echo "$out"; fails=$((fails+1))
 fi
 
+rm -f "$T/ctx.fifo"
+mkfifo "$T/ctx.fifo"
+"$ROOT/tools/build_app.sh" "$ROOT/tests/context_menu_test.m" \
+    "$T/context_menu_test" >/dev/null
+out="$(IOSIM_EVENT_FIFO="$T/ctx.fifo" \
+    IOSIM_TEST_PNG_MENU="$T/ctx_menu.png" \
+    IOSIM_TEST_PNG_AFTER="$T/ctx_after.png" \
+    IOSIM_TEST_PNG_MENU2="$T/ctx_menu2.png" \
+    IOSIM_TEST_PNG_END="$T/ctx_end.png" \
+    IOSIM_TEST_PNG_GEN="$T/ctx_gen.png" \
+    IOSIM_TEST_PNG_GENEND="$T/ctx_genend.png" \
+    IOSIM_TEST_PNG_COL="$T/ctx_col.png" \
+    IOSIM_TEST_PNG_COLEND="$T/ctx_colend.png" \
+    DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" \
+    "$T/context_menu_test" 2>&1)"
+check "[menu] config 1" "$out" \
+    "a long press asks the table delegate for a context menu"
+check "[menu] favorite 1" "$out" \
+    "tapping a context menu action runs its handler"
+check "[menu] config 2" "$out" \
+    "a second row provides its own configuration"
+check "[menu] config generic" "$out" \
+    "a UIContextMenuInteraction on a plain view provides a menu"
+check "[menu] ping" "$out" \
+    "the generic menu action runs"
+check "[menu] config item 0" "$out" \
+    "a collection item provides a context menu configuration"
+check "[menu] tag" "$out" "the collection menu action runs"
+check "[menu] png written" "$out" "the context menu fixture captures every phase"
+if out="$(python3 - "$ROOT/tools" "$T" <<'CTXPNG'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+
+def loader(path):
+    w, h, bpp, rows = pngpixel.load(path)
+    def read(x, y):
+        return pngpixel.px(rows, bpp, x * 3, y * 3)
+    return read
+
+def rgb(read, x, y):
+    c = read(x, y)
+    return ((c >> 16) & 255, (c >> 8) & 255, c & 255)
+
+def blue(c):
+    return c[2] > 60 and c[2] > c[0] + 30 and c[1] < 80
+
+def purple(c):
+    return c[0] > 60 and c[2] > 90 and c[1] < 70
+
+def orange(c):
+    return c[0] > 170 and 65 < c[1] < 150 and c[2] < 80
+
+def green(c):
+    return abs(c[0] - 26) < 25 and abs(c[1] - 204) < 25 and abs(c[2] - 77) < 25
+
+def dim_green(c):
+    return c[1] > 120 and c[1] < 190 and c[1] > c[0] + 80 and c[1] > c[2] + 80
+
+def card(c):
+    return c[0] < 60 and c[1] < 60 and c[2] < 75
+
+def cyan(c):
+    return abs(c[0] - 26) < 25 and abs(c[1] - 153) < 30 and abs(c[2] - 179) < 30
+
+root = sys.argv[2]
+menu = loader(root + "/ctx_menu.png")
+after = loader(root + "/ctx_after.png")
+menu2 = loader(root + "/ctx_menu2.png")
+end = loader(root + "/ctx_end.png")
+gen = loader(root + "/ctx_gen.png")
+genend = loader(root + "/ctx_genend.png")
+col = loader(root + "/ctx_col.png")
+colend = loader(root + "/ctx_colend.png")
+if not blue(rgb(menu, 201, 90)):
+    raise SystemExit("the lifted row preview is missing")
+if not card(rgb(menu, 201, 150)):
+    raise SystemExit("the context menu card is not drawn under the preview")
+if not dim_green(rgb(menu, 201, 300)):
+    raise SystemExit("the backdrop is not blurred and dimmed")
+edge = rgb(menu, 201, 590)
+if not (edge[1] < 150 and edge[1] > 70):
+    raise SystemExit("the backdrop has no blurred green-to-collection edge")
+if not (blue(rgb(after, 201, 66)) and green(rgb(after, 201, 300))):
+    raise SystemExit("the table is not restored after the action")
+if not purple(rgb(menu2, 201, 90)):
+    raise SystemExit("the second lifted row preview has the wrong cell")
+if not card(rgb(menu2, 201, 150)):
+    raise SystemExit("the second menu card is missing")
+if not (purple(rgb(end, 201, 90)) and green(rgb(end, 201, 300))):
+    raise SystemExit("the outside tap did not dismiss the menu")
+if not orange(rgb(gen, 201, 440)):
+    raise SystemExit("the generic view preview is not a snapshot")
+if not card(rgb(gen, 201, 510)):
+    raise SystemExit("the generic menu card is missing")
+if not dim_green(rgb(gen, 10, 300)):
+    raise SystemExit("the generic menu backdrop is not blurred")
+if not (orange(rgb(genend, 90, 440)) and green(rgb(genend, 10, 300))):
+    raise SystemExit("the generic view was not restored after Ping")
+if not green(rgb(genend, 201, 510)):
+    raise SystemExit("the generic menu card did not dismiss")
+if not cyan(rgb(col, 201, 670)):
+    raise SystemExit("the collection item preview is missing")
+if not card(rgb(col, 201, 760)):
+    raise SystemExit("the collection menu card is missing")
+if not cyan(rgb(colend, 70, 670)):
+    raise SystemExit("the collection item was not restored")
+if not (green(rgb(colend, 10, 550)) and
+        rgb(colend, 201, 760)[0] < 25 and rgb(colend, 201, 760)[1] < 25):
+    raise SystemExit("the collection menu did not dismiss")
+print("ok   context menus lift rows, items and views, blur, run and dismiss")
+CTXPNG
+)"; then
+    echo "$out"
+else
+    echo "FAIL context menus"; echo "$out"; fails=$((fails+1))
+fi
+
 if [ "$fails" -ne 0 ]; then
     echo "$fails test(s) failed" >&2
     exit 1

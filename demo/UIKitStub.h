@@ -305,6 +305,9 @@ enum {
 - (void)drawRect:(CGRect)rect;
 - (void)addSubview:(UIView *)view;
 - (void)addGestureRecognizer:(id)recognizer;
+- (void)addInteraction:(id)interaction;
+- (void)removeInteraction:(id)interaction;
+- (NSArray *)interactions;
 @property BOOL translatesAutoresizingMaskIntoConstraints;
 @property(readonly) NSLayoutAnchor *leadingAnchor;
 @property(readonly) NSLayoutAnchor *trailingAnchor;
@@ -535,6 +538,81 @@ typedef void (^UIActivityViewControllerCompletionHandler)(
 - (void)setCompletionHandler:
     (UIActivityViewControllerCompletionHandler)handler;
 - (UIActivityViewControllerCompletionHandler)completionHandler;
+@end
+
+/* ---------------------------------------------------- context menus */
+
+typedef NSString *UIActionIdentifier;
+
+enum {
+    UIMenuElementAttributesDisabled = 1 << 0,
+    UIMenuElementAttributesDestructive = 1 << 1,
+    UIMenuElementAttributesHidden = 1 << 2,
+    UIMenuElementAttributesKeepsMenuPresented = 1 << 3
+};
+enum {
+    UIMenuOptionsDisplayInline = 1 << 0,
+    UIMenuOptionsDestructive = 1 << 1,
+    UIMenuOptionsSingleSelection = 1 << 2,
+    UIMenuOptionsDisplayAsPalette = 1 << 3
+};
+
+@class UIMenu, UIAction, UIContextMenuConfiguration;
+@class UIContextMenuInteraction;
+
+@interface UIMenuElement : NSObject
+- (NSString *)title;
+- (UIImage *)image;
+- (long)attributes;
+@end
+
+@interface UIAction : UIMenuElement
++ (id)actionWithTitle:(NSString *)title image:(UIImage *)image
+           identifier:(UIActionIdentifier)identifier
+              handler:(void (^)(UIAction *action))handler;
+- (UIActionIdentifier)identifier;
+- (long)state;
+- (void)setState:(long)state;
+- (void)setAttributes:(long)attributes;
+@end
+
+@interface UIMenu : UIMenuElement
++ (id)menuWithTitle:(NSString *)title children:(NSArray *)children;
++ (id)menuWithTitle:(NSString *)title image:(UIImage *)image
+         identifier:(NSString *)identifier options:(long)options
+           children:(NSArray *)children;
+- (NSArray *)children;
+- (NSString *)identifier;
+- (long)options;
+@end
+
+@interface UIContextMenuConfiguration : NSObject
++ (id)configurationWithIdentifier:(NSString *)identifier
+                  previewProvider:(UIViewController *(^)(void))previewProvider
+                   actionProvider:(UIMenu *(^)(NSArray *))actionProvider;
+- (NSString *)identifier;
+- (UIViewController *(^)(void))previewProvider;
+- (UIMenu *(^)(NSArray *))actionProvider;
+@end
+
+@interface UIContextMenuInteraction : NSObject
+- (id)initWithDelegate:(id)delegate;
+- (id)delegate;
+- (CGPoint)locationInView:(UIView *)view;
+- (UIView *)view;
+@end
+
+@protocol UIContextMenuInteractionDelegate
+- (UIContextMenuConfiguration *)contextMenuInteraction:
+    (UIContextMenuInteraction *)interaction
+    configurationForMenuAtLocation:(CGPoint)location;
+@optional
+- (void)contextMenuInteraction:(UIContextMenuInteraction *)interaction
+    willDisplayMenuForConfiguration:(UIContextMenuConfiguration *)configuration
+                            animator:(id)animator;
+- (void)contextMenuInteraction:(UIContextMenuInteraction *)interaction
+    willEndForConfiguration:(UIContextMenuConfiguration *)configuration
+                   animator:(id)animator;
 @end
 
 @interface UIActivityIndicatorView : UIView
@@ -876,6 +954,9 @@ enum {
 @optional
 - (void)tableView:(UITableView *)tableView
     didSelectRowAtIndexPath:(NSIndexPath *)indexPath;
+- (id)tableView:(UITableView *)tableView
+    contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath
+                                        point:(CGPoint)point;
 @end
 
 enum {
@@ -911,6 +992,10 @@ enum {
 @protocol UICollectionViewDelegate
 - (void)collectionView:(UICollectionView *)collectionView
     didSelectItemAtIndexPath:(NSIndexPath *)indexPath;
+@optional
+- (id)collectionView:(UICollectionView *)collectionView
+    contextMenuConfigurationForItemAtIndexPath:(NSIndexPath *)indexPath
+                                        point:(CGPoint)point;
 @end
 
 enum {

@@ -742,6 +742,8 @@ typedef enum {
     id _gestureRecognizers[8];
     int _gestureRecognizerCount;
     BOOL _clipsToBounds;
+    id _interactions[8];
+    int _interactionCount;
 }
 - (id)initWithFrame:(CGRect)frame;
 - (CGRect)frame;
@@ -761,6 +763,9 @@ typedef enum {
 - (void)bringSubviewToFront:(UIView *)view;
 - (void)sendSubviewToBack:(UIView *)view;
 - (void)removeFromSuperview;
+- (void)addInteraction:(id)interaction;
+- (void)removeInteraction:(id)interaction;
+- (NSArray *)interactions;
 - (CALayer *)layer;
 - (void)setHidden:(BOOL)hidden;
 - (BOOL)isHidden;
@@ -1053,6 +1058,108 @@ enum {
 - (void (^)(id, BOOL))completionHandler;
 - (NSArray *)_availableActivities;
 - (void)_activityDidFinish:(UIActivity *)activity completed:(BOOL)completed;
+@end
+
+/* ---------------------------------------------------- context menus */
+
+typedef id UIActionIdentifier;
+
+enum {
+    UIMenuElementAttributesDisabled = 1 << 0,
+    UIMenuElementAttributesDestructive = 1 << 1,
+    UIMenuElementAttributesHidden = 1 << 2,
+    UIMenuElementAttributesKeepsMenuPresented = 1 << 3
+};
+
+enum {
+    UIMenuOptionsDisplayInline = 1 << 0,
+    UIMenuOptionsDestructive = 1 << 1,
+    UIMenuOptionsSingleSelection = 1 << 2,
+    UIMenuOptionsDisplayAsPalette = 1 << 3
+};
+
+@class UIMenu, UIAction, UIContextMenuConfiguration;
+@class UIContextMenuInteraction;
+
+@interface UIMenuElement : NSObject {
+@public
+    id _title;
+    UIImage *_image;
+    long _attributes;
+}
+- (id)title;
+- (UIImage *)image;
+- (long)attributes;
+@end
+
+@interface UIAction : UIMenuElement {
+@public
+    id _identifier;
+    void (^_handler)(UIAction *);
+    long _state;
+}
++ (id)actionWithTitle:(id)title image:(UIImage *)image
+           identifier:(id)identifier
+              handler:(void (^)(UIAction *action))handler;
+- (id)identifier;
+- (long)state;
+- (void)setState:(long)state;
+- (void)setAttributes:(long)attributes;
+@end
+
+@interface UIMenu : UIMenuElement {
+@public
+    id _identifier;
+    id _children;
+    long _options;
+}
++ (id)menuWithTitle:(id)title children:(NSArray *)children;
++ (id)menuWithTitle:(id)title image:(UIImage *)image identifier:(id)identifier
+            options:(long)options children:(NSArray *)children;
+- (NSArray *)children;
+- (id)identifier;
+- (long)options;
+@end
+
+@interface UIContextMenuConfiguration : NSObject {
+@public
+    id _identifier;
+    UIViewController *(^_previewProvider)(void);
+    UIMenu *(^_actionProvider)(NSArray *);
+}
++ (id)configurationWithIdentifier:(id)identifier
+                  previewProvider:(UIViewController *(^)(void))previewProvider
+                   actionProvider:(UIMenu *(^)(NSArray *))actionProvider;
+- (id)identifier;
+- (UIViewController *(^)(void))previewProvider;
+- (UIMenu *(^)(NSArray *))actionProvider;
+@end
+
+@interface UIContextMenuInteraction : NSObject {
+@public
+    id _delegate;
+    UIView *_view;
+    CGPoint _location;
+}
+- (id)initWithDelegate:(id)delegate;
+- (id)delegate;
+- (CGPoint)locationInView:(UIView *)view;
+- (UIView *)view;
+- (void)willMoveToView:(UIView *)view;
+- (void)didMoveToView:(UIView *)view;
+@end
+
+@protocol UIContextMenuInteractionDelegate
+- (UIContextMenuConfiguration *)contextMenuInteraction:
+    (UIContextMenuInteraction *)interaction
+    configurationForMenuAtLocation:(CGPoint)location;
+@optional
+- (void)contextMenuInteraction:(UIContextMenuInteraction *)interaction
+    willDisplayMenuForConfiguration:(UIContextMenuConfiguration *)configuration
+                            animator:(id)animator;
+- (void)contextMenuInteraction:(UIContextMenuInteraction *)interaction
+    willEndForConfiguration:(UIContextMenuConfiguration *)configuration
+                   animator:(id)animator;
 @end
 
 @interface UIStackView : UIView {
@@ -1902,6 +2009,10 @@ enum {
     double _pinchLastTime;
     BOOL _pinchRotationOnly;
     UIScrollView *_pinchScroll;
+    UIView *_contextHit;
+    CGPoint _contextStartPoint;
+    double _contextStartTime;
+    BOOL _contextCandidate;
 }
 - (id)initWithWindowScene:(UIWindowScene *)scene;
 - (void)setRootViewController:(UIViewController *)controller;
@@ -3499,6 +3610,38 @@ static CGPoint window_point_for_view(UIView *view, CGPoint point)
     view->_superview = self;
     if (_subviewCount < 32)
         _subviews[_subviewCount++] = view;
+}
+- (void)addInteraction:(id)interaction
+{
+    if (!interaction)
+        return;
+    for (int i = 0; i < _interactionCount; i++)
+        if (_interactions[i] == interaction)
+            return;
+    if (_interactionCount >= 8)
+        return;
+    _interactions[_interactionCount++] = interaction;
+    if ([interaction respondsToSelector:@selector(didMoveToView:)])
+        [interaction didMoveToView:self];
+}
+- (void)removeInteraction:(id)interaction
+{
+    for (int i = 0; i < _interactionCount; i++)
+    {
+        if (_interactions[i] != interaction)
+            continue;
+        if ([interaction respondsToSelector:@selector(willMoveToView:)])
+            [interaction willMoveToView:nil];
+        for (int j = i; j + 1 < _interactionCount; j++)
+            _interactions[j] = _interactions[j + 1];
+        _interactionCount--;
+        return;
+    }
+}
+- (NSArray *)interactions
+{
+    return [NSArray arrayWithObjects:_interactions
+                                count:(unsigned long)_interactionCount];
 }
 - (void)insertSubview:(UIView *)view atIndex:(long)index
 {
@@ -8890,6 +9033,568 @@ int iosim_scroll_tick(void)
     return redraw;
 }
 
+/* ---------------------------------------------------- context menus */
+
+@implementation UIMenuElement
+- (id)title { return _title; }
+- (UIImage *)image { return _image; }
+- (long)attributes { return _attributes; }
+@end
+
+@implementation UIAction
++ (id)actionWithTitle:(id)title image:(UIImage *)image
+           identifier:(id)identifier
+              handler:(void (^)(UIAction *))handler
+{
+    UIAction *action = [[self alloc] init];
+    action->_title = title;
+    action->_image = image;
+    action->_identifier = identifier;
+    if (handler)
+        action->_handler = (void (^)(UIAction *))_Block_copy(handler);
+    return action;
+}
+- (id)identifier { return _identifier; }
+- (long)state { return _state; }
+- (void)setState:(long)state { _state = state; }
+- (void)setAttributes:(long)attributes { _attributes = attributes; }
+@end
+
+@implementation UIMenu
++ (id)menuWithTitle:(id)title children:(NSArray *)children
+{
+    return [self menuWithTitle:title image:nil identifier:nil options:0
+                      children:children];
+}
++ (id)menuWithTitle:(id)title image:(UIImage *)image identifier:(id)identifier
+            options:(long)options children:(NSArray *)children
+{
+    UIMenu *menu = [[self alloc] init];
+    menu->_title = title;
+    menu->_image = image;
+    menu->_identifier = identifier;
+    menu->_options = options;
+    menu->_children = children;
+    return menu;
+}
+- (NSArray *)children { return _children; }
+- (id)identifier { return _identifier; }
+- (long)options { return _options; }
+@end
+
+@implementation UIContextMenuConfiguration
++ (id)configurationWithIdentifier:(id)identifier
+                  previewProvider:(UIViewController *(^)(void))previewProvider
+                   actionProvider:(UIMenu *(^)(NSArray *))actionProvider
+{
+    UIContextMenuConfiguration *configuration = [[self alloc] init];
+    configuration->_identifier = identifier;
+    if (previewProvider)
+        configuration->_previewProvider =
+            (UIViewController *(^)(void))_Block_copy(previewProvider);
+    if (actionProvider)
+        configuration->_actionProvider =
+            (UIMenu *(^)(NSArray *))_Block_copy(actionProvider);
+    return configuration;
+}
+- (id)identifier { return _identifier; }
+- (UIViewController *(^)(void))previewProvider { return _previewProvider; }
+- (UIMenu *(^)(NSArray *))actionProvider { return _actionProvider; }
+@end
+
+@implementation UIContextMenuInteraction
+- (id)initWithDelegate:(id)delegate
+{
+    self = [super init];
+    if (self)
+        _delegate = delegate;
+    return self;
+}
+- (id)delegate { return _delegate; }
+- (UIView *)view { return _view; }
+- (CGPoint)locationInView:(UIView *)view
+{
+    if (!_view || !view)
+        return _location;
+    return [_view convertPoint:_location toView:view];
+}
+- (void)willMoveToView:(UIView *)view { (void)view; }
+- (void)didMoveToView:(UIView *)view { _view = view; }
+@end
+
+#define CTX_MAX_ENTRIES 24
+
+typedef struct {
+    UIAction *action; /* nil for a section header */
+    id header;
+} ctx_entry;
+
+typedef struct {
+    int active;
+    UIView *sourceView;
+    UIContextMenuInteraction *interaction;
+    UIContextMenuConfiguration *configuration;
+    UITableView *table;
+    UICollectionView *collection;
+    UIView *cell;
+    CGRect sourceRect;      /* screen points */
+    CGPoint touchPoint;
+    UIViewController *previewController;
+    int previewKind;        /* 0 snapshot, 1 view controller, 2 cell */
+    unsigned *snapshot;
+    int snapshotW, snapshotH;
+    ctx_entry entries[CTX_MAX_ENTRIES];
+    int entryCount;
+    CGRect previewFrame;    /* screen points */
+    CGRect menuFrame;       /* screen points */
+    int rowRects[CTX_MAX_ENTRIES][4]; /* device pixels */
+    int rowEntries[CTX_MAX_ENTRIES];
+    int rowCount;
+    int ignoreUp; /* the lift that ends the opening long press */
+} ctx_state;
+
+static ctx_state g_ctx;
+
+static void ctx_screen_origin(UIView *view, double *ox, double *oy)
+{
+    double x = 0, y = 0;
+    for (UIView *v = view; v; v = [v superview])
+    {
+        x += v->_frame.origin.x;
+        y += v->_frame.origin.y;
+        UIView *parent = [v superview];
+        if (parent && [parent isKindOfClass:[UIScrollView class]])
+        {
+            UIScrollView *scroll = (UIScrollView *)parent;
+            x -= scroll->_contentOffset.x;
+            y -= scroll->_contentOffset.y;
+        }
+    }
+    *ox = x;
+    *oy = y;
+}
+
+static double ctx_menu_height(void)
+{
+    double height = 16;
+    for (int i = 0; i < g_ctx.entryCount; i++)
+        height += g_ctx.entries[i].action ? 46.0 : 28.0;
+    return height;
+}
+
+static void ctx_compute_frames(double screenWidth, double screenHeight)
+{
+    double sourceW = g_ctx.sourceRect.size.width;
+    double sourceH = g_ctx.sourceRect.size.height;
+    double previewW = sourceW > 0 ? sourceW : 260;
+    if (previewW > screenWidth - 24)
+        previewW = screenWidth - 24;
+    double previewH = sourceH > 0 ? sourceH * previewW / sourceW : 160;
+    if (previewH < 44)
+        previewH = 44;
+    if (previewH > screenHeight * 0.55)
+        previewH = screenHeight * 0.55;
+    double menuW = previewW < 250 ? 250 : previewW;
+    if (menuW > screenWidth - 24)
+        menuW = screenWidth - 24;
+    double menuH = ctx_menu_height();
+    double total = previewH + 10 + menuH;
+    double top = g_ctx.touchPoint.y - previewH / 2.0;
+    if (top + total > screenHeight - 48)
+        top = screenHeight - 48 - total;
+    if (top < 70)
+        top = 70;
+    g_ctx.previewFrame = CGRectMake((screenWidth - previewW) / 2, top,
+                                    previewW, previewH);
+    g_ctx.menuFrame = CGRectMake((screenWidth - menuW) / 2,
+                                 top + previewH + 10, menuW, menuH);
+}
+
+static void ctx_add_entry(UIAction *action, id header)
+{
+    if (g_ctx.entryCount >= CTX_MAX_ENTRIES)
+        return;
+    ctx_entry *entry = &g_ctx.entries[g_ctx.entryCount++];
+    entry->action = action;
+    entry->header = header;
+}
+
+static void ctx_flatten_menu(UIMenu *menu, int depth, int inlined)
+{
+    if (!menu || depth > 3)
+        return;
+    NSArray *children = menu->_children;
+    if (!children)
+        return;
+    if (menu->_title && !inlined)
+        ctx_add_entry(nil, menu->_title);
+    unsigned long count = [children count];
+    for (unsigned long i = 0; i < count; i++)
+    {
+        id child = [children objectAtIndex:i];
+        if ([child isKindOfClass:[UIAction class]])
+        {
+            UIAction *action = (UIAction *)child;
+            if (action->_attributes & UIMenuElementAttributesHidden)
+                continue;
+            ctx_add_entry(action, nil);
+        }
+        else if ([child isKindOfClass:[UIMenu class]])
+        {
+            UIMenu *submenu = (UIMenu *)child;
+            int inlineChildren =
+                (submenu->_options & UIMenuOptionsDisplayInline) != 0;
+            ctx_flatten_menu(submenu, depth + 1, inlineChildren);
+        }
+    }
+}
+
+static long table_section_count(UITableView *table)
+{
+    long count = table_sections(table);
+    if (count > 64)
+        count = 64;
+    return count;
+}
+
+static CGRect ctx_table_row_rect(UITableView *table, NSIndexPath *path)
+{
+    long section = [path section];
+    long row = [path row];
+    double cursor = 0;
+    long sections = table_section_count(table);
+    for (long s = 0; s < sections; s++)
+    {
+        cursor += table_header_height(table, s);
+        long rows = table_rows(table, s);
+        if (s == section)
+        {
+            for (long r = 0; r < row && r < rows; r++)
+            {
+                NSIndexPath *p = [NSIndexPath indexPathForRow:r inSection:s];
+                cursor += table_row_height(table, p);
+            }
+            NSIndexPath *p = [NSIndexPath indexPathForRow:row inSection:s];
+            double height = table_row_height(table, p);
+            double ox = 0, oy = 0;
+            ctx_screen_origin(table, &ox, &oy);
+            return CGRectMake(ox, oy + cursor - table->_contentOffset.y,
+                              table->_frame.size.width, height);
+        }
+        for (long r = 0; r < rows; r++)
+        {
+            NSIndexPath *p = [NSIndexPath indexPathForRow:r inSection:s];
+            cursor += table_row_height(table, p);
+        }
+    }
+    return CGRectMake(0, 0, 0, 0);
+}
+
+static UIView *ctx_table_cell(UITableView *table, NSIndexPath *path)
+{
+    if (!table->_dataSource ||
+        ![table->_dataSource respondsToSelector:
+            @selector(tableView:cellForRowAtIndexPath:)])
+        return nil;
+    SEL sel = @selector(tableView:cellForRowAtIndexPath:);
+    return (UIView *)((id (*)(id, void *, id, id))objc_msgSend)(
+        table->_dataSource, (void *)sel, table, path);
+}
+
+static int ctx_collection_item_at(UICollectionView *view, CGPoint point,
+                                  long *outSection, long *outItem,
+                                  CGRect *outFrame)
+{
+    double itemW, itemH, interitem, line, left, right, top, bottom;
+    collection_metrics(view, &itemW, &itemH, &interitem, &line, &left,
+                       &right, &top, &bottom);
+    int columns = collection_columns(view->_frame.size.width, itemW,
+                                     interitem, left, right);
+    long sections = collection_sections(view);
+    double cursor = 0;
+    for (long s = 0; s < sections; s++)
+    {
+        long count = collection_items_in_section(view, s);
+        cursor += top;
+        for (long i = 0; i < count; i++)
+        {
+            int column = (int)(i % columns), row = (int)(i / columns);
+            double x = left + column * (itemW + interitem);
+            double y = cursor + row * (itemH + line);
+            if (point.x >= x && point.x < x + itemW && point.y >= y &&
+                point.y < y + itemH)
+            {
+                *outSection = s;
+                *outItem = i;
+                *outFrame = CGRectMake(x, y, itemW, itemH);
+                return 1;
+            }
+        }
+        long rows = (count + columns - 1) / columns;
+        if (rows > 0)
+            cursor += rows * itemH + (rows - 1) * line;
+        cursor += bottom;
+        if (s + 1 < sections)
+            cursor += line;
+    }
+    return 0;
+}
+
+static int context_menu_begin_at(UIWindow *window, CGPoint point)
+{
+    if (g_ctx.active)
+        return 1;
+    UIView *hit = [window hitTest:point];
+    if (!hit)
+        return 0;
+    UIContextMenuConfiguration *configuration = nil;
+    UIContextMenuInteraction *interaction = nil;
+    UIView *sourceView = nil;
+    UITableView *table = nil;
+    UICollectionView *collection = nil;
+    NSIndexPath *path = nil;
+    CGRect collectionItemFrame = CGRectMake(0, 0, 0, 0);
+
+    for (UIView *v = hit; v && !configuration; v = [v superview])
+    {
+        for (int i = 0; i < v->_interactionCount; i++)
+        {
+            id candidate = v->_interactions[i];
+            if (![candidate isKindOfClass:[UIContextMenuInteraction class]])
+                continue;
+            UIContextMenuInteraction *menuInteraction =
+                (UIContextMenuInteraction *)candidate;
+            if (!menuInteraction->_delegate ||
+                ![menuInteraction->_delegate respondsToSelector:
+                    @selector(contextMenuInteraction:configurationForMenuAtLocation:)])
+                continue;
+            CGPoint local = [v convertPoint:point fromView:nil];
+            SEL sel = @selector(contextMenuInteraction:configurationForMenuAtLocation:);
+            configuration = (UIContextMenuConfiguration *)
+                ((id (*)(id, void *, id, CGPoint))objc_msgSend)(
+                    menuInteraction->_delegate, (void *)sel, menuInteraction,
+                    local);
+            if (configuration)
+            {
+                interaction = menuInteraction;
+                sourceView = v;
+                menuInteraction->_location = local;
+                break;
+            }
+        }
+    }
+    if (!configuration)
+    {
+        for (UIView *v = hit; v && !configuration; v = [v superview])
+        {
+            if (![v isKindOfClass:[UITableView class]])
+                continue;
+            UITableView *candidate = (UITableView *)v;
+            CGPoint local = [candidate convertPoint:point fromView:nil];
+            long section = 0, row = 0;
+            if (!table_row_at_point(candidate, local, &section, &row))
+                continue;
+            id delegate = candidate->_delegate;
+            if (!delegate ||
+                ![delegate respondsToSelector:
+                    @selector(tableView:contextMenuConfigurationForRowAtIndexPath:point:)])
+                continue;
+            NSIndexPath *indexPath =
+                [NSIndexPath indexPathForRow:row inSection:section];
+            SEL sel = @selector(tableView:contextMenuConfigurationForRowAtIndexPath:point:);
+            configuration = (UIContextMenuConfiguration *)
+                ((id (*)(id, void *, id, id, CGPoint))objc_msgSend)(
+                    delegate, (void *)sel, candidate, indexPath, local);
+            if (configuration)
+            {
+                table = candidate;
+                path = indexPath;
+            }
+        }
+    }
+    if (!configuration)
+    {
+        for (UIView *v = hit; v && !configuration; v = [v superview])
+        {
+            if (![v isKindOfClass:[UICollectionView class]])
+                continue;
+            UICollectionView *candidate = (UICollectionView *)v;
+            CGPoint local = [candidate convertPoint:point fromView:nil];
+            long section = 0, item = 0;
+            CGRect itemFrame = CGRectMake(0, 0, 0, 0);
+            if (!ctx_collection_item_at(candidate, local, &section, &item,
+                                        &itemFrame))
+                continue;
+            id delegate = candidate->_delegate;
+            if (!delegate ||
+                ![delegate respondsToSelector:
+                    @selector(collectionView:contextMenuConfigurationForItemAtIndexPath:point:)])
+                continue;
+            NSIndexPath *indexPath =
+                [NSIndexPath indexPathForRow:item inSection:section];
+            SEL sel = @selector(collectionView:contextMenuConfigurationForItemAtIndexPath:point:);
+            configuration = (UIContextMenuConfiguration *)
+                ((id (*)(id, void *, id, id, CGPoint))objc_msgSend)(
+                    delegate, (void *)sel, candidate, indexPath, local);
+            if (configuration)
+            {
+                collection = candidate;
+                path = indexPath;
+                collectionItemFrame = itemFrame;
+            }
+        }
+    }
+    if (!configuration)
+        return 0;
+
+    memset(&g_ctx, 0, sizeof(g_ctx));
+    g_ctx.active = 1;
+    g_ctx.ignoreUp = 1;
+    g_ctx.configuration = configuration;
+    g_ctx.interaction = interaction;
+    g_ctx.sourceView = sourceView;
+    g_ctx.table = table;
+    g_ctx.collection = collection;
+    g_ctx.touchPoint = point;
+
+    if (table && path)
+    {
+        g_ctx.sourceRect = ctx_table_row_rect(table, path);
+        g_ctx.cell = ctx_table_cell(table, path);
+        g_ctx.previewKind = 2;
+    }
+    else if (collection && path)
+    {
+        long section = [path section], item = [path row];
+        double ox = 0, oy = 0;
+        ctx_screen_origin(collection, &ox, &oy);
+        g_ctx.sourceRect = CGRectMake(
+            ox + collectionItemFrame.origin.x - collection->_contentOffset.x,
+            oy + collectionItemFrame.origin.y - collection->_contentOffset.y,
+            collectionItemFrame.size.width, collectionItemFrame.size.height);
+        long flat = collection_flat_index(collection, section, item);
+        if (flat >= 0 && flat < (long)[collection->_cells count])
+        {
+            id cell = [collection->_cells objectAtIndex:(unsigned long)flat];
+            if ([cell isKindOfClass:[UIView class]])
+                g_ctx.cell = (UIView *)cell;
+        }
+        g_ctx.previewKind = 2;
+    }
+    else if (sourceView)
+    {
+        double ox = 0, oy = 0;
+        ctx_screen_origin(sourceView, &ox, &oy);
+        g_ctx.sourceRect = CGRectMake(ox, oy,
+                                      sourceView->_frame.size.width,
+                                      sourceView->_frame.size.height);
+        g_ctx.previewKind = 0;
+    }
+
+    if (configuration->_previewProvider)
+    {
+        UIViewController *preview = configuration->_previewProvider();
+        if (preview)
+        {
+            (void)[preview view];
+            g_ctx.previewController = preview;
+            g_ctx.previewKind = 1;
+        }
+    }
+    if (configuration->_actionProvider)
+    {
+        UIMenu *menu = configuration->_actionProvider(nil);
+        if (menu)
+            ctx_flatten_menu(menu, 0, 0);
+    }
+    CGRect screen = [[UIScreen mainScreen] bounds];
+    ctx_compute_frames(screen.size.width, screen.size.height);
+
+    if (g_ctx.previewKind == 0)
+    {
+        double scale = [[UIScreen mainScreen] scale];
+        if (scale <= 0)
+            scale = 1.0;
+        int px = (int)(g_ctx.sourceRect.origin.x * scale + 0.5);
+        int py = (int)(g_ctx.sourceRect.origin.y * scale + 0.5);
+        int pw = (int)(g_ctx.sourceRect.size.width * scale + 0.5);
+        int ph = (int)(g_ctx.sourceRect.size.height * scale + 0.5);
+        int fw = (int)(screen.size.width * scale + 0.5);
+        int fh = (int)(screen.size.height * scale + 0.5);
+        if (px < 0) { pw += px; px = 0; }
+        if (py < 0) { ph += py; py = 0; }
+        if (px + pw > fw)
+            pw = fw - px;
+        if (py + ph > fh)
+            ph = fh - py;
+        if (pw > 0 && ph > 0)
+        {
+            g_ctx.snapshot = malloc((unsigned long)pw * ph * sizeof(unsigned));
+            if (g_ctx.snapshot)
+            {
+                iosim_fb_capture(px, py, pw, ph, g_ctx.snapshot);
+                g_ctx.snapshotW = pw;
+                g_ctx.snapshotH = ph;
+            }
+        }
+    }
+    if (interaction && interaction->_delegate &&
+        [interaction->_delegate respondsToSelector:
+            @selector(contextMenuInteraction:willDisplayMenuForConfiguration:animator:)])
+    {
+        SEL sel = @selector(contextMenuInteraction:willDisplayMenuForConfiguration:animator:);
+        ((void (*)(id, void *, id, id, id))objc_msgSend)(
+            interaction->_delegate, (void *)sel, interaction, configuration,
+            nil);
+    }
+    return 1;
+}
+
+static void context_menu_dismiss(void)
+{
+    if (!g_ctx.active)
+        return;
+    if (g_ctx.interaction && g_ctx.interaction->_delegate &&
+        [g_ctx.interaction->_delegate respondsToSelector:
+            @selector(contextMenuInteraction:willEndForConfiguration:animator:)])
+    {
+        SEL sel = @selector(contextMenuInteraction:willEndForConfiguration:animator:);
+        ((void (*)(id, void *, id, id, id))objc_msgSend)(
+            g_ctx.interaction->_delegate, (void *)sel, g_ctx.interaction,
+            g_ctx.configuration, nil);
+    }
+    if (g_ctx.snapshot)
+        free(g_ctx.snapshot);
+    memset(&g_ctx, 0, sizeof(g_ctx));
+}
+
+static int context_menu_handle_tap(int px, int py)
+{
+    if (!g_ctx.active)
+        return 0;
+    for (int i = 0; i < g_ctx.rowCount; i++)
+    {
+        if (px < g_ctx.rowRects[i][0] || px >= g_ctx.rowRects[i][2] ||
+            py < g_ctx.rowRects[i][1] || py >= g_ctx.rowRects[i][3])
+            continue;
+        int index = g_ctx.rowEntries[i];
+        if (index < 0 || index >= g_ctx.entryCount)
+            return 1;
+        UIAction *action = g_ctx.entries[index].action;
+        if (!action)
+            return 1;
+        if (action->_attributes & UIMenuElementAttributesDisabled)
+            return 1;
+        void (^handler)(UIAction *) = action->_handler;
+        context_menu_dismiss();
+        if (handler)
+            handler(action);
+        return 1;
+    }
+    context_menu_dismiss();
+    return 1;
+}
+
 @implementation UIWindow
 - (id)initWithWindowScene:(UIWindowScene *)scene
 {
@@ -8971,6 +9676,10 @@ int iosim_scroll_tick(void)
     _panVelocity = CGPointMake(0, 0);
     _longPress = nil;
     _touchHit = [self hitTest:point];
+    _contextHit = _touchHit;
+    _contextStartPoint = point;
+    _contextStartTime = iosim_now();
+    _contextCandidate = 1;
     /* A screen-edge pan takes priority over ordinary pans and scroll views;
      * it stays possible until the finger moves past the pan threshold. */
     for (UIView *v = _touchHit; v && !_edgePan; v = [v superview])
@@ -9046,6 +9755,13 @@ int iosim_scroll_tick(void)
     if (scale <= 0)
         scale = 1.0;
     CGPoint point = CGPointMake(x / scale, y / scale);
+    if (_contextCandidate)
+    {
+        double ctxDx = point.x - _contextStartPoint.x;
+        double ctxDy = point.y - _contextStartPoint.y;
+        if (ctxDx * ctxDx + ctxDy * ctxDy > 100.0)
+            _contextCandidate = 0;
+    }
     double move_time = iosim_now();
     double move_dt = move_time - _lastMoveTime;
     if (move_dt > 0.001)
@@ -9187,6 +9903,7 @@ int iosim_scroll_tick(void)
     if (scale <= 0)
         scale = 1.0;
     CGPoint point = CGPointMake(x / scale, y / scale);
+    _contextCandidate = 0;
     if (_longPress)
     {
         if (_longPress->_state == UIGestureRecognizerStateBegan ||
@@ -9526,15 +10243,29 @@ static double two_finger_angle(double x1, double y1, double x2, double y2)
  * minimum duration has elapsed becomes Began without needing another event. */
 - (int)tickGestureRecognizers
 {
-    if (!_longPress || _longPress->_state != UIGestureRecognizerStatePossible)
-        return 0;
-    UILongPressGestureRecognizer *press =
-        (UILongPressGestureRecognizer *)_longPress;
-    if (iosim_now() - _pressStartTime < press->_minimumPressDuration)
-        return 0;
-    press->_location = _pressStartPoint;
-    send_gesture_action(press, UIGestureRecognizerStateBegan);
-    return 1;
+    int redraw = 0;
+    if (_longPress && _longPress->_state == UIGestureRecognizerStatePossible)
+    {
+        UILongPressGestureRecognizer *press =
+            (UILongPressGestureRecognizer *)_longPress;
+        if (iosim_now() - _pressStartTime >= press->_minimumPressDuration)
+        {
+            press->_location = _pressStartPoint;
+            send_gesture_action(press, UIGestureRecognizerStateBegan);
+            _contextCandidate = 0;
+            redraw = 1;
+        }
+    }
+    /* A stationary touch held for half a second opens a context menu when
+     * the hit view (or a table/collection row) provides a configuration. */
+    if (_contextCandidate && !g_ctx.active && !_dragMoved && !_activePan &&
+        iosim_now() - _contextStartTime >= 0.5)
+    {
+        _contextCandidate = 0;
+        if (context_menu_begin_at(self, _contextStartPoint))
+            redraw = 1;
+    }
+    return redraw;
 }
 
 - (void)dispatchTapX:(int)x y:(int)y
@@ -16163,6 +16894,196 @@ static void draw_activity_sheet(UIActivityViewController *controller,
     g_share_cancel_rect[3] = cancelY + cancelH;
 }
 
+/* ------------------------------------------------- context menu draw */
+
+/* Replaces the pixels outside a preview card's rounded corners with the
+ * blurred backdrop captured before the card was drawn. */
+static void ctx_clear_preview_corners(unsigned *bg, int fbW, int fbH,
+                                      int x, int y, int w, int h,
+                                      int radius)
+{
+    if (!bg || w <= 0 || h <= 0)
+        return;
+    unsigned *current =
+        malloc((unsigned long)fbW * (unsigned long)fbH * sizeof(unsigned));
+    if (!current)
+        return;
+    iosim_fb_capture(0, 0, fbW, fbH, current);
+    double exr = w / 2.0 - radius, eyr = h / 2.0 - radius;
+    for (int yy = 0; yy < h; yy++)
+    {
+        int dy = y + yy;
+        if (dy < 0 || dy >= fbH)
+            continue;
+        for (int xx = 0; xx < w; xx++)
+        {
+            int dx = x + xx;
+            if (dx < 0 || dx >= fbW)
+                continue;
+            double px = xx + 0.5 - w / 2.0;
+            double py = yy + 0.5 - h / 2.0;
+            double qx = __builtin_fabs(px) - exr;
+            double qy = __builtin_fabs(py) - eyr;
+            double ax = qx > 0 ? qx : 0, ay = qy > 0 ? qy : 0;
+            double outside = __builtin_sqrt(ax * ax + ay * ay);
+            double inside = qx > qy ? qx : qy;
+            double d = outside + (inside < 0 ? inside : 0) - radius;
+            if (d > 0.0)
+                current[(unsigned long)dy * fbW + dx] =
+                    bg[(unsigned long)dy * fbW + dx];
+        }
+    }
+    iosim_fb_paste_xrgb(current);
+    free(current);
+}
+
+static void draw_context_menu(int fbW, int fbH, double scale)
+{
+    if (!g_ctx.active)
+        return;
+    double W = fbW / scale, H = fbH / scale;
+    ctx_compute_frames(W, H);
+
+    unsigned *bg =
+        malloc((unsigned long)fbW * (unsigned long)fbH * sizeof(unsigned));
+    if (bg)
+    {
+        iosim_fb_capture(0, 0, fbW, fbH, bg);
+        blur_box_xrgb(bg, fbW, fbH, (int)(20 * scale + 0.5), 2);
+        iosim_fb_paste_xrgb(bg);
+        iosim_fb_set_opacity(0.22);
+        iosim_fb_fill_rect(0, 0, fbW, fbH, 0);
+        iosim_fb_set_opacity(1.0);
+        iosim_fb_capture(0, 0, fbW, fbH, bg);
+    }
+    draw_device_chrome(fbW, scale);
+
+    CGRect preview = g_ctx.previewFrame;
+    int px = (int)(preview.origin.x * scale + 0.5);
+    int py = (int)(preview.origin.y * scale + 0.5);
+    int pw = (int)(preview.size.width * scale + 0.5);
+    int ph = (int)(preview.size.height * scale + 0.5);
+    int previewRadius = (int)(14 * scale + 0.5);
+    int shadowOffset = (int)(4 * scale + 0.5);
+    iosim_fb_set_opacity(0.32);
+    iosim_fb_fill_round_rect(px + shadowOffset / 2, py + shadowOffset,
+                             pw - shadowOffset, ph, previewRadius,
+                             0x000000);
+    iosim_fb_set_opacity(1.0);
+    iosim_fb_fill_round_rect(px, py, pw, ph, previewRadius, 0x1c1c1e);
+
+    if (g_ctx.previewKind == 1 && g_ctx.previewController)
+    {
+        UIView *view = [g_ctx.previewController view];
+        if (view)
+        {
+            view->_frame = CGRectMake(0, 0, preview.size.width,
+                                      preview.size.height);
+            render_view(view, preview.origin.x, preview.origin.y, scale, 1.0);
+        }
+    }
+    else if (g_ctx.previewKind == 2 && g_ctx.cell)
+    {
+        UIView *cell = g_ctx.cell;
+        CGRect savedFrame = cell->_frame;
+        UIColor *savedBackground = cell->_backgroundColor;
+        cell->_frame = CGRectMake(0, 0, preview.size.width,
+                                  preview.size.height);
+        if (!savedBackground)
+            cell->_backgroundColor =
+                [UIColor colorWithRed:0.11 green:0.11 blue:0.12 alpha:1.0];
+        render_view(cell, preview.origin.x, preview.origin.y, scale, 1.0);
+        cell->_backgroundColor = savedBackground;
+        cell->_frame = savedFrame;
+    }
+    else if (g_ctx.snapshot)
+    {
+        iosim_fb_blit_xrgb_scaled(g_ctx.snapshot, g_ctx.snapshotW,
+                                  g_ctx.snapshotH, px, py, pw, ph, 1.0);
+    }
+    if (bg)
+        ctx_clear_preview_corners(bg, fbW, fbH, px, py, pw, ph,
+                                  previewRadius);
+
+    CGRect menu = g_ctx.menuFrame;
+    int mx = (int)(menu.origin.x * scale + 0.5);
+    int my = (int)(menu.origin.y * scale + 0.5);
+    int mw = (int)(menu.size.width * scale + 0.5);
+    int mh = (int)(menu.size.height * scale + 0.5);
+    int menuRadius = (int)(22 * scale + 0.5);
+    iosim_fb_fill_round_rect(mx, my, mw, mh, menuRadius, 0x3f4048);
+    iosim_fb_fill_round_rect(mx + 1, my + 1, mw - 2, mh - 2, menuRadius - 1,
+                             0x23242d);
+
+    int cursor = my + (int)(8 * scale + 0.5);
+    int rowH = (int)(46 * scale + 0.5);
+    int headerH = (int)(28 * scale + 0.5);
+    int textX = mx + (int)(18 * scale + 0.5);
+    g_ctx.rowCount = 0;
+    int previousWasAction = 0;
+    for (int i = 0; i < g_ctx.entryCount; i++)
+    {
+        ctx_entry *entry = &g_ctx.entries[i];
+        if (!entry->action)
+        {
+            const char *header = iosim_string_cstr(entry->header);
+            int asc = 0, desc = 0, lh = 0;
+            iosim_fb_font_metrics(IOSIM_FONT_REGULAR, 13, scale, &asc, &desc,
+                                  &lh);
+            iosim_fb_font_text(textX, cursor + headerH / 2 - lh / 2 + asc,
+                               header, IOSIM_FONT_REGULAR, 13, scale,
+                               0x9a9aa1);
+            cursor += headerH;
+            previousWasAction = 0;
+            continue;
+        }
+        UIAction *action = entry->action;
+        int rowY = cursor;
+        if (previousWasAction)
+            iosim_fb_fill_rect(textX, rowY, mw - 2 * (textX - mx),
+                               (int)(scale + 0.5), 0x3a3b42);
+        int titleX = textX;
+        UIImage *image = action->_image;
+        if (image && image->_rgba && image->_width > 0)
+        {
+            int iconSize = (int)(24 * scale + 0.5);
+            iosim_fb_blit_rgba_scaled(mx + (int)(16 * scale + 0.5),
+                                      rowY + (rowH - iconSize) / 2, iconSize,
+                                      iconSize, image->_rgba, image->_width,
+                                      image->_height, image->_width * 4);
+            titleX = mx + (int)(52 * scale + 0.5);
+        }
+        unsigned color = 0xffffff;
+        if (action->_attributes & UIMenuElementAttributesDestructive)
+            color = 0xff453a;
+        else if (action->_attributes & UIMenuElementAttributesDisabled)
+            color = 0x7c7c82;
+        char title[192];
+        share_text_ellipsis(iosim_string_cstr(action->_title),
+                            IOSIM_FONT_REGULAR, 17, scale,
+                            mx + mw - (int)(16 * scale + 0.5) - titleX,
+                            title, sizeof(title));
+        int asc = 0, desc = 0, lh = 0;
+        iosim_fb_font_metrics(IOSIM_FONT_REGULAR, 17, scale, &asc, &desc,
+                              &lh);
+        iosim_fb_font_text(titleX, rowY + rowH / 2 - lh / 2 + asc, title,
+                           IOSIM_FONT_REGULAR, 17, scale, color);
+        if (g_ctx.rowCount < CTX_MAX_ENTRIES)
+        {
+            g_ctx.rowRects[g_ctx.rowCount][0] = mx;
+            g_ctx.rowRects[g_ctx.rowCount][1] = rowY;
+            g_ctx.rowRects[g_ctx.rowCount][2] = mx + mw;
+            g_ctx.rowRects[g_ctx.rowCount][3] = rowY + rowH;
+            g_ctx.rowEntries[g_ctx.rowCount] = i;
+            g_ctx.rowCount++;
+        }
+        cursor += rowH;
+        previousWasAction = 1;
+    }
+    if (bg)
+        free(bg);
+}
+
 static void draw_modals(UIViewController *root, int fbW, int fbH,
                         double scale)
 {
@@ -16502,6 +17423,7 @@ int UIApplicationMain(int argc, char **argv, id principal, id delegateName)
     draw_device_chrome(fbWidth, scale);
     draw_keyboard(fbWidth, fbHeight, scale);
     draw_modals(rootController, fbWidth, fbHeight, scale);
+    draw_context_menu(fbWidth, fbHeight, scale);
 
     iosim_dispatch_drain_main();
 
@@ -16519,6 +17441,7 @@ int UIApplicationMain(int argc, char **argv, id principal, id delegateName)
         int r;
         double touchDownX = 0, touchDownY = 0;
         int haveTouchDown = 0;
+        int contextSwallowedDown = 0;
         int requestSwitcher = 0;
         double screenHeightPt = fbHeight / scale;
         while ((r = iosim_event_next(&type, &x, &y)) != 0)
@@ -16526,7 +17449,9 @@ int UIApplicationMain(int argc, char **argv, id principal, id delegateName)
             int redraw = 0;
             if (r == 1 && type == 1)
             {
-                if (edit_menu_handle_tap(x, y))
+                if (context_menu_handle_tap(x, y))
+                    redraw = 1;
+                else if (edit_menu_handle_tap(x, y))
                     redraw = 1;
                 else if (alert_handle_tap(rootController, x, y, fbWidth, fbHeight,
                                      scale))
@@ -16576,19 +17501,48 @@ int UIApplicationMain(int argc, char **argv, id principal, id delegateName)
             }
             else if (r == 1 && type == 2)
             {
-                touchDownX = x / scale;
-                touchDownY = y / scale;
-                haveTouchDown = 1;
-                [window dispatchTouchDownX:x y:y];
-                redraw = 1;
+                if (g_ctx.active)
+                {
+                    /* A touch outside the menu dismisses it; the touch is
+                     * consumed rather than reaching the view beneath. */
+                    context_menu_dismiss();
+                    contextSwallowedDown = 1;
+                    haveTouchDown = 0;
+                    redraw = 1;
+                }
+                else
+                {
+                    touchDownX = x / scale;
+                    touchDownY = y / scale;
+                    haveTouchDown = 1;
+                    [window dispatchTouchDownX:x y:y];
+                    redraw = 1;
+                }
             }
             else if (r == 1 && type == 3)
             {
-                [window dispatchTouchMoveX:x y:y];
-                redraw = 1;
+                if (!g_ctx.active && !contextSwallowedDown)
+                {
+                    [window dispatchTouchMoveX:x y:y];
+                    redraw = 1;
+                }
             }
             else if (r == 1 && type == 4)
             {
+                if (g_ctx.active && g_ctx.ignoreUp)
+                {
+                    g_ctx.ignoreUp = 0;
+                    [window dispatchTouchUpX:x y:y];
+                    redraw = 1;
+                    continue;
+                }
+                if (g_ctx.active || contextSwallowedDown)
+                {
+                    context_menu_dismiss();
+                    contextSwallowedDown = 0;
+                    redraw = 1;
+                    continue;
+                }
                 double upX = x / scale, upY = y / scale;
                 [window dispatchTouchUpX:x y:y];
                 if (haveTouchDown &&
@@ -16654,6 +17608,7 @@ int UIApplicationMain(int argc, char **argv, id principal, id delegateName)
             draw_device_chrome(fbWidth, scale);
             draw_keyboard(fbWidth, fbHeight, scale);
             draw_modals(rootController, fbWidth, fbHeight, scale);
+            draw_context_menu(fbWidth, fbHeight, scale);
             if (path && *path)
                 iosim_fb_present(path);
         }
