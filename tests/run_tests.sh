@@ -4771,6 +4771,254 @@ else
     echo "FAIL lock response"; fails=$((fails+1))
 fi
 
+# ---------- appearance: UITraitCollection and dynamic system colors ----------
+UDID="$("$ROOT/tools/iosimctl" create "Appearance iPhone" com.iosim.SimDeviceType.iPhone-18-Pro)"
+"$ROOT/tools/iosimctl" boot "$UDID" >/dev/null
+SBLOG="$IOSIM_HOME/Devices/$UDID/logs/springboard.log"
+sleep 0.6
+"$ROOT/tools/build_app.sh" "$ROOT/tests/appearance_test.m" \
+    "$T/AppearanceApp" >/dev/null
+mkdir -p "$T/AppearanceApp.app"
+cp "$T/AppearanceApp" "$T/AppearanceApp.app/AppearanceApp"
+python3 - "$T/AppearanceApp.app/Info.plist" <<'PY'
+import plistlib, sys
+with open(sys.argv[1], "wb") as f:
+    plistlib.dump({
+        "CFBundleIdentifier": "com.iosim.appearance",
+        "CFBundleExecutable": "AppearanceApp",
+        "CFBundleName": "Appearance",
+        "CFBundlePackageType": "APPL",
+        "CFBundleVersion": "1",
+        "CFBundleShortVersionString": "1.0",
+    }, f)
+PY
+"$ROOT/tools/iosimctl" install "$UDID" "$T/AppearanceApp.app" >/dev/null
+sleep 0.6
+"$ROOT/tools/iosimctl" ui "$UDID" tap 201 718.5 >/dev/null
+if wait_log "[SpringBoard] search opened"; then
+    echo "ok   Spotlight opens for the appearance fixture"
+else
+    echo "FAIL appearance search open"; fails=$((fails+1))
+fi
+for c in a p p e a r a n c e; do
+    "$ROOT/tools/iosimctl" ui "$UDID" key "$c" >/dev/null
+done
+if wait_log "[SpringBoard] search results 1"; then
+    echo "ok   the appearance fixture is found in Spotlight"
+else
+    echo "FAIL appearance search"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" tap 200 270 >/dev/null
+if wait_log "[appearance] initial 1"; then
+    echo "ok   a new app starts in light appearance"
+else
+    echo "FAIL appearance initial"; fails=$((fails+1))
+fi
+sleep 0.4
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/aplight.png" >/dev/null
+"$ROOT/tools/iosimctl" ui "$UDID" appearance dark >/dev/null
+if wait_log "[appearance] style 2"; then
+    echo "ok   the foreground app receives a dark trait change"
+else
+    echo "FAIL appearance dark trait"; fails=$((fails+1))
+fi
+sleep 0.4
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/apdark.png" >/dev/null
+"$ROOT/tools/iosimctl" ui "$UDID" appearance light >/dev/null
+if wait_log "[appearance] style 1"; then
+    echo "ok   the app receives the light trait change again"
+else
+    echo "FAIL appearance light trait"; fails=$((fails+1))
+fi
+sleep 0.4
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/aplight2.png" >/dev/null
+if out="$(python3 - "$ROOT/tools" "$T" <<'APPNG'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+root = sys.argv[2]
+def load(name):
+    w, h, bpp, rows = pngpixel.load(root + "/" + name)
+    def rgb(x, y):
+        c = pngpixel.px(rows, bpp, x * 3, y * 3)
+        return ((c >> 16) & 255, (c >> 8) & 255, c & 255)
+    return rgb
+def counts(rgb):
+    black = white = 0
+    for y in range(350, 445, 2):
+        for x in range(60, 340, 2):
+            c = rgb(x, y)
+            if c[0] < 40 and c[1] < 40 and c[2] < 40:
+                black += 1
+            if c[0] > 220 and c[1] > 220 and c[2] > 220:
+                white += 1
+    return black, white
+def time_counts(rgb):
+    dark = white = 0
+    for y in range(24, 48):
+        for x in range(55, 106):
+            c = rgb(x, y)
+            if c[0] < 80 and c[1] < 80 and c[2] < 80:
+                dark += 1
+            if c[0] > 200 and c[1] > 200 and c[2] > 200:
+                white += 1
+    return dark, white
+light = load("aplight.png")
+dark = load("apdark.png")
+light2 = load("aplight2.png")
+lb, lw = counts(light)
+db, dw = counts(dark)
+l2b, l2w = counts(light2)
+ltd, ltw = time_counts(light)
+dtd, dtw = time_counts(dark)
+l2td, l2tw = time_counts(light2)
+if light(201, 300)[0] < 240:
+    raise SystemExit("the light system background is not white")
+if dark(201, 300)[0] > 10:
+    raise SystemExit("the dark system background is not black")
+if lb < 10 or lw < 3000:
+    raise SystemExit("light label/background pixels are wrong")
+if dw < 10 or db < 3000:
+    raise SystemExit("dark label/background pixels are wrong")
+if l2b < 10 or l2w < 3000:
+    raise SystemExit("the app did not return to light appearance")
+if ltd < 20 or l2td < 20:
+    raise SystemExit("the light status bar is not dark content")
+if dtw < 20:
+    raise SystemExit("the dark status bar is not light content")
+print("ok   system colors follow the device appearance")
+print("ok   the status bar style follows the appearance")
+APPNG
+)"; then
+    echo "$out"
+else
+    echo "FAIL appearance colors"; echo "$out"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
+sleep 0.6
+"$ROOT/tools/build_app.sh" "$ROOT/tests/blur_material_test.m" \
+    "$T/BlurMaterialApp" >/dev/null
+mkdir -p "$T/BlurMaterialApp.app"
+cp "$T/BlurMaterialApp" "$T/BlurMaterialApp.app/BlurMaterialApp"
+python3 - "$T/BlurMaterialApp.app/Info.plist" <<'PY'
+import plistlib, sys
+with open(sys.argv[1], "wb") as f:
+    plistlib.dump({
+        "CFBundleIdentifier": "com.iosim.blurmaterial",
+        "CFBundleExecutable": "BlurMaterialApp",
+        "CFBundleName": "BlurMaterial",
+        "CFBundlePackageType": "APPL",
+        "CFBundleVersion": "1",
+        "CFBundleShortVersionString": "1.0",
+    }, f)
+PY
+"$ROOT/tools/iosimctl" install "$UDID" "$T/BlurMaterialApp.app" >/dev/null
+sleep 0.5
+: > "$SBLOG"
+"$ROOT/tools/iosimctl" ui "$UDID" tap 201 718.5 >/dev/null
+if wait_log "[SpringBoard] search opened"; then
+    echo "ok   Spotlight opens for the material fixture"
+else
+    echo "FAIL material search open"; fails=$((fails+1))
+fi
+for c in b l u r m a t e r i a l; do
+    "$ROOT/tools/iosimctl" ui "$UDID" key "$c" >/dev/null
+done
+if wait_log "[SpringBoard] search results 1"; then
+    echo "ok   the material fixture is found in Spotlight"
+else
+    echo "FAIL material search"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" tap 200 270 >/dev/null
+if wait_log "[blur-material] ready"; then
+    echo "ok   the material fixture launches"
+else
+    echo "FAIL material launch"; fails=$((fails+1))
+fi
+sleep 0.4
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/apblurlight.png" >/dev/null
+"$ROOT/tools/iosimctl" ui "$UDID" appearance dark >/dev/null
+if wait_log "[blur-material] style 2"; then
+    echo "ok   the material fixture receives the dark trait"
+else
+    echo "FAIL material trait"; fails=$((fails+1))
+fi
+sleep 0.4
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/apblurdark.png" >/dev/null
+if out="$(python3 - "$ROOT/tools" "$T" <<'MATPNG'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+root = sys.argv[2]
+def load(name):
+    w, h, bpp, rows = pngpixel.load(root + "/" + name)
+    def rgb(x, y):
+        c = pngpixel.px(rows, bpp, x * 3, y * 3)
+        return ((c >> 16) & 255, (c >> 8) & 255, c & 255)
+    return rgb
+light = load("apblurlight.png")
+dark = load("apblurdark.png")
+if light(60, 420)[0] < 140:
+    raise SystemExit("the light system material is too dark")
+if dark(60, 420)[0] > 110:
+    raise SystemExit("the dark system material is still light")
+if abs(light(20, 420)[0] - 128) > 12 or abs(dark(20, 420)[0] - 128) > 12:
+    raise SystemExit("the material changed its backdrop")
+print("ok   system material blur follows the appearance")
+MATPNG
+)"; then
+    echo "$out"
+else
+    echo "FAIL material appearance"; echo "$out"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
+sleep 0.6
+"$ROOT/tools/iosimctl" ui "$UDID" appearance dark >/dev/null
+if wait_log "[SpringBoard] appearance dark"; then
+    echo "ok   SpringBoard records a dark appearance at the home screen"
+else
+    echo "FAIL appearance SpringBoard"; fails=$((fails+1))
+fi
+sleep 0.3
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/aphomedark.png" >/dev/null
+if [ "$(cat "$IOSIM_HOME/Devices/$UDID/data/Library/SpringBoard/appearance.txt" 2>/dev/null)" = "dark" ]; then
+    echo "ok   the appearance is stored for the next app launch"
+else
+    echo "FAIL appearance store"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" appearance light >/dev/null
+if wait_log "[SpringBoard] appearance light"; then
+    echo "ok   SpringBoard switches back to light"
+else
+    echo "FAIL appearance light store"; fails=$((fails+1))
+fi
+sleep 0.3
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/aphomelight.png" >/dev/null
+if out="$(python3 - "$ROOT/tools" "$T" <<'HOMEPNG'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+root = sys.argv[2]
+def load(name):
+    w, h, bpp, rows = pngpixel.load(root + "/" + name)
+    def rgb(x, y):
+        c = pngpixel.px(rows, bpp, x * 3, y * 3)
+        return ((c >> 16) & 255, (c >> 8) & 255, c & 255)
+    return rgb
+dark = load("aphomedark.png")
+light = load("aphomelight.png")
+if dark(170, 718)[0] > 80:
+    raise SystemExit("the dark search glass is still light")
+if light(170, 718)[0] < 90:
+    raise SystemExit("the light search glass is still dark")
+print("ok   home screen glass follows the appearance")
+HOMEPNG
+)"; then
+    echo "$out"
+else
+    echo "FAIL appearance home glass"; echo "$out"; fails=$((fails+1))
+fi
+
 if [ "$fails" -ne 0 ]; then
     echo "$fails test(s) failed" >&2
     exit 1

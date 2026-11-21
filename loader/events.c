@@ -141,6 +141,13 @@ int iosim_event_next(int *type, int *x, int *y)
         *y = 0;
         return 1;
     }
+    if (strncmp(line, "appearance", 10) == 0)
+    {
+        *type = 18;
+        *x = line[11] == '1' ? 1 : 0;
+        *y = 0;
+        return 1;
+    }
     if (sscanf(line, "tap %d %d", &px, &py) == 2)
     {
         *type = 1;

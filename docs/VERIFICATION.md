@@ -1400,6 +1400,30 @@ at (201, 500) pt and its white title pixels, and tapping it logs
 `[SpringBoard] unlocked`, `[SpringBoard] notification opened Locked` and
 `[notifyapp] didReceive locked Locked`.
 
+### Appearance
+
+`tests/appearance_test.m` draws its background with `systemBackgroundColor`
+and its label with `labelColor`, logs `[appearance] initial <style>` from
+`viewDidLoad` and `[appearance] style <style>` from
+`traitCollectionDidChange:`. The suite launches it on a fresh device, waits
+for `initial 1`, and a screenshot samples (201, 300) pt as white with the
+label box black-on-white. `iosimctl ui <device> appearance dark` logs
+`style 2`; the next screenshot samples the background as black and the label
+box white-on-black. Switching back logs `style 1` and restores the light
+pixels. Sending the app home and switching to dark logs
+`[SpringBoard] appearance dark` and leaves `appearance.txt` containing
+`dark`; the suite switches back to light and waits for SpringBoard's light
+log. The fixture's `preferredStatusBarStyle` returns light content in dark
+appearance and dark content in light; the suite counts dark time glyphs in
+the light screenshot and light glyphs in the dark one. Home-screen
+screenshots after each SpringBoard switch sample the search glass at
+(170, 718) pt: dark below 80 and light above 90. A second fixture,
+`tests/blur_material_test.m`, puts a system-material card over a uniform
+gray field and logs `[blur-material] style <style>` from
+`traitCollectionDidChange:`; the suite samples the card at (60, 420) pt:
+above 140 in light appearance and below 110 after the dark switch, while the
+backdrop outside stays near 128.
+
 ### UIKit: pull-to-refresh
 
 `demo/RefreshApp.m` attaches a `UIRefreshControl` to a twelve-row table. The

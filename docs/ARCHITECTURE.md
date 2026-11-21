@@ -436,7 +436,27 @@ CGImage` exposes a cached image and `imageWithCGImage:` copies one back.
 `CALayer.contents` accepts a `CGImage` or `UIImage` and the renderer blits it
 for both standalone sublayers and a view's backing layer. Device RGB and gray
 color spaces are singletons; `CGColorCreate` converts gray components to RGB
-and `CGColorGetColorSpace` reports the originating space. Paths support
+and `CGColorGetColorSpace` reports the originating space. Appearance is
+device-wide: `UITraitCollection` carries the user interface style, display
+scale and size classes; `UIView` and `UIViewController` expose
+`traitCollection`, `overrideUserInterfaceStyle` and
+`traitCollectionDidChange:`, and an override applies to the view subtree.
+`UIColor` supports dynamic colors (a provider block plus the system palette:
+backgrounds, labels, separators, link and the system hues) whose components
+resolve at draw time through a process-wide style, so `CGColor`, view and
+layer backgrounds and text drawing all follow the current appearance.
+SpringBoard owns `Library/SpringBoard/appearance.txt`; `iosimctl ui <device>
+appearance light|dark` sends a type-18 event to whichever process is
+foreground, which writes the file and updates its window tree, and
+SpringBoard reloads the file when it regains the screen. Apps resolve the
+file before building views, so a cold launch starts in the stored appearance.
+The app status bar follows `UIApplication setStatusBarStyle:animated:` or the
+root controller's `preferredStatusBarStyle`; a plain default style picks
+black or white from the root view's background. SpringBoard's dock and
+search glass darken with the device appearance, and `UIVisualEffectView`'s
+system material styles switch between light and dark tints (thicker
+materials tint more strongly).
+Paths support
 bounding boxes, even-odd point containment, copies and rectangle
 constructors. Quadratic and cubic curve entry points flatten adaptively:
 the helper shared with UIBezierPath bounds the error by `max|B''| / (8 n^2)`

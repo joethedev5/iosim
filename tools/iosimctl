@@ -704,6 +704,11 @@ def cmd_ui(args):
                 f"{int(round(y * scale))}")
         send(line)
         print(f"sent {line}")
+    elif args.action == "appearance":
+        if len(params) != 1 or params[0] not in ("light", "dark"):
+            die(f"usage: iosimctl ui <device> appearance <light|dark>")
+        send("appearance 1" if params[0] == "dark" else "appearance 0")
+        print(f"sent appearance {params[0]}")
     elif args.action in ("pinch", "rotate"):
         if len(params) not in (3, 4):
             die(f"usage: iosimctl ui <device> {args.action} <x> <y> "
@@ -897,7 +902,8 @@ def main():
     p.add_argument("action",
                    choices=["tap", "down", "move", "up", "swipe", "drag",
                             "pinch", "rotate", "key", "backspace", "home",
-                            "apps", "switcher", "lock", "unlock"])
+                            "apps", "switcher", "lock", "unlock",
+                            "appearance"])
     p.add_argument("params", nargs="*")
     p.set_defaults(func=cmd_ui)
 

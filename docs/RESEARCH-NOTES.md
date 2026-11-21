@@ -600,6 +600,36 @@ management.
   also clears the Notification Center flag, which otherwise reopened an empty
   center on the next redraw.
 
+## Appearance and dynamic colors
+
+- `UIColor` now carries light and dark components. `ui_components:` resolves
+  them through the process-wide `g_ui_style`, and `CGColor`, `text_color_rgb`
+  and `color_rgb` all go through it, so view and layer backgrounds and text
+  follow the current appearance. The palette covers system backgrounds,
+  labels, separators, link and the system hues.
+- `UITraitCollection` carries user interface style, display scale and size
+  classes. `UIView` and `UIViewController` expose `traitCollection`,
+  `overrideUserInterfaceStyle` and `traitCollectionDidChange:`;
+  `ui_trait_children` walks the subtree and leaves children with their own
+  override alone.
+- Appearance is device-wide through
+  `Library/SpringBoard/appearance.txt`. SpringBoard handles type-18 events at
+  home; the foreground app handles type 18 itself, writes the file, applies
+  the style and notifies its window tree, and SpringBoard reloads the file
+  when it regains the screen. Apps resolve the file before building views, so
+  a cold launch starts in the stored style.
+- `iosimctl ui <device> appearance light|dark` sends the event; `events.c`
+  parses `appearance N` as type 18. The loader is built by CMake, not by
+  `tools/build_runtime.sh`, so loader changes need `cmake --build build`
+  before the next boot.
+- The status bar is style-aware: `UIApplication setStatusBarStyle:animated:`
+  overrides the root controller's `preferredStatusBarStyle`; the default
+  style resolves to black or white from the root view's background. The time
+  and every status glyph share that color. SpringBoard's dock and search
+  glass take a dark translucent overlay in dark appearance. System material
+  blur styles (3-7) tint dark in dark appearance and light in light, with
+  thickness increasing the tint alpha.
+
 ## Open directions
 
 - `metal-cpp` + macOS SDK Metal headers make it possible to implement a
@@ -611,10 +641,10 @@ management.
   reference for deeper dispatch and pthread fidelity; `dispatch_source`
   (timer, data add/or/replace, read/write) is already implemented and
   covered by section 23.
-- Appearance is the next UIKit surface gap: there is no `UITraitCollection`,
-  `overrideUserInterfaceStyle` or dynamic system colors. Plan: a global
-  light/dark style resolved by `UIColor`'s `CGColor` and `text_color_rgb`
-  paths, per-view/controller overrides, `traitCollectionDidChange:`, a shared
-  `Library/SpringBoard/appearance.txt` toggled by a new UI event, SpringBoard
-  exporting the style to launched apps, and running apps polling the file to
-  repaint.
+- `CAReplicatorLayer` plan: render the replicator's sublayers once into an
+  offscreen XRGB buffer, then blit `instanceCount` copies with the
+  accumulated `instanceTransform` applied around the layer's center; apply
+  per-instance RGB/alpha offsets to the buffer copy and tint by
+  `instanceColor`. `instanceDelay` (staggering child animations) is a
+  follow-on once copy rendering works; a spinner/dot-row fixture will verify
+  it.

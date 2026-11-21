@@ -33,6 +33,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | `UITouch`/`UIEvent` responder delivery, continuous control tracking | ✅ |
 | Drag scrolling with rubber-band clamp, tap/pan/swipe/pinch/rotation/screen-edge gesture recognizers with pan velocity | ✅ |
 | Auto Layout: NSLayoutConstraint, anchors, guides, intrinsic sizing, priorities | ✅ (subset) |
+| Appearance: `UITraitCollection`, `overrideUserInterfaceStyle`, `traitCollectionDidChange:`, dynamic system colors resolved at draw time, status bar styles, appearance-aware system material blur, and device-wide light/dark switching that also darkens SpringBoard's glass | ✅ |
 | Multiline UILabel wrapping, UITextField/UITextView editing and delegates, UITextView drag selection, long press, draggable handles and a Copy/Paste edit menu, software keyboard | ✅ |
 | UISwitch, UISlider, UISegmentedControl, UIPageControl, UIActivityIndicatorView, UIProgressView | ✅ |
 | UIAlertController alerts and actions, UIActivityViewController share sheet with Copy and application activities, animated page-sheet modal presentation and dismissal | ✅ |

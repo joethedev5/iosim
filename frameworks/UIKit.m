@@ -412,16 +412,82 @@ extern id kCAMediaTimingFunctionEaseInEaseOut;
 - (void)setFrameInterval:(long)interval;
 @end
 
+enum {
+    UIUserInterfaceStyleUnspecified = 0,
+    UIUserInterfaceStyleLight = 1,
+    UIUserInterfaceStyleDark = 2
+};
+
+enum {
+    UIUserInterfaceSizeClassUnspecified = 0,
+    UIUserInterfaceSizeClassCompact = 1,
+    UIUserInterfaceSizeClassRegular = 2
+};
+
+@class UITraitCollection;
+
+@interface UITraitCollection : NSObject {
+@public
+    long _userInterfaceStyle;
+    double _displayScale;
+    long _horizontalSizeClass;
+    long _verticalSizeClass;
+}
++ (UITraitCollection *)traitCollectionWithUserInterfaceStyle:(long)style;
+- (long)userInterfaceStyle;
+- (double)displayScale;
+- (long)horizontalSizeClass;
+- (long)verticalSizeClass;
+- (BOOL)containsTraitsInCollection:(UITraitCollection *)other;
+@end
+
 @interface UIColor : NSObject {
 @public
     double _r, _g, _b, _a;
+    double _dark_r, _dark_g, _dark_b, _dark_a;
+    BOOL _dynamic;
+    void *_provider;
 }
 + (UIColor *)colorWithRed:(double)r green:(double)g blue:(double)b
                     alpha:(double)a;
++ (UIColor *)colorWithDynamicProvider:(id (^)(UITraitCollection *traits))provider;
 + (UIColor *)whiteColor;
 + (UIColor *)blackColor;
 + (UIColor *)clearColor;
 + (UIColor *)systemBlueColor;
++ (UIColor *)systemRedColor;
++ (UIColor *)systemGreenColor;
++ (UIColor *)systemOrangeColor;
++ (UIColor *)systemYellowColor;
++ (UIColor *)systemPurpleColor;
++ (UIColor *)systemPinkColor;
++ (UIColor *)systemTealColor;
++ (UIColor *)systemIndigoColor;
++ (UIColor *)systemBrownColor;
++ (UIColor *)systemGrayColor;
++ (UIColor *)systemGray2Color;
++ (UIColor *)systemGray3Color;
++ (UIColor *)systemGray4Color;
++ (UIColor *)systemGray5Color;
++ (UIColor *)systemGray6Color;
++ (UIColor *)systemBackgroundColor;
++ (UIColor *)secondarySystemBackgroundColor;
++ (UIColor *)tertiarySystemBackgroundColor;
++ (UIColor *)systemGroupedBackgroundColor;
++ (UIColor *)secondarySystemGroupedBackgroundColor;
++ (UIColor *)labelColor;
++ (UIColor *)secondaryLabelColor;
++ (UIColor *)tertiaryLabelColor;
++ (UIColor *)quaternaryLabelColor;
++ (UIColor *)separatorColor;
++ (UIColor *)opaqueSeparatorColor;
++ (UIColor *)linkColor;
++ (UIColor *)ui_colorWithLightRed:(double)lr lightGreen:(double)lg
+                        lightBlue:(double)lb lightAlpha:(double)la
+                          darkRed:(double)dr darkGreen:(double)dg
+                         darkBlue:(double)db darkAlpha:(double)da;
+- (void)ui_components:(double *)components;
+- (UIColor *)resolvedColorWithTraitCollection:(UITraitCollection *)traits;
 - (CGColorRef)CGColor;
 @end
 
@@ -721,6 +787,7 @@ typedef enum {
 @public
     CGRect _frame;
     UIColor *_backgroundColor;
+    long _overrideUserInterfaceStyle;
     id _subviews[32];
     int _subviewCount;
     BOOL _hidden;
@@ -764,6 +831,10 @@ typedef enum {
 - (CGRect)convertRect:(CGRect)rect fromView:(UIView *)view;
 - (void)setBackgroundColor:(UIColor *)color;
 - (UIColor *)backgroundColor;
+- (UITraitCollection *)traitCollection;
+- (long)overrideUserInterfaceStyle;
+- (void)setOverrideUserInterfaceStyle:(long)style;
+- (void)traitCollectionDidChange:(UITraitCollection *)previous;
 - (void)addSubview:(UIView *)view;
 - (void)insertSubview:(UIView *)view atIndex:(long)index;
 - (void)bringSubviewToFront:(UIView *)view;
@@ -950,6 +1021,8 @@ enum {
 - (void)viewDidLoad;
 - (void)viewWillAppear:(BOOL)animated;
 - (void)viewDidAppear:(BOOL)animated;
+- (long)preferredStatusBarStyle;
+- (void)setNeedsStatusBarAppearanceUpdate;
 - (void)viewWillDisappear:(BOOL)animated;
 - (void)viewDidDisappear:(BOOL)animated;
 - (void)viewWillLayoutSubviews;
@@ -959,6 +1032,10 @@ enum {
 - (void)dismissViewControllerAnimated:(BOOL)animated
                            completion:(void (^)(void))completion;
 - (UIViewController *)presentedViewController;
+- (UITraitCollection *)traitCollection;
+- (long)overrideUserInterfaceStyle;
+- (void)setOverrideUserInterfaceStyle:(long)style;
+- (void)traitCollectionDidChange:(UITraitCollection *)previous;
 @end
 
 enum {
@@ -2042,6 +2119,12 @@ enum {
     UIApplicationStateBackground = 2
 };
 
+enum {
+    UIStatusBarStyleDefault = 0,
+    UIStatusBarStyleLightContent = 1,
+    UIStatusBarStyleDarkContent = 3
+};
+
 @interface UIApplication : UIResponder {
 @public
     id _delegate;
@@ -2052,6 +2135,8 @@ enum {
 - (void)setDelegate:(id)delegate;
 - (id)delegate;
 - (long)applicationState;
+- (long)statusBarStyle;
+- (void)setStatusBarStyle:(long)style animated:(BOOL)animated;
 - (double)backgroundTimeRemaining;
 - (unsigned long)beginBackgroundTaskWithExpirationHandler:(void (^)(void))handler;
 - (void)endBackgroundTask:(unsigned long)task;
@@ -2532,7 +2617,101 @@ int iosim_display_link_tick(void)
 }
 @end
 
+/* ------------------------------------------------------------ appearance */
+
+/* The appearance is device-wide: SpringBoard owns
+ * Library/SpringBoard/appearance.txt and every app reads it. g_ui_style
+ * caches the last value this process resolved. */
+static int g_ui_style = -1;
+
+static int ui_appearance_read_file(void)
+{
+    const char *shared = getenv("SIMULATOR_SHARED_RESOURCES_DIRECTORY");
+    if (!shared || !*shared)
+        return 0;
+    char path[1100];
+    snprintf(path, sizeof(path), "%s/Library/SpringBoard/appearance.txt",
+             shared);
+    unsigned char *bytes = 0;
+    unsigned long length = 0;
+    if (iosim_fs_read(path, &bytes, &length) != 0 || !bytes)
+        return 0;
+    int dark = length > 0 && (bytes[0] == 'd' || bytes[0] == 'D');
+    free(bytes);
+    return dark;
+}
+
+static void ui_appearance_write_file(int dark)
+{
+    const char *shared = getenv("SIMULATOR_SHARED_RESOURCES_DIRECTORY");
+    if (!shared || !*shared)
+        return;
+    char dir[1000];
+    snprintf(dir, sizeof(dir), "%s/Library/SpringBoard", shared);
+    iosim_fs_mkdir(dir, 1);
+    char path[1100];
+    snprintf(path, sizeof(path), "%s/appearance.txt", dir);
+    const char *text = dark ? "dark\n" : "light\n";
+    iosim_fs_write(path, text, dark ? 5 : 6);
+}
+
+static int ui_style_current(void)
+{
+    if (g_ui_style >= 0)
+        return g_ui_style;
+    const char *env = getenv("IOSIM_USER_INTERFACE_STYLE");
+    if (env && *env)
+        g_ui_style = (env[0] == 'd' || env[0] == 'D') ? 1 : 0;
+    else
+        g_ui_style = ui_appearance_read_file();
+    return g_ui_style;
+}
+
+static UITraitCollection *ui_trait_for_style(int dark)
+{
+    return [UITraitCollection
+        traitCollectionWithUserInterfaceStyle:
+            (dark ? UIUserInterfaceStyleDark : UIUserInterfaceStyleLight)];
+}
+
+NSString *const UITraitCollectionDidChangeNotification =
+    @"UITraitCollectionDidChangeNotification";
+
 /* ---------------------------------------------------------------- colors */
+
+@implementation UITraitCollection
++ (UITraitCollection *)traitCollectionWithUserInterfaceStyle:(long)style
+{
+    UITraitCollection *traits = [[self alloc] init];
+    traits->_userInterfaceStyle = style;
+    traits->_displayScale = 3.0;
+    traits->_horizontalSizeClass = UIUserInterfaceSizeClassCompact;
+    traits->_verticalSizeClass = UIUserInterfaceSizeClassRegular;
+    return traits;
+}
+- (long)userInterfaceStyle { return _userInterfaceStyle; }
+- (double)displayScale { return _displayScale; }
+- (long)horizontalSizeClass { return _horizontalSizeClass; }
+- (long)verticalSizeClass { return _verticalSizeClass; }
+- (BOOL)containsTraitsInCollection:(UITraitCollection *)other
+{
+    if (!other)
+        return NO;
+    if (other->_userInterfaceStyle &&
+        other->_userInterfaceStyle != _userInterfaceStyle)
+        return NO;
+    if (other->_displayScale > 0 &&
+        other->_displayScale != _displayScale)
+        return NO;
+    if (other->_horizontalSizeClass &&
+        other->_horizontalSizeClass != _horizontalSizeClass)
+        return NO;
+    if (other->_verticalSizeClass &&
+        other->_verticalSizeClass != _verticalSizeClass)
+        return NO;
+    return YES;
+}
+@end
 
 @implementation UIColor
 + (UIColor *)colorWithRed:(double)r green:(double)g blue:(double)b
@@ -2545,16 +2724,249 @@ int iosim_display_link_tick(void)
     c->_a = a;
     return c;
 }
++ (UIColor *)ui_colorWithLightRed:(double)lr lightGreen:(double)lg
+                        lightBlue:(double)lb lightAlpha:(double)la
+                          darkRed:(double)dr darkGreen:(double)dg
+                         darkBlue:(double)db darkAlpha:(double)da
+{
+    UIColor *c = [[self alloc] init];
+    c->_r = lr;
+    c->_g = lg;
+    c->_b = lb;
+    c->_a = la;
+    c->_dark_r = dr;
+    c->_dark_g = dg;
+    c->_dark_b = db;
+    c->_dark_a = da;
+    c->_dynamic = YES;
+    return c;
+}
++ (UIColor *)colorWithDynamicProvider:
+    (id (^)(UITraitCollection *traits))provider
+{
+    UIColor *c = [[self alloc] init];
+    c->_dynamic = NO;
+    c->_provider = provider ? _Block_copy(provider) : 0;
+    return c;
+}
 + (UIColor *)whiteColor { return [self colorWithRed:1 green:1 blue:1 alpha:1]; }
 + (UIColor *)blackColor { return [self colorWithRed:0 green:0 blue:0 alpha:1]; }
 + (UIColor *)clearColor { return [self colorWithRed:0 green:0 blue:0 alpha:0]; }
 + (UIColor *)systemBlueColor
 {
-    return [self colorWithRed:0.0 green:0.5686 blue:1.0 alpha:1];
+    return [self ui_colorWithLightRed:0.0 lightGreen:0.4784 lightBlue:1.0
+                           lightAlpha:1.0 darkRed:0.0392 darkGreen:0.5176
+                             darkBlue:1.0 darkAlpha:1.0];
+}
++ (UIColor *)systemRedColor
+{
+    return [self ui_colorWithLightRed:1.0 lightGreen:0.2314 lightBlue:0.1882
+                           lightAlpha:1.0 darkRed:1.0 darkGreen:0.2706
+                             darkBlue:0.2275 darkAlpha:1.0];
+}
++ (UIColor *)systemGreenColor
+{
+    return [self ui_colorWithLightRed:0.2039 lightGreen:0.7804 lightBlue:0.3490
+                           lightAlpha:1.0 darkRed:0.1882 darkGreen:0.8196
+                             darkBlue:0.3451 darkAlpha:1.0];
+}
++ (UIColor *)systemOrangeColor
+{
+    return [self ui_colorWithLightRed:1.0 lightGreen:0.5843 lightBlue:0.0
+                           lightAlpha:1.0 darkRed:1.0 darkGreen:0.6235
+                             darkBlue:0.0392 darkAlpha:1.0];
+}
++ (UIColor *)systemYellowColor
+{
+    return [self ui_colorWithLightRed:1.0 lightGreen:0.8 lightBlue:0.0
+                           lightAlpha:1.0 darkRed:1.0 darkGreen:0.8392
+                             darkBlue:0.0392 darkAlpha:1.0];
+}
++ (UIColor *)systemPurpleColor
+{
+    return [self ui_colorWithLightRed:0.6863 lightGreen:0.3216 lightBlue:0.8706
+                           lightAlpha:1.0 darkRed:0.7490 darkGreen:0.3529
+                             darkBlue:0.9490 darkAlpha:1.0];
+}
++ (UIColor *)systemPinkColor
+{
+    return [self ui_colorWithLightRed:1.0 lightGreen:0.1765 lightBlue:0.3333
+                           lightAlpha:1.0 darkRed:1.0 darkGreen:0.2157
+                             darkBlue:0.3725 darkAlpha:1.0];
+}
++ (UIColor *)systemTealColor
+{
+    return [self ui_colorWithLightRed:0.1882 lightGreen:0.6902 lightBlue:0.7804
+                           lightAlpha:1.0 darkRed:0.3922 darkGreen:0.8235
+                             darkBlue:1.0 darkAlpha:1.0];
+}
++ (UIColor *)systemIndigoColor
+{
+    return [self ui_colorWithLightRed:0.3451 lightGreen:0.3373 lightBlue:0.8392
+                           lightAlpha:1.0 darkRed:0.3686 darkGreen:0.3608
+                             darkBlue:0.9020 darkAlpha:1.0];
+}
++ (UIColor *)systemBrownColor
+{
+    return [self ui_colorWithLightRed:0.6353 lightGreen:0.5176 lightBlue:0.3686
+                           lightAlpha:1.0 darkRed:0.6745 darkGreen:0.5569
+                             darkBlue:0.4078 darkAlpha:1.0];
+}
++ (UIColor *)systemGrayColor
+{
+    return [self ui_colorWithLightRed:0.5569 lightGreen:0.5569 lightBlue:0.5765
+                           lightAlpha:1.0 darkRed:0.5569 darkGreen:0.5569
+                             darkBlue:0.5765 darkAlpha:1.0];
+}
++ (UIColor *)systemGray2Color
+{
+    return [self ui_colorWithLightRed:0.6824 lightGreen:0.6824 lightBlue:0.6980
+                           lightAlpha:1.0 darkRed:0.3882 darkGreen:0.3882
+                             darkBlue:0.4000 darkAlpha:1.0];
+}
++ (UIColor *)systemGray3Color
+{
+    return [self ui_colorWithLightRed:0.7804 lightGreen:0.7804 lightBlue:0.8
+                           lightAlpha:1.0 darkRed:0.2824 darkGreen:0.2824
+                             darkBlue:0.2902 darkAlpha:1.0];
+}
++ (UIColor *)systemGray4Color
+{
+    return [self ui_colorWithLightRed:0.8196 lightGreen:0.8196 lightBlue:0.8392
+                           lightAlpha:1.0 darkRed:0.2275 darkGreen:0.2275
+                             darkBlue:0.2353 darkAlpha:1.0];
+}
++ (UIColor *)systemGray5Color
+{
+    return [self ui_colorWithLightRed:0.8980 lightGreen:0.8980 lightBlue:0.9176
+                           lightAlpha:1.0 darkRed:0.1725 darkGreen:0.1725
+                             darkBlue:0.1804 darkAlpha:1.0];
+}
++ (UIColor *)systemGray6Color
+{
+    return [self ui_colorWithLightRed:0.9490 lightGreen:0.9490 lightBlue:0.9686
+                           lightAlpha:1.0 darkRed:0.1098 darkGreen:0.1098
+                             darkBlue:0.1176 darkAlpha:1.0];
+}
++ (UIColor *)systemBackgroundColor
+{
+    return [self ui_colorWithLightRed:1.0 lightGreen:1.0 lightBlue:1.0
+                           lightAlpha:1.0 darkRed:0.0 darkGreen:0.0
+                             darkBlue:0.0 darkAlpha:1.0];
+}
++ (UIColor *)secondarySystemBackgroundColor
+{
+    return [self ui_colorWithLightRed:0.9490 lightGreen:0.9490 lightBlue:0.9686
+                           lightAlpha:1.0 darkRed:0.1098 darkGreen:0.1098
+                             darkBlue:0.1176 darkAlpha:1.0];
+}
++ (UIColor *)tertiarySystemBackgroundColor
+{
+    return [self ui_colorWithLightRed:1.0 lightGreen:1.0 lightBlue:1.0
+                           lightAlpha:1.0 darkRed:0.1725 darkGreen:0.1725
+                             darkBlue:0.1804 darkAlpha:1.0];
+}
++ (UIColor *)systemGroupedBackgroundColor
+{
+    return [self ui_colorWithLightRed:0.9490 lightGreen:0.9490 lightBlue:0.9686
+                           lightAlpha:1.0 darkRed:0.0 darkGreen:0.0
+                             darkBlue:0.0 darkAlpha:1.0];
+}
++ (UIColor *)secondarySystemGroupedBackgroundColor
+{
+    return [self ui_colorWithLightRed:1.0 lightGreen:1.0 lightBlue:1.0
+                           lightAlpha:1.0 darkRed:0.1098 darkGreen:0.1098
+                             darkBlue:0.1176 darkAlpha:1.0];
+}
++ (UIColor *)labelColor
+{
+    return [self ui_colorWithLightRed:0.0 lightGreen:0.0 lightBlue:0.0
+                           lightAlpha:1.0 darkRed:1.0 darkGreen:1.0
+                             darkBlue:1.0 darkAlpha:1.0];
+}
++ (UIColor *)secondaryLabelColor
+{
+    return [self ui_colorWithLightRed:0.2353 lightGreen:0.2353 lightBlue:0.2627
+                           lightAlpha:0.6 darkRed:0.9216 darkGreen:0.9216
+                             darkBlue:0.9608 darkAlpha:0.6];
+}
++ (UIColor *)tertiaryLabelColor
+{
+    return [self ui_colorWithLightRed:0.2353 lightGreen:0.2353 lightBlue:0.2627
+                           lightAlpha:0.3 darkRed:0.9216 darkGreen:0.9216
+                             darkBlue:0.9608 darkAlpha:0.3];
+}
++ (UIColor *)quaternaryLabelColor
+{
+    return [self ui_colorWithLightRed:0.2353 lightGreen:0.2353 lightBlue:0.2627
+                           lightAlpha:0.18 darkRed:0.9216 darkGreen:0.9216
+                             darkBlue:0.9608 darkAlpha:0.18];
+}
++ (UIColor *)separatorColor
+{
+    return [self ui_colorWithLightRed:0.2353 lightGreen:0.2353 lightBlue:0.2627
+                           lightAlpha:0.29 darkRed:0.5451 darkGreen:0.5451
+                             darkBlue:0.5608 darkAlpha:0.65];
+}
++ (UIColor *)opaqueSeparatorColor
+{
+    return [self ui_colorWithLightRed:0.7765 lightGreen:0.7765 lightBlue:0.7843
+                           lightAlpha:1.0 darkRed:0.2196 darkGreen:0.2196
+                             darkBlue:0.2275 darkAlpha:1.0];
+}
++ (UIColor *)linkColor
+{
+    return [self ui_colorWithLightRed:0.0 lightGreen:0.4784 lightBlue:1.0
+                           lightAlpha:1.0 darkRed:0.0392 darkGreen:0.5176
+                             darkBlue:1.0 darkAlpha:1.0];
+}
+- (void)ui_components:(double *)components
+{
+    if (_provider)
+    {
+        UITraitCollection *traits = ui_trait_for_style(ui_style_current());
+        id resolved = ((id (^)(id))_provider)(traits);
+        if (resolved && resolved != (id)self &&
+            [resolved isKindOfClass:[UIColor class]])
+        {
+            [(UIColor *)resolved ui_components:components];
+            return;
+        }
+    }
+    if (_dynamic && ui_style_current())
+    {
+        components[0] = _dark_r;
+        components[1] = _dark_g;
+        components[2] = _dark_b;
+        components[3] = _dark_a;
+        return;
+    }
+    components[0] = _r;
+    components[1] = _g;
+    components[2] = _b;
+    components[3] = _a;
+}
+- (UIColor *)resolvedColorWithTraitCollection:(UITraitCollection *)traits
+{
+    int dark = traits &&
+        traits->_userInterfaceStyle == UIUserInterfaceStyleDark;
+    if (_provider)
+    {
+        id resolved = ((id (^)(id))_provider)(traits);
+        if (resolved && [resolved isKindOfClass:[UIColor class]])
+            return (UIColor *)resolved;
+    }
+    if (_dynamic && dark)
+        return [UIColor colorWithRed:_dark_r green:_dark_g blue:_dark_b
+                              alpha:_dark_a];
+    return [UIColor colorWithRed:_r green:_g blue:_b alpha:_a];
 }
 - (CGColorRef)CGColor
 {
-    return CGColorCreateGenericRGB(_r, _g, _b, _a);
+    double components[4];
+    [self ui_components:components];
+    return CGColorCreateGenericRGB(components[0], components[1],
+                                   components[2], components[3]);
 }
 @end
 
@@ -2566,9 +2978,11 @@ static unsigned text_color_rgb(UIColor *color)
 {
     if (!color)
         return 0x000000;
-    int r = (int)(color->_r * 255.0 + 0.5);
-    int g = (int)(color->_g * 255.0 + 0.5);
-    int b = (int)(color->_b * 255.0 + 0.5);
+    double components[4];
+    [color ui_components:components];
+    int r = (int)(components[0] * 255.0 + 0.5);
+    int g = (int)(components[1] * 255.0 + 0.5);
+    int b = (int)(components[2] * 255.0 + 0.5);
     if (r < 0) r = 0; if (r > 255) r = 255;
     if (g < 0) g = 0; if (g > 255) g = 255;
     if (b < 0) b = 0; if (b > 255) b = 255;
@@ -3496,6 +3910,38 @@ static int wrap_editable_lines(const char *text, int style, double points,
     return count;
 }
 
+static int ui_view_style_with_global(UIView *view, int global)
+{
+    if (view->_overrideUserInterfaceStyle == UIUserInterfaceStyleDark)
+        return 1;
+    if (view->_overrideUserInterfaceStyle == UIUserInterfaceStyleLight)
+        return 0;
+    if (view->_superview)
+        return ui_view_style_with_global((UIView *)view->_superview, global);
+    return global;
+}
+
+/* Notifies the subtree that its effective style changed. Each child with its
+ * own override keeps that style and is left alone. */
+static void ui_trait_children(UIView *view, int oldParent, int newParent)
+{
+    for (int i = 0; i < view->_subviewCount; i++)
+    {
+        UIView *child = (UIView *)view->_subviews[i];
+        int oldStyle = child->_overrideUserInterfaceStyle ==
+                               UIUserInterfaceStyleDark ? 1 :
+                       child->_overrideUserInterfaceStyle ==
+                               UIUserInterfaceStyleLight ? 0 : oldParent;
+        int newStyle = child->_overrideUserInterfaceStyle ==
+                               UIUserInterfaceStyleDark ? 1 :
+                       child->_overrideUserInterfaceStyle ==
+                               UIUserInterfaceStyleLight ? 0 : newParent;
+        if (oldStyle != newStyle)
+            [child traitCollectionDidChange:ui_trait_for_style(oldStyle)];
+        ui_trait_children(child, oldStyle, newStyle);
+    }
+}
+
 @implementation UIView
 - (id)initWithFrame:(CGRect)frame
 {
@@ -3608,6 +4054,28 @@ static CGPoint window_point_for_view(UIView *view, CGPoint point)
 }
 - (void)setBackgroundColor:(UIColor *)color { _backgroundColor = color; }
 - (UIColor *)backgroundColor { return _backgroundColor; }
+- (UITraitCollection *)traitCollection
+{
+    int style = ui_view_style_with_global(self, ui_style_current());
+    return ui_trait_for_style(style);
+}
+- (long)overrideUserInterfaceStyle { return _overrideUserInterfaceStyle; }
+- (void)traitCollectionDidChange:(UITraitCollection *)previous
+{
+    (void)previous;
+}
+- (void)setOverrideUserInterfaceStyle:(long)style
+{
+    if (_overrideUserInterfaceStyle == style)
+        return;
+    int oldStyle = ui_view_style_with_global(self, ui_style_current());
+    _overrideUserInterfaceStyle = style;
+    int newStyle = ui_view_style_with_global(self, ui_style_current());
+    if (oldStyle == newStyle)
+        return;
+    [self traitCollectionDidChange:ui_trait_for_style(oldStyle)];
+    ui_trait_children(self, oldStyle, newStyle);
+}
 - (void)setClipsToBounds:(BOOL)clips { _clipsToBounds = clips; }
 - (BOOL)clipsToBounds { return _clipsToBounds; }
 - (void)addSubview:(UIView *)view
@@ -5107,6 +5575,7 @@ static int iosim_text_press_tick(void)
 /* ------------------------------------------------------------- pickers */
 
 static unsigned color_rgb(UIColor *color);
+static double color_alpha(UIColor *color);
 
 static long picker_components(UIPickerView *picker)
 {
@@ -5167,7 +5636,7 @@ static unsigned picker_text_color(UIView *view)
     for (UIView *v = view; v; v = [v superview])
     {
         UIColor *color = v->_backgroundColor;
-        if (!color || color->_a <= 0.5)
+        if (!color || color_alpha(color) <= 0.5)
             continue;
         unsigned rgb = color_rgb(color);
         double luminance = (0.299 * (((rgb >> 16) & 0xff) / 255.0) +
@@ -6435,6 +6904,34 @@ static int iosim_modal_tick(void)
 - (void)loadView
 {
     _view = [[UIView alloc] initWithFrame:[[UIScreen mainScreen] bounds]];
+}
+- (UITraitCollection *)traitCollection
+{
+    if (_view)
+        return [_view traitCollection];
+    return ui_trait_for_style(ui_style_current());
+}
+- (long)overrideUserInterfaceStyle
+{
+    return _view ? [_view overrideUserInterfaceStyle] :
+                   UIUserInterfaceStyleUnspecified;
+}
+- (void)setOverrideUserInterfaceStyle:(long)style
+{
+    [self view];
+    if (_view)
+        [_view setOverrideUserInterfaceStyle:style];
+}
+- (void)traitCollectionDidChange:(UITraitCollection *)previous
+{
+    (void)previous;
+}
+- (long)preferredStatusBarStyle
+{
+    return UIStatusBarStyleDefault;
+}
+- (void)setNeedsStatusBarAppearanceUpdate
+{
 }
 - (UIView *)view
 {
@@ -10348,7 +10845,65 @@ static double two_finger_angle(double x1, double y1, double x2, double y2)
 + (UIWindow *)keyWindow { return g_keyWindow; }
 @end
 
+/* Applies a device-wide appearance change and tells the window tree, its
+ * root controller and any presented controllers about it. */
+static void ui_apply_style(int dark)
+{
+    int old = ui_style_current();
+    if (old == dark)
+    {
+        g_ui_style = dark;
+        return;
+    }
+    g_ui_style = dark;
+    UIWindow *window = [UIWindow keyWindow];
+    if (window)
+    {
+        int oldStyle = ui_view_style_with_global(window, old);
+        int newStyle = ui_view_style_with_global(window, dark);
+        if (oldStyle != newStyle)
+            [window traitCollectionDidChange:ui_trait_for_style(oldStyle)];
+        ui_trait_children(window, oldStyle, newStyle);
+        UIViewController *controller = [window rootViewController];
+        while (controller)
+        {
+            UIView *view = [controller view];
+            int oldController =
+                view ? ui_view_style_with_global(view, old) : old;
+            int newController =
+                view ? ui_view_style_with_global(view, dark) : dark;
+            if (oldController != newController)
+                [controller
+                    traitCollectionDidChange:ui_trait_for_style(oldController)];
+            controller = [controller presentedViewController];
+        }
+    }
+    [[NSNotificationCenter defaultCenter]
+        postNotificationName:UITraitCollectionDidChangeNotification
+                      object:nil];
+}
+
+/* Polls the shared appearance file from an app's run loop. Returns 1 when a
+ * repaint is needed. */
+int iosim_ui_appearance_tick(void)
+{
+    static double next_check = 0;
+    double now = iosim_now();
+    if (now < next_check)
+        return 0;
+    next_check = now + 0.5;
+    int dark = ui_appearance_read_file();
+    if (dark == ui_style_current())
+        return 0;
+    ui_apply_style(dark);
+    return 1;
+}
+
 /* --------------------------------------------------------- applications */
+
+/* An application-wide status bar style set through UIApplication overrides
+ * the root view controller's preference. -1 means no override. */
+static long g_status_bar_style_override = -1;
 
 @implementation UIApplication
 + (UIApplication *)sharedApplication
@@ -10368,6 +10923,16 @@ static double two_finger_angle(double x1, double y1, double x2, double y2)
 - (void)setDelegate:(id)delegate { _delegate = delegate; }
 - (id)delegate { return _delegate; }
 - (long)applicationState { return _state; }
+- (long)statusBarStyle
+{
+    return g_status_bar_style_override >= 0 ? g_status_bar_style_override
+                                            : UIStatusBarStyleDefault;
+}
+- (void)setStatusBarStyle:(long)style animated:(BOOL)animated
+{
+    (void)animated;
+    g_status_bar_style_override = style;
+}
 - (long)applicationIconBadgeNumber { return _iconBadgeNumber; }
 - (void)setApplicationIconBadgeNumber:(long)value
 {
@@ -10661,13 +11226,24 @@ static unsigned color_rgb(UIColor *color)
 {
     if (!color)
         return 0;
-    int r = (int)(color->_r * 255.0 + 0.5);
-    int g = (int)(color->_g * 255.0 + 0.5);
-    int b = (int)(color->_b * 255.0 + 0.5);
+    double components[4];
+    [color ui_components:components];
+    int r = (int)(components[0] * 255.0 + 0.5);
+    int g = (int)(components[1] * 255.0 + 0.5);
+    int b = (int)(components[2] * 255.0 + 0.5);
     if (r < 0) r = 0; if (r > 255) r = 255;
     if (g < 0) g = 0; if (g > 255) g = 255;
     if (b < 0) b = 0; if (b > 255) b = 255;
     return ((unsigned)r << 16) | ((unsigned)g << 8) | (unsigned)b;
+}
+
+static double color_alpha(UIColor *color)
+{
+    if (!color)
+        return 0;
+    double components[4];
+    [color ui_components:components];
+    return components[3];
 }
 
 /* CAGradientLayer.colors holds CGColorRefs in UIKit, but this runtime also
@@ -11713,11 +12289,11 @@ static void render_layer(CALayer *layer, double parentX, double parentY,
     }
     iosim_fb_set_opacity(alpha);
     int masked = push_layer_mask(layer, x, y, w, h, scale);
-    if (layer->_backgroundColor && layer->_backgroundColor->_a > 0.001 &&
+    if (layer->_backgroundColor && color_alpha(layer->_backgroundColor) > 0.001 &&
         w > 0 && h > 0)
     {
         unsigned color = color_rgb(layer->_backgroundColor);
-        iosim_fb_set_opacity(alpha * layer->_backgroundColor->_a);
+        iosim_fb_set_opacity(alpha * color_alpha(layer->_backgroundColor));
         double radius = layer_key_value(layer, "cornerRadius",
                                         layer->_cornerRadius);
         if (radius > 0)
@@ -11994,12 +12570,12 @@ static void render_view(UIView *view, double originX, double originY,
         iosim_fb_set_opacity(alpha);
     }
 
-    if (view->_backgroundColor && view->_backgroundColor->_a > 0.001 &&
+    if (view->_backgroundColor && color_alpha(view->_backgroundColor) > 0.001 &&
         w > 0 && h > 0 &&
         ![view isKindOfClass:[UIVisualEffectView class]])
     {
         unsigned color = color_rgb(view->_backgroundColor);
-        iosim_fb_set_opacity(alpha * view->_backgroundColor->_a);
+        iosim_fb_set_opacity(alpha * color_alpha(view->_backgroundColor));
         double radius = view->_layer
             ? layer_key_value(view->_layer, "cornerRadius",
                               view->_layer->_cornerRadius)
@@ -12874,6 +13450,22 @@ static void render_view(UIView *view, double originX, double originY,
                     tint = 0xffffff;
                     tint_alpha = 0.55;
                 }
+                else if (style >= UIBlurEffectStyleSystemUltraThinMaterial)
+                {
+                    /* System materials follow the device appearance. */
+                    double thickness =
+                        (double)(style - UIBlurEffectStyleSystemUltraThinMaterial);
+                    if (ui_style_current() == 1)
+                    {
+                        tint = 0x1c1c1e;
+                        tint_alpha = 0.50 + thickness * 0.05;
+                    }
+                    else
+                    {
+                        tint = 0xf2f2f7;
+                        tint_alpha = 0.28 + thickness * 0.04;
+                    }
+                }
                 else
                 {
                     tint = 0xf2f2f7;
@@ -13031,11 +13623,11 @@ static void render_view(UIView *view, double originX, double originY,
 
 /* Right side of the status bar: cellular, Wi-Fi and battery. The lock screen
  * draws these without the time, which it shows at display size. */
-static void draw_status_icons(int fbWidth, double scale)
+static void draw_status_icons(int fbWidth, double scale, unsigned color)
 {
     /* Cellular signal placeholders, Wi-Fi and battery, measured from the
-     * iPhone 18 Pro status bar. IOSIM_STATUS_SIGNAL=bars draws the white
-     * override style; IOSIM_STATUS_BATTERY=charging draws the green battery. */
+     * iPhone 18 Pro status bar. IOSIM_STATUS_SIGNAL=bars draws the override
+     * style; IOSIM_STATUS_BATTERY=charging draws the green battery. */
     const char *signalStyle = getenv("IOSIM_STATUS_SIGNAL");
     if (signalStyle && strcmp(signalStyle, "bars") == 0)
     {
@@ -13046,27 +13638,27 @@ static void draw_status_icons(int fbWidth, double scale)
                                      (int)(3.33 * scale + 0.5),
                                      (int)((6.333 + i * 2.333) * scale +
                                            0.5),
-                                     (int)(1.0 * scale), 0xffffff);
+                                     (int)(1.0 * scale), color);
     }
     else
     {
         for (int i = 0; i < 4; i++)
             iosim_fb_fill_circle((int)((278.83 + i * 5.667) * scale),
                                  (int)(37.83 * scale), (int)(1.85 * scale),
-                                 0x484c58);
+                                 color);
     }
     for (int i = 0; i < 51; i++)
     {
         double angle = (-140.0 + i * 2.0) * 3.14159265358979323846 / 180.0;
         int x = (int)((315.33 + 11.08 * __builtin_cos(angle)) * scale);
         int y = (int)((38.0 + 11.08 * __builtin_sin(angle)) * scale);
-        iosim_fb_fill_circle(x, y, (int)(1.03 * scale), 0xffffff);
+        iosim_fb_fill_circle(x, y, (int)(1.03 * scale), color);
         x = (int)((315.33 + 7.08 * __builtin_cos(angle)) * scale);
         y = (int)((38.0 + 7.08 * __builtin_sin(angle)) * scale);
-        iosim_fb_fill_circle(x, y, (int)(1.03 * scale), 0xffffff);
+        iosim_fb_fill_circle(x, y, (int)(1.03 * scale), color);
     }
     iosim_fb_fill_circle((int)(315.33 * scale), (int)(36.67 * scale),
-                         (int)(2.67 * scale), 0xffffff);
+                         (int)(2.67 * scale), color);
     const char *batteryStyle = getenv("IOSIM_STATUS_BATTERY");
     if (batteryStyle && strcmp(batteryStyle, "charging") == 0)
     {
@@ -13089,19 +13681,48 @@ static void draw_status_icons(int fbWidth, double scale)
     {
         iosim_fb_fill_round_rect((int)(333.0 * scale), (int)(25.33 * scale),
                                  (int)(26.33 * scale), (int)(13.67 * scale),
-                                 (int)(4.0 * scale), 0xffffff);
+                                 (int)(4.0 * scale), color);
         iosim_fb_fill_round_rect((int)(360.0 * scale), (int)(29.67 * scale),
                                  (int)(2.0 * scale), (int)(5.0 * scale),
-                                 (int)(1.0 * scale), 0xffffff);
+                                 (int)(1.0 * scale), color);
     }
 }
 
 static int g_shell_active;
 static int g_sb_overlay_guard;
+static UIViewController *g_app_root_controller;
 static void shell_draw_notification_overlays(int fbWidth, double scale);
+
+/* Status bar glyphs are white over SpringBoard's wallpaper and follow the
+ * foreground app's style otherwise. An explicit UIApplication style wins;
+ * then the root controller's preferredStatusBarStyle; a plain default style
+ * picks the color that reads against the root view's background. */
+static unsigned app_status_bar_color(void)
+{
+    long style = g_status_bar_style_override;
+    if (style < 0 && g_app_root_controller)
+        style = [g_app_root_controller preferredStatusBarStyle];
+    if (style == UIStatusBarStyleLightContent)
+        return 0xffffff;
+    if (style == UIStatusBarStyleDarkContent)
+        return 0x000000;
+    UIView *view = g_app_root_controller ? [g_app_root_controller view] : nil;
+    UIColor *background = view ? view->_backgroundColor : nil;
+    if (background)
+    {
+        unsigned rgb = color_rgb(background);
+        double luminance = (0.299 * (((rgb >> 16) & 0xff) / 255.0) +
+                            0.587 * (((rgb >> 8) & 0xff) / 255.0) +
+                            0.114 * ((rgb & 0xff) / 255.0));
+        if (luminance < 0.5)
+            return 0xffffff;
+    }
+    return 0x000000;
+}
 
 static void draw_device_chrome(int fbWidth, double scale)
 {
+    unsigned chrome = g_shell_active ? 0xffffff : app_status_bar_color();
     (void)fbWidth;
     /* Status bar: time, cellular, Wi-Fi and battery. */
     double timeSize = getenv("IOSIM_TIME_SIZE") ? atof(getenv("IOSIM_TIME_SIZE"))
@@ -13115,8 +13736,8 @@ static void draw_device_chrome(int fbWidth, double scale)
                                              timeSize, scale);
     iosim_fb_font_text((int)(80.67 * scale) - timeWidth / 2,
                        (int)(timeBaseline * scale), statusTime,
-                       IOSIM_FONT_SEMIBOLD, timeSize, scale, 0xffffff);
-    draw_status_icons(fbWidth, scale);
+                       IOSIM_FONT_SEMIBOLD, timeSize, scale, chrome);
+    draw_status_icons(fbWidth, scale, chrome);
     if (g_shell_active && !g_sb_overlay_guard)
         shell_draw_notification_overlays(fbWidth, scale);
 }
@@ -14904,6 +15525,13 @@ static void shell_draw(int fbWidth, int fbHeight, double scale)
     int dr = (int)(44.5 * scale + 0.5);
     iosim_fb_fill_field(dx, dy, dw, dh, dr, shell_dock_grid, SHELL_DOCK_W,
                         SHELL_DOCK_H);
+    if (ui_style_current() == 1)
+    {
+        /* The glass darkens with the device appearance. */
+        iosim_fb_set_opacity(0.55);
+        iosim_fb_fill_round_rect(dx, dy, dw, dh, dr, 0x1c1c1e);
+        iosim_fb_set_opacity(1.0);
+    }
     int dock_center_y = (int)((805.3333) * scale + 0.5);
     int dock_left = (int)((201.0 - 44.0) * scale + 0.5);
     int dock_right = (int)((201.0 + 44.0) * scale + 0.5);
@@ -14925,17 +15553,26 @@ static void shell_draw(int fbWidth, int fbHeight, double scale)
     int sr = (int)(14.5 * scale + 0.5);
     iosim_fb_fill_field(sx, sy, sw, sh, sr, shell_search_grid,
                         SHELL_SEARCH_W, SHELL_SEARCH_H);
+    int dark_style = ui_style_current() == 1;
+    if (dark_style)
+    {
+        iosim_fb_set_opacity(0.82);
+        iosim_fb_fill_round_rect(sx, sy, sw, sh, sr, 0x1c1c1e);
+        iosim_fb_set_opacity(1.0);
+    }
+    unsigned glyph = dark_style ? 0xaeaeb2 : 0xd6d3de;
+    unsigned placeholder = dark_style ? 0xe5e5ea : 0xd8d5e0;
     int mx = sx + (int)(12 * scale), my = sy + sh / 2;
     iosim_fb_stroke_circle(mx, my, (int)(4.5 * scale),
-                           (int)(1.4 * scale + 0.5), 0xd6d3de);
+                           (int)(1.4 * scale + 0.5), glyph);
     iosim_fb_draw_line(mx + (int)(3 * scale), my + (int)(3 * scale),
                        mx + (int)(6 * scale), my + (int)(6 * scale),
-                       (int)(1.4 * scale + 0.5), 0xd6d3de);
+                       (int)(1.4 * scale + 0.5), glyph);
     int swidth = iosim_fb_font_text_width("Search", IOSIM_FONT_REGULAR, 13,
                                           scale);
     iosim_fb_font_text(sx + (sw - swidth) / 2 + (int)(7 * scale),
                        my + (int)(5 * scale), "Search", IOSIM_FONT_REGULAR,
-                       13, scale, 0xd8d5e0);
+                       13, scale, placeholder);
 
     draw_device_chrome(fbWidth, scale);
 }
@@ -16890,7 +17527,7 @@ static void shell_draw_lock(int fbWidth, int fbHeight, double scale,
                              (int)(5 * scale), (int)(2.5 * scale), 0xffffff);
     iosim_fb_set_opacity(1.0);
 
-    draw_status_icons(fbWidth, scale);
+    draw_status_icons(fbWidth, scale, 0xffffff);
     if (path && *path)
         iosim_fb_present(path);
 }
@@ -16926,6 +17563,9 @@ static void shell_after_app_stop(int fbWidth, int fbHeight, double scale,
      * while it was foreground. */
     shell_badges_load();
     shell_notification_categories_load();
+    /* Appearance events are consumed by whichever process is foreground, so
+     * pick up the shared value again when SpringBoard gets the screen back. */
+    g_ui_style = ui_appearance_read_file();
     if (g_lock_requested)
     {
         g_lock_requested = 0;
@@ -17104,6 +17744,7 @@ static int run_springboard(void)
     const char *ph = getenv("SIMULATOR_MAINSCREEN_HEIGHT");
     int fbWidth = pw ? atoi(pw) : 1206;
     int fbHeight = ph ? atoi(ph) : 2622;
+    g_ui_style = ui_appearance_read_file();
     if (iosim_fb_begin((unsigned)fbWidth, (unsigned)fbHeight) != 0)
         return 1;
 
@@ -17134,6 +17775,18 @@ static int run_springboard(void)
         if (shell_notification_tick(fbWidth, fbHeight, scale, path))
         {
             shell_refresh_all(fbWidth, fbHeight, scale, path);
+            continue;
+        }
+        if (r == 1 && type == 18)
+        {
+            /* The device manager switched light/dark appearance. */
+            int dark = x != 0;
+            g_ui_style = dark;
+            ui_appearance_write_file(dark);
+            shell_refresh_all(fbWidth, fbHeight, scale, path);
+            /* Log after the repaint so a waiting harness can screenshot. */
+            printf("[SpringBoard] appearance %s\n", dark ? "dark" : "light");
+            fflush(0);
             continue;
         }
         if (r == 1 && type == 8)
@@ -18766,6 +19419,10 @@ int UIApplicationMain(int argc, char **argv, id principal, id delegateName)
     if (shellMode && *shellMode)
         return run_springboard();
 
+    /* The device appearance is shared with SpringBoard; resolve it before
+     * any view is built so dynamic colors draw with the right style. */
+    g_ui_style = ui_appearance_read_file();
+
     /* Open the event stream before the first frame so the system UI can
      * deliver events while the scene is still being built. */
     iosim_event_open();
@@ -18834,6 +19491,7 @@ int UIApplicationMain(int argc, char **argv, id principal, id delegateName)
                 sceneDelegate);
 
     UIViewController *rootController = [window rootViewController];
+    g_app_root_controller = rootController;
     if (rootController)
     {
         [rootController viewWillAppear:NO];
@@ -18914,6 +19572,15 @@ int UIApplicationMain(int argc, char **argv, id principal, id delegateName)
             else if (r == 1 && type == 6 && g_firstResponder)
             {
                 [g_firstResponder deleteBackward];
+                redraw = 1;
+            }
+            else if (r == 1 && type == 18)
+            {
+                /* The foreground app owns the event stream, so it records
+                 * the new device appearance for SpringBoard and itself. */
+                int dark = x != 0;
+                ui_appearance_write_file(dark);
+                ui_apply_style(dark);
                 redraw = 1;
             }
             else if (r == 1 && type >= 12 && type <= 17)
@@ -19023,6 +19690,8 @@ int UIApplicationMain(int argc, char **argv, id principal, id delegateName)
             if (iosim_display_link_tick())
                 redraw = 1;
             if (iosim_animation_tick())
+                redraw = 1;
+            if (iosim_ui_appearance_tick())
                 redraw = 1;
             if (iosim_modal_tick())
                 redraw = 1;

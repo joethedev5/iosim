@@ -218,12 +218,50 @@ typedef enum {
 @property(readonly, getter=isValid) BOOL valid;
 @end
 
+enum {
+    UIUserInterfaceStyleUnspecified = 0,
+    UIUserInterfaceStyleLight = 1,
+    UIUserInterfaceStyleDark = 2
+};
+
+enum {
+    UIUserInterfaceSizeClassUnspecified = 0,
+    UIUserInterfaceSizeClassCompact = 1,
+    UIUserInterfaceSizeClassRegular = 2
+};
+
+@interface UITraitCollection : NSObject
+@property(readonly) long userInterfaceStyle;
+@property(readonly) double displayScale;
+@property(readonly) long horizontalSizeClass;
+@property(readonly) long verticalSizeClass;
+@end
+
 @interface UIColor : NSObject
 + (UIColor *)colorWithRed:(double)r green:(double)g blue:(double)b
                     alpha:(double)a;
 + (UIColor *)whiteColor;
 + (UIColor *)blackColor;
 + (UIColor *)systemBlueColor;
++ (UIColor *)systemRedColor;
++ (UIColor *)systemGreenColor;
++ (UIColor *)systemOrangeColor;
++ (UIColor *)systemYellowColor;
++ (UIColor *)systemPurpleColor;
++ (UIColor *)systemPinkColor;
++ (UIColor *)systemTealColor;
++ (UIColor *)systemIndigoColor;
++ (UIColor *)systemGrayColor;
++ (UIColor *)systemBackgroundColor;
++ (UIColor *)secondarySystemBackgroundColor;
++ (UIColor *)systemGroupedBackgroundColor;
++ (UIColor *)labelColor;
++ (UIColor *)secondaryLabelColor;
++ (UIColor *)tertiaryLabelColor;
++ (UIColor *)separatorColor;
++ (UIColor *)opaqueSeparatorColor;
++ (UIColor *)linkColor;
+- (UIColor *)resolvedColorWithTraitCollection:(UITraitCollection *)traits;
 @property(readonly) id CGColor;
 @end
 
@@ -303,6 +341,9 @@ enum {
 @property double alpha;
 @property CGAffineTransform transform;
 @property(nonatomic, retain) UIColor *backgroundColor;
+@property(readonly) UITraitCollection *traitCollection;
+@property(nonatomic) long overrideUserInterfaceStyle;
+- (void)traitCollectionDidChange:(UITraitCollection *)previous;
 @property(readonly) CALayer *layer;
 - (void)drawRect:(CGRect)rect;
 - (void)addSubview:(UIView *)view;
@@ -401,6 +442,11 @@ enum {
 - (id)init;
 @property(nonatomic) long modalPresentationStyle;
 @property(nonatomic, retain) UIView *view;
+@property(readonly) UITraitCollection *traitCollection;
+@property(nonatomic) long overrideUserInterfaceStyle;
+- (void)traitCollectionDidChange:(UITraitCollection *)previous;
+- (long)preferredStatusBarStyle;
+- (void)setNeedsStatusBarAppearanceUpdate;
 @property(nonatomic, retain) id title;
 @property(readonly) id navigationController;
 @property(readonly) UINavigationItem *navigationItem;
@@ -807,9 +853,17 @@ enum {
     UIApplicationStateBackground = 2
 };
 
+enum {
+    UIStatusBarStyleDefault = 0,
+    UIStatusBarStyleLightContent = 1,
+    UIStatusBarStyleDarkContent = 3
+};
+
 @interface UIApplication : UIResponder
 + (UIApplication *)sharedApplication;
 - (long)applicationState;
+- (long)statusBarStyle;
+- (void)setStatusBarStyle:(long)style animated:(BOOL)animated;
 @property(nonatomic) long applicationIconBadgeNumber;
 @end
 
