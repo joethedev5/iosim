@@ -798,3 +798,13 @@ management.
   its 49pt height from the content view and keeps it hidden by default.
   `UIRefreshControl.attributedTitle` is stored but the spinner is still drawn
   by the blade renderer, not by a label.
+- `UIViewPropertyAnimator` reuses the UIView animation engine: it runs its
+  animation blocks through `animateWithDuration:`, reports the end position to
+  completion handlers and keeps pause/stop/finish as state transitions over
+  that single engine. A real limitation surfaced by its async completion:
+  `_Block_copy` copies the block struct but the runtime's
+  `_Block_object_assign` is a no-op, so a `__block` scalar captured by a block
+  that runs after the creating stack frame returns still points at the stack.
+  Synchronous block consumers (enumeration, sorting) see the right value;
+  asynchronous ones need a heap object or global until the block runtime
+  promotes byref storage.

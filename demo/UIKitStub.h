@@ -855,6 +855,57 @@ enum {
 - (void)safeAreaInsetsDidChange;
 @end
 
+enum {
+    UIViewAnimatingStateInactive = 0,
+    UIViewAnimatingStateActive = 1,
+    UIViewAnimatingStateStopped = 2
+};
+
+enum {
+    UIViewAnimatingPositionEnd = 0,
+    UIViewAnimatingPositionStart = 1,
+    UIViewAnimatingPositionCurrent = 2
+};
+
+enum {
+    UIViewAnimationCurveEaseInOut = 0,
+    UIViewAnimationCurveEaseIn = 1,
+    UIViewAnimationCurveEaseOut = 2,
+    UIViewAnimationCurveLinear = 3
+};
+
+@interface UIViewPropertyAnimator : NSObject
+- (id)initWithDuration:(double)duration
+                 curve:(long)curve
+            animations:(void (^)(void))animations;
+- (id)initWithDuration:(double)duration
+          dampingRatio:(double)ratio
+            animations:(void (^)(void))animations;
+- (id)initWithDuration:(double)duration
+         controlPoint1:(CGPoint)point1
+         controlPoint2:(CGPoint)point2
+            animations:(void (^)(void))animations;
+@property(readonly) double duration;
+@property double fractionComplete;
+@property(getter=isReversed) BOOL reversed;
+@property(readonly) long state;
+@property(readonly, getter=isRunning) BOOL running;
+@property(getter=isInterruptible) BOOL interruptible;
+@property(getter=isUserInteractionEnabled) BOOL userInteractionEnabled;
+@property BOOL scrubsLinearly;
+@property BOOL pausesOnCompletion;
+- (void)addAnimations:(void (^)(void))animations;
+- (void)addAnimations:(void (^)(void))animations delayFactor:(double)factor;
+- (void)addCompletion:(void (^)(long position))completion;
+- (void)startAnimation;
+- (void)startAnimationAfterDelay:(double)delay;
+- (void)pauseAnimation;
+- (void)stopAnimation:(BOOL)withoutFinishing;
+- (void)finishAnimationAtPosition:(long)position;
+- (void)continueAnimationWithTimingParameters:(id)parameters
+                                durationFactor:(double)factor;
+@end
+
 @class UITextField;
 
 @protocol UITextFieldDelegate

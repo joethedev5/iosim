@@ -4,6 +4,8 @@
 extern int printf(const char *fmt, ...);
 extern int fflush(void *stream);
 
+static int g_animatorRuns;
+
 @interface FoundationSearchUpdater : NSObject <UISearchResultsUpdating>
 @end
 
@@ -270,6 +272,24 @@ extern int fflush(void *stream);
            [toolbarController modalTransitionStyle],
            [toolbarController hidesBottomBarWhenPushed],
            [toolbarController modalPresentationCapturesStatusBarAppearance]);
+
+    g_animatorRuns = 0;
+    UIViewPropertyAnimator *animator = [[UIViewPropertyAnimator alloc]
+        initWithDuration:0.1 curve:0 animations:^{
+            g_animatorRuns++;
+        }];
+    [animator addAnimations:^{
+        g_animatorRuns++;
+    }];
+    [animator addCompletion:^(long position) {
+        printf("[fnd] animator done %ld %ld %d\n", position,
+               [animator state], g_animatorRuns);
+        fflush(0);
+    }];
+    printf("[fnd] animator start %.1f %.1f %d %ld\n", [animator duration],
+           [animator fractionComplete], [animator isRunning],
+           [animator state]);
+    [animator startAnimation];
 
     printf("[fnd] ready\n");
     fflush(0);

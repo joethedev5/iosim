@@ -1481,6 +1481,76 @@ typedef enum {
                 completion:(void (^)(BOOL finished))completion;
 @end
 
+typedef enum {
+    UIViewAnimatingStateInactive = 0,
+    UIViewAnimatingStateActive = 1,
+    UIViewAnimatingStateStopped = 2
+} UIViewAnimatingState;
+
+typedef enum {
+    UIViewAnimatingPositionEnd = 0,
+    UIViewAnimatingPositionStart = 1,
+    UIViewAnimatingPositionCurrent = 2
+} UIViewAnimatingPosition;
+
+typedef enum {
+    UIViewAnimationCurveEaseInOut = 0,
+    UIViewAnimationCurveEaseIn = 1,
+    UIViewAnimationCurveEaseOut = 2,
+    UIViewAnimationCurveLinear = 3
+} UIViewAnimationCurve;
+
+@interface UIViewPropertyAnimator : NSObject {
+@public
+    double _duration;
+    double _fractionComplete;
+    BOOL _reversed;
+    BOOL _interruptible;
+    BOOL _userInteractionEnabled;
+    BOOL _scrubsLinearly;
+    BOOL _pausesOnCompletion;
+    BOOL _completed;
+    long _state;
+    id _animations;
+    id _completions;
+}
+- (id)initWithDuration:(double)duration
+                 curve:(long)curve
+            animations:(void (^)(void))animations;
+- (id)initWithDuration:(double)duration
+          dampingRatio:(double)ratio
+            animations:(void (^)(void))animations;
+- (id)initWithDuration:(double)duration
+         controlPoint1:(CGPoint)point1
+         controlPoint2:(CGPoint)point2
+            animations:(void (^)(void))animations;
+- (double)duration;
+- (double)fractionComplete;
+- (void)setFractionComplete:(double)fraction;
+- (BOOL)isReversed;
+- (void)setReversed:(BOOL)reversed;
+- (long)state;
+- (BOOL)isRunning;
+- (BOOL)isInterruptible;
+- (void)setInterruptible:(BOOL)interruptible;
+- (BOOL)isUserInteractionEnabled;
+- (void)setUserInteractionEnabled:(BOOL)enabled;
+- (BOOL)scrubsLinearly;
+- (void)setScrubsLinearly:(BOOL)linear;
+- (BOOL)pausesOnCompletion;
+- (void)setPausesOnCompletion:(BOOL)pauses;
+- (void)addAnimations:(void (^)(void))animations;
+- (void)addAnimations:(void (^)(void))animations delayFactor:(double)factor;
+- (void)addCompletion:(void (^)(long position))completion;
+- (void)startAnimation;
+- (void)startAnimationAfterDelay:(double)delay;
+- (void)pauseAnimation;
+- (void)stopAnimation:(BOOL)withoutFinishing;
+- (void)finishAnimationAtPosition:(long)position;
+- (void)continueAnimationWithTimingParameters:(id)parameters
+                                durationFactor:(double)factor;
+@end
+
 @interface UIAccessibilityElement : NSObject {
 @public
     id _accessibilityContainer;
@@ -7022,6 +7092,173 @@ static CGPoint window_point_for_view(UIView *view, CGPoint point)
     g_animateCurve = 0;
     if (!repeat && completion)
         animation_add_completion(delay + duration, completion);
+}
+@end
+
+@implementation UIViewPropertyAnimator
+- (id)initWithDuration:(double)duration
+                 curve:(long)curve
+            animations:(void (^)(void))animations
+{
+    self = [super init];
+    if (self)
+    {
+        _duration = duration;
+        _state = UIViewAnimatingStateInactive;
+        _interruptible = YES;
+        _userInteractionEnabled = YES;
+        _scrubsLinearly = YES;
+        _animations = [NSMutableArray array];
+        _completions = [NSMutableArray array];
+        (void)curve;
+        [self addAnimations:animations];
+    }
+    return self;
+}
+- (id)initWithDuration:(double)duration
+          dampingRatio:(double)ratio
+            animations:(void (^)(void))animations
+{
+    (void)ratio;
+    return [self initWithDuration:duration
+                            curve:UIViewAnimationCurveEaseInOut
+                       animations:animations];
+}
+- (id)initWithDuration:(double)duration
+         controlPoint1:(CGPoint)point1
+         controlPoint2:(CGPoint)point2
+            animations:(void (^)(void))animations
+{
+    (void)point1;
+    (void)point2;
+    return [self initWithDuration:duration
+                            curve:UIViewAnimationCurveEaseInOut
+                       animations:animations];
+}
+- (double)duration { return _duration; }
+- (double)fractionComplete { return _fractionComplete; }
+- (void)setFractionComplete:(double)fraction
+{
+    if (fraction < 0)
+        fraction = 0;
+    if (fraction > 1)
+        fraction = 1;
+    _fractionComplete = fraction;
+    if (fraction > 0 && _state == UIViewAnimatingStateInactive && !_completed)
+    {
+        [self runAnimations];
+        _state = UIViewAnimatingStateActive;
+    }
+}
+- (BOOL)isReversed { return _reversed; }
+- (void)setReversed:(BOOL)reversed { _reversed = reversed; }
+- (long)state { return _state; }
+- (BOOL)isRunning { return _state == UIViewAnimatingStateActive; }
+- (BOOL)isInterruptible { return _interruptible; }
+- (void)setInterruptible:(BOOL)interruptible
+{
+    _interruptible = interruptible;
+}
+- (BOOL)isUserInteractionEnabled { return _userInteractionEnabled; }
+- (void)setUserInteractionEnabled:(BOOL)enabled
+{
+    _userInteractionEnabled = enabled;
+}
+- (BOOL)scrubsLinearly { return _scrubsLinearly; }
+- (void)setScrubsLinearly:(BOOL)linear { _scrubsLinearly = linear; }
+- (BOOL)pausesOnCompletion { return _pausesOnCompletion; }
+- (void)setPausesOnCompletion:(BOOL)pauses { _pausesOnCompletion = pauses; }
+- (void)addAnimations:(void (^)(void))animations
+{
+    if (!animations)
+        return;
+    [(NSMutableArray *)_animations
+        addObject:(id)_Block_copy((void *)animations)];
+}
+- (void)addAnimations:(void (^)(void))animations delayFactor:(double)factor
+{
+    (void)factor;
+    [self addAnimations:animations];
+}
+- (void)addCompletion:(void (^)(long position))completion
+{
+    if (!completion)
+        return;
+    [(NSMutableArray *)_completions
+        addObject:(id)_Block_copy((void *)completion)];
+}
+- (void)runAnimations
+{
+    for (unsigned long i = 0; i < [(NSArray *)_animations count]; i++)
+    {
+        void (^block)(void) =
+            (void (^)(void))[(NSArray *)_animations objectAtIndex:i];
+        block();
+    }
+}
+- (void)completeWithPosition:(long)position
+{
+    if (_completed)
+        return;
+    _completed = YES;
+    _state = UIViewAnimatingStateInactive;
+    _fractionComplete =
+        position == UIViewAnimatingPositionStart ? 0 : 1;
+    for (unsigned long i = 0; i < [(NSArray *)_completions count]; i++)
+    {
+        void (^block)(long) =
+            (void (^)(long))[(NSArray *)_completions objectAtIndex:i];
+        block(position);
+    }
+}
+- (void)startAnimation
+{
+    [self startAnimationAfterDelay:0];
+}
+- (void)startAnimationAfterDelay:(double)delay
+{
+    if (_state != UIViewAnimatingStateInactive || _completed)
+        return;
+    _state = UIViewAnimatingStateActive;
+    if ([(NSArray *)_animations count] == 0)
+    {
+        [self completeWithPosition:UIViewAnimatingPositionEnd];
+        return;
+    }
+    void (^run)(void) = ^{ [self runAnimations]; };
+    [UIView animateWithDuration:_duration
+                          delay:delay
+                        options:0
+                     animations:run
+                     completion:^(BOOL finished) {
+        [self completeWithPosition:finished
+            ? UIViewAnimatingPositionEnd : UIViewAnimatingPositionCurrent];
+    }];
+}
+- (void)pauseAnimation
+{
+    if (_state == UIViewAnimatingStateActive)
+        _state = UIViewAnimatingStateActive;
+}
+- (void)stopAnimation:(BOOL)withoutFinishing
+{
+    (void)withoutFinishing;
+    _state = UIViewAnimatingStateStopped;
+    [self completeWithPosition:UIViewAnimatingPositionCurrent];
+}
+- (void)finishAnimationAtPosition:(long)position
+{
+    if (_completed)
+        return;
+    if (_state == UIViewAnimatingStateInactive)
+        [self runAnimations];
+    [self completeWithPosition:position];
+}
+- (void)continueAnimationWithTimingParameters:(id)parameters
+                                durationFactor:(double)factor
+{
+    (void)parameters;
+    (void)factor;
 }
 @end
 

@@ -1413,3 +1413,9 @@ Python for iteration speed.
   its icon), with no memory-pressure termination policy. Stock system apps are display icons
   without executables, and a directly launched app alongside a running
   SpringBoard is not coordinated through launchd.
+`UIViewPropertyAnimator` is a thin state machine over the existing UIView
+animation engine: `startAnimation` schedules the animation blocks and a
+completion, `finishAnimationAtPosition:` settles immediately, and pause/stop
+only change the reported state. Block copy currently leaves `__block`
+scalars pointing at their creating stack frame, so asynchronous blocks must
+capture heap objects or globals.
