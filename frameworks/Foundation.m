@@ -3295,6 +3295,73 @@ static int pred_parse_or(pred_parser *parser)
 - (void)removeAllObjects { _count = 0; }
 @end
 
+/* --------------------------------------------------------- NSCountedSet */
+
+@implementation NSCountedSet
++ (id)countedSetWithArray:(id)array
+{
+    NSCountedSet *set = [[[self alloc] init] autorelease];
+    for (unsigned long i = 0; i < [array count]; i++)
+        [set addObject:[array objectAtIndex:i]];
+    return set;
+}
+- (void)addObject:(id)object
+{
+    if (!object)
+        return;
+    for (unsigned long i = 0; i < _count; i++)
+    {
+        if (objects_equal(_items[i], object))
+        {
+            _counts[i]++;
+            return;
+        }
+    }
+    id *items = realloc(_items, (_count + 1) * sizeof(id));
+    if (!items)
+        return;
+    _items = items;
+    unsigned long *counts = realloc(_counts, (_count + 1) * sizeof(unsigned long));
+    if (!counts)
+        return;
+    _counts = counts;
+    _items[_count] = object;
+    _counts[_count] = 1;
+    _count++;
+}
+- (void)removeObject:(id)object
+{
+    for (unsigned long i = 0; i < _count; i++)
+    {
+        if (!objects_equal(_items[i], object))
+            continue;
+        if (_counts[i] > 1)
+        {
+            _counts[i]--;
+            return;
+        }
+        for (unsigned long j = i; j + 1 < _count; j++)
+        {
+            _items[j] = _items[j + 1];
+            _counts[j] = _counts[j + 1];
+        }
+        _count--;
+        return;
+    }
+}
+- (void)removeAllObjects
+{
+    _count = 0;
+}
+- (unsigned long)countForObject:(id)object
+{
+    for (unsigned long i = 0; i < _count; i++)
+        if (objects_equal(_items[i], object))
+            return _counts[i];
+    return 0;
+}
+@end
+
 /* --------------------------------------------------------- NSOrderedSet */
 
 @implementation NSOrderedSet

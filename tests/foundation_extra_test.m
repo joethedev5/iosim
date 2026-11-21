@@ -508,6 +508,13 @@ static int g_animatorRuns;
     printf("[fnd] sizechildcount %d %.0f\n", parentController->_sizeChanges,
            [sizeChild preferredContentSize].width);
 
+    NSCountedSet *counted = [NSCountedSet countedSetWithArray:
+        @[@"a", @"b", @"a", @"a"]];
+    [counted addObject:@"b"];
+    [counted removeObject:@"a"];
+    printf("[fnd] counted %lu %lu %lu\n", [counted count],
+           [counted countForObject:@"a"], [counted countForObject:@"b"]);
+
     NSMutableOrderedSet *ordered = [NSMutableOrderedSet orderedSet];
     [ordered addObject:@"a"];
     [ordered addObject:@"b"];

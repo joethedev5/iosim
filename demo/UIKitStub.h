@@ -274,6 +274,18 @@ typedef struct {
                                        count:(unsigned long)len;
 @end
 
+@interface NSMutableSet : NSSet
++ (id)set;
+- (void)addObject:(id)object;
+- (void)removeObject:(id)object;
+- (void)removeAllObjects;
+@end
+
+@interface NSCountedSet : NSMutableSet
++ (id)countedSetWithArray:(id)array;
+- (unsigned long)countForObject:(id)object;
+@end
+
 @interface NSOrderedSet : NSObject <NSFastEnumeration>
 + (id)orderedSet;
 + (id)orderedSetWithObject:(id)object;

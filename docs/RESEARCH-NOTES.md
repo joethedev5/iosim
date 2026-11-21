@@ -848,3 +848,6 @@ components.
   item/section constructors, positional access, `indexPathByAddingIndex:`,
   `indexPathByRemovingLastIndex`, `compare:` and `getIndexes:`. Table and
   collection views keep using the same two-index representation.
+- `NSCountedSet` subclasses `NSMutableSet` with a parallel count vector:
+  adding an existing member increments its count, removing decrements it and
+  drops the member at zero, and `countForObject:` returns the multiplicity.

@@ -426,6 +426,14 @@ enum {
 - (void)removeAllObjects;
 @end
 
+@interface NSCountedSet : NSMutableSet {
+@public
+    unsigned long *_counts;
+}
++ (id)countedSetWithArray:(id)array;
+- (unsigned long)countForObject:(id)object;
+@end
+
 @interface NSOrderedSet : NSObject <NSFastEnumeration> {
 @public
     id *_items;
