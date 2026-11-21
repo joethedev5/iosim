@@ -1433,3 +1433,5 @@ presented controller's view.
 If the transitioning delegate returns an interactive driver, the transition
 context goes to `startInteractiveTransition:` rather than directly to the
 animator; the driver is responsible for driving and completing it.
+`NSOrderedSet` is an insertion-ordered array with unique membership; its
+mutable subclass adds insert/remove/replace and indexed subscripting.

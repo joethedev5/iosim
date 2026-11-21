@@ -416,6 +416,41 @@ enum {
 - (void)removeAllObjects;
 @end
 
+@interface NSOrderedSet : NSObject <NSFastEnumeration> {
+@public
+    id *_items;
+    unsigned long _count;
+}
++ (id)orderedSet;
++ (id)orderedSetWithObject:(id)object;
++ (id)orderedSetWithObjects:(const id *)objects count:(unsigned long)count;
++ (id)orderedSetWithObjects:(id)first, ...;
++ (id)orderedSetWithArray:(id)array;
++ (id)orderedSetWithSet:(id)set;
+- (unsigned long)count;
+- (id)objectAtIndex:(unsigned long)index;
+- (id)firstObject;
+- (id)lastObject;
+- (unsigned long)indexOfObject:(id)object;
+- (BOOL)containsObject:(id)object;
+- (id)array;
+- (id)set;
+- (unsigned long)countByEnumeratingWithState:(NSFastEnumerationState *)state
+                                     objects:(id *)buffer
+                                       count:(unsigned long)len;
+@end
+
+@interface NSMutableOrderedSet : NSOrderedSet
++ (id)orderedSet;
+- (void)addObject:(id)object;
+- (void)insertObject:(id)object atIndex:(unsigned long)index;
+- (void)removeObject:(id)object;
+- (void)removeObjectAtIndex:(unsigned long)index;
+- (void)replaceObjectAtIndex:(unsigned long)index withObject:(id)object;
+- (void)setObject:(id)object atIndexedSubscript:(unsigned long)index;
+- (void)removeAllObjects;
+@end
+
 @interface NSDictionary : NSObject <NSFastEnumeration> {
 @public
     id *_keys;

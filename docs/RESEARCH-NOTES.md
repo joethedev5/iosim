@@ -828,3 +828,7 @@ management.
   calls `startInteractiveTransition:` with the same context instead of
   `animateTransition:`; the driver owns when to complete, so a percent-driven
   driver can settle the context itself.
+- `NSOrderedSet`/`NSMutableOrderedSet` keep insertion order with set-style
+  uniqueness: a dynamic array plus linear membership checks, with ordered-set
+  construction from arrays and sets, index lookup, subscript replacement and
+  conversion back to `NSArray`/`NSSet`.

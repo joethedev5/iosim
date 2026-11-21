@@ -6040,6 +6040,7 @@ if wait_log "[fnd] trim 'Hello World'" &&
    wait_log "[fnd] navtoolbar 0 1 725 3 1 1" &&
    wait_log "[fnd] animator start 0.1 0.0 0 0" &&
    wait_log "[fnd] animator done 0 0 2" &&
+   wait_log "[fnd] ordered 2 a d a 1 0 2" &&
    wait_log "[fnd] trans delegate 1" &&
    wait_log "[fnd] pres will" &&
    wait_log "[fnd] inter start 1" &&

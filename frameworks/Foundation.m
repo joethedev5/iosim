@@ -3206,6 +3206,155 @@ static int pred_parse_or(pred_parser *parser)
 - (void)removeAllObjects { _count = 0; }
 @end
 
+/* --------------------------------------------------------- NSOrderedSet */
+
+@implementation NSOrderedSet
++ (id)orderedSet { return [[[self alloc] init] autorelease]; }
++ (id)orderedSetWithObject:(id)object
+{
+    NSMutableOrderedSet *set = [NSMutableOrderedSet orderedSet];
+    [set addObject:object];
+    return set;
+}
++ (id)orderedSetWithObjects:(const id *)objects count:(unsigned long)count
+{
+    NSMutableOrderedSet *set = [NSMutableOrderedSet orderedSet];
+    for (unsigned long i = 0; i < count; i++)
+        [set addObject:objects[i]];
+    return set;
+}
++ (id)orderedSetWithObjects:(id)first, ...
+{
+    NSMutableOrderedSet *set = [NSMutableOrderedSet orderedSet];
+    va_list ap;
+    va_start(ap, first);
+    id object = first;
+    while (object)
+    {
+        [set addObject:object];
+        object = va_arg(ap, id);
+    }
+    va_end(ap);
+    return set;
+}
++ (id)orderedSetWithArray:(id)array
+{
+    NSMutableOrderedSet *set = [NSMutableOrderedSet orderedSet];
+    for (unsigned long i = 0; i < [array count]; i++)
+        [set addObject:[array objectAtIndex:i]];
+    return set;
+}
++ (id)orderedSetWithSet:(id)source
+{
+    NSMutableOrderedSet *set = [NSMutableOrderedSet orderedSet];
+    NSArray *objects = [source respondsToSelector:@selector(allObjects)]
+                           ? [source allObjects]
+                           : nil;
+    for (unsigned long i = 0; i < [objects count]; i++)
+        [set addObject:[objects objectAtIndex:i]];
+    return set;
+}
+- (unsigned long)count { return _count; }
+- (id)objectAtIndex:(unsigned long)index
+{
+    return index < _count ? _items[index] : nil;
+}
+- (id)firstObject { return _count ? _items[0] : nil; }
+- (id)lastObject { return _count ? _items[_count - 1] : nil; }
+- (unsigned long)indexOfObject:(id)object
+{
+    for (unsigned long i = 0; i < _count; i++)
+        if (objects_equal(_items[i], object))
+            return i;
+    return NSNotFound;
+}
+- (BOOL)containsObject:(id)object
+{
+    return [self indexOfObject:object] != NSNotFound;
+}
+- (id)array { return [NSArray arrayWithObjects:_items count:_count]; }
+- (id)set { return [NSSet setWithArray:[self array]]; }
+- (unsigned long)countByEnumeratingWithState:(NSFastEnumerationState *)state
+                                     objects:(id *)buffer
+                                       count:(unsigned long)len
+{
+    (void)buffer;
+    (void)len;
+    if (state->state != 0)
+        return 0;
+    state->state = 1;
+    state->itemsPtr = _items;
+    state->mutationsPtr = &state->extra[0];
+    return _count;
+}
+- (id)description
+{
+    NSMutableString *string = [NSMutableString string];
+    [string appendString:@"{("];
+    for (unsigned long i = 0; i < _count; i++)
+    {
+        if (i)
+            [string appendString:@", "];
+        [string appendString:
+            [NSString stringWithUTF8String:obj_cstr(_items[i])]];
+    }
+    [string appendString:@")}"];
+    return string;
+}
+@end
+
+@implementation NSMutableOrderedSet
++ (id)orderedSet { return [[[self alloc] init] autorelease]; }
+- (void)addObject:(id)object
+{
+    if (!object || [self containsObject:object])
+        return;
+    id *items = realloc(_items, (_count + 1) * sizeof(id));
+    if (!items)
+        return;
+    _items = items;
+    _items[_count++] = object;
+}
+- (void)insertObject:(id)object atIndex:(unsigned long)index
+{
+    if (!object || index > _count || [self containsObject:object])
+        return;
+    id *items = realloc(_items, (_count + 1) * sizeof(id));
+    if (!items)
+        return;
+    _items = items;
+    for (unsigned long i = _count; i > index; i--)
+        _items[i] = _items[i - 1];
+    _items[index] = object;
+    _count++;
+}
+- (void)removeObject:(id)object
+{
+    unsigned long index = [self indexOfObject:object];
+    if (index != NSNotFound)
+        [self removeObjectAtIndex:index];
+}
+- (void)removeObjectAtIndex:(unsigned long)index
+{
+    if (index >= _count)
+        return;
+    for (unsigned long i = index; i + 1 < _count; i++)
+        _items[i] = _items[i + 1];
+    _count--;
+}
+- (void)replaceObjectAtIndex:(unsigned long)index withObject:(id)object
+{
+    if (index >= _count || !object)
+        return;
+    _items[index] = object;
+}
+- (void)setObject:(id)object atIndexedSubscript:(unsigned long)index
+{
+    [self replaceObjectAtIndex:index withObject:object];
+}
+- (void)removeAllObjects { _count = 0; }
+@end
+
 /* --------------------------------------------------------- NSDictionary */
 
 @implementation NSDictionary

@@ -430,6 +430,20 @@ static int g_animatorRuns;
            [animator state]);
     [animator startAnimation];
 
+    NSMutableOrderedSet *ordered = [NSMutableOrderedSet orderedSet];
+    [ordered addObject:@"a"];
+    [ordered addObject:@"b"];
+    [ordered addObject:@"a"];
+    [ordered insertObject:@"c" atIndex:1];
+    [ordered removeObject:@"b"];
+    [ordered replaceObjectAtIndex:1 withObject:@"d"];
+    printf("[fnd] ordered %lu %s %s %s %lu %d %lu\n", [ordered count],
+           [[ordered objectAtIndex:0] UTF8String],
+           [[ordered objectAtIndex:1] UTF8String],
+           [[ordered firstObject] UTF8String],
+           [ordered indexOfObject:@"d"], [ordered containsObject:@"b"],
+           [[ordered set] count]);
+
     FoundationTransitionAnimator *transitionAnimator =
         [[FoundationTransitionAnimator alloc] init];
     FoundationTransitionDelegate *transitionDelegate =
