@@ -3809,10 +3809,27 @@ enum {
     id _items;
     long _changeCount;
 }
+extern id UIPasteboardTypeListString;
+extern id UIPasteboardTypeListImage;
+extern id UIPasteboardTypeListURL;
+extern id UIPasteboardTypeListColor;
+
 + (UIPasteboard *)generalPasteboard;
 - (id)string;
 - (void)setString:(id)string;
 - (BOOL)hasStrings;
+- (id)strings;
+- (void)setStrings:(id)strings;
+- (id)URL;
+- (void)setURL:(id)url;
+- (id)URLs;
+- (void)setURLs:(id)urls;
+- (id)color;
+- (void)setColor:(id)color;
+- (id)colors;
+- (void)setColors:(id)colors;
+- (id)types;
+- (BOOL)containsPasteboardTypes:(id)types;
 - (id)items;
 - (void)setItems:(id)items;
 - (long)changeCount;
@@ -16414,6 +16431,44 @@ static id g_pasteboard_text_type_value(void)
     return g_pasteboard_text_type;
 }
 
+id UIPasteboardTypeListString;
+id UIPasteboardTypeListImage;
+id UIPasteboardTypeListURL;
+id UIPasteboardTypeListColor;
+
+__attribute__((constructor)) static void iosim_pasteboard_types(void)
+{
+    UIPasteboardTypeListString = [NSArray arrayWithObjects:
+        @"public.utf8-plain-text", @"public.utf16-plain-text",
+        @"public.text", nil];
+    UIPasteboardTypeListImage = [NSArray arrayWithObjects:
+        @"public.image", @"public.png", @"public.jpeg", @"public.tiff", nil];
+    UIPasteboardTypeListURL = [NSArray arrayWithObjects:
+        @"public.url", @"public.file-url", nil];
+    UIPasteboardTypeListColor =
+        [NSArray arrayWithObject:@"com.apple.uikit.color"];
+}
+
+static id pasteboard_color_data(id color)
+{
+    double red = 0, green = 0, blue = 0, alpha = 0;
+    if (!color ||
+        ![color getRed:&red green:&green blue:&blue alpha:&alpha])
+        return nil;
+    double values[4] = { red, green, blue, alpha };
+    return [NSData dataWithBytes:values length:sizeof(values)];
+}
+
+static id pasteboard_color_from_data(id data)
+{
+    if (!data || [data length] < sizeof(double) * 4)
+        return nil;
+    double values[4];
+    memcpy(values, [data bytes], sizeof(values));
+    return [UIColor colorWithRed:values[0] green:values[1]
+                           blue:values[2] alpha:values[3]];
+}
+
 static void pasteboard_path(char *out, unsigned long cap)
 {
     const char *shared = getenv("SIMULATOR_SHARED_RESOURCES_DIRECTORY");
@@ -16538,6 +16593,195 @@ static void pasteboard_path(char *out, unsigned long cap)
 - (BOOL)hasStrings
 {
     return [self string] != nil;
+}
+- (id)strings
+{
+    NSMutableArray *strings = [NSMutableArray array];
+    id items = [self items];
+    id type = g_pasteboard_text_type_value();
+    for (unsigned long i = 0; i < [items count]; i++)
+    {
+        id item = [items objectAtIndex:i];
+        if (![item isKindOfClass:[NSDictionary class]])
+            continue;
+        id value = [(NSDictionary *)item objectForKey:type];
+        if ([value isKindOfClass:[NSString class]])
+            [strings addObject:value];
+    }
+    return strings;
+}
+- (void)setStrings:(id)strings
+{
+    NSMutableArray *items = [NSMutableArray array];
+    if (strings && [strings isKindOfClass:[NSArray class]])
+    {
+        for (unsigned long i = 0; i < [strings count]; i++)
+        {
+            id value = [strings objectAtIndex:i];
+            if (![value isKindOfClass:[NSString class]])
+                continue;
+            NSMutableDictionary *item = [NSMutableDictionary dictionary];
+            [item setObject:value forKey:g_pasteboard_text_type_value()];
+            [items addObject:item];
+        }
+    }
+    _items = items;
+    _changeCount++;
+    [self save];
+}
+- (id)URL
+{
+    id items = [self items];
+    for (unsigned long i = 0; i < [items count]; i++)
+    {
+        id item = [items objectAtIndex:i];
+        if (![item isKindOfClass:[NSDictionary class]])
+            continue;
+        id value = [(NSDictionary *)item objectForKey:@"public.url"];
+        if ([value isKindOfClass:[NSString class]])
+            return [NSURL URLWithString:value];
+    }
+    return nil;
+}
+- (void)setURL:(id)url
+{
+    NSMutableArray *items = [NSMutableArray array];
+    if (url)
+    {
+        NSMutableDictionary *item = [NSMutableDictionary dictionary];
+        [item setObject:[url absoluteString] forKey:@"public.url"];
+        [items addObject:item];
+    }
+    _items = items;
+    _changeCount++;
+    [self save];
+}
+- (id)URLs
+{
+    NSMutableArray *urls = [NSMutableArray array];
+    id items = [self items];
+    for (unsigned long i = 0; i < [items count]; i++)
+    {
+        id item = [items objectAtIndex:i];
+        if (![item isKindOfClass:[NSDictionary class]])
+            continue;
+        id value = [(NSDictionary *)item objectForKey:@"public.url"];
+        if ([value isKindOfClass:[NSString class]])
+            [urls addObject:[NSURL URLWithString:value]];
+    }
+    return urls;
+}
+- (void)setURLs:(id)urls
+{
+    NSMutableArray *items = [NSMutableArray array];
+    if (urls && [urls isKindOfClass:[NSArray class]])
+    {
+        for (unsigned long i = 0; i < [urls count]; i++)
+        {
+            id url = [urls objectAtIndex:i];
+            if (!url)
+                continue;
+            NSMutableDictionary *item = [NSMutableDictionary dictionary];
+            [item setObject:[url absoluteString] forKey:@"public.url"];
+            [items addObject:item];
+        }
+    }
+    _items = items;
+    _changeCount++;
+    [self save];
+}
+- (id)color
+{
+    id items = [self items];
+    for (unsigned long i = 0; i < [items count]; i++)
+    {
+        id item = [items objectAtIndex:i];
+        if (![item isKindOfClass:[NSDictionary class]])
+            continue;
+        id value = [(NSDictionary *)item objectForKey:@"com.apple.uikit.color"];
+        id color = pasteboard_color_from_data(value);
+        if (color)
+            return color;
+    }
+    return nil;
+}
+- (void)setColor:(id)color
+{
+    NSMutableArray *items = [NSMutableArray array];
+    id data = pasteboard_color_data(color);
+    if (data)
+    {
+        NSMutableDictionary *item = [NSMutableDictionary dictionary];
+        [item setObject:data forKey:@"com.apple.uikit.color"];
+        [items addObject:item];
+    }
+    _items = items;
+    _changeCount++;
+    [self save];
+}
+- (id)colors
+{
+    NSMutableArray *colors = [NSMutableArray array];
+    id items = [self items];
+    for (unsigned long i = 0; i < [items count]; i++)
+    {
+        id item = [items objectAtIndex:i];
+        if (![item isKindOfClass:[NSDictionary class]])
+            continue;
+        id value = [(NSDictionary *)item objectForKey:@"com.apple.uikit.color"];
+        id color = pasteboard_color_from_data(value);
+        if (color)
+            [colors addObject:color];
+    }
+    return colors;
+}
+- (void)setColors:(id)colors
+{
+    NSMutableArray *items = [NSMutableArray array];
+    if (colors && [colors isKindOfClass:[NSArray class]])
+    {
+        for (unsigned long i = 0; i < [colors count]; i++)
+        {
+            id data = pasteboard_color_data([colors objectAtIndex:i]);
+            if (!data)
+                continue;
+            NSMutableDictionary *item = [NSMutableDictionary dictionary];
+            [item setObject:data forKey:@"com.apple.uikit.color"];
+            [items addObject:item];
+        }
+    }
+    _items = items;
+    _changeCount++;
+    [self save];
+}
+- (id)types
+{
+    NSMutableArray *types = [NSMutableArray array];
+    id items = [self items];
+    for (unsigned long i = 0; i < [items count]; i++)
+    {
+        id item = [items objectAtIndex:i];
+        if (![item isKindOfClass:[NSDictionary class]])
+            continue;
+        id keys = [(NSDictionary *)item allKeys];
+        for (unsigned long j = 0; j < [keys count]; j++)
+        {
+            id key = [keys objectAtIndex:j];
+            if (![types containsObject:key])
+                [types addObject:key];
+        }
+    }
+    return types;
+}
+- (BOOL)containsPasteboardTypes:(id)types
+{
+    if (!types)
+        return NO;
+    id available = [self types];
+    for (unsigned long i = 0; i < [types count]; i++)
+        if (![available containsObject:[types objectAtIndex:i]])
+            return NO;
+    return YES;
 }
 - (long)changeCount
 {

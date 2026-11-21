@@ -1093,6 +1093,11 @@ first item carries `public.utf8-plain-text`. A data write then replaces the
 contents (`len=3 change=2`), and another process reads the same three bytes
 back as `data=3/1 change=2`, so the pasteboard is a device service rather
 than per-process state.
+`tests/pasteboard_types_test.m` stores two strings, two URLs and a color and
+reports `[pb] strings 2 one 1`, `[pb] urls 2 https://example.com/b 1`,
+`[pb] color 1.00 0.50 0.25 0.75` and `[pb] types 1 1`: `strings`, `URLs`,
+`colors`, `types` and `containsPasteboardTypes:` read back the typed item
+values, and color components survive as a 32-byte data value in the plist.
 
 ### Services: dispatch, Mach, bootstrap and XPC
 

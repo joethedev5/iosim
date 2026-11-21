@@ -316,6 +316,18 @@ out="$(SIMULATOR_SHARED_RESOURCES_DIRECTORY="$PB_SHARED" \
     DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/pasteboard" read-data 2>&1)"
 check "[paste] data=3/1 change=2" "$out" \
     "a second process reads the typed pasteboard data"
+"$ROOT/tools/build_app.sh" "$ROOT/tests/pasteboard_types_test.m" \
+    "$T/pasteboard_types_test" >/dev/null
+out="$(SIMULATOR_SHARED_RESOURCES_DIRECTORY="$PB_SHARED" \
+    DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/pasteboard_types_test" 2>&1)"
+check "[pb] strings 2 one 1" "$out" \
+    "the pasteboard stores multiple strings under the plain-text type"
+check "[pb] urls 2 https://example.com/b 1" "$out" \
+    "the pasteboard stores multiple URLs under the public.url type"
+check "[pb] color 1.00 0.50 0.25 0.75" "$out" \
+    "the pasteboard stores UIColor components under the UIKit color type"
+check "[pb] types 1 1" "$out" \
+    "types and containsPasteboardTypes report the stored type"
 
 # ---------- 4g. NSCalendar components ----------
 "$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \

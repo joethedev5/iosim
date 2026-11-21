@@ -2008,11 +2008,23 @@ enum {
 @property(readonly) NSArray *connectedScenes;
 @end
 
+extern id UIPasteboardTypeListString;
+extern id UIPasteboardTypeListImage;
+extern id UIPasteboardTypeListURL;
+extern id UIPasteboardTypeListColor;
+
 @interface UIPasteboard : NSObject
 + (UIPasteboard *)generalPasteboard;
 @property(nonatomic, retain) id string;
+@property(nonatomic, retain) NSArray *strings;
+@property(nonatomic, retain) NSURL *URL;
+@property(nonatomic, retain) NSArray *URLs;
+@property(nonatomic, retain) UIColor *color;
+@property(nonatomic, retain) NSArray *colors;
+@property(readonly) NSArray *types;
 @property(readonly) long changeCount;
 - (BOOL)hasStrings;
+- (BOOL)containsPasteboardTypes:(NSArray *)types;
 - (id)items;
 - (void)setItems:(id)items;
 - (id)dataForPasteboardType:(id)type;

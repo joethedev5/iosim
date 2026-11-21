@@ -1476,3 +1476,6 @@ Binary plists share the `NSPropertyListSerialization` entry points: the writer
 flattens objects into a unique table, emits markers and refs, then an offset
 table and 32-byte trailer; the reader trusts only the trailer's sizes, resolves
 object refs through the offset table, and caps recursion depth.
+`UIPasteboard.strings`, `URLs` and `colors` build items with their public type
+keys and parse them back from the shared plist; `types` unions item keys and
+`containsPasteboardTypes:` checks the union.

@@ -880,3 +880,7 @@ components.
   and UTF-16BE strings, UIDs, arrays/sets and dictionaries, with extended
   lengths stored as inline int objects. The writer flattens unique objects,
   emits refs of the minimum width and writes the same trailer.
+- Pasteboard items stay one dictionary per item; rich properties are views
+  over the same storage: strings use the plain-text key, URLs the public.url
+  key, and colors a 32-byte big-endian-agnostic native double array under
+  com.apple.uikit.color. Type queries union the item keys in order.
