@@ -1435,3 +1435,5 @@ context goes to `startInteractiveTransition:` rather than directly to the
 animator; the driver is responsible for driving and completing it.
 `NSOrderedSet` is an insertion-ordered array with unique membership; its
 mutable subclass adds insert/remove/replace and indexed subscripting.
+`UIViewController` implements `UIContentContainer`; preferred-content-size
+changes propagate upward through the parent controller chain.

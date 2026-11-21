@@ -832,3 +832,7 @@ management.
   uniqueness: a dynamic array plus linear membership checks, with ordered-set
   construction from arrays and sets, index lookup, subscript replacement and
   conversion back to `NSArray`/`NSSet`.
+- `UIViewController` conforms to `UIContentContainer`: changing a child's
+  `preferredContentSize` forwards `preferredContentSizeDidChangeForChildContentContainer:`
+  to its parent, and the default parent callback is a no-op. Container size
+  fitting notifications are exposed as no-op hooks for now.

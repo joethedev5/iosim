@@ -1947,7 +1947,15 @@ extern NSString *const UITransitionContextToViewKey;
                completion:(void (^)(BOOL completed))completion;
 @end
 
-@interface UIViewController : NSObject {
+@protocol UIContentContainer
+- (CGSize)preferredContentSize;
+- (void)preferredContentSizeDidChangeForChildContentContainer:
+    (id<UIContentContainer>)container;
+- (void)systemLayoutFittingSizeDidChangeForChildContentContainer:
+    (id<UIContentContainer>)container;
+@end
+
+@interface UIViewController : NSObject <UIContentContainer> {
 @public
     UIView *_view;
     BOOL _viewLoaded;
@@ -2031,6 +2039,10 @@ extern NSString *const UITransitionContextToViewKey;
 - (void)setRestorationIdentifier:(id)identifier;
 - (CGSize)preferredContentSize;
 - (void)setPreferredContentSize:(CGSize)size;
+- (void)preferredContentSizeDidChangeForChildContentContainer:
+    (id<UIContentContainer>)container;
+- (void)systemLayoutFittingSizeDidChangeForChildContentContainer:
+    (id<UIContentContainer>)container;
 - (UIViewController *)parentViewController;
 - (NSArray *)children;
 - (void)addChildViewController:(UIViewController *)controller;
@@ -10931,6 +10943,21 @@ NSString *const UITransitionContextToViewKey =
 - (void)setPreferredContentSize:(CGSize)size
 {
     _preferredContentSize = size;
+    if (_parentController &&
+        [_parentController respondsToSelector:
+            @selector(preferredContentSizeDidChangeForChildContentContainer:)])
+        [_parentController
+            preferredContentSizeDidChangeForChildContentContainer:self];
+}
+- (void)preferredContentSizeDidChangeForChildContentContainer:
+    (id<UIContentContainer>)container
+{
+    (void)container;
+}
+- (void)systemLayoutFittingSizeDidChangeForChildContentContainer:
+    (id<UIContentContainer>)container
+{
+    (void)container;
 }
 - (id)title { return _title; }
 - (UIPopoverPresentationController *)popoverPresentationController

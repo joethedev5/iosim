@@ -156,6 +156,23 @@ static int g_animatorRuns;
 }
 @end
 
+@interface FoundationParentController : UIViewController {
+@public
+    int _sizeChanges;
+}
+@end
+
+@implementation FoundationParentController
+- (void)preferredContentSizeDidChangeForChildContentContainer:
+    (id<UIContentContainer>)container
+{
+    _sizeChanges++;
+    printf("[fnd] sizechild %d %.0f\n", _sizeChanges,
+           [container preferredContentSize].width);
+    fflush(0);
+}
+@end
+
 @interface FoundationController : UIViewController
 @end
 
@@ -429,6 +446,14 @@ static int g_animatorRuns;
            [animator fractionComplete], [animator isRunning],
            [animator state]);
     [animator startAnimation];
+
+    FoundationParentController *parentController =
+        [[FoundationParentController alloc] init];
+    UIViewController *sizeChild = [[UIViewController alloc] init];
+    [parentController addChildViewController:sizeChild];
+    sizeChild.preferredContentSize = CGSizeMake(123, 45);
+    printf("[fnd] sizechildcount %d %.0f\n", parentController->_sizeChanges,
+           [sizeChild preferredContentSize].width);
 
     NSMutableOrderedSet *ordered = [NSMutableOrderedSet orderedSet];
     [ordered addObject:@"a"];

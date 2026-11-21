@@ -1156,7 +1156,15 @@ extern NSString *const UITransitionContextToViewKey;
 @property(nonatomic) BOOL prefersScrollingExpandsWhenScrolledToEdge;
 @end
 
-@interface UIViewController : NSObject
+@protocol UIContentContainer
+- (CGSize)preferredContentSize;
+- (void)preferredContentSizeDidChangeForChildContentContainer:
+    (id<UIContentContainer>)container;
+- (void)systemLayoutFittingSizeDidChangeForChildContentContainer:
+    (id<UIContentContainer>)container;
+@end
+
+@interface UIViewController : NSObject <UIContentContainer>
 - (id)init;
 @property(nonatomic) long modalPresentationStyle;
 @property unsigned long edgesForExtendedLayout;
@@ -1172,6 +1180,10 @@ extern NSString *const UITransitionContextToViewKey;
 @property(copy) NSArray *toolbarItems;
 - (void)setToolbarItems:(NSArray *)items animated:(BOOL)animated;
 @property CGSize preferredContentSize;
+- (void)preferredContentSizeDidChangeForChildContentContainer:
+    (id<UIContentContainer>)container;
+- (void)systemLayoutFittingSizeDidChangeForChildContentContainer:
+    (id<UIContentContainer>)container;
 @property(readonly) UIPopoverPresentationController *popoverPresentationController;
 @property(readonly) UISheetPresentationController *sheetPresentationController;
 @property(readonly) UIPresentationController *presentationController;
