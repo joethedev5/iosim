@@ -7008,12 +7008,602 @@ static id plist_parse_value(struct plist_state *p, int depth)
     return nil;
 }
 
+/* ---------------------------------------------------- binary property lists */
+
+#define BP_MAX_OBJECTS 8192
+#define BP_EPOCH_OFFSET 978307200.0
+
+static int bp_byte_width(unsigned long long value)
+{
+    if (value <= 0xffULL)
+        return 1;
+    if (value <= 0xffffULL)
+        return 2;
+    if (value <= 0xffffffffULL)
+        return 4;
+    return 8;
+}
+
+static void bp_append_be(NSMutableData *data, unsigned long long value,
+                         int bytes)
+{
+    unsigned char buf[8];
+    for (int i = 0; i < bytes; i++)
+        buf[i] = (unsigned char)(value >> (8 * (bytes - 1 - i)));
+    [data appendBytes:buf length:(unsigned long)bytes];
+}
+
+static void bp_append_marker(NSMutableData *data, unsigned char marker,
+                             unsigned long count)
+{
+    if (count < 15)
+    {
+        unsigned char byte = (unsigned char)(marker | count);
+        [data appendBytes:&byte length:1];
+        return;
+    }
+    unsigned char byte = (unsigned char)(marker | 0xf);
+    [data appendBytes:&byte length:1];
+    int width = bp_byte_width(count);
+    unsigned char int_marker = (unsigned char)(0x10 | (width == 8 ? 3 :
+        width == 4 ? 2 : width == 2 ? 1 : 0));
+    [data appendBytes:&int_marker length:1];
+    bp_append_be(data, count, width);
+}
+
+static unsigned long bp_utf8_to_utf16be(const unsigned char *s,
+                                        unsigned long n, unsigned char *out)
+{
+    unsigned long used = 0;
+    unsigned long i = 0;
+    while (i < n)
+    {
+        unsigned int cp = s[i++];
+        if (cp >= 0xc0)
+        {
+            int extra = cp >= 0xf0 ? 3 : cp >= 0xe0 ? 2 : 1;
+            cp &= extra == 3 ? 0x07 : extra == 2 ? 0x0f : 0x1f;
+            while (extra-- > 0 && i < n)
+                cp = (cp << 6) | (s[i++] & 0x3f);
+        }
+        if (cp > 0xffff)
+        {
+            cp -= 0x10000;
+            unsigned int hi = 0xd800 + (cp >> 10);
+            unsigned int lo = 0xdc00 + (cp & 0x3ff);
+            out[used++] = (unsigned char)(hi >> 8);
+            out[used++] = (unsigned char)hi;
+            out[used++] = (unsigned char)(lo >> 8);
+            out[used++] = (unsigned char)lo;
+        }
+        else
+        {
+            out[used++] = (unsigned char)(cp >> 8);
+            out[used++] = (unsigned char)cp;
+        }
+    }
+    return used;
+}
+
+static unsigned long bp_utf16be_to_utf8(const unsigned char *s,
+                                        unsigned long units, char *out)
+{
+    unsigned long used = 0;
+    unsigned long i = 0;
+    while (i < units)
+    {
+        unsigned int cp = ((unsigned int)s[i * 2] << 8) | s[i * 2 + 1];
+        i++;
+        if (cp >= 0xd800 && cp <= 0xdbff && i < units)
+        {
+            unsigned int lo = ((unsigned int)s[i * 2] << 8) | s[i * 2 + 1];
+            if (lo >= 0xdc00 && lo <= 0xdfff)
+            {
+                cp = 0x10000 + ((cp - 0xd800) << 10) + (lo - 0xdc00);
+                i++;
+            }
+        }
+        if (cp < 0x80)
+            out[used++] = (char)cp;
+        else if (cp < 0x800)
+        {
+            out[used++] = (char)(0xc0 | (cp >> 6));
+            out[used++] = (char)(0x80 | (cp & 0x3f));
+        }
+        else if (cp < 0x10000)
+        {
+            out[used++] = (char)(0xe0 | (cp >> 12));
+            out[used++] = (char)(0x80 | ((cp >> 6) & 0x3f));
+            out[used++] = (char)(0x80 | (cp & 0x3f));
+        }
+        else
+        {
+            out[used++] = (char)(0xf0 | (cp >> 18));
+            out[used++] = (char)(0x80 | ((cp >> 12) & 0x3f));
+            out[used++] = (char)(0x80 | ((cp >> 6) & 0x3f));
+            out[used++] = (char)(0x80 | (cp & 0x3f));
+        }
+    }
+    out[used] = 0;
+    return used;
+}
+
+struct bp_writer {
+    id objects[BP_MAX_OBJECTS];
+    unsigned long offsets[BP_MAX_OBJECTS];
+    int count;
+    NSMutableData *out;
+    int ref_size;
+};
+
+static int bp_find_object(struct bp_writer *writer, id object)
+{
+    for (int i = 0; i < writer->count; i++)
+        if (writer->objects[i] == object)
+            return i;
+    return -1;
+}
+
+static void bp_add_object(struct bp_writer *writer, id object)
+{
+    if (!object || writer->count >= BP_MAX_OBJECTS ||
+        bp_find_object(writer, object) >= 0)
+        return;
+    writer->objects[writer->count++] = object;
+    if ([object isKindOfClass:[NSArray class]])
+    {
+        NSArray *array = object;
+        for (unsigned long i = 0; i < [array count]; i++)
+            bp_add_object(writer, [array objectAtIndex:i]);
+    }
+    else if ([object isKindOfClass:[NSDictionary class]])
+    {
+        NSDictionary *dictionary = object;
+        id keys = [dictionary allKeys];
+        for (unsigned long i = 0; i < [keys count]; i++)
+        {
+            id key = [keys objectAtIndex:i];
+            bp_add_object(writer, key);
+            bp_add_object(writer, [dictionary objectForKey:key]);
+        }
+    }
+}
+
+static void bp_write_object(struct bp_writer *writer, id object)
+{
+    NSMutableData *out = writer->out;
+    if ([object isKindOfClass:[NSNull class]])
+    {
+        unsigned char marker = 0x00;
+        [out appendBytes:&marker length:1];
+        return;
+    }
+    if ([object isKindOfClass:[NSNumber class]])
+    {
+        NSNumber *number = object;
+        if (number->_kind == 2)
+        {
+            unsigned char marker = number->_ival ? 0x09 : 0x08;
+            [out appendBytes:&marker length:1];
+        }
+        else if (number->_kind == 1)
+        {
+            unsigned char marker = 0x23;
+            [out appendBytes:&marker length:1];
+            unsigned long long bits = 0;
+            memcpy(&bits, &number->_dval, 8);
+            bp_append_be(out, bits, 8);
+        }
+        else
+        {
+            int width = number->_ival < 0 ? 8 : bp_byte_width(
+                (unsigned long long)number->_ival);
+            unsigned char marker = (unsigned char)(0x10 |
+                (width == 8 ? 3 : width == 4 ? 2 : width == 2 ? 1 : 0));
+            [out appendBytes:&marker length:1];
+            bp_append_be(out, (unsigned long long)number->_ival, width);
+        }
+        return;
+    }
+    if ([object isKindOfClass:[NSDate class]])
+    {
+        unsigned char marker = 0x33;
+        [out appendBytes:&marker length:1];
+        double seconds = [object timeIntervalSince1970] - BP_EPOCH_OFFSET;
+        unsigned long long bits = 0;
+        memcpy(&bits, &seconds, 8);
+        bp_append_be(out, bits, 8);
+        return;
+    }
+    if ([object isKindOfClass:[NSString class]])
+    {
+        const unsigned char *bytes = (const unsigned char *)[object UTF8String];
+        unsigned long n = bytes ? strlen((const char *)bytes) : 0;
+        int ascii = 1;
+        for (unsigned long i = 0; i < n; i++)
+            if (bytes[i] >= 0x80)
+                ascii = 0;
+        if (ascii)
+        {
+            bp_append_marker(out, 0x50, n);
+            if (n)
+                [out appendBytes:bytes length:n];
+        }
+        else
+        {
+            unsigned char *utf16 = malloc(n * 2 + 4);
+            unsigned long used = utf16 ? bp_utf8_to_utf16be(bytes, n, utf16) : 0;
+            bp_append_marker(out, 0x60, used / 2);
+            if (used)
+                [out appendBytes:utf16 length:used];
+            free(utf16);
+        }
+        return;
+    }
+    if ([object isKindOfClass:[NSData class]])
+    {
+        unsigned long n = [object length];
+        bp_append_marker(out, 0x40, n);
+        if (n)
+            [out appendBytes:[object bytes] length:n];
+        return;
+    }
+    if ([object isKindOfClass:[NSArray class]])
+    {
+        NSArray *array = object;
+        bp_append_marker(out, 0xa0, [array count]);
+        for (unsigned long i = 0; i < [array count]; i++)
+            bp_append_be(out, (unsigned long long)bp_find_object(writer,
+                [array objectAtIndex:i]), writer->ref_size);
+        return;
+    }
+    if ([object isKindOfClass:[NSDictionary class]])
+    {
+        NSDictionary *dictionary = object;
+        id keys = [dictionary allKeys];
+        bp_append_marker(out, 0xd0, [keys count]);
+        for (unsigned long i = 0; i < [keys count]; i++)
+            bp_append_be(out, (unsigned long long)bp_find_object(writer,
+                [keys objectAtIndex:i]), writer->ref_size);
+        for (unsigned long i = 0; i < [keys count]; i++)
+            bp_append_be(out, (unsigned long long)bp_find_object(writer,
+                [dictionary objectForKey:[keys objectAtIndex:i]]),
+                writer->ref_size);
+        return;
+    }
+    unsigned char marker = 0x00;
+    [out appendBytes:&marker length:1];
+}
+
+static NSData *bp_write_plist(id plist)
+{
+    if (!plist)
+        return nil;
+    struct bp_writer writer;
+    writer.count = 0;
+    writer.ref_size = 1;
+    writer.out = [NSMutableData data];
+    bp_add_object(&writer, plist);
+    if (writer.count == 0)
+        return nil;
+    writer.ref_size = bp_byte_width((unsigned long long)(writer.count - 1));
+    NSMutableData *out = writer.out;
+    [out appendBytes:"bplist00" length:8];
+    for (int i = 0; i < writer.count; i++)
+    {
+        writer.offsets[i] = [out length];
+        bp_write_object(&writer, writer.objects[i]);
+    }
+    unsigned long offset_table = [out length];
+    int offset_size = bp_byte_width((unsigned long long)offset_table);
+    for (int i = 0; i < writer.count; i++)
+        bp_append_be(out, writer.offsets[i], offset_size);
+    unsigned char trailer[32];
+    memset(trailer, 0, sizeof(trailer));
+    trailer[6] = (unsigned char)offset_size;
+    trailer[7] = (unsigned char)writer.ref_size;
+    unsigned long long count = (unsigned long long)writer.count;
+    for (int i = 0; i < 8; i++)
+        trailer[8 + i] = (unsigned char)(count >> (8 * (7 - i)));
+    for (int i = 0; i < 8; i++)
+        trailer[16 + i] = 0;
+    for (int i = 0; i < 8; i++)
+        trailer[24 + i] = (unsigned char)((unsigned long long)offset_table >>
+                                          (8 * (7 - i)));
+    [out appendBytes:trailer length:32];
+    return out;
+}
+
+struct bp_reader {
+    const unsigned char *bytes;
+    unsigned long length;
+    unsigned long num_objects;
+    unsigned long top_object;
+    unsigned long offset_table;
+    int offset_size;
+    int ref_size;
+    int error;
+};
+
+static unsigned long long bp_read_be(const unsigned char *bytes, int width)
+{
+    unsigned long long value = 0;
+    for (int i = 0; i < width; i++)
+        value = (value << 8) | bytes[i];
+    return value;
+}
+
+static int bp_read_count(struct bp_reader *reader, unsigned long *pos,
+                         unsigned char info, unsigned long *count)
+{
+    if (info != 0x0f)
+    {
+        *count = info;
+        return 1;
+    }
+    if (*pos >= reader->length)
+        return 0;
+    unsigned char marker = reader->bytes[(*pos)++];
+    if ((marker >> 4) != 1)
+        return 0;
+    int width = 1 << (marker & 0xf);
+    if (width > 8 || *pos + (unsigned long)width > reader->length)
+        return 0;
+    *count = (unsigned long)bp_read_be(reader->bytes + *pos, width);
+    *pos += (unsigned long)width;
+    return 1;
+}
+
+static id bp_read_object(struct bp_reader *reader, unsigned long index,
+                         int depth);
+
+static id bp_read_array(struct bp_reader *reader, unsigned long pos,
+                        unsigned long count, int depth)
+{
+    NSMutableArray *array = [NSMutableArray array];
+    for (unsigned long i = 0; i < count; i++)
+    {
+        if (pos + (unsigned long)reader->ref_size > reader->length)
+        {
+            reader->error = 1;
+            return nil;
+        }
+        unsigned long ref = (unsigned long)bp_read_be(
+            reader->bytes + pos, reader->ref_size);
+        pos += (unsigned long)reader->ref_size;
+        id value = bp_read_object(reader, ref, depth + 1);
+        if (!value)
+            value = [NSNull null];
+        [array addObject:value];
+    }
+    return array;
+}
+
+static id bp_read_object(struct bp_reader *reader, unsigned long index,
+                         int depth)
+{
+    if (reader->error || depth > 64 || index >= reader->num_objects)
+    {
+        reader->error = 1;
+        return nil;
+    }
+    unsigned long offset_pos = reader->offset_table +
+        index * (unsigned long)reader->offset_size;
+    if (offset_pos + (unsigned long)reader->offset_size > reader->length)
+    {
+        reader->error = 1;
+        return nil;
+    }
+    unsigned long offset = (unsigned long)bp_read_be(
+        reader->bytes + offset_pos, reader->offset_size);
+    if (offset >= reader->length)
+    {
+        reader->error = 1;
+        return nil;
+    }
+    unsigned char marker = reader->bytes[offset];
+    unsigned long pos = offset + 1;
+    unsigned long count = 0;
+    switch (marker >> 4)
+    {
+    case 0x0:
+        if (marker == 0x00)
+            return [NSNull null];
+        if (marker == 0x08)
+            return [NSNumber numberWithBool:NO];
+        if (marker == 0x09)
+            return [NSNumber numberWithBool:YES];
+        return [NSNull null];
+    case 0x1:
+    {
+        int width = 1 << (marker & 0xf);
+        if (width > 8 || pos + (unsigned long)width > reader->length)
+        {
+            reader->error = 1;
+            return nil;
+        }
+        unsigned long long value = bp_read_be(reader->bytes + pos, width);
+        long long signed_value = width == 8 ? (long long)value
+                                            : (long long)value;
+        return [NSNumber numberWithLongLong:signed_value];
+    }
+    case 0x2:
+    {
+        int width = 1 << (marker & 0xf);
+        if (width == 4)
+        {
+            unsigned int bits = (unsigned int)bp_read_be(
+                reader->bytes + pos, 4);
+            float value = 0;
+            memcpy(&value, &bits, 4);
+            return [NSNumber numberWithFloat:value];
+        }
+        if (width == 8)
+        {
+            unsigned long long bits = bp_read_be(reader->bytes + pos, 8);
+            double value = 0;
+            memcpy(&value, &bits, 8);
+            return [NSNumber numberWithDouble:value];
+        }
+        reader->error = 1;
+        return nil;
+    }
+    case 0x3:
+    {
+        if (pos + 8 > reader->length)
+        {
+            reader->error = 1;
+            return nil;
+        }
+        unsigned long long bits = bp_read_be(reader->bytes + pos, 8);
+        double seconds = 0;
+        memcpy(&seconds, &bits, 8);
+        return [NSDate dateWithTimeIntervalSince1970:
+            seconds + BP_EPOCH_OFFSET];
+    }
+    case 0x4:
+    {
+        if (!bp_read_count(reader, &pos, marker & 0xf, &count) ||
+            pos + count > reader->length)
+        {
+            reader->error = 1;
+            return nil;
+        }
+        return [NSData dataWithBytes:reader->bytes + pos length:count];
+    }
+    case 0x5:
+    {
+        if (!bp_read_count(reader, &pos, marker & 0xf, &count) ||
+            pos + count > reader->length)
+        {
+            reader->error = 1;
+            return nil;
+        }
+        char *text = malloc(count + 1);
+        if (!text)
+        {
+            reader->error = 1;
+            return nil;
+        }
+        memcpy(text, reader->bytes + pos, count);
+        text[count] = 0;
+        id string = [NSString stringWithUTF8String:text];
+        free(text);
+        return string;
+    }
+    case 0x6:
+    {
+        if (!bp_read_count(reader, &pos, marker & 0xf, &count) ||
+            pos + count * 2 > reader->length)
+        {
+            reader->error = 1;
+            return nil;
+        }
+        char *text = malloc(count * 3 + 1);
+        if (!text)
+        {
+            reader->error = 1;
+            return nil;
+        }
+        bp_utf16be_to_utf8(reader->bytes + pos, count, text);
+        id string = [NSString stringWithUTF8String:text];
+        free(text);
+        return string;
+    }
+    case 0x8:
+    {
+        int width = (marker & 0xf) + 1;
+        if (width > 8 || pos + (unsigned long)width > reader->length)
+        {
+            reader->error = 1;
+            return nil;
+        }
+        return [NSNumber numberWithLongLong:
+            (long long)bp_read_be(reader->bytes + pos, width)];
+    }
+    case 0xa:
+    case 0xc:
+        if (!bp_read_count(reader, &pos, marker & 0xf, &count))
+        {
+            reader->error = 1;
+            return nil;
+        }
+        return bp_read_array(reader, pos, count, depth);
+    case 0xd:
+    {
+        if (!bp_read_count(reader, &pos, marker & 0xf, &count))
+        {
+            reader->error = 1;
+            return nil;
+        }
+        unsigned long keys_pos = pos;
+        unsigned long values_pos = pos + count * (unsigned long)reader->ref_size;
+        NSMutableDictionary *dictionary = [NSMutableDictionary dictionary];
+        for (unsigned long i = 0; i < count; i++)
+        {
+            unsigned long key_ref = (unsigned long)bp_read_be(
+                reader->bytes + keys_pos + i * reader->ref_size,
+                reader->ref_size);
+            unsigned long value_ref = (unsigned long)bp_read_be(
+                reader->bytes + values_pos + i * reader->ref_size,
+                reader->ref_size);
+            id key = bp_read_object(reader, key_ref, depth + 1);
+            id value = bp_read_object(reader, value_ref, depth + 1);
+            if (!key)
+                key = [NSNull null];
+            if (!value)
+                value = [NSNull null];
+            [dictionary setObject:value forKey:key];
+        }
+        return dictionary;
+    }
+    default:
+        reader->error = 1;
+        return nil;
+    }
+}
+
+static id bp_read_plist(id data)
+{
+    if (!data || [data length] < 40)
+        return nil;
+    const unsigned char *bytes = [data bytes];
+    unsigned long length = [data length];
+    if (memcmp(bytes, "bplist00", 8) != 0)
+        return nil;
+    const unsigned char *trailer = bytes + length - 32;
+    struct bp_reader reader;
+    reader.bytes = bytes;
+    reader.length = length;
+    reader.offset_size = trailer[6];
+    reader.ref_size = trailer[7];
+    reader.num_objects = (unsigned long)bp_read_be(trailer + 8, 8);
+    reader.top_object = (unsigned long)bp_read_be(trailer + 16, 8);
+    reader.offset_table = (unsigned long)bp_read_be(trailer + 24, 8);
+    reader.error = 0;
+    if (reader.offset_size < 1 || reader.offset_size > 8 ||
+        reader.ref_size < 1 || reader.ref_size > 8 ||
+        reader.num_objects == 0 || reader.offset_table >= length ||
+        reader.offset_table + reader.num_objects * reader.offset_size >
+            length)
+        return nil;
+    id value = bp_read_object(&reader, reader.top_object, 0);
+    return reader.error ? nil : value;
+}
+
 @implementation NSPropertyListSerialization
 + (id)dataWithPropertyList:(id)plist format:(unsigned long)format
                    options:(unsigned long)options error:(id *)error
 {
-    (void)format;
     (void)options;
+    if (format == NSPropertyListBinaryFormat_v1_0)
+    {
+        NSData *binary = bp_write_plist(plist);
+        if (!binary && error)
+            *error = [NSError errorWithDomain:@"NSCocoaErrorDomain" code:3840
+                                       userInfo:nil];
+        return binary;
+    }
     NSMutableString *text = [NSMutableString string];
     [text appendString:
         @"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
@@ -7048,6 +7638,21 @@ static id plist_parse_value(struct plist_state *p, int depth)
             *error = [NSError errorWithDomain:@"NSCocoaErrorDomain" code:3840
                                        userInfo:nil];
         return nil;
+    }
+    if ([data length] >= 8 &&
+        memcmp([data bytes], "bplist00", 8) == 0)
+    {
+        id binary = bp_read_plist(data);
+        if (!binary)
+        {
+            if (error)
+                *error = [NSError errorWithDomain:@"NSCocoaErrorDomain"
+                                            code:3840 userInfo:nil];
+            return nil;
+        }
+        if (format)
+            *format = NSPropertyListBinaryFormat_v1_0;
+        return binary;
     }
     struct plist_state p;
     p.s = (const char *)[data bytes];

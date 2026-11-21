@@ -994,9 +994,15 @@ and `<data>YWJjZA==</data>`. That cross-language parse is the check that the
 writer emits the actual plist format rather than an internal encoding.
 
 `NSPropertyListSerialization` implements both directions for dictionaries,
-arrays, strings, integers, reals, booleans, data and dates. Strings are
-XML-escaped on the way out and unescaped on the way in; the parser bounds
-nesting depth and only accepts well-formed tags.
+arrays, strings, integers, reals, booleans, data and dates in XML and binary
+formats. Strings are XML-escaped on the way out and unescaped on the way in;
+the parser bounds nesting depth and only accepts well-formed tags.
+`tests/binary_plist_test.m` writes a dictionary holding ASCII and UTF-16
+strings, an integer, a boolean, a real, data, an array and a date with
+`NSPropertyListBinaryFormat_v1_0`, checks the `bplist00` header and a trailer
+larger than 40 bytes, then parses it back and reports
+`[bplist] dict Hello 42 1 2.5 3 2`, `[bplist] array 3 4`,
+`[bplist] unicode 1`, and `[bplist] date 1700000000 format 200`.
 
 ### Foundation: keyed archives
 
@@ -1772,7 +1778,8 @@ The framework surface is still a subset. Auto Layout supports equality and
 inequality anchors with priorities evaluated by relaxation, intrinsic sizing
 and guides, but not the full Cassowary solver or every UIKit layout API.
 `NSUserDefaults` persists XML property lists under the app's
-`Library/Preferences`; binary property lists are not parsed. JSON covers
+`Library/Preferences`, while `NSPropertyListSerialization` also reads and
+writes binary property lists. JSON covers
 Foundation objects without comments, streaming or fragments unless enabled.
 Text input is `UITextField` and an append-only `UITextView` with a QWERTY
 keyboard; text selection, multitap gestures and selection handles are not

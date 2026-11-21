@@ -874,3 +874,9 @@ components.
   waits for the task list to empty (or the deadline), calls remaining
   expiration handlers, then stops the process. Active-app tasks get a token but
   no window.
+- Binary property lists are parsed from the `bplist00` trailer: offset size,
+  object-ref size, object count, top object and offset table. Object markers
+  cover null/bool, 1/2/4/8-byte integers, 4/8-byte reals, dates, data, ASCII
+  and UTF-16BE strings, UIDs, arrays/sets and dictionaries, with extended
+  lengths stored as inline int objects. The writer flattens unique objects,
+  emits refs of the minimum width and writes the same trailer.

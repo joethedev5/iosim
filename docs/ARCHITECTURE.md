@@ -1472,3 +1472,7 @@ pair, and any pair left at the deadline has its handler invoked before
 supplementary, secondary). Layout gives the primary its configured width, the
 supplementary its own width clamped to the remainder, and the secondary
 everything left; collapsed and secondary-only modes hide the extra columns.
+Binary plists share the `NSPropertyListSerialization` entry points: the writer
+flattens objects into a unique table, emits markers and refs, then an offset
+table and 32-byte trailer; the reader trusts only the trailer's sizes, resolves
+object refs through the offset table, and caps recursion depth.

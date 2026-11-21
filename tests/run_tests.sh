@@ -1786,6 +1786,21 @@ fi
 "$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
 sleep 0.4
 
+# ---------- binary property lists ----------
+"$ROOT/tools/build_app.sh" "$ROOT/tests/binary_plist_test.m" \
+    "$T/binary_plist_test" >/dev/null
+out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/binary_plist_test" 2>&1)"
+check "[bplist] header 1 1" "$out" \
+    "binary property-list output carries the bplist00 header and trailer"
+check "[bplist] dict Hello 42 1 2.5 3 2" "$out" \
+    "binary dictionaries round-trip strings, numbers, booleans, data and arrays"
+check "[bplist] array 3 4" "$out" \
+    "binary arrays preserve their elements"
+check "[bplist] unicode 1" "$out" \
+    "binary UTF-16 strings round-trip non-ASCII text"
+check "[bplist] date 1700000000 format 200" "$out" \
+    "binary dates round-trip and the reader reports the binary format"
+
 # ---------- background task bookkeeping ----------
 "$ROOT/tools/build_app.sh" "$ROOT/tests/background_task_test.m" \
     "$T/background_task_test" >/dev/null

@@ -57,7 +57,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | NSDateFormatter parse/print round trip, NSNumberFormatter decimal/currency/percent | ✅ |
 | KDK kernel symbolication: full local+global maps, Mach trap and BSD syscall tables | ✅ |
 | `NSFileManager`, `NSData` file I/O, `NSFileHandle` read/write/seek/truncate, `NSURL`, `NSJSONSerialization` | ✅ |
-| `NSPropertyListSerialization` and persistent `NSUserDefaults` domains | ✅ |
+| `NSPropertyListSerialization` (XML and binary formats) and persistent `NSUserDefaults` domains | ✅ |
 | `NSKeyedArchiver`/`NSKeyedUnarchiver` keyed archives with custom `NSCoding` classes | ✅ |
 | NSRunLoop timers and delayed performs, NSThread main-thread check and sleep | ✅ |
 | NSCalendar/NSDateComponents Gregorian decomposition and construction | ✅ |
