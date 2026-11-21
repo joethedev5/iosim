@@ -17,6 +17,60 @@ static int g_animatorRuns;
 }
 @end
 
+@interface FoundationTransitionAnimator : NSObject
+    <UIViewControllerAnimatedTransitioning> {
+@public
+    int _calls;
+}
+@end
+
+@implementation FoundationTransitionAnimator
+- (double)transitionDuration:
+    (id<UIViewControllerContextTransitioning>)context
+{
+    (void)context;
+    return 0.05;
+}
+- (void)animateTransition:
+    (id<UIViewControllerContextTransitioning>)context
+{
+    _calls++;
+    UIViewController *from = [context
+        viewControllerForKey:UITransitionContextFromViewControllerKey];
+    UIViewController *to = [context
+        viewControllerForKey:UITransitionContextToViewControllerKey];
+    printf("[fnd] trans anim %d %d %d %d %d %d\n", _calls,
+           [context isAnimated], from != nil, to != nil,
+           [to isBeingPresented], [from isBeingDismissed]);
+    fflush(0);
+    [context completeTransition:YES];
+}
+@end
+
+@interface FoundationTransitionDelegate : NSObject
+    <UIViewControllerTransitioningDelegate> {
+@public
+    FoundationTransitionAnimator *_animator;
+}
+@end
+
+@implementation FoundationTransitionDelegate
+- (id<UIViewControllerAnimatedTransitioning>)
+    animationControllerForPresentedController:(UIViewController *)presented
+                         presentingController:(UIViewController *)presenting
+                             sourceController:(UIViewController *)source
+{
+    (void)presented; (void)presenting; (void)source;
+    return _animator;
+}
+- (id<UIViewControllerAnimatedTransitioning>)
+    animationControllerForDismissedController:(UIViewController *)dismissed
+{
+    (void)dismissed;
+    return _animator;
+}
+@end
+
 @interface FoundationController : UIViewController
 @end
 
@@ -290,6 +344,26 @@ static int g_animatorRuns;
            [animator fractionComplete], [animator isRunning],
            [animator state]);
     [animator startAnimation];
+
+    FoundationTransitionAnimator *transitionAnimator =
+        [[FoundationTransitionAnimator alloc] init];
+    FoundationTransitionDelegate *transitionDelegate =
+        [[FoundationTransitionDelegate alloc] init];
+    transitionDelegate->_animator = transitionAnimator;
+    UIViewController *presented = [[UIViewController alloc] init];
+    presented.view =
+        [[UIView alloc] initWithFrame:CGRectMake(0, 0, 80, 80)];
+    presented.transitioningDelegate = transitionDelegate;
+    printf("[fnd] trans delegate %d\n",
+           presented.transitioningDelegate == transitionDelegate);
+    [self presentViewController:presented animated:YES completion:^{
+        printf("[fnd] trans present done\n");
+        fflush(0);
+    }];
+    [self dismissViewControllerAnimated:YES completion:^{
+        printf("[fnd] trans dismiss done\n");
+        fflush(0);
+    }];
 
     printf("[fnd] ready\n");
     fflush(0);

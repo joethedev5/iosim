@@ -1833,6 +1833,108 @@ enum {
 - (void)setPrefersScrollingExpandsWhenScrolledToEdge:(BOOL)expands;
 @end
 
+@class UIViewController;
+
+extern NSString *const UITransitionContextFromViewControllerKey;
+extern NSString *const UITransitionContextToViewControllerKey;
+extern NSString *const UITransitionContextFromViewKey;
+extern NSString *const UITransitionContextToViewKey;
+
+@protocol UIViewControllerContextTransitioning
+- (UIView *)containerView;
+- (UIViewController *)viewControllerForKey:(NSString *)key;
+- (UIView *)viewForKey:(NSString *)key;
+- (CGRect)initialFrameForViewController:(UIViewController *)controller;
+- (CGRect)finalFrameForViewController:(UIViewController *)controller;
+- (BOOL)isAnimated;
+- (BOOL)isInteractive;
+- (long)presentationStyle;
+- (BOOL)transitionWasCancelled;
+- (void)completeTransition:(BOOL)didComplete;
+- (void)updateInteractiveTransition:(double)percentComplete;
+- (void)finishInteractiveTransition;
+- (void)cancelInteractiveTransition;
+- (void)pauseInteractiveTransition;
+@end
+
+@protocol UIViewControllerAnimatedTransitioning
+- (double)transitionDuration:
+    (id<UIViewControllerContextTransitioning>)context;
+- (void)animateTransition:
+    (id<UIViewControllerContextTransitioning>)context;
+@optional
+- (void)animationEnded:(BOOL)transitionCompleted;
+@end
+
+@protocol UIViewControllerInteractiveTransitioning
+- (void)startInteractiveTransition:
+    (id<UIViewControllerContextTransitioning>)context;
+@optional
+- (double)completionSpeed;
+- (long)completionCurve;
+@end
+
+@protocol UIViewControllerTransitioningDelegate
+@optional
+- (id<UIViewControllerAnimatedTransitioning>)
+    animationControllerForPresentedController:(UIViewController *)presented
+                         presentingController:(UIViewController *)presenting
+                             sourceController:(UIViewController *)source;
+- (id<UIViewControllerAnimatedTransitioning>)
+    animationControllerForDismissedController:(UIViewController *)dismissed;
+- (id<UIViewControllerInteractiveTransitioning>)
+    interactionControllerForPresentation:
+        (id<UIViewControllerAnimatedTransitioning>)animator;
+- (id<UIViewControllerInteractiveTransitioning>)
+    interactionControllerForDismissal:
+        (id<UIViewControllerAnimatedTransitioning>)animator;
+- (UIPresentationController *)
+    presentationControllerForPresentedViewController:(UIViewController *)presented
+                            presentingViewController:(UIViewController *)presenting
+                                sourceViewController:(UIViewController *)source;
+@end
+
+@interface UIPercentDrivenInteractiveTransition : NSObject
+    <UIViewControllerInteractiveTransitioning> {
+@public
+    double _percentComplete;
+    double _completionSpeed;
+    long _completionCurve;
+    id _animator;
+    id _context;
+}
+- (double)percentComplete;
+- (void)setPercentComplete:(double)percent;
+- (double)completionSpeed;
+- (void)setCompletionSpeed:(double)speed;
+- (long)completionCurve;
+- (void)setCompletionCurve:(long)curve;
+- (void)updateInteractiveTransition:(double)percentComplete;
+- (void)cancelInteractiveTransition;
+- (void)finishInteractiveTransition;
+- (void)pauseInteractiveTransition;
+@end
+
+@interface _UIViewControllerTransitionContext : NSObject
+    <UIViewControllerContextTransitioning> {
+@public
+    UIView *_containerView;
+    UIViewController *_fromController;
+    UIViewController *_toController;
+    BOOL _animated;
+    BOOL _interactive;
+    BOOL _cancelled;
+    long _presentationStyle;
+    void (^_completion)(BOOL completed);
+}
+- (id)initWithContainerView:(UIView *)container
+           fromController:(UIViewController *)from
+             toController:(UIViewController *)to
+                 animated:(BOOL)animated
+        presentationStyle:(long)style
+               completion:(void (^)(BOOL completed))completion;
+@end
+
 @interface UIViewController : NSObject {
 @public
     UIView *_view;
@@ -1860,9 +1962,17 @@ enum {
     BOOL _modalInPresentation;
     id _restorationIdentifier;
     CGSize _preferredContentSize;
+    id _transitioningDelegate;
+    id _transitionContext;
+    id _transitionAnimator;
+    BOOL _beingPresented;
+    BOOL _beingDismissed;
 }
 - (id)init;
 - (id)title;
+- (id<UIViewControllerTransitioningDelegate>)transitioningDelegate;
+- (void)setTransitioningDelegate:
+    (id<UIViewControllerTransitioningDelegate>)delegate;
 - (UIPopoverPresentationController *)popoverPresentationController;
 - (UISheetPresentationController *)sheetPresentationController;
 - (UIPresentationController *)presentationController;
@@ -10496,6 +10606,144 @@ static int g_status_bar_hidden_override = -1;
 static int g_status_bar_dirty;
 static int app_status_bar_hidden(void);
 
+NSString *const UITransitionContextFromViewControllerKey =
+    @"UITransitionContextFromViewControllerKey";
+NSString *const UITransitionContextToViewControllerKey =
+    @"UITransitionContextToViewControllerKey";
+NSString *const UITransitionContextFromViewKey =
+    @"UITransitionContextFromViewKey";
+NSString *const UITransitionContextToViewKey =
+    @"UITransitionContextToViewKey";
+
+@implementation _UIViewControllerTransitionContext
+- (id)initWithContainerView:(UIView *)container
+           fromController:(UIViewController *)from
+             toController:(UIViewController *)to
+                 animated:(BOOL)animated
+        presentationStyle:(long)style
+               completion:(void (^)(BOOL completed))completion
+{
+    self = [super init];
+    if (self)
+    {
+        _containerView = container;
+        _fromController = from;
+        _toController = to;
+        _animated = animated;
+        _presentationStyle = style;
+        _completion = _Block_copy(completion);
+    }
+    return self;
+}
+- (UIView *)containerView { return _containerView; }
+- (UIViewController *)viewControllerForKey:(NSString *)key
+{
+    if (key == UITransitionContextFromViewControllerKey)
+        return _fromController;
+    if (key == UITransitionContextToViewControllerKey)
+        return _toController;
+    return nil;
+}
+- (UIView *)viewForKey:(NSString *)key
+{
+    if (key == UITransitionContextFromViewKey)
+        return _fromController ? _fromController.view : nil;
+    if (key == UITransitionContextToViewKey)
+        return _toController ? _toController.view : nil;
+    return nil;
+}
+- (CGRect)initialFrameForViewController:(UIViewController *)controller
+{
+    (void)controller;
+    return _containerView ? _containerView->_frame : CGRectMake(0, 0, 0, 0);
+}
+- (CGRect)finalFrameForViewController:(UIViewController *)controller
+{
+    (void)controller;
+    return _containerView ? _containerView->_frame : CGRectMake(0, 0, 0, 0);
+}
+- (BOOL)isAnimated { return _animated; }
+- (BOOL)isInteractive { return _interactive; }
+- (long)presentationStyle { return _presentationStyle; }
+- (BOOL)transitionWasCancelled { return _cancelled; }
+- (void)completeTransition:(BOOL)didComplete
+{
+    if (!didComplete)
+        _cancelled = YES;
+    void (^completion)(BOOL) = _completion;
+    _completion = 0;
+    if (completion)
+        completion(didComplete);
+}
+- (void)updateInteractiveTransition:(double)percentComplete
+{
+    (void)percentComplete;
+    _interactive = YES;
+}
+- (void)finishInteractiveTransition { }
+- (void)cancelInteractiveTransition { _cancelled = YES; }
+- (void)pauseInteractiveTransition { }
+@end
+
+@implementation UIPercentDrivenInteractiveTransition
+- (id)init
+{
+    self = [super init];
+    if (self)
+    {
+        _completionSpeed = 1.0;
+        _completionCurve = 0;
+    }
+    return self;
+}
+- (double)percentComplete { return _percentComplete; }
+- (void)setPercentComplete:(double)percent { _percentComplete = percent; }
+- (double)completionSpeed { return _completionSpeed; }
+- (void)setCompletionSpeed:(double)speed { _completionSpeed = speed; }
+- (long)completionCurve { return _completionCurve; }
+- (void)setCompletionCurve:(long)curve { _completionCurve = curve; }
+- (void)startInteractiveTransition:
+    (id<UIViewControllerContextTransitioning>)context
+{
+    _context = context;
+    if (_animator &&
+        [(id)_animator respondsToSelector:@selector(animateTransition:)])
+        [(id)_animator animateTransition:context];
+}
+- (void)updateInteractiveTransition:(double)percentComplete
+{
+    _percentComplete = percentComplete;
+    if (_context &&
+        [(id)_context respondsToSelector:
+            @selector(updateInteractiveTransition:)])
+        [(id)_context updateInteractiveTransition:percentComplete];
+}
+- (void)cancelInteractiveTransition
+{
+    if (_context &&
+        [(id)_context respondsToSelector:@selector(cancelInteractiveTransition)])
+        [(id)_context cancelInteractiveTransition];
+    if (_context &&
+        [(id)_context respondsToSelector:@selector(completeTransition:)])
+        [(id)_context completeTransition:NO];
+}
+- (void)finishInteractiveTransition
+{
+    if (_context &&
+        [(id)_context respondsToSelector:@selector(finishInteractiveTransition)])
+        [(id)_context finishInteractiveTransition];
+    if (_context &&
+        [(id)_context respondsToSelector:@selector(completeTransition:)])
+        [(id)_context completeTransition:YES];
+}
+- (void)pauseInteractiveTransition
+{
+    if (_context &&
+        [(id)_context respondsToSelector:@selector(pauseInteractiveTransition)])
+        [(id)_context pauseInteractiveTransition];
+}
+@end
+
 @implementation UIPresentationController
 - (id)presentedViewController { return _presentedViewController; }
 - (id)presentingViewController { return _presentingViewController; }
@@ -10600,6 +10848,15 @@ static int app_status_bar_hidden(void);
         _automaticallyAdjustsScrollViewInsets = YES;
     }
     return self;
+}
+- (id<UIViewControllerTransitioningDelegate>)transitioningDelegate
+{
+    return _transitioningDelegate;
+}
+- (void)setTransitioningDelegate:
+    (id<UIViewControllerTransitioningDelegate>)delegate
+{
+    _transitioningDelegate = delegate;
 }
 - (unsigned long)edgesForExtendedLayout { return _edgesForExtendedLayout; }
 - (void)setEdgesForExtendedLayout:(unsigned long)edges
@@ -10788,8 +11045,8 @@ static int app_status_bar_hidden(void);
 - (UIView *)viewIfLoaded { return _view; }
 - (BOOL)isViewLoaded { return _view != nil; }
 - (void)loadViewIfNeeded { (void)[self view]; }
-- (BOOL)isBeingPresented { return NO; }
-- (BOOL)isBeingDismissed { return NO; }
+- (BOOL)isBeingPresented { return _beingPresented; }
+- (BOOL)isBeingDismissed { return _beingDismissed; }
 - (BOOL)isMovingFromParentViewController { return NO; }
 - (BOOL)isMovingToParentViewController { return NO; }
 - (BOOL)shouldAutorotate { return YES; }
@@ -10894,13 +11151,63 @@ static int app_status_bar_hidden(void);
 - (void)presentViewController:(UIViewController *)controller animated:(BOOL)animated
                    completion:(void (^)(void))completion
 {
-    (void)animated;
     if (!controller)
         return;
+    id<UIViewControllerTransitioningDelegate> delegate =
+        controller.transitioningDelegate;
+    id animator = nil;
+    if ([delegate respondsToSelector:@selector(animationControllerForPresentedController:presentingController:sourceController:)])
+        animator = [delegate animationControllerForPresentedController:controller
+                                                 presentingController:self
+                                                     sourceController:self];
+    if (animator &&
+        [animator respondsToSelector:@selector(animateTransition:)])
+    {
+        _transitionContext = nil;
+        _transitionAnimator = nil;
+        UIView *container = [self view];
+        UIView *toView = [controller view];
+        toView.frame = container.bounds;
+        if (toView.superview && toView.superview != container)
+            [toView removeFromSuperview];
+        if (!toView.superview)
+            [container addSubview:toView];
+        _presentedController = controller;
+        controller->_beingPresented = YES;
+        [controller viewWillAppear:animated];
+        _UIViewControllerTransitionContext *context =
+            [[_UIViewControllerTransitionContext alloc]
+                initWithContainerView:container
+                       fromController:self
+                         toController:controller
+                             animated:animated
+                    presentationStyle:[controller modalPresentationStyle]
+                           completion:^(BOOL completed) {
+            controller->_beingPresented = NO;
+            if (completed)
+                [controller viewDidAppear:animated];
+            else
+            {
+                [toView removeFromSuperview];
+                if (_presentedController == controller)
+                    _presentedController = nil;
+            }
+            if ([animator respondsToSelector:@selector(animationEnded:)])
+                [(id)animator animationEnded:completed];
+            if (completion)
+                completion();
+        }];
+        _transitionContext = context;
+        _transitionAnimator = animator;
+        [animator animateTransition:context];
+        return;
+    }
     _presentedController = controller;
+    controller->_beingPresented = YES;
     (void)[controller view];
     [controller viewWillAppear:animated];
     [controller viewDidAppear:animated];
+    controller->_beingPresented = NO;
     if (animated && ![controller isKindOfClass:[UIAlertController class]])
     {
         g_modal_animating = 1;
@@ -10924,15 +11231,61 @@ static int app_status_bar_hidden(void);
 - (void)dismissViewControllerAnimated:(BOOL)animated
                            completion:(void (^)(void))completion
 {
-    (void)animated;
     UIViewController *controller = (UIViewController *)_presentedController;
-    if (controller)
+    if (!controller)
     {
-        [controller viewWillDisappear:animated];
-        [controller viewDidDisappear:animated];
+        if (completion)
+            completion();
+        return;
     }
+    id<UIViewControllerTransitioningDelegate> delegate =
+        controller.transitioningDelegate;
+    id animator = nil;
+    if ([delegate respondsToSelector:@selector(animationControllerForDismissedController:)])
+        animator = [delegate animationControllerForDismissedController:
+            controller];
+    if (animator &&
+        [animator respondsToSelector:@selector(animateTransition:)])
+    {
+        _transitionContext = nil;
+        _transitionAnimator = nil;
+        UIView *container = [self view];
+        UIView *fromView = [controller view];
+        (void)container;
+        controller->_beingDismissed = YES;
+        [controller viewWillDisappear:animated];
+        _UIViewControllerTransitionContext *context =
+            [[_UIViewControllerTransitionContext alloc]
+                initWithContainerView:container
+                       fromController:controller
+                         toController:self
+                             animated:animated
+                    presentationStyle:[controller modalPresentationStyle]
+                           completion:^(BOOL completed) {
+            controller->_beingDismissed = NO;
+            if (completed)
+            {
+                [fromView removeFromSuperview];
+                [controller viewDidDisappear:animated];
+                if (_presentedController == controller)
+                    _presentedController = nil;
+            }
+            if ([animator respondsToSelector:@selector(animationEnded:)])
+                [(id)animator animationEnded:completed];
+            if (completion)
+                completion();
+        }];
+        _transitionContext = context;
+        _transitionAnimator = animator;
+        [animator animateTransition:context];
+        return;
+    }
+    controller->_beingDismissed = YES;
+    [controller viewWillDisappear:animated];
+    [controller viewDidDisappear:animated];
+    controller->_beingDismissed = NO;
     _presentedController = nil;
-    if (animated && controller &&
+    if (animated &&
         ![controller isKindOfClass:[UIAlertController class]])
     {
         g_modal_animating = -1;

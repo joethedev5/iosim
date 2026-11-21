@@ -808,3 +808,11 @@ management.
   Synchronous block consumers (enumeration, sorting) see the right value;
   asynchronous ones need a heap object or global until the block runtime
   promotes byref storage.
+- Custom view-controller transitions use the same modal presentation path as
+  the built-in page sheet, but when the presented controller has a
+  `transitioningDelegate` that returns an animator, the runtime builds a
+  `UIViewControllerContextTransitioning` context over the presenting view and
+  hands it to `animateTransition:`. The animator owns the animation and calls
+  `completeTransition:`; the runtime then runs the appearance callbacks and
+  user completion. `isBeingPresented`/`isBeingDismissed` are true only for the
+  duration of that handoff, including the synchronous case.

@@ -1020,6 +1020,76 @@ enum {
 @property(readonly) CGRect frameOfPresentedViewInContainerView;
 @end
 
+extern NSString *const UITransitionContextFromViewControllerKey;
+extern NSString *const UITransitionContextToViewControllerKey;
+extern NSString *const UITransitionContextFromViewKey;
+extern NSString *const UITransitionContextToViewKey;
+
+@protocol UIViewControllerContextTransitioning
+- (UIView *)containerView;
+- (UIViewController *)viewControllerForKey:(NSString *)key;
+- (UIView *)viewForKey:(NSString *)key;
+- (CGRect)initialFrameForViewController:(UIViewController *)controller;
+- (CGRect)finalFrameForViewController:(UIViewController *)controller;
+- (BOOL)isAnimated;
+- (BOOL)isInteractive;
+- (long)presentationStyle;
+- (BOOL)transitionWasCancelled;
+- (void)completeTransition:(BOOL)didComplete;
+- (void)updateInteractiveTransition:(double)percentComplete;
+- (void)finishInteractiveTransition;
+- (void)cancelInteractiveTransition;
+- (void)pauseInteractiveTransition;
+@end
+
+@protocol UIViewControllerAnimatedTransitioning
+- (double)transitionDuration:
+    (id<UIViewControllerContextTransitioning>)context;
+- (void)animateTransition:
+    (id<UIViewControllerContextTransitioning>)context;
+@optional
+- (void)animationEnded:(BOOL)transitionCompleted;
+@end
+
+@protocol UIViewControllerInteractiveTransitioning
+- (void)startInteractiveTransition:
+    (id<UIViewControllerContextTransitioning>)context;
+@optional
+- (double)completionSpeed;
+- (long)completionCurve;
+@end
+
+@protocol UIViewControllerTransitioningDelegate
+@optional
+- (id<UIViewControllerAnimatedTransitioning>)
+    animationControllerForPresentedController:(UIViewController *)presented
+                         presentingController:(UIViewController *)presenting
+                             sourceController:(UIViewController *)source;
+- (id<UIViewControllerAnimatedTransitioning>)
+    animationControllerForDismissedController:(UIViewController *)dismissed;
+- (id<UIViewControllerInteractiveTransitioning>)
+    interactionControllerForPresentation:
+        (id<UIViewControllerAnimatedTransitioning>)animator;
+- (id<UIViewControllerInteractiveTransitioning>)
+    interactionControllerForDismissal:
+        (id<UIViewControllerAnimatedTransitioning>)animator;
+- (UIPresentationController *)
+    presentationControllerForPresentedViewController:(UIViewController *)presented
+                            presentingViewController:(UIViewController *)presenting
+                                sourceViewController:(UIViewController *)source;
+@end
+
+@interface UIPercentDrivenInteractiveTransition : NSObject
+    <UIViewControllerInteractiveTransitioning>
+@property(nonatomic) double percentComplete;
+@property(nonatomic) double completionSpeed;
+@property(nonatomic) long completionCurve;
+- (void)updateInteractiveTransition:(double)percentComplete;
+- (void)cancelInteractiveTransition;
+- (void)finishInteractiveTransition;
+- (void)pauseInteractiveTransition;
+@end
+
 @interface UIPopoverPresentationController : UIPresentationController
 @property(nonatomic, retain) UIView *sourceView;
 @property(nonatomic) CGRect sourceRect;
@@ -1055,6 +1125,7 @@ enum {
 @property(getter=isModalInPresentation) BOOL modalInPresentation;
 @property(nonatomic, retain) id restorationIdentifier;
 @property long modalTransitionStyle;
+@property(nonatomic, assign) id<UIViewControllerTransitioningDelegate> transitioningDelegate;
 @property BOOL modalPresentationCapturesStatusBarAppearance;
 @property BOOL hidesBottomBarWhenPushed;
 @property(copy) NSArray *toolbarItems;

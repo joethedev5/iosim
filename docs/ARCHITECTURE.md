@@ -1419,3 +1419,9 @@ completion, `finishAnimationAtPosition:` settles immediately, and pause/stop
 only change the reported state. Block copy currently leaves `__block`
 scalars pointing at their creating stack frame, so asynchronous blocks must
 capture heap objects or globals.
+Custom modal transitions are a small context object plus delegate dispatch:
+`presentViewController:` and `dismissViewControllerAnimated:` ask the
+transitioning delegate for an animator, build a
+`_UIViewControllerTransitionContext` with the from/to controllers and the
+presenting view as container, and let the animator call
+`completeTransition:`. The standard page-sheet path remains the fallback.
