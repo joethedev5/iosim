@@ -6074,6 +6074,7 @@ if wait_log "[fnd] trim 'Hello World'" &&
    wait_log "[fnd] appext a.txt /tmp/a.txt" &&
    wait_log "[fnd] scene2 1 1" &&
    wait_log "[fnd] split 0 2 307 307 717 2 1" &&
+   wait_log "[fnd] triple 307 307 200 507 517 3 1" &&
    wait_log "[fnd] navtoolbar 0 1 725 3 1 1" &&
    wait_log "[fnd] animator start 0.1 0.0 0 0" &&
    wait_log "[fnd] animator done 0 0 2" &&

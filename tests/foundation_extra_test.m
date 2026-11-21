@@ -454,6 +454,27 @@ static int g_animatorRuns;
            [split viewControllerForColumn:UISplitViewControllerColumnPrimary]
                == left);
 
+    UISplitViewController *triple = [[UISplitViewController alloc]
+        initWithStyle:UISplitViewControllerStyleTripleColumn];
+    UIViewController *tleft = [[UIViewController alloc] init];
+    UIViewController *tside = [[UIViewController alloc] init];
+    UIViewController *tright = [[UIViewController alloc] init];
+    tleft.view = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 100, 100)];
+    tside.view = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 100, 100)];
+    tright.view = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 100, 100)];
+    [triple setViewControllers:@[tleft, tside, tright]];
+    triple.supplementaryColumnWidth = 200;
+    UIView *tripleRoot = [triple view];
+    tripleRoot.frame = CGRectMake(0, 0, 1024, 768);
+    [triple viewWillLayoutSubviews];
+    printf("[fnd] triple %.0f %.0f %.0f %.0f %.0f %lu %d\n",
+           [tleft.view frame].size.width,
+           [tside.view frame].origin.x, [tside.view frame].size.width,
+           [tright.view frame].origin.x, [tright.view frame].size.width,
+           (unsigned long)[[triple children] count],
+           [triple viewControllerForColumn:
+               UISplitViewControllerColumnSupplementary] == tside);
+
     UIViewController *toolbarController = [[UIViewController alloc] init];
     toolbarController.modalTransitionStyle = 3;
     toolbarController.hidesBottomBarWhenPushed = YES;

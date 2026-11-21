@@ -1468,3 +1468,7 @@ the background sets a five-second deadline and polls the task list while
 worker queues run; `endBackgroundTask:` releases the handler and removes the
 pair, and any pair left at the deadline has its handler invoked before
 `iosim_suspend_self`.
+`UISplitViewController` installs up to three column controllers (primary,
+supplementary, secondary). Layout gives the primary its configured width, the
+supplementary its own width clamped to the remainder, and the secondary
+everything left; collapsed and secondary-only modes hide the extra columns.

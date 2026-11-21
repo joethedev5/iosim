@@ -3245,6 +3245,7 @@ enum {
 @interface UISplitViewController : UIViewController {
 @public
     UIViewController *_splitPrimary;
+    UIViewController *_splitSupplementary;
     UIViewController *_splitSecondary;
     id _splitDelegate;
     long _splitStyle;
@@ -3252,6 +3253,7 @@ enum {
     double _preferredPrimaryColumnWidthFraction;
     double _minimumPrimaryColumnWidth;
     double _maximumPrimaryColumnWidth;
+    double _supplementaryColumnWidth;
 }
 - (id)initWithStyle:(long)style;
 - (NSArray *)viewControllers;
@@ -3275,6 +3277,8 @@ enum {
 - (void)setMinimumPrimaryColumnWidth:(double)width;
 - (double)maximumPrimaryColumnWidth;
 - (void)setMaximumPrimaryColumnWidth:(double)width;
+- (double)supplementaryColumnWidth;
+- (void)setSupplementaryColumnWidth:(double)width;
 - (BOOL)showsSecondaryOnlyButton;
 - (void)toggleMasterVisible:(id)sender;
 - (void)installControllers;
@@ -8842,6 +8846,7 @@ static int iosim_text_press_tick(void)
         _preferredPrimaryColumnWidthFraction = 0.3;
         _minimumPrimaryColumnWidth = 0;
         _maximumPrimaryColumnWidth = 1000000;
+        _supplementaryColumnWidth = 0;
     }
     return self;
 }
@@ -8859,6 +8864,8 @@ static int iosim_text_press_tick(void)
     NSMutableArray *controllers = [NSMutableArray array];
     if (_splitPrimary)
         [controllers addObject:_splitPrimary];
+    if (_splitSupplementary)
+        [controllers addObject:_splitSupplementary];
     if (_splitSecondary)
         [controllers addObject:_splitSecondary];
     return controllers;
@@ -8867,8 +8874,17 @@ static int iosim_text_press_tick(void)
 {
     _splitPrimary = [viewControllers count] > 0
         ? [viewControllers objectAtIndex:0] : nil;
-    _splitSecondary = [viewControllers count] > 1
-        ? [viewControllers objectAtIndex:1] : nil;
+    if ([viewControllers count] > 2)
+    {
+        _splitSupplementary = [viewControllers objectAtIndex:1];
+        _splitSecondary = [viewControllers objectAtIndex:2];
+    }
+    else
+    {
+        _splitSupplementary = nil;
+        _splitSecondary = [viewControllers count] > 1
+            ? [viewControllers objectAtIndex:1] : nil;
+    }
     if ([self isViewLoaded])
         [self installControllers];
 }
@@ -8910,8 +8926,9 @@ static int iosim_text_press_tick(void)
 {
     if (column == UISplitViewControllerColumnPrimary)
         _splitPrimary = viewController;
-    else if (column == UISplitViewControllerColumnSecondary ||
-             column == UISplitViewControllerColumnSupplementary)
+    else if (column == UISplitViewControllerColumnSupplementary)
+        _splitSupplementary = viewController;
+    else if (column == UISplitViewControllerColumnSecondary)
         _splitSecondary = viewController;
     if ([self isViewLoaded])
         [self installControllers];
@@ -8920,8 +8937,9 @@ static int iosim_text_press_tick(void)
 {
     if (column == UISplitViewControllerColumnPrimary)
         return _splitPrimary;
-    if (column == UISplitViewControllerColumnSecondary ||
-        column == UISplitViewControllerColumnSupplementary)
+    if (column == UISplitViewControllerColumnSupplementary)
+        return _splitSupplementary;
+    if (column == UISplitViewControllerColumnSecondary)
         return _splitSecondary;
     return nil;
 }
@@ -8966,6 +8984,20 @@ static int iosim_text_press_tick(void)
     if ([self isViewLoaded])
         [self layoutColumns];
 }
+- (double)supplementaryColumnWidth
+{
+    if (_supplementaryColumnWidth > 0)
+        return _supplementaryColumnWidth;
+    double width = _view ? _view.bounds.size.width
+                         : [[UIScreen mainScreen] bounds].size.width;
+    return width * _preferredPrimaryColumnWidthFraction;
+}
+- (void)setSupplementaryColumnWidth:(double)width
+{
+    _supplementaryColumnWidth = width < 0 ? 0 : width;
+    if ([self isViewLoaded])
+        [self layoutColumns];
+}
 - (BOOL)showsSecondaryOnlyButton { return NO; }
 - (void)toggleMasterVisible:(id)sender
 {
@@ -8999,6 +9031,13 @@ static int iosim_text_press_tick(void)
         [_view addSubview:[_splitPrimary view]];
         [_splitPrimary didMoveToParentViewController:self];
     }
+    if (_splitSupplementary)
+    {
+        [self addChildViewController:_splitSupplementary];
+        [_splitSupplementary willMoveToParentViewController:self];
+        [_view addSubview:[_splitSupplementary view]];
+        [_splitSupplementary didMoveToParentViewController:self];
+    }
     if (_splitSecondary)
     {
         [self addChildViewController:_splitSecondary];
@@ -9014,6 +9053,8 @@ static int iosim_text_press_tick(void)
         return;
     CGRect bounds = _view.bounds;
     UIView *primary = _splitPrimary ? [_splitPrimary view] : nil;
+    UIView *supplementary =
+        _splitSupplementary ? [_splitSupplementary view] : nil;
     UIView *secondary = _splitSecondary ? [_splitSecondary view] : nil;
     if ([self isCollapsed])
     {
@@ -9022,6 +9063,8 @@ static int iosim_text_press_tick(void)
             primary.hidden = secondary != nil;
             primary.frame = bounds;
         }
+        if (supplementary)
+            supplementary.hidden = YES;
         if (secondary)
         {
             secondary.hidden = NO;
@@ -9034,6 +9077,8 @@ static int iosim_text_press_tick(void)
     {
         if (primary)
             primary.hidden = YES;
+        if (supplementary)
+            supplementary.hidden = YES;
         if (secondary)
         {
             secondary.hidden = NO;
@@ -9055,6 +9100,16 @@ static int iosim_text_press_tick(void)
     {
         primary.hidden = NO;
         primary.frame = CGRectMake(0, 0, width, bounds.size.height);
+    }
+    if (supplementary)
+    {
+        double supplement = [self supplementaryColumnWidth];
+        if (supplement > bounds.size.width - width)
+            supplement = bounds.size.width - width;
+        supplementary.hidden = NO;
+        supplementary.frame = CGRectMake(width, 0, supplement,
+                                         bounds.size.height);
+        width += supplement;
     }
     secondary.hidden = NO;
     secondary.frame = CGRectMake(width, 0, bounds.size.width - width,

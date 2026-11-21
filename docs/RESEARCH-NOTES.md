@@ -689,11 +689,11 @@ components.
 - `UIViewController` containment is a child array with parent back-links.
   `UIPageViewController` installs its current page as a child when its view
   loads and swaps pages by removing and re-adding subviews.
-  `UISplitViewController` keeps primary/secondary controllers, installs both
-  as children, and lays them out side by side when the view is at least 700pt
-  wide; narrower widths collapse to the secondary controller. The display
-  mode, primary width fraction/min/max and delegate will-change callback are
-  modeled, but supplementary/triple-column layouts are not.
+  `UISplitViewController` keeps primary, optional supplementary and secondary
+  controllers, installs them as children, and lays them out side by side when
+  the view is at least 700pt wide; narrower widths collapse to the secondary
+  controller. The display mode, primary width fraction/min/max,
+  supplementary width and delegate will-change callback are modeled.
 - `NSAttributedString` stores one attribute dictionary; labels/buttons read
   `NSFontAttributeName` and `NSForegroundColorAttributeName` from it and
   render the plain string. Attribute-name symbols live in UIKit, not as

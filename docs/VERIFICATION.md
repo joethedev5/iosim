@@ -189,6 +189,17 @@ classes. The data source returns them from
 subviews (header, two cells, footer). The suite checks all three lines, so
 supplementary registration, dequeue, placement and content sizing agree.
 
+### UIKit: split-view columns
+
+`tests/foundation_extra_test.m` lays out a 1024 pt double-column split view and
+prints `[fnd] split 0 2 307 307 717 2 1`: primary width 307 pt, secondary at
+x=307 with width 717, two children and the primary column lookup returning the
+left controller. A triple-column split view with a 200 pt supplementary column
+prints `[fnd] triple 307 307 200 507 517 3 1`: the supplementary controller
+sits between primary and secondary, the secondary starts at x=507 with width
+517, all three are children, and the supplementary column lookup returns its
+controller.
+
 ### UIKit layout: navigation and stack views
 
 `demo/NavApp.m` builds a `UINavigationController` around two view controllers.
@@ -1787,8 +1798,9 @@ full 2D affine transform (translation, scale and rotation) through an offscreen
 composite; animating one interpolates decomposed rotation, scale and
 translation, and touch conversion and hit-testing invert the transform, but
 skewed transforms interpolate as their nearest rotation plus scale.
-`UISplitViewController` supports the double-column primary/secondary layout
-and its compact collapse; supplementary and triple-column layouts are not
+`UISplitViewController` supports double- and triple-column layouts with an
+optional supplementary column, its compact collapse, column width controls and
+the supplementary-column lookup; column-level delegate customization is not
 modeled. `CATransform3D` layers project through a homography when the
 perspective terms are set; 3D rotation, scale and translation render, but
 the layer's offscreen is still its untransformed size, so extreme perspective
