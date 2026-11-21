@@ -4795,6 +4795,106 @@ static id url_string_between(const char *start, const char *end)
 - (id)description { return _string; }
 @end
 
+@implementation NSProgress
++ (NSProgress *)progressWithTotalUnitCount:(long long)total
+{
+    NSProgress *progress = [[[self alloc] init] autorelease];
+    progress->_totalUnitCount = total;
+    return progress;
+}
++ (NSProgress *)discreteProgressWithTotalUnitCount:(long long)total
+{
+    return [self progressWithTotalUnitCount:total];
+}
++ (NSProgress *)progressWithTotalUnitCount:(long long)total
+                                    parent:(NSProgress *)parent
+                          pendingUnitCount:(long long)pending
+{
+    (void)parent;
+    (void)pending;
+    return [self progressWithTotalUnitCount:total];
+}
+- (long long)totalUnitCount { return _totalUnitCount; }
+- (void)setTotalUnitCount:(long long)total { _totalUnitCount = total; }
+- (long long)completedUnitCount { return _completedUnitCount; }
+- (void)setCompletedUnitCount:(long long)completed
+{
+    _completedUnitCount = completed;
+}
+- (double)fractionCompleted
+{
+    if (_totalUnitCount <= 0)
+        return 0;
+    double fraction = (double)_completedUnitCount / (double)_totalUnitCount;
+    if (fraction < 0) fraction = 0;
+    if (fraction > 1) fraction = 1;
+    return fraction;
+}
+- (BOOL)isCancelled { return _cancelled; }
+- (BOOL)isPaused { return _paused; }
+- (id)kind { return _kind; }
+- (void)setKind:(id)kind { _kind = kind; }
+- (id)localizedDescription { return _localizedDescription; }
+- (void)setLocalizedDescription:(id)description
+{
+    _localizedDescription = description;
+}
+- (void (^)(void))cancellationHandler
+{
+    return (void (^)(void))_cancellationHandler;
+}
+- (void)setCancellationHandler:(void (^)(void))handler
+{
+    _cancellationHandler = handler ? (id)_Block_copy(handler) : nil;
+}
+- (void (^)(void))pausingHandler
+{
+    return (void (^)(void))_pausingHandler;
+}
+- (void)setPausingHandler:(void (^)(void))handler
+{
+    _pausingHandler = handler ? (id)_Block_copy(handler) : nil;
+}
+- (void (^)(void))resumingHandler
+{
+    return (void (^)(void))_resumingHandler;
+}
+- (void)setResumingHandler:(void (^)(void))handler
+{
+    _resumingHandler = handler ? (id)_Block_copy(handler) : nil;
+}
+- (void)becomeCurrentWithPendingUnitCount:(long long)unitCount
+{
+    (void)unitCount;
+}
+- (void)resignCurrent { }
+- (void)addChild:(NSProgress *)child withPendingUnitCount:(long long)unitCount
+{
+    (void)child;
+    (void)unitCount;
+}
+- (void)cancel
+{
+    _cancelled = YES;
+    if (_cancellationHandler)
+        ((void (^)(void))_cancellationHandler)();
+}
+- (void)pause
+{
+    _paused = YES;
+    if (_pausingHandler)
+        ((void (^)(void))_pausingHandler)();
+}
+- (void)resume
+{
+    _paused = NO;
+    if (_resumingHandler)
+        ((void (^)(void))_resumingHandler)();
+}
+- (void)publish { }
+- (void)unpublish { }
+@end
+
 @implementation NSProcessInfo
 + (NSProcessInfo *)processInfo
 {

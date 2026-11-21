@@ -115,6 +115,32 @@ __attribute__((objc_root_class))
 - (id)UUIDString;
 @end
 
+@interface NSProgress : NSObject
++ (NSProgress *)progressWithTotalUnitCount:(long long)total;
++ (NSProgress *)discreteProgressWithTotalUnitCount:(long long)total;
++ (NSProgress *)progressWithTotalUnitCount:(long long)total
+                                    parent:(NSProgress *)parent
+                          pendingUnitCount:(long long)pending;
+@property long long totalUnitCount;
+@property long long completedUnitCount;
+@property(readonly) double fractionCompleted;
+@property(readonly, getter=isCancelled) BOOL cancelled;
+@property(readonly, getter=isPaused) BOOL paused;
+@property(copy) id kind;
+@property(copy) id localizedDescription;
+@property(copy) void (^cancellationHandler)(void);
+@property(copy) void (^pausingHandler)(void);
+@property(copy) void (^resumingHandler)(void);
+- (void)becomeCurrentWithPendingUnitCount:(long long)unitCount;
+- (void)resignCurrent;
+- (void)addChild:(NSProgress *)child withPendingUnitCount:(long long)unitCount;
+- (void)cancel;
+- (void)pause;
+- (void)resume;
+- (void)publish;
+- (void)unpublish;
+@end
+
 @interface NSProcessInfo : NSObject
 + (NSProcessInfo *)processInfo;
 - (NSDictionary *)environment;

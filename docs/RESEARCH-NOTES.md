@@ -851,3 +851,7 @@ components.
 - `NSCountedSet` subclasses `NSMutableSet` with a parallel count vector:
   adding an existing member increments its count, removing decrements it and
   drops the member at zero, and `countForObject:` returns the multiplicity.
+- `NSProgress` tracks total/completed unit counts and derives
+  `fractionCompleted`; cancellation and pause/resume flip flags and invoke the
+  copied handlers synchronously. Parent/child registration and publish are
+  accepted no-ops for now.

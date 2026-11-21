@@ -652,6 +652,51 @@ enum {
 - (void)closeFile;
 @end
 
+@interface NSProgress : NSObject {
+@public
+    long long _totalUnitCount;
+    long long _completedUnitCount;
+    BOOL _cancelled;
+    BOOL _paused;
+    id _kind;
+    id _localizedDescription;
+    id _cancellationHandler;
+    id _pausingHandler;
+    id _resumingHandler;
+    id _userInfo;
+}
++ (NSProgress *)progressWithTotalUnitCount:(long long)total;
++ (NSProgress *)discreteProgressWithTotalUnitCount:(long long)total;
++ (NSProgress *)progressWithTotalUnitCount:(long long)total
+                                    parent:(NSProgress *)parent
+                          pendingUnitCount:(long long)pending;
+- (long long)totalUnitCount;
+- (void)setTotalUnitCount:(long long)total;
+- (long long)completedUnitCount;
+- (void)setCompletedUnitCount:(long long)completed;
+- (double)fractionCompleted;
+- (BOOL)isCancelled;
+- (BOOL)isPaused;
+- (id)kind;
+- (void)setKind:(id)kind;
+- (id)localizedDescription;
+- (void)setLocalizedDescription:(id)description;
+- (void (^)(void))cancellationHandler;
+- (void)setCancellationHandler:(void (^)(void))handler;
+- (void (^)(void))pausingHandler;
+- (void)setPausingHandler:(void (^)(void))handler;
+- (void (^)(void))resumingHandler;
+- (void)setResumingHandler:(void (^)(void))handler;
+- (void)becomeCurrentWithPendingUnitCount:(long long)unitCount;
+- (void)resignCurrent;
+- (void)addChild:(NSProgress *)child withPendingUnitCount:(long long)unitCount;
+- (void)cancel;
+- (void)pause;
+- (void)resume;
+- (void)publish;
+- (void)unpublish;
+@end
+
 @interface NSProcessInfo : NSObject
 + (NSProcessInfo *)processInfo;
 - (NSDictionary *)environment;

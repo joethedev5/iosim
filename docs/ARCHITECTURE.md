@@ -1450,3 +1450,5 @@ every framebuffer/CGColor path renders in the software framebuffer's sRGB
 space while `getRed:` still reports the original components.
 `NSCountedSet` keeps a count beside each unique member in the inherited set
 array.
+`NSProgress` is a unit-count state object with copied cancellation, pausing
+and resuming handlers; hierarchy registration and publishing are no-ops.

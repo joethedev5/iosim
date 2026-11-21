@@ -508,6 +508,18 @@ static int g_animatorRuns;
     printf("[fnd] sizechildcount %d %.0f\n", parentController->_sizeChanges,
            [sizeChild preferredContentSize].width);
 
+    NSProgress *progress = [NSProgress progressWithTotalUnitCount:10];
+    __block int progressCancelled = 0;
+    progress.cancellationHandler = ^{
+        progressCancelled = 1;
+    };
+    progress.completedUnitCount = 4;
+    printf("[fnd] progress %.1f %d %d\n", [progress fractionCompleted],
+           [progress isCancelled], progressCancelled);
+    [progress cancel];
+    printf("[fnd] progress2 %d %d\n", [progress isCancelled],
+           progressCancelled);
+
     NSCountedSet *counted = [NSCountedSet countedSetWithArray:
         @[@"a", @"b", @"a", @"a"]];
     [counted addObject:@"b"];
