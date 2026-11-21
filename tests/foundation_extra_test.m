@@ -156,6 +156,36 @@ static int g_animatorRuns;
 }
 @end
 
+@interface FoundationSizeController : UIViewController {
+@public
+    int _transitions;
+    CGSize _lastSize;
+}
+@end
+
+@implementation FoundationSizeController
+- (void)viewWillTransitionToSize:(CGSize)size
+       withTransitionCoordinator:
+    (id<UIViewControllerTransitionCoordinator>)coordinator
+{
+    _transitions++;
+    _lastSize = size;
+    printf("[fnd] sizetrans %d %.0f %.0f %d %d\n", _transitions,
+           size.width, size.height, [coordinator isAnimated],
+           [self transitionCoordinator] == coordinator);
+    [coordinator animateAlongsideTransition:^(
+        id<UIViewControllerTransitionCoordinatorContext> context) {
+        printf("[fnd] sizetrans alongside %.0f\n",
+               [context transitionDuration]);
+        fflush(0);
+    } completion:^(id<UIViewControllerTransitionCoordinatorContext> context) {
+        printf("[fnd] sizetrans done %d\n", [context isCancelled]);
+        fflush(0);
+    }];
+    fflush(0);
+}
+@end
+
 @interface FoundationParentController : UIViewController {
 @public
     int _sizeChanges;
@@ -446,6 +476,17 @@ static int g_animatorRuns;
            [animator fractionComplete], [animator isRunning],
            [animator state]);
     [animator startAnimation];
+
+    FoundationSizeController *sizeController =
+        [[FoundationSizeController alloc] init];
+    sizeController.view =
+        [[UIView alloc] initWithFrame:CGRectMake(0, 0, 200, 300)];
+    [sizeController viewWillLayoutSubviews];
+    sizeController.view.frame = CGRectMake(0, 0, 400, 500);
+    [sizeController viewWillLayoutSubviews];
+    printf("[fnd] sizetrans count %d %.0f %.0f\n", sizeController->_transitions,
+           sizeController->_lastSize.width,
+           sizeController->_lastSize.height);
 
     FoundationParentController *parentController =
         [[FoundationParentController alloc] init];

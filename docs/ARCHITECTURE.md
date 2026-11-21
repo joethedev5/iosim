@@ -1437,3 +1437,7 @@ animator; the driver is responsible for driving and completing it.
 mutable subclass adds insert/remove/replace and indexed subscripting.
 `UIViewController` implements `UIContentContainer`; preferred-content-size
 changes propagate upward through the parent controller chain.
+Size transitions are detected in `viewWillLayoutSubviews` by comparing the
+view size to the last one; a `_UIViewControllerTransitionCoordinator` carries
+the container, controllers and duration, and the default
+`viewWillTransitionToSize:` fans out to child controllers.

@@ -6040,6 +6040,10 @@ if wait_log "[fnd] trim 'Hello World'" &&
    wait_log "[fnd] navtoolbar 0 1 725 3 1 1" &&
    wait_log "[fnd] animator start 0.1 0.0 0 0" &&
    wait_log "[fnd] animator done 0 0 2" &&
+   wait_log "[fnd] sizetrans 1 400 500 0 1" &&
+   wait_log "[fnd] sizetrans alongside 0" &&
+   wait_log "[fnd] sizetrans done 0" &&
+   wait_log "[fnd] sizetrans count 1 400 500" &&
    wait_log "[fnd] sizechild 1 123" &&
    wait_log "[fnd] sizechildcount 1 123" &&
    wait_log "[fnd] ordered 2 a d a 1 0 2" &&

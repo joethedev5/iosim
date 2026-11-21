@@ -836,3 +836,9 @@ management.
   `preferredContentSize` forwards `preferredContentSizeDidChangeForChildContentContainer:`
   to its parent, and the default parent callback is a no-op. Container size
   fitting notifications are exposed as no-op hooks for now.
+- `UIViewController` tracks its last laid-out size; when `viewWillLayoutSubviews`
+  sees a new non-zero size it builds a `UIViewControllerTransitionCoordinator`
+  and calls `viewWillTransitionToSize:withTransitionCoordinator:`. The default
+  implementation forwards to children, and the coordinator runs
+  alongside/completion blocks synchronously with its container view and
+  animated/duration state.

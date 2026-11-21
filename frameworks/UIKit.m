@@ -1955,6 +1955,59 @@ extern NSString *const UITransitionContextToViewKey;
     (id<UIContentContainer>)container;
 @end
 
+@protocol UIViewControllerTransitionCoordinatorContext
+- (BOOL)isAnimated;
+- (BOOL)isInteractive;
+- (BOOL)isCancelled;
+- (double)transitionDuration;
+- (double)percentComplete;
+- (long)completionCurve;
+- (double)completionVelocity;
+- (UIView *)containerView;
+- (UIViewController *)viewControllerForKey:(NSString *)key;
+- (UIView *)viewForKey:(NSString *)key;
+- (CGAffineTransform)targetTransform;
+- (long)presentationStyle;
+@end
+
+@protocol UIViewControllerTransitionCoordinator
+    <UIViewControllerTransitionCoordinatorContext>
+- (BOOL)animateAlongsideTransition:
+    (void (^)(id<UIViewControllerTransitionCoordinatorContext> context))animation
+                       completion:
+    (void (^)(id<UIViewControllerTransitionCoordinatorContext> context))completion;
+- (BOOL)animateAlongsideTransitionInView:(UIView *)view
+                               animation:
+    (void (^)(id<UIViewControllerTransitionCoordinatorContext> context))animation
+                              completion:
+    (void (^)(id<UIViewControllerTransitionCoordinatorContext> context))completion;
+- (void)notifyWhenInteractionChangesUsingBlock:
+    (void (^)(id<UIViewControllerTransitionCoordinatorContext> context))handler;
+- (void)notifyWhenInteractionEndsUsingBlock:
+    (void (^)(id<UIViewControllerTransitionCoordinatorContext> context))handler;
+@end
+
+@interface _UIViewControllerTransitionCoordinator : NSObject
+    <UIViewControllerTransitionCoordinator> {
+@public
+    UIView *_containerView;
+    UIViewController *_fromController;
+    UIViewController *_toController;
+    BOOL _animated;
+    BOOL _interactive;
+    BOOL _cancelled;
+    double _duration;
+    double _percentComplete;
+    CGSize _targetSize;
+    id _targetTraitCollection;
+}
+- (id)initWithContainerView:(UIView *)container
+             fromController:(UIViewController *)from
+               toController:(UIViewController *)to
+                   animated:(BOOL)animated
+                   duration:(double)duration;
+@end
+
 @interface UIViewController : NSObject <UIContentContainer> {
 @public
     UIView *_view;
@@ -1986,6 +2039,8 @@ extern NSString *const UITransitionContextToViewKey;
     id _transitioningDelegate;
     id _transitionContext;
     id _transitionAnimator;
+    id _transitionCoordinator;
+    CGSize _lastTransitionSize;
     BOOL _beingPresented;
     BOOL _beingDismissed;
 }
@@ -2043,6 +2098,13 @@ extern NSString *const UITransitionContextToViewKey;
     (id<UIContentContainer>)container;
 - (void)systemLayoutFittingSizeDidChangeForChildContentContainer:
     (id<UIContentContainer>)container;
+- (id<UIViewControllerTransitionCoordinator>)transitionCoordinator;
+- (void)viewWillTransitionToSize:(CGSize)size
+       withTransitionCoordinator:
+    (id<UIViewControllerTransitionCoordinator>)coordinator;
+- (void)willTransitionToTraitCollection:(UITraitCollection *)newCollection
+              withTransitionCoordinator:
+    (id<UIViewControllerTransitionCoordinator>)coordinator;
 - (UIViewController *)parentViewController;
 - (NSArray *)children;
 - (void)addChildViewController:(UIViewController *)controller;
@@ -10885,6 +10947,88 @@ NSString *const UITransitionContextToViewKey =
 }
 @end
 
+@implementation _UIViewControllerTransitionCoordinator
+- (id)initWithContainerView:(UIView *)container
+             fromController:(UIViewController *)from
+               toController:(UIViewController *)to
+                   animated:(BOOL)animated
+                   duration:(double)duration
+{
+    self = [super init];
+    if (self)
+    {
+        _containerView = container;
+        _fromController = from;
+        _toController = to;
+        _animated = animated;
+        _duration = duration;
+    }
+    return self;
+}
+- (BOOL)isAnimated { return _animated; }
+- (BOOL)isInteractive { return _interactive; }
+- (BOOL)isCancelled { return _cancelled; }
+- (double)transitionDuration { return _duration; }
+- (double)percentComplete { return _percentComplete; }
+- (long)completionCurve { return 0; }
+- (double)completionVelocity { return 1.0; }
+- (UIView *)containerView { return _containerView; }
+- (UIViewController *)viewControllerForKey:(NSString *)key
+{
+    if (key == UITransitionContextFromViewControllerKey)
+        return _fromController;
+    if (key == UITransitionContextToViewControllerKey)
+        return _toController;
+    return nil;
+}
+- (UIView *)viewForKey:(NSString *)key
+{
+    if (key == UITransitionContextFromViewKey)
+        return _fromController ? _fromController.view : nil;
+    if (key == UITransitionContextToViewKey)
+        return _toController ? _toController.view : nil;
+    return nil;
+}
+- (CGAffineTransform)targetTransform
+{
+    return CGAffineTransformIdentityValue();
+}
+- (long)presentationStyle
+{
+    return _toController ? [_toController modalPresentationStyle] : -2;
+}
+- (BOOL)animateAlongsideTransition:
+    (void (^)(id<UIViewControllerTransitionCoordinatorContext> context))animation
+                       completion:
+    (void (^)(id<UIViewControllerTransitionCoordinatorContext> context))completion
+{
+    if (animation)
+        animation(self);
+    if (completion)
+        completion(self);
+    return YES;
+}
+- (BOOL)animateAlongsideTransitionInView:(UIView *)view
+                               animation:
+    (void (^)(id<UIViewControllerTransitionCoordinatorContext> context))animation
+                              completion:
+    (void (^)(id<UIViewControllerTransitionCoordinatorContext> context))completion
+{
+    (void)view;
+    return [self animateAlongsideTransition:animation completion:completion];
+}
+- (void)notifyWhenInteractionChangesUsingBlock:
+    (void (^)(id<UIViewControllerTransitionCoordinatorContext> context))handler
+{
+    (void)handler;
+}
+- (void)notifyWhenInteractionEndsUsingBlock:
+    (void (^)(id<UIViewControllerTransitionCoordinatorContext> context))handler
+{
+    (void)handler;
+}
+@end
+
 @implementation UIViewController
 - (id)init
 {
@@ -11182,7 +11326,10 @@ NSString *const UITransitionContextToViewKey =
 {
     _view = view;
     if (_view)
+    {
         _view->_additionalSafeAreaInsets = _additionalSafeAreaInsets;
+        _lastTransitionSize = _view->_frame.size;
+    }
     if (_view && !_viewLoaded)
     {
         _viewLoaded = YES;
@@ -11208,8 +11355,50 @@ NSString *const UITransitionContextToViewKey =
 - (void)viewDidAppear:(BOOL)animated { (void)animated; }
 - (void)viewWillDisappear:(BOOL)animated { (void)animated; }
 - (void)viewDidDisappear:(BOOL)animated { (void)animated; }
-- (void)viewWillLayoutSubviews { }
+- (void)viewWillLayoutSubviews
+{
+    if (!_view)
+        return;
+    CGSize size = _view->_frame.size;
+    if (size.width <= 0 || size.height <= 0)
+        return;
+    if (size.width == _lastTransitionSize.width &&
+        size.height == _lastTransitionSize.height)
+        return;
+    _lastTransitionSize = size;
+    _UIViewControllerTransitionCoordinator *coordinator =
+        [[_UIViewControllerTransitionCoordinator alloc]
+            initWithContainerView:_view
+                   fromController:self
+                     toController:self
+                         animated:NO
+                         duration:0.0];
+    _transitionCoordinator = coordinator;
+    [self viewWillTransitionToSize:size
+           withTransitionCoordinator:coordinator];
+    _transitionCoordinator = nil;
+}
 - (void)viewDidLayoutSubviews { }
+- (id<UIViewControllerTransitionCoordinator>)transitionCoordinator
+{
+    return _transitionCoordinator;
+}
+- (void)viewWillTransitionToSize:(CGSize)size
+       withTransitionCoordinator:
+    (id<UIViewControllerTransitionCoordinator>)coordinator
+{
+    for (int i = 0; i < _childCount; i++)
+        [_children[i] viewWillTransitionToSize:size
+                       withTransitionCoordinator:coordinator];
+}
+- (void)willTransitionToTraitCollection:(UITraitCollection *)newCollection
+              withTransitionCoordinator:
+    (id<UIViewControllerTransitionCoordinator>)coordinator
+{
+    for (int i = 0; i < _childCount; i++)
+        [_children[i] willTransitionToTraitCollection:newCollection
+                              withTransitionCoordinator:coordinator];
+}
 - (void)viewDidLoad
 {
 }

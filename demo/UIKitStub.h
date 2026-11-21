@@ -1164,6 +1164,38 @@ extern NSString *const UITransitionContextToViewKey;
     (id<UIContentContainer>)container;
 @end
 
+@protocol UIViewControllerTransitionCoordinatorContext
+- (BOOL)isAnimated;
+- (BOOL)isInteractive;
+- (BOOL)isCancelled;
+- (double)transitionDuration;
+- (double)percentComplete;
+- (long)completionCurve;
+- (double)completionVelocity;
+- (UIView *)containerView;
+- (UIViewController *)viewControllerForKey:(NSString *)key;
+- (UIView *)viewForKey:(NSString *)key;
+- (CGAffineTransform)targetTransform;
+- (long)presentationStyle;
+@end
+
+@protocol UIViewControllerTransitionCoordinator
+    <UIViewControllerTransitionCoordinatorContext>
+- (BOOL)animateAlongsideTransition:
+    (void (^)(id<UIViewControllerTransitionCoordinatorContext> context))animation
+                       completion:
+    (void (^)(id<UIViewControllerTransitionCoordinatorContext> context))completion;
+- (BOOL)animateAlongsideTransitionInView:(UIView *)view
+                               animation:
+    (void (^)(id<UIViewControllerTransitionCoordinatorContext> context))animation
+                              completion:
+    (void (^)(id<UIViewControllerTransitionCoordinatorContext> context))completion;
+- (void)notifyWhenInteractionChangesUsingBlock:
+    (void (^)(id<UIViewControllerTransitionCoordinatorContext> context))handler;
+- (void)notifyWhenInteractionEndsUsingBlock:
+    (void (^)(id<UIViewControllerTransitionCoordinatorContext> context))handler;
+@end
+
 @interface UIViewController : NSObject <UIContentContainer>
 - (id)init;
 @property(nonatomic) long modalPresentationStyle;
@@ -1184,6 +1216,13 @@ extern NSString *const UITransitionContextToViewKey;
     (id<UIContentContainer>)container;
 - (void)systemLayoutFittingSizeDidChangeForChildContentContainer:
     (id<UIContentContainer>)container;
+@property(readonly) id<UIViewControllerTransitionCoordinator> transitionCoordinator;
+- (void)viewWillTransitionToSize:(CGSize)size
+       withTransitionCoordinator:
+    (id<UIViewControllerTransitionCoordinator>)coordinator;
+- (void)willTransitionToTraitCollection:(UITraitCollection *)newCollection
+              withTransitionCoordinator:
+    (id<UIViewControllerTransitionCoordinator>)coordinator;
 @property(readonly) UIPopoverPresentationController *popoverPresentationController;
 @property(readonly) UISheetPresentationController *sheetPresentationController;
 @property(readonly) UIPresentationController *presentationController;
