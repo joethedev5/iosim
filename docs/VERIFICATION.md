@@ -1453,8 +1453,20 @@ then loads the PNG file with Python and requires its center pixel to be green.
 ### Attributed strings
 
 `tests/attributed_test.m` assigns an attributed string with a bold 22pt red
-font to a label, and a mutated attributed string to a button. The suite
-requires `[attr] label Hello 5 22` and `[attr] button Wo! 3 1`.
+font to a label, a mutated attributed string to a button, and an attributed
+string to a text view. It also gives a button a rendered magenta image, gives
+another a filled `UIButtonConfiguration` with a green capsule background, and
+sets a rounded-rect border on a text field. The suite requires
+`[attr] label Hello 5 22`, `[attr] button Wo! 3 1`,
+`[attr] textview Hello 5`, `[attr] image 1 1`, `[attr] config Cfg 1` and
+`[attr] field 3`, `[attr] textlayer M 30`, `[attr] transition 1 1`,
+`[attr] bar 1 1`, `[attr] vc 1 1 30`, `[attr] access 1 Acc 64` and
+`[attr] gestures 1 3 2 1 1`, `[attr] frame 0 0 80 20`,
+`[attr] fieldvalue Hello`, `[attr] table 0 1 60`,
+`[attr] collection 1 1 0` and `[attr] scroll 1 2 0`, then samples the
+screenshot for the
+magenta image, green configuration background, dark field background and the
+white pixels of the text layer's string.
 
 ### Page view controllers
 
@@ -1470,8 +1482,27 @@ string conversion, capitalization, percent decoding, mutable character sets,
 range replacement and lookup, and UIFont weights. The suite requires every
 logged result, including `[fnd] trim 'Hello World'`,
 `[fnd] font 14 System 20`, `[fnd] color 1 0 0 1.0 0.1 0.4 1.0 0.25`,
-`[fnd] desc 17 17`, `[fnd] readable 16 0 370 874` and
-`[fnd] props 1 0 1 3`.
+`[fnd] desc 17 17`, `[fnd] readable 16 0 370 874`,
+`[fnd] props 1 0 1 3`, `[fnd] url https example.com 8080 /a/b x=1`,
+`[fnd] comp https://example.com:8080/a?q=2#top example.com`,
+`[fnd] pfont 17`, `[fnd] present 7 1 2 2 0`, `[fnd] value 3 4 2 5 1`,
+`[fnd] idx 4 2 11 1 28`, `[fnd] scene 1 0 iosim-scene-session`,
+`[fnd] qitems 2 a two`, `[fnd] qbuild k=v`,
+`[fnd] device iPhone 18.0 0 1`, `[fnd] process iosim 4 4`,
+`[fnd] uuid 36 1`, `[fnd] affine 7 9`,
+`[fnd] vcprops 15 1 0 320 480`, `[fnd] searchupdate 1`,
+`[fnd] search 1 1 0`, `[fnd] vendor 1`, `[fnd] idxmore 10 5 10`,
+`[fnd] b64 aGVsbG8= 5`, `[fnd] urlappend /tmp/a/b`,
+`[fnd] axel E 1 3 4`, `[fnd] pct a%20b&c`, `[fnd] hue 0 1 1 1`,
+`[fnd] alert 1 1 0 1`, `[fnd] viewwin 1 0`, `[fnd] appext a.txt /tmp/a.txt`
+and `[fnd] scene2 1 1`. The alert line adds a text field through the
+configuration handler, disables the preferred action and checks that the
+controller keeps both. The view line runs after the window is key, so the
+root view must find its window through the superview chain. The presentation
+line configures a
+popover source view, two sheet detents, a large-title mode and an empty
+bar-button array, so the presentation controllers and the `__NSArray0__`
+literal path are exercised too.
 
 ### Mask views and interaction
 
@@ -1584,7 +1615,10 @@ the spinner box (176–226 pt by 62–118 pt); the fixture's `endRefreshing` the
 logs `[refresh] done`, and a second screenshot counts no bright pixels in that
 box — the spinner stopped its infinite animation and the content returned to
 offset zero. The control is a real subview positioned by the scroll view, and
-its spinner shares the activity indicator's blade renderer.
+its spinner shares the activity indicator's blade renderer. The table's
+`refreshControl` setter delegates to `UIScrollView`, which installs the control
+as a subview; assigning the inherited ivar alone leaves the spinner invisible
+even though `isRefreshing` is true.
 
 ### App lifecycle: delegate callbacks and application state
 

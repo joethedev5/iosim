@@ -33,6 +33,8 @@ __attribute__((objc_root_class))
 - (id)autorelease;
 @end
 
+@class NSCharacterSet;
+
 @interface NSString : NSObject
 + (id)stringWithFormat:(id)format, ...;
 + (id)stringWithUTF8String:(const char *)string;
@@ -44,6 +46,11 @@ __attribute__((objc_root_class))
 - (NSRange)rangeOfString:(id)string;
 - (id)capitalizedString;
 - (id)stringByRemovingPercentEncoding;
+- (id)stringByAppendingPathExtension:(id)extension;
+- (id)stringByAddingPercentEncodingWithAllowedCharacters:
+    (NSCharacterSet *)allowedCharacters;
+- (id)stringByAddingPercentEscapesUsingEncoding:(unsigned long)encoding;
+- (id)stringByReplacingPercentEscapesUsingEncoding:(unsigned long)encoding;
 - (long)integerValue;
 - (double)doubleValue;
 - (BOOL)boolValue;
@@ -57,6 +64,12 @@ __attribute__((objc_root_class))
 + (id)decimalDigitCharacterSet;
 + (id)letterCharacterSet;
 + (id)characterSetWithCharactersInString:(id)string;
++ (id)URLQueryAllowedCharacterSet;
++ (id)URLPathAllowedCharacterSet;
++ (id)URLHostAllowedCharacterSet;
++ (id)URLFragmentAllowedCharacterSet;
++ (id)URLUserAllowedCharacterSet;
++ (id)URLPasswordAllowedCharacterSet;
 - (BOOL)characterIsMember:(unsigned short)character;
 - (id)mutableCopy;
 @end
@@ -89,6 +102,126 @@ __attribute__((objc_root_class))
 - (const void *)bytes;
 - (unsigned long)length;
 - (BOOL)writeToFile:(NSString *)path atomically:(BOOL)atomically;
+- (id)base64EncodedStringWithOptions:(unsigned long)options;
+- (id)initWithBase64EncodedString:(id)string options:(unsigned long)options;
+@end
+
+@class NSArray;
+@class NSDictionary;
+
+@interface NSUUID : NSObject
++ (id)UUID;
+- (id)initWithUUIDString:(id)string;
+- (id)UUIDString;
+@end
+
+@interface NSProcessInfo : NSObject
++ (NSProcessInfo *)processInfo;
+- (NSDictionary *)environment;
+- (NSArray *)arguments;
+- (id)processName;
+- (id)globallyUniqueString;
+- (id)operatingSystemVersionString;
+- (unsigned long long)physicalMemory;
+- (unsigned long)processorCount;
+- (unsigned long)activeProcessorCount;
+- (double)systemUptime;
+- (id)hostName;
+- (BOOL)isLowPowerModeEnabled;
+@end
+
+@interface NSURL : NSObject
++ (id)fileURLWithPath:(id)path;
++ (id)URLWithString:(id)string;
+- (id)path;
+- (id)absolutePath;
+- (id)scheme;
+- (id)host;
+- (id)query;
+- (int)port;
+- (id)absoluteString;
+- (BOOL)isFileURL;
+- (id)URLByAppendingPathComponent:(id)component;
+- (id)URLByAppendingPathComponent:(id)component isDirectory:(BOOL)isDirectory;
+- (id)URLByDeletingLastPathComponent;
+- (id)URLByAppendingPathExtension:(id)extension;
+- (id)URLByDeletingPathExtension;
+- (id)URLByStandardizingPath;
+- (id)URLByResolvingSymlinksInPath;
+- (NSArray *)pathComponents;
+@end
+
+@class NSArray;
+
+@interface NSURLQueryItem : NSObject
++ (id)queryItemWithName:(id)name value:(id)value;
+- (id)initWithName:(id)name value:(id)value;
+@property(readonly) id name;
+@property(readonly) id value;
+@end
+
+@interface NSURLComponents : NSObject
++ (id)componentsWithString:(id)string;
++ (id)componentsWithURL:(id)url resolvingAgainstBaseURL:(BOOL)resolve;
+- (id)string;
+@property(readonly) NSURL *URL;
+@property(nonatomic, retain) id scheme;
+@property(nonatomic, retain) id host;
+@property(nonatomic, retain) id path;
+@property(nonatomic, retain) id query;
+@property(nonatomic, retain) NSArray *queryItems;
+@property(nonatomic, retain) id percentEncodedQuery;
+@property(nonatomic, retain) id percentEncodedPath;
+@property(nonatomic, retain) id fragment;
+@property int port;
+@end
+
+@interface NSIndexSet : NSObject
++ (id)indexSet;
++ (id)indexSetWithIndex:(unsigned long)index;
++ (id)indexSetWithIndexesInRange:(NSRange)range;
+- (unsigned long)count;
+- (unsigned long)firstIndex;
+- (unsigned long)lastIndex;
+- (BOOL)containsIndex:(unsigned long)index;
+- (unsigned long)indexGreaterThanIndex:(unsigned long)index;
+- (unsigned long)indexLessThanIndex:(unsigned long)index;
+- (unsigned long)indexGreaterThanOrEqualToIndex:(unsigned long)index;
+- (void)enumerateIndexesUsingBlock:(void (^)(unsigned long index, BOOL *stop))block;
+- (void)enumerateRangesUsingBlock:(void (^)(NSRange range, BOOL *stop))block;
+@end
+
+@interface NSMutableIndexSet : NSIndexSet
+- (void)addIndex:(unsigned long)index;
+- (void)addIndexesInRange:(NSRange)range;
+- (void)removeIndex:(unsigned long)index;
+- (void)removeAllIndexes;
+@end
+
+@interface NSValue : NSObject
++ (id)valueWithBytes:(const void *)value objCType:(const char *)type;
++ (id)value:(const void *)value withObjCType:(const char *)type;
++ (id)valueWithCGPoint:(CGPoint)point;
++ (id)valueWithCGSize:(CGSize)size;
++ (id)valueWithCGRect:(CGRect)rect;
++ (id)valueWithCGAffineTransform:(CGAffineTransform)transform;
++ (id)valueWithCATransform3D:(CATransform3D)transform;
++ (id)valueWithUIEdgeInsets:(UIEdgeInsets)insets;
++ (id)valueWithRange:(NSRange)range;
++ (id)valueWithNonretainedObject:(id)object;
++ (id)valueWithPointer:(const void *)pointer;
+- (void)getValue:(void *)value size:(unsigned long)size;
+- (const char *)objCType;
+- (CGPoint)CGPointValue;
+- (CGSize)CGSizeValue;
+- (CGRect)CGRectValue;
+- (CGAffineTransform)CGAffineTransformValue;
+- (CATransform3D)CATransform3DValue;
+- (UIEdgeInsets)UIEdgeInsetsValue;
+- (NSRange)rangeValue;
+- (id)nonretainedObjectValue;
+- (void *)pointerValue;
+- (BOOL)isEqualToValue:(id)other;
 @end
 
 @interface NSTimer : NSObject
@@ -408,6 +541,8 @@ enum {
 - (BOOL)getRed:(double *)red green:(double *)green blue:(double *)blue
          alpha:(double *)alpha;
 - (BOOL)getWhite:(double *)white alpha:(double *)alpha;
+- (BOOL)getHue:(double *)hue saturation:(double *)saturation
+    brightness:(double *)brightness alpha:(double *)alpha;
 + (UIColor *)whiteColor;
 + (UIColor *)blackColor;
 + (UIColor *)clearColor;
@@ -479,6 +614,9 @@ enum {
 - (UIFont *)fontWithSize:(double)size;
 + (UIFont *)fontWithDescriptor:(UIFontDescriptor *)descriptor
                           size:(double)size;
++ (UIFont *)preferredFontForTextStyle:(id)style;
++ (UIFont *)preferredFontForTextStyle:(id)style
+              compatibleWithTraitCollection:(UITraitCollection *)traits;
 - (UIFontDescriptor *)fontDescriptor;
 @end
 
@@ -498,6 +636,28 @@ enum {
 - (double)nativeScale;
 @property double brightness;
 @property(readonly) BOOL captured;
+@end
+
+extern NSString *UIDeviceOrientationDidChangeNotification;
+
+@interface UIDevice : NSObject
++ (UIDevice *)currentDevice;
+@property(readonly) NSString *name;
+@property(readonly) NSString *model;
+@property(readonly) NSString *localizedModel;
+@property(readonly) NSString *systemName;
+@property(readonly) NSString *systemVersion;
+@property(readonly) NSUUID *identifierForVendor;
+@property(readonly) long userInterfaceIdiom;
+@property long orientation;
+@property(readonly) long batteryState;
+@property(readonly) double batteryLevel;
+@property BOOL proximityMonitoringEnabled;
+@property(readonly) BOOL multitaskingSupported;
+@property(readonly) BOOL generatingDeviceOrientationNotifications;
+- (void)beginGeneratingDeviceOrientationNotifications;
+- (void)endGeneratingDeviceOrientationNotifications;
+- (void)playInputClick;
 @end
 
 @class NSArray;
@@ -596,7 +756,19 @@ enum {
 @property CGRect frame;
 @property CGPoint center;
 @property(readonly) UIView *superview;
+@property(readonly) UIWindow *window;
 @property(readonly) NSArray *subviews;
+@property long semanticContentAttribute;
++ (long)userInterfaceLayoutDirectionForSemanticContentAttribute:(long)attribute;
+@property(readonly) long effectiveUserInterfaceLayoutDirection;
+- (void)setNeedsDisplay;
+- (void)setNeedsDisplayInRect:(CGRect)rect;
+- (void)didAddSubview:(UIView *)subview;
+- (void)willRemoveSubview:(UIView *)subview;
+- (void)willMoveToSuperview:(UIView *)newSuperview;
+- (void)didMoveToSuperview;
+- (void)willMoveToWindow:(id)window;
+- (void)didMoveToWindow;
 - (CGPoint)convertPoint:(CGPoint)point toView:(UIView *)view;
 - (CGPoint)convertPoint:(CGPoint)point fromView:(UIView *)view;
 - (CGRect)convertRect:(CGRect)rect toView:(UIView *)view;
@@ -626,6 +798,17 @@ enum {
 - (void)addInteraction:(id)interaction;
 - (void)removeInteraction:(id)interaction;
 - (NSArray *)interactions;
+@property(nonatomic, getter=isAccessibilityElement) BOOL accessibilityElement;
+@property(nonatomic, retain) id accessibilityLabel;
+@property(nonatomic, retain) id accessibilityIdentifier;
+@property(nonatomic, retain) id accessibilityHint;
+@property(nonatomic, retain) id accessibilityValue;
+@property unsigned long long accessibilityTraits;
+@property BOOL accessibilityElementsHidden;
+@property BOOL accessibilityViewIsModal;
+@property BOOL shouldGroupAccessibilityChildren;
+@property(nonatomic, retain) NSArray *accessibilityElements;
+@property CGRect accessibilityFrame;
 @property BOOL translatesAutoresizingMaskIntoConstraints;
 @property(readonly) NSLayoutAnchor *leadingAnchor;
 @property(readonly) NSLayoutAnchor *trailingAnchor;
@@ -657,6 +840,14 @@ enum {
 + (void)addKeyframeWithRelativeStartTime:(double)start
                         relativeDuration:(double)duration
                               animations:(void (^)(void))animations;
++ (void)transitionWithView:(UIView *)view duration:(double)duration
+                   options:(unsigned long)options
+                animations:(void (^)(void))animations
+                completion:(void (^)(BOOL finished))completion;
++ (void)transitionFromView:(UIView *)fromView toView:(UIView *)toView
+                  duration:(double)duration
+                   options:(unsigned long)options
+                completion:(void (^)(BOOL finished))completion;
 @property(nonatomic, retain) UIColor *tintColor;
 - (void)tintColorDidChange;
 @property long tintAdjustmentMode;
@@ -684,6 +875,13 @@ enum {
 @property(nonatomic, retain) UIColor *textColor;
 @property(nonatomic, retain) UIFont *font;
 @property int keyboardType;
+@property int borderStyle;
+@property BOOL clearsOnBeginEditing;
+@property(nonatomic, retain) id leftView;
+@property(nonatomic, retain) id rightView;
+@property long leftViewMode;
+@property long rightViewMode;
+@property long clearButtonMode;
 @property(nonatomic, assign) id delegate;
 - (BOOL)becomeFirstResponder;
 - (BOOL)resignFirstResponder;
@@ -713,6 +911,24 @@ enum {
 @property(nonatomic, retain) id placeholder;
 @property BOOL showsCancelButton;
 - (void)setShowsCancelButton:(BOOL)shows animated:(BOOL)animated;
+@property(nonatomic, retain) NSArray *scopeButtonTitles;
+@property long selectedScopeButtonIndex;
+@property BOOL showsScopeBar;
+@property(nonatomic, retain) UIColor *barTintColor;
+@property long searchBarStyle;
+@property(nonatomic, retain) UIImage *backgroundImage;
+@end
+
+@interface UIAccessibilityElement : NSObject
+- (id)initWithAccessibilityContainer:(id)container;
+@property(readonly) id accessibilityContainer;
+@property(nonatomic, getter=isAccessibilityElement) BOOL accessibilityElement;
+@property(nonatomic, retain) id accessibilityLabel;
+@property(nonatomic, retain) id accessibilityIdentifier;
+@property(nonatomic, retain) id accessibilityHint;
+@property(nonatomic, retain) id accessibilityValue;
+@property unsigned long long accessibilityTraits;
+@property CGRect accessibilityFrame;
 @end
 
 @interface UILabel : UIView
@@ -722,6 +938,10 @@ enum {
 @property(nonatomic, retain) UIFont *font;
 @property int textAlignment;
 @property int numberOfLines;
+@property long lineBreakMode;
+@property double preferredMaxLayoutWidth;
+@property BOOL adjustsFontSizeToFitWidth;
+@property double minimumScaleFactor;
 @end
 
 @class UINavigationItem;
@@ -730,22 +950,85 @@ enum {
     UIModalPresentationFullScreen = 0,
     UIModalPresentationPageSheet = 1,
     UIModalPresentationFormSheet = 2,
+    UIModalPresentationCurrentContext = 3,
+    UIModalPresentationCustom = 4,
     UIModalPresentationOverFullScreen = 5,
+    UIModalPresentationOverCurrentContext = 6,
+    UIModalPresentationPopover = 7,
+    UIModalPresentationBlurOverFullScreen = 8,
+    UIModalPresentationNone = -1,
     UIModalPresentationAutomatic = -2
 };
+
+@class UIViewController;
+
+@interface UIPresentationController : NSObject
+@property(readonly) UIViewController *presentedViewController;
+@property(readonly) UIViewController *presentingViewController;
+@property(readonly) UIView *containerView;
+@property(readonly) CGRect frameOfPresentedViewInContainerView;
+@end
+
+@interface UIPopoverPresentationController : UIPresentationController
+@property(nonatomic, retain) UIView *sourceView;
+@property(nonatomic) CGRect sourceRect;
+@property(nonatomic, retain) id barButtonItem;
+@property(nonatomic) long permittedArrowDirections;
+@property(nonatomic, assign) id delegate;
+@property(nonatomic) UIEdgeInsets popoverLayoutMargins;
+@end
+
+@interface UISheetPresentationControllerDetent : NSObject
++ (id)mediumDetent;
++ (id)largeDetent;
++ (id)customDetentWithIdentifier:(id)identifier
+                        resolver:(double (^)(id))resolver;
+@property(readonly) id identifier;
+@end
+
+@interface UISheetPresentationController : UIPresentationController
+@property(nonatomic, retain) NSArray *detents;
+@property(nonatomic) BOOL prefersGrabberVisible;
+@property(nonatomic) double preferredCornerRadius;
+@property(nonatomic, retain) id largestUndimmedDetentIdentifier;
+@property(nonatomic) BOOL prefersScrollingExpandsWhenScrolledToEdge;
+@end
 
 @interface UIViewController : NSObject
 - (id)init;
 @property(nonatomic) long modalPresentationStyle;
+@property unsigned long edgesForExtendedLayout;
+@property BOOL extendedLayoutIncludesOpaqueBars;
+@property BOOL automaticallyAdjustsScrollViewInsets;
+@property BOOL definesPresentationContext;
+@property(getter=isModalInPresentation) BOOL modalInPresentation;
+@property(nonatomic, retain) id restorationIdentifier;
+@property CGSize preferredContentSize;
+@property(readonly) UIPopoverPresentationController *popoverPresentationController;
+@property(readonly) UISheetPresentationController *sheetPresentationController;
+@property(readonly) UIPresentationController *presentationController;
 @property(nonatomic, retain) UIView *view;
 @property(readonly) UIView *viewIfLoaded;
 @property(readonly, getter=isViewLoaded) BOOL viewLoaded;
+- (void)loadViewIfNeeded;
+@property(readonly) BOOL isBeingPresented;
+@property(readonly) BOOL isBeingDismissed;
+@property(readonly) BOOL isMovingFromParentViewController;
+@property(readonly) BOOL isMovingToParentViewController;
+@property(readonly) BOOL shouldAutorotate;
+@property(readonly) unsigned long supportedInterfaceOrientations;
 @property(readonly) UIViewController *parentViewController;
 @property(readonly) NSArray *children;
 - (void)addChildViewController:(UIViewController *)controller;
 - (void)removeFromParentViewController;
 - (void)willMoveToParentViewController:(UIViewController *)parent;
 - (void)didMoveToParentViewController:(UIViewController *)parent;
+- (void)transitionFromViewController:(UIViewController *)fromViewController
+                    toViewController:(UIViewController *)toViewController
+                            duration:(double)duration
+                             options:(unsigned long)options
+                          animations:(void (^)(void))animations
+                          completion:(void (^)(BOOL finished))completion;
 @property(readonly) UITraitCollection *traitCollection;
 @property(nonatomic) long overrideUserInterfaceStyle;
 - (void)traitCollectionDidChange:(UITraitCollection *)previous;
@@ -758,14 +1041,36 @@ enum {
 - (void)setNeedsStatusBarAppearanceUpdate;
 @property(nonatomic, retain) id title;
 @property(readonly) id navigationController;
+@property(readonly) id tabBarController;
 @property(readonly) UINavigationItem *navigationItem;
 @property(nonatomic, retain) id tabBarItem;
 - (void)loadView;
 - (void)viewDidLoad;
 - (void)presentViewController:(UIViewController *)controller animated:(BOOL)animated
                    completion:(void (^)(void))completion;
+- (void)showViewController:(UIViewController *)controller sender:(id)sender;
+- (void)showDetailViewController:(UIViewController *)controller sender:(id)sender;
 - (void)dismissViewControllerAnimated:(BOOL)animated
                            completion:(void (^)(void))completion;
+@end
+
+@class UISearchController;
+@protocol UISearchResultsUpdating
+- (void)updateSearchResultsForSearchController:
+    (UISearchController *)searchController;
+@end
+
+@interface UISearchController : UIViewController
+- (id)initWithSearchResultsController:(UIViewController *)controller;
+@property(readonly) UISearchBar *searchBar;
+@property(nonatomic, retain) id searchResultsUpdater;
+@property(nonatomic, retain) id delegate;
+@property(readonly) UIViewController *searchResultsController;
+@property BOOL active;
+@property BOOL obscuresBackgroundDuringPresentation;
+@property BOOL dimsBackgroundDuringPresentation;
+@property BOOL hidesNavigationBarDuringPresentation;
+- (void)setActive:(BOOL)active animated:(BOOL)animated;
 @end
 
 enum {
@@ -795,18 +1100,55 @@ enum {
 @end
 
 @interface UIRefreshControl : UIControl
+@property(nonatomic, retain) id attributedTitle;
 - (BOOL)isRefreshing;
 - (void)beginRefreshing;
 - (void)endRefreshing;
 @end
 
+@class UIImageView;
+
+enum {
+    UIButtonConfigurationCornerStyleFixed = 0,
+    UIButtonConfigurationCornerStyleDynamic = 1,
+    UIButtonConfigurationCornerStyleCapsule = 2,
+    UIButtonConfigurationCornerStyleLarge = 3
+};
+
+@interface UIButtonConfiguration : NSObject
++ (id)plainButtonConfiguration;
++ (id)filledButtonConfiguration;
++ (id)grayButtonConfiguration;
++ (id)tintedButtonConfiguration;
++ (id)borderedButtonConfiguration;
++ (id)borderlessButtonConfiguration;
++ (id)configurationWithTitle:(id)title;
+@property(nonatomic, retain) id title;
+@property(nonatomic, retain) id subtitle;
+@property(nonatomic, retain) UIImage *image;
+@property(nonatomic, retain) UIColor *baseForegroundColor;
+@property(nonatomic, retain) UIColor *baseBackgroundColor;
+@property long cornerStyle;
+@property UIEdgeInsets contentInsets;
+@property double imagePadding;
+@end
+
 @interface UIButton : UIControl
 + (id)buttonWithType:(int)type;
+@property(nonatomic, retain) UIButtonConfiguration *configuration;
+- (void)setNeedsUpdateConfiguration;
+- (void)updateConfiguration;
+- (void)setImage:(UIImage *)image forState:(unsigned long)state;
+- (UIImage *)imageForState:(unsigned long)state;
+@property(readonly) UIImageView *imageView;
 - (void)setTitle:(id)title forState:(unsigned long)state;
 - (void)setAttributedTitle:(NSAttributedString *)title
                   forState:(unsigned long)state;
 - (NSAttributedString *)attributedTitleForState:(unsigned long)state;
 - (void)setTitleColor:(UIColor *)color forState:(unsigned long)state;
+@property UIEdgeInsets contentEdgeInsets;
+@property UIEdgeInsets titleEdgeInsets;
+@property UIEdgeInsets imageEdgeInsets;
 @property(readonly) UILabel *titleLabel;
 @end
 
@@ -815,12 +1157,18 @@ enum {
 @interface UIAlertAction : NSObject
 + (id)actionWithTitle:(id)title style:(long)style
               handler:(void (^)(UIAlertAction *action))handler;
+@property(nonatomic, retain) UIImage *image;
+@property(nonatomic, getter=isEnabled) BOOL enabled;
 @end
 
 @interface UIAlertController : UIViewController
 + (id)alertControllerWithTitle:(id)title message:(id)message
                  preferredStyle:(long)style;
 - (void)addAction:(UIAlertAction *)action;
+@property(readonly) NSArray *textFields;
+- (void)addTextFieldWithConfigurationHandler:
+    (void (^)(UITextField *textField))configurationHandler;
+@property(nonatomic, retain) UIAlertAction *preferredAction;
 @end
 
 enum { UIAlertControllerStyleActionSheet = 0, UIAlertControllerStyleAlert = 1 };
@@ -1173,13 +1521,25 @@ enum {
 - (void)setProgress:(double)progress animated:(BOOL)animated;
 @end
 
+@class UIWindow, UISceneSession;
+
 @interface UIScene : NSObject
+@property(nonatomic, assign) id delegate;
+@property(readonly) UISceneSession *session;
+@property(readonly) long activationState;
 @end
 
 @interface UIWindowScene : UIScene
+@property(readonly) NSArray *windows;
+@property(readonly) UIWindow *keyWindow;
+@property(readonly) UIScreen *screen;
+@property(readonly) long interfaceOrientation;
 @end
 
 @interface UISceneSession : NSObject
+@property(readonly) id persistentIdentifier;
+@property(readonly) id role;
+@property(nonatomic, retain) id configuration;
 @end
 
 @interface UISceneConnectionOptions : NSObject
@@ -1204,6 +1564,9 @@ extern id UIWindowSceneSessionRoleApplication;
 @property(nonatomic) BOOL alwaysBounceVertical;
 @property(nonatomic) BOOL alwaysBounceHorizontal;
 @property(nonatomic) double decelerationRate;
+@property long keyboardDismissMode;
+@property long indicatorStyle;
+@property BOOL scrollsToTop;
 @property(nonatomic, assign) id delegate;
 @property(nonatomic) double zoomScale;
 @property(nonatomic) double minimumZoomScale;
@@ -1275,6 +1638,9 @@ enum {
 - (void)openURL:(id)url options:(id)options
     completionHandler:(void (^)(BOOL success))completion;
 @property(nonatomic, getter=isIdleTimerDisabled) BOOL idleTimerDisabled;
+- (void)registerForRemoteNotifications;
+- (void)unregisterForRemoteNotifications;
+- (BOOL)isRegisteredForRemoteNotifications;
 @property(readonly) NSArray *windows;
 @property(readonly) UIWindow *keyWindow;
 @property(readonly) NSArray *connectedScenes;
@@ -1331,6 +1697,9 @@ extern int UIApplicationMain(int argc, char **argv, id principal,
 @property double strokeEnd;
 @property int lineCap;
 @property int lineJoin;
+@property(nonatomic, retain) NSArray *lineDashPattern;
+@property double lineDashPhase;
+@property double miterLimit;
 @end
 
 @interface CAGradientLayer : CALayer
@@ -1339,6 +1708,15 @@ extern int UIApplicationMain(int argc, char **argv, id principal,
 @property CGPoint startPoint;
 @property CGPoint endPoint;
 @property(nonatomic, retain) id type;
+@end
+
+@interface CATextLayer : CALayer
+@property(nonatomic, retain) id string;
+@property(nonatomic, retain) id font;
+@property double fontSize;
+@property(nonatomic, retain) id foregroundColor;
+@property long alignmentMode;
+@property(getter=isWrapped) BOOL wrapped;
 @end
 
 @interface UIImage : NSObject {
@@ -1359,7 +1737,9 @@ extern int UIApplicationMain(int argc, char **argv, id principal,
 @end
 
 @interface UITabBarController : UIViewController
+@property(nonatomic, retain) id delegate;
 - (void)setViewControllers:(NSArray *)controllers;
+- (void)setViewControllers:(NSArray *)controllers animated:(BOOL)animated;
 - (NSArray *)viewControllers;
 - (void)setSelectedIndex:(int)index;
 - (int)selectedIndex;
@@ -1504,6 +1884,17 @@ enum {
 - (id)dequeueReusableCellWithReuseIdentifier:(id)identifier
                                forIndexPath:(NSIndexPath *)indexPath;
 - (void)reloadData;
+@property(nonatomic, retain) id prefetchDataSource;
+@property(nonatomic, retain) id dragDelegate;
+@property(nonatomic, retain) id dropDelegate;
+@property(nonatomic, retain) UIView *backgroundView;
+@property BOOL allowsSelection;
+@property BOOL allowsMultipleSelection;
+@property BOOL dragInteractionEnabled;
+@property(readonly) NSArray *visibleCells;
+@property(readonly) NSArray *indexPathsForVisibleItems;
+@property(readonly) long numberOfSections;
+- (long)numberOfItemsInSection:(long)section;
 @end
 
 @interface UITableViewCell : UIView
@@ -1527,6 +1918,27 @@ enum {
 - (BOOL)isEditing;
 - (void)deleteRowsAtIndexPaths:(NSArray *)indexPaths
            withRowAnimation:(long)animation;
+@property long separatorStyle;
+@property(nonatomic, retain) UIColor *separatorColor;
+@property UIEdgeInsets separatorInset;
+@property(nonatomic, retain) UIView *tableHeaderView;
+@property(nonatomic, retain) UIView *tableFooterView;
+@property(nonatomic, retain) UIView *backgroundView;
+@property(nonatomic, retain) id prefetchDataSource;
+@property(nonatomic, retain) id dragDelegate;
+@property(nonatomic, retain) id dropDelegate;
+@property BOOL allowsSelection;
+@property BOOL allowsMultipleSelection;
+@property BOOL allowsSelectionDuringEditing;
+@property BOOL allowsMultipleSelectionDuringEditing;
+@property BOOL dragInteractionEnabled;
+@property BOOL cellLayoutMarginsFollowReadableWidth;
+@property BOOL insetsContentViewsToSafeArea;
+@property double estimatedRowHeight;
+@property double estimatedSectionHeaderHeight;
+@property double estimatedSectionFooterHeight;
+@property double sectionHeaderHeight;
+@property double sectionFooterHeight;
 @end
 
 void UIGraphicsBeginImageContextWithOptions(CGSize size, BOOL opaque,
@@ -1616,7 +2028,14 @@ enum {
              action:(SEL)action;
 - (id)initWithBarButtonSystemItem:(long)item target:(id)target
                            action:(SEL)action;
+- (id)initWithImage:(UIImage *)image style:(long)style target:(id)target
+             action:(SEL)action;
+- (id)initWithCustomView:(UIView *)view;
 @property(nonatomic, retain) id title;
+@property(nonatomic, retain) UIImage *image;
+@property(nonatomic, retain) UIColor *tintColor;
+@property(nonatomic, readonly) UIView *customView;
+@property double width;
 @end
 
 @interface UINavigationItem : NSObject
@@ -1624,6 +2043,15 @@ enum {
 @property(nonatomic, retain) id title;
 @property(nonatomic, retain) UIBarButtonItem *leftBarButtonItem;
 @property(nonatomic, retain) UIBarButtonItem *rightBarButtonItem;
+@property(nonatomic, retain) UIBarButtonItem *backBarButtonItem;
+@property(nonatomic, retain) id backButtonTitle;
+@property(nonatomic, retain) NSArray *leftBarButtonItems;
+@property(nonatomic, retain) NSArray *rightBarButtonItems;
+- (void)setLeftBarButtonItems:(NSArray *)items animated:(BOOL)animated;
+- (void)setRightBarButtonItems:(NSArray *)items animated:(BOOL)animated;
+@property(nonatomic, retain) id prompt;
+@property(nonatomic, retain) UISearchController *searchController;
+@property long largeTitleDisplayMode;
 @property BOOL hidesBackButton;
 @end
 
@@ -1634,6 +2062,11 @@ enum {
 - (void)pushNavigationItem:(UINavigationItem *)item animated:(BOOL)animated;
 - (UINavigationItem *)popNavigationItemAnimated:(BOOL)animated;
 @property(nonatomic, retain) UIColor *barTintColor;
+@property long barStyle;
+@property BOOL prefersLargeTitles;
+@property(getter=isTranslucent) BOOL translucent;
+@property(nonatomic, retain) id titleTextAttributes;
+@property(nonatomic, retain) id largeTitleTextAttributes;
 @end
 
 @interface UIToolbar : UIView
@@ -1648,10 +2081,14 @@ enum {
 @class UIGestureRecognizer;
 
 @interface UINavigationController : UIViewController
+@property(nonatomic, retain) id delegate;
 - (id)initWithRootViewController:(UIViewController *)root;
+@property(readonly) UINavigationBar *navigationBar;
+@property(getter=isNavigationBarHidden) BOOL navigationBarHidden;
 - (void)pushViewController:(UIViewController *)controller animated:(BOOL)animated;
 - (UIViewController *)popViewControllerAnimated:(BOOL)animated;
 - (NSArray *)viewControllers;
+- (void)setViewControllers:(NSArray *)controllers animated:(BOOL)animated;
 - (UIGestureRecognizer *)interactivePopGestureRecognizer;
 @end
 
@@ -1668,12 +2105,27 @@ typedef enum {
 - (id)initWithTarget:(id)target action:(SEL)action;
 - (long)state;
 - (CGPoint)locationInView:(UIView *)view;
+@property(getter=isEnabled) BOOL enabled;
+@property(nonatomic, assign) id delegate;
+@property(readonly) unsigned long numberOfTouches;
+@property BOOL delaysTouchesBegan;
+@property BOOL delaysTouchesEnded;
+@property BOOL cancelsTouchesInView;
+@property(nonatomic, retain) NSArray *allowedTouchTypes;
+- (void)requireGestureRecognizerToFail:(UIGestureRecognizer *)other;
+@end
+
+@interface UITapGestureRecognizer : UIGestureRecognizer
+@property int numberOfTapsRequired;
+@property int numberOfTouchesRequired;
 @end
 
 @interface UIPanGestureRecognizer : UIGestureRecognizer
 - (CGPoint)translationInView:(UIView *)view;
 - (CGPoint)velocityInView:(UIView *)view;
 - (void)setTranslation:(CGPoint)translation inView:(UIView *)view;
+@property unsigned long minimumNumberOfTouches;
+@property unsigned long maximumNumberOfTouches;
 @end
 
 typedef enum {
@@ -1703,6 +2155,11 @@ typedef enum {
 @interface UIRotationGestureRecognizer : UIGestureRecognizer
 @property double rotation;
 @property(readonly) double velocity;
+@end
+
+@interface UISwipeGestureRecognizer : UIGestureRecognizer
+@property long direction;
+@property int numberOfTouchesRequired;
 @end
 
 #define CGRectZero CGRectMake(0, 0, 0, 0)
@@ -1874,5 +2331,29 @@ enum {
 @end
 
 extern NSString *const UNNotificationDefaultActionIdentifier;
+
+enum {
+    UIAccessibilityTraitNone = 0,
+    UIAccessibilityTraitButton = 1,
+    UIAccessibilityTraitLink = 2,
+    UIAccessibilityTraitSearchField = 4,
+    UIAccessibilityTraitImage = 8,
+    UIAccessibilityTraitSelected = 16,
+    UIAccessibilityTraitPlaysSound = 32,
+    UIAccessibilityTraitStaticText = 64,
+    UIAccessibilityTraitSummaryElement = 128,
+    UIAccessibilityTraitNotEnabled = 256,
+    UIAccessibilityTraitUpdatesFrequently = 512,
+    UIAccessibilityTraitHeader = 1024,
+    UIAccessibilityTraitAdjustable = 2048
+};
+void UIAccessibilityPostNotification(unsigned int notification, id argument);
+BOOL UIAccessibilityIsVoiceOverRunning(void);
+BOOL UIAccessibilityIsReduceMotionEnabled(void);
+BOOL UIAccessibilityIsReduceTransparencyEnabled(void);
+BOOL UIAccessibilityIsSwitchControlRunning(void);
+BOOL UIAccessibilityIsBoldTextEnabled(void);
+BOOL UIAccessibilityIsInvertColorsEnabled(void);
+BOOL UIAccessibilityIsGrayscaleEnabled(void);
 
 #endif

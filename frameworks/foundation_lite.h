@@ -152,6 +152,7 @@ extern id NSBackgroundColorAttributeName;
 - (id)componentsSeparatedByString:(id)separator;
 - (id)stringByReplacingOccurrencesOfString:(id)target withString:(id)replacement;
 - (id)stringByAppendingPathComponent:(id)component;
+- (id)stringByAppendingPathExtension:(id)extension;
 - (id)lastPathComponent;
 - (id)pathExtension;
 - (id)stringByDeletingLastPathComponent;
@@ -164,6 +165,10 @@ extern id NSBackgroundColorAttributeName;
 - (NSRange)rangeOfString:(id)needle;
 - (id)capitalizedString;
 - (id)stringByRemovingPercentEncoding;
+- (id)stringByAddingPercentEncodingWithAllowedCharacters:
+    (NSCharacterSet *)allowedCharacters;
+- (id)stringByAddingPercentEscapesUsingEncoding:(unsigned long)encoding;
+- (id)stringByReplacingPercentEscapesUsingEncoding:(unsigned long)encoding;
 - (long)integerValue;
 - (int)intValue;
 - (double)doubleValue;
@@ -205,6 +210,12 @@ extern id NSBackgroundColorAttributeName;
 + (id)decimalDigitCharacterSet;
 + (id)letterCharacterSet;
 + (id)characterSetWithCharactersInString:(id)string;
++ (id)URLQueryAllowedCharacterSet;
++ (id)URLPathAllowedCharacterSet;
++ (id)URLHostAllowedCharacterSet;
++ (id)URLFragmentAllowedCharacterSet;
++ (id)URLUserAllowedCharacterSet;
++ (id)URLPasswordAllowedCharacterSet;
 - (BOOL)characterIsMember:(unsigned short)character;
 - (id)mutableCopy;
 @end
@@ -473,6 +484,64 @@ enum {
                     format:(unsigned long *)format error:(id *)error;
 @end
 
+@interface NSValue : NSObject {
+@public
+    unsigned char _storage[64];
+    unsigned long _size;
+    char _type[16];
+}
++ (id)valueWithBytes:(const void *)value objCType:(const char *)type;
++ (id)value:(const void *)value withObjCType:(const char *)type;
++ (id)valueWithCGPoint:(CGPoint)point;
++ (id)valueWithCGSize:(CGSize)size;
++ (id)valueWithCGRect:(CGRect)rect;
++ (id)valueWithCGAffineTransform:(CGAffineTransform)transform;
++ (id)valueWithCATransform3D:(CATransform3D)transform;
++ (id)valueWithUIEdgeInsets:(UIEdgeInsets)insets;
++ (id)valueWithRange:(NSRange)range;
++ (id)valueWithNonretainedObject:(id)object;
++ (id)valueWithPointer:(const void *)pointer;
+- (void)getValue:(void *)value size:(unsigned long)size;
+- (const char *)objCType;
+- (CGPoint)CGPointValue;
+- (CGSize)CGSizeValue;
+- (CGRect)CGRectValue;
+- (CGAffineTransform)CGAffineTransformValue;
+- (CATransform3D)CATransform3DValue;
+- (UIEdgeInsets)UIEdgeInsetsValue;
+- (NSRange)rangeValue;
+- (id)nonretainedObjectValue;
+- (void *)pointerValue;
+- (BOOL)isEqualToValue:(id)other;
+@end
+
+@interface NSIndexSet : NSObject {
+@public
+    unsigned long *_indexes;
+    unsigned long _count;
+    unsigned long _capacity;
+}
++ (id)indexSet;
++ (id)indexSetWithIndex:(unsigned long)index;
++ (id)indexSetWithIndexesInRange:(NSRange)range;
+- (unsigned long)count;
+- (unsigned long)firstIndex;
+- (unsigned long)lastIndex;
+- (BOOL)containsIndex:(unsigned long)index;
+- (unsigned long)indexGreaterThanIndex:(unsigned long)index;
+- (unsigned long)indexLessThanIndex:(unsigned long)index;
+- (unsigned long)indexGreaterThanOrEqualToIndex:(unsigned long)index;
+- (void)enumerateIndexesUsingBlock:(void (^)(unsigned long index, BOOL *stop))block;
+- (void)enumerateRangesUsingBlock:(void (^)(NSRange range, BOOL *stop))block;
+@end
+
+@interface NSMutableIndexSet : NSIndexSet
+- (void)addIndex:(unsigned long)index;
+- (void)addIndexesInRange:(NSRange)range;
+- (void)removeIndex:(unsigned long)index;
+- (void)removeAllIndexes;
+@end
+
 @interface NSData : NSObject {
 @public
     void *_bytes;
@@ -490,6 +559,8 @@ enum {
 - (BOOL)writeToURL:(id)url atomically:(BOOL)atomically;
 - (id)subdataWithRange:(NSRange)range;
 - (BOOL)isEqualToData:(id)other;
+- (id)base64EncodedStringWithOptions:(unsigned long)options;
+- (id)initWithBase64EncodedString:(id)string options:(unsigned long)options;
 @end
 
 @interface NSMutableData : NSData {
@@ -528,21 +599,60 @@ enum {
 - (void)closeFile;
 @end
 
+@interface NSProcessInfo : NSObject
++ (NSProcessInfo *)processInfo;
+- (NSDictionary *)environment;
+- (NSArray *)arguments;
+- (id)processName;
+- (id)globallyUniqueString;
+- (id)operatingSystemVersionString;
+- (unsigned long long)physicalMemory;
+- (unsigned long)processorCount;
+- (unsigned long)activeProcessorCount;
+- (double)systemUptime;
+- (id)hostName;
+- (BOOL)isLowPowerModeEnabled;
+@end
+
+@interface NSUUID : NSObject {
+@public
+    unsigned char _bytes[16];
+}
++ (id)UUID;
+- (id)initWithUUIDString:(id)string;
+- (id)UUIDString;
+@end
+
 @interface NSURL : NSObject {
 @public
     id _string;
     id _path;
+    id _scheme;
+    id _host;
+    id _query;
+    int _port;
     BOOL _fileURL;
 }
 + (id)fileURLWithPath:(id)path;
 + (id)URLWithString:(id)string;
 - (id)path;
+- (id)absolutePath;
+- (id)scheme;
+- (id)host;
+- (id)query;
+- (int)port;
 - (id)absoluteString;
 - (BOOL)isFileURL;
 - (id)lastPathComponent;
 - (id)pathExtension;
 - (id)URLByAppendingPathComponent:(id)component;
+- (id)URLByAppendingPathComponent:(id)component isDirectory:(BOOL)isDirectory;
 - (id)URLByDeletingLastPathComponent;
+- (id)URLByAppendingPathExtension:(id)extension;
+- (id)URLByDeletingPathExtension;
+- (id)URLByStandardizingPath;
+- (id)URLByResolvingSymlinksInPath;
+- (NSArray *)pathComponents;
 @end
 
 #ifdef __BLOCKS__
@@ -551,6 +661,50 @@ typedef void (^NSURLSessionCompletionHandler)(id data, id response,
 #else
 typedef void *NSURLSessionCompletionHandler;
 #endif
+
+@interface NSURLQueryItem : NSObject {
+@public
+    id _name;
+    id _value;
+}
++ (id)queryItemWithName:(id)name value:(id)value;
+- (id)initWithName:(id)name value:(id)value;
+- (id)name;
+- (id)value;
+@end
+
+@interface NSURLComponents : NSObject {
+@public
+    id _scheme;
+    id _host;
+    id _path;
+    id _query;
+    id _fragment;
+    int _port;
+}
++ (id)componentsWithString:(id)string;
++ (id)componentsWithURL:(id)url resolvingAgainstBaseURL:(BOOL)resolve;
+- (id)string;
+- (NSURL *)URL;
+- (id)scheme;
+- (void)setScheme:(id)scheme;
+- (id)host;
+- (void)setHost:(id)host;
+- (id)path;
+- (void)setPath:(id)path;
+- (id)query;
+- (void)setQuery:(id)query;
+- (NSArray *)queryItems;
+- (void)setQueryItems:(NSArray *)items;
+- (id)percentEncodedQuery;
+- (void)setPercentEncodedQuery:(id)query;
+- (id)percentEncodedPath;
+- (void)setPercentEncodedPath:(id)path;
+- (id)fragment;
+- (void)setFragment:(id)fragment;
+- (int)port;
+- (void)setPort:(int)port;
+@end
 
 @interface NSURLRequest : NSObject {
 @public
@@ -775,6 +929,19 @@ extern id NSDefaultRunLoopMode;
 }
 - (void)setDateFormat:(id)format;
 - (id)dateFormat;
+- (id)stringFromDate:(NSDate *)date;
+- (NSDate *)dateFromString:(id)string;
+@end
+
+@interface NSISO8601DateFormatter : NSObject {
+@public
+    unsigned long _formatOptions;
+    id _timeZone;
+}
+- (unsigned long)formatOptions;
+- (void)setFormatOptions:(unsigned long)options;
+- (id)timeZone;
+- (void)setTimeZone:(id)zone;
 - (id)stringFromDate:(NSDate *)date;
 - (NSDate *)dateFromString:(id)string;
 @end

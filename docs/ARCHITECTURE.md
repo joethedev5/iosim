@@ -460,6 +460,65 @@ and the mutable set operations. UIFont carries size, boldness and an optional
 face name, enough for weight, italic, monospaced, named and descriptor-based
 constructors. UIColor converts HSV to RGB and accepts Display P3 components as
 sRGB. `readableContentGuide` reserves 16pt side margins.
+`UIButton` keeps a real `UIImageView` subview for `setImage:forState:` and
+positions it beside the title (or centers it when there is no title);
+`UIButtonConfiguration` carries a title, image, foreground/background colors,
+corner style, content insets and image padding, and assigning one applies
+those values to the button, including a capsule corner radius. Content, title
+and image edge insets feed the title-label frame. `UITextField.borderStyle`
+paints a rounded dark field background and insets its text; the border style,
+clear-on-begin-editing, left/right views and view modes are exposed.
+`UIFont.preferredFontForTextStyle:` returns the 17pt body face.
+`UIBarButtonItem` accepts image and custom-view initializers and draws an
+image-only item as a 24pt image view. `UINavigationItem`
+stores back-button titles, bar-button arrays and large-title display mode, and
+`UINavigationBar` exposes bar style, large titles, translucency and title
+attribute dictionaries. `UIPopoverPresentationController` and
+`UISheetPresentationController` are real objects reachable from a controller:
+popovers keep source view/rect, arrow directions and layout margins, and
+sheets keep detents (`mediumDetent`/`largeDetent`/custom), grabber visibility
+and corner radius, so configuration code runs even where the presentation is
+not shown as a popover.
+`CATextLayer` draws its string with the shared font renderer, honouring
+`fontSize`, an optional `UIFont`, `foregroundColor` and left/center/right
+alignment. `UIView.transitionFromView:toView:` swaps the two views in the
+common superview, and `transitionWithView:` runs its animation block and
+completion immediately. `NSValue` stores up to 64 bytes plus an Objective-C
+type string and unpacks CGPoint/CGSize/CGRect/UIEdgeInsets/NSRange/pointer
+values; `NSIndexSet`/`NSMutableIndexSet` keep a sorted index list with block
+enumeration. `UIWindowScene.windows` tracks windows created with
+`initWithWindowScene:`, and `UISceneSession` supplies a persistent identifier
+and application role.
+`NSProcessInfo` exposes a singleton with an empty environment and argument
+list, four processors, 4 GB of physical memory and a 36-character
+`NSUUID.UUIDString`; `NSUUID` stores 16 bytes and prints canonical uppercase
+hyphenated text. `NSURLQueryItem` and `NSURLComponents.queryItems` parse and
+rebuild `&`-separated `name=value` pairs; `NSURL` also appends/deletes path
+extensions and returns path components. `NSValue` additionally packs affine
+and 3D transforms. `UIDevice.currentDevice` reports an iPhone on iOS 18.0 in
+portrait with unknown battery state, and posts the orientation notification
+name. `UISearchController` owns a real `UISearchBar`, keeps results-updater
+and delegate objects, and calls the updater when activated. UIView
+accessibility label/identifier/hint/value/traits/elements storage is present,
+labels default to their text with the static-text trait, buttons default to
+the button trait, and the `UIAccessibility*` query functions return the
+non-accessibility-enabled answers. Gesture recognizers store delegate,
+enabled, delays/cancels flags, touch counts and tap/pan/swipe counts.
+`NSData` encodes and decodes base64 with padding, `NSIndexSet` answers
+greater/less-than queries and enumerates consecutive runs as ranges, and
+`NSURL` accepts a directory flag when appending a path component.
+`UIAccessibilityElement` is a standalone element with container, label,
+identifier, hint, value, traits and frame. `UITableView` stores separator,
+header/footer, background, selection, drag/drop, prefetch and estimated-height
+configuration; `UICollectionView` stores prefetch, drag/drop, background and
+selection state and answers `visibleCells`, `numberOfSections` and
+`numberOfItemsInSection:`. `UIScrollView` stores keyboard-dismiss mode,
+indicator style and `scrollsToTop`.
+`NSURL` parses scheme, host, port, path and query from its string;
+`NSURLComponents` reads those parts from a URL and rebuilds a string from its
+scheme, host, port, path, query and fragment. Empty collection literals
+(`@[]`, `@{}`) resolve through the `__NSArray0__`/`__NSDictionary0__` globals
+that Foundation exports.
 `UIView.maskView` hands the mask view's layer to the target layer's mask slot
 and mirrors the mask view's background onto that layer, since masks are
 rendered from layers rather than views. Hit testing stops at a view with

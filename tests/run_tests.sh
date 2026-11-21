@@ -6006,7 +6006,34 @@ if wait_log "[fnd] trim 'Hello World'" &&
    wait_log "[fnd] color 1 0 0 1.0 0.1 0.4 1.0 0.25" &&
    wait_log "[fnd] desc 17 17" &&
    wait_log "[fnd] readable 16 0 370 874" &&
-   wait_log "[fnd] props 1 0 1 3"; then
+   wait_log "[fnd] props 1 0 1 3" &&
+   wait_log "[fnd] url https example.com 8080 /a/b x=1" &&
+   wait_log "[fnd] comp https://example.com:8080/a?q=2#top example.com" &&
+   wait_log "[fnd] pfont 17" &&
+   wait_log "[fnd] present 7 1 2 2 0" &&
+   wait_log "[fnd] value 3 4 2 5 1" &&
+   wait_log "[fnd] idx 4 2 11 1 28" &&
+   wait_log "[fnd] scene 1 0 iosim-scene-session" &&
+   wait_log "[fnd] qitems 2 a two" &&
+   wait_log "[fnd] qbuild k=v" &&
+   wait_log "[fnd] device iPhone 18.0 0 1" &&
+   wait_log "[fnd] process iosim 4 4" &&
+   wait_log "[fnd] uuid 36 1" &&
+   wait_log "[fnd] affine 7 9" &&
+   wait_log "[fnd] vcprops 15 1 0 320 480" &&
+   wait_log "[fnd] searchupdate 1" &&
+   wait_log "[fnd] search 1 1 0" &&
+   wait_log "[fnd] vendor 1" &&
+   wait_log "[fnd] idxmore 10 5 10" &&
+   wait_log "[fnd] b64 aGVsbG8= 5" &&
+   wait_log "[fnd] urlappend /tmp/a/b" &&
+   wait_log "[fnd] axel E 1 3 4" &&
+   wait_log "[fnd] pct a%20b&c" &&
+   wait_log "[fnd] hue 0 1 1 1" &&
+   wait_log "[fnd] alert 1 1 0 1" &&
+   wait_log "[fnd] viewwin 1 0" &&
+   wait_log "[fnd] appext a.txt /tmp/a.txt" &&
+   wait_log "[fnd] scene2 1 1"; then
     echo "ok   Foundation helpers, colors, fonts and readable guides"
 else
     echo "FAIL Foundation helpers"; fails=$((fails+1))
@@ -6095,10 +6122,56 @@ sleep 0.7
 "$ROOT/tools/iosimctl" ui "$UDID" tap 200 270 >/dev/null
 if wait_log "[attr] label Hello 5 22" &&
    wait_log "[attr] button Wo! 3 1" &&
-   wait_log "[attr] textview Hello 5"; then
+   wait_log "[attr] textview Hello 5" &&
+   wait_log "[attr] image 1 1" &&
+   wait_log "[attr] config Cfg 1" &&
+   wait_log "[attr] field 3" &&
+   wait_log "[attr] textlayer M 30" &&
+   wait_log "[attr] transition 1 1" &&
+   wait_log "[attr] bar 1 1" &&
+   wait_log "[attr] vc 1 1 30" &&
+   wait_log "[attr] access 1 Acc 64" &&
+   wait_log "[attr] gestures 1 3 2 1 1" &&
+   wait_log "[attr] frame 0 0 80 20" &&
+   wait_log "[attr] fieldvalue Hello" &&
+   wait_log "[attr] table 0 1 60" &&
+   wait_log "[attr] collection 1 1 0" &&
+   wait_log "[attr] scroll 1 2 0"; then
     echo "ok   attributed strings drive label and button text"
 else
     echo "FAIL attributed strings"; fails=$((fails+1))
+fi
+sleep 0.4
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/attr.png" >/dev/null
+if out="$(python3 - "$ROOT/tools" "$T" <<'ATTR'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+root = sys.argv[2]
+w, h, bpp, rows = pngpixel.load(root + "/attr.png")
+c = pngpixel.px(rows, bpp, 210, 1770)
+if ((c >> 16) & 255, (c >> 8) & 255, c & 255) != (255, 0, 255):
+    raise SystemExit("the button image did not draw")
+c = pngpixel.px(rows, bpp, 435, 1746)
+if ((c >> 16) & 255, (c >> 8) & 255, c & 255) != (0, 255, 0):
+    raise SystemExit("the button configuration background did not draw")
+c = pngpixel.px(rows, bpp, 135, 2166)
+if ((c >> 16) & 255, (c >> 8) & 255, c & 255) != (28, 28, 30):
+    raise SystemExit("the text field border background did not draw")
+white = 0
+for yy in range(760, 800):
+    for xx in range(40, 160):
+        c = pngpixel.px(rows, bpp, xx * 3, yy * 3)
+        if ((c >> 16) & 255, (c >> 8) & 255, c & 255) == (255, 255, 255):
+            white += 1
+if white < 20:
+    raise SystemExit("the text layer did not draw its string")
+print("ok   a button image view draws its image")
+ATTR
+)"; then
+    echo "$out"
+else
+    echo "FAIL button image pixels"; echo "$out"; fails=$((fails+1))
 fi
 "$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
 

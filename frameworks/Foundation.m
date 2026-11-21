@@ -5,6 +5,17 @@
 #include "foundation_lite.h"
 #include <stdarg.h>
 
+/* Empty collection literals (`@[]`, `@{}`) reference these globals instead
+ * of sending a factory message. Foundation exports them on Apple platforms. */
+id __NSArray0__;
+id __NSDictionary0__;
+
+__attribute__((constructor)) static void iosim_foundation_literal_globals(void)
+{
+    __NSArray0__ = [NSArray array];
+    __NSDictionary0__ = [NSDictionary dictionary];
+}
+
 extern void *iosim_objc_alloc(void *cls);
 extern void *iosim_objc_class_of(void *obj);
 extern void *iosim_objc_superclass(void *cls);
@@ -51,6 +62,7 @@ extern int iosim_regex_search(const char *pattern, const char *text,
 extern void iosim_regex_free(void *pointer);
 
 extern void *malloc(unsigned long size);
+extern void free(void *pointer);
 extern void *calloc(unsigned long n, unsigned long size);
 extern void *realloc(void *ptr, unsigned long size);
 extern void  free(void *ptr);
@@ -83,6 +95,8 @@ extern int   strncmp(const char *a, const char *b, unsigned long n);
 extern char *strchr(const char *s, int c);
 extern char *strrchr(const char *s, int c);
 extern void *memcpy(void *dst, const void *src, unsigned long n);
+extern int memcmp(const void *a, const void *b, unsigned long n);
+extern int strcmp(const char *a, const char *b);
 extern void *memchr(const void *s, int c, unsigned long n);
 extern void *memset(void *dst, int c, unsigned long n);
 extern int   memcmp(const void *a, const void *b, unsigned long n);
@@ -1449,6 +1463,27 @@ static char *format_va(const char *fmt, va_list ap)
     free(buf);
     return path;
 }
+- (id)stringByAppendingPathExtension:(id)extension
+{
+    const char *base = iosim_string_cstr(self);
+    const char *ext = iosim_string_cstr(extension);
+    if (!ext || !ext[0])
+        return self;
+    unsigned long bn = strlen(base), en = strlen(ext);
+    char *buf = malloc(bn + en + 2);
+    if (!buf)
+        return self;
+    memcpy(buf, base, bn);
+    unsigned long n = bn;
+    if (n == 0 || buf[n - 1] != '.')
+        buf[n++] = '.';
+    memcpy(buf + n, ext, en);
+    n += en;
+    buf[n] = 0;
+    NSString *path = [[NSString alloc] initWithUTF8String:buf];
+    free(buf);
+    return path;
+}
 - (id)lastPathComponent
 {
     const char *s = iosim_string_cstr(self);
@@ -1656,6 +1691,54 @@ static int hex_digit(char c)
     free(buf);
     return result;
 }
+- (id)stringByAddingPercentEncodingWithAllowedCharacters:
+    (NSCharacterSet *)allowedCharacters
+{
+    const unsigned char *s = (const unsigned char *)iosim_string_cstr(self);
+    unsigned long len = strlen((const char *)s);
+    char *buf = malloc(len * 3 + 1);
+    if (!buf)
+        return self;
+    static const char digits[] = "0123456789ABCDEF";
+    unsigned long out = 0;
+    for (unsigned long i = 0; i < len; i++)
+    {
+        unsigned char c = s[i];
+        if (c >= 0x80 ||
+            (allowedCharacters && [allowedCharacters characterIsMember:c]))
+        {
+            if (c >= 0x80)
+            {
+                buf[out++] = '%';
+                buf[out++] = digits[c >> 4];
+                buf[out++] = digits[c & 15];
+            }
+            else
+                buf[out++] = (char)c;
+        }
+        else
+        {
+            buf[out++] = '%';
+            buf[out++] = digits[c >> 4];
+            buf[out++] = digits[c & 15];
+        }
+    }
+    buf[out] = 0;
+    id result = [[[NSString alloc] initWithUTF8String:buf] autorelease];
+    free(buf);
+    return result;
+}
+- (id)stringByAddingPercentEscapesUsingEncoding:(unsigned long)encoding
+{
+    (void)encoding;
+    return [self stringByAddingPercentEncodingWithAllowedCharacters:
+        [NSCharacterSet URLQueryAllowedCharacterSet]];
+}
+- (id)stringByReplacingPercentEscapesUsingEncoding:(unsigned long)encoding
+{
+    (void)encoding;
+    return [self stringByRemovingPercentEncoding];
+}
 - (long)integerValue { return strtol(iosim_string_cstr(self), 0, 10); }
 - (int)intValue { return (int)[self integerValue]; }
 - (double)doubleValue { return strtod(iosim_string_cstr(self), 0); }
@@ -1705,6 +1788,42 @@ static id character_set_from_cstr(const char *chars)
 + (id)characterSetWithCharactersInString:(id)string
 {
     return character_set_from_cstr(iosim_string_cstr(string));
+}
++ (id)URLQueryAllowedCharacterSet
+{
+    return character_set_from_cstr(
+        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        "0123456789-._~!$&'()*+,;=:@/?");
+}
++ (id)URLPathAllowedCharacterSet
+{
+    return character_set_from_cstr(
+        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        "0123456789-._~!$&'()*+,;=:@/");
+}
++ (id)URLHostAllowedCharacterSet
+{
+    return character_set_from_cstr(
+        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        "0123456789-._~!$&'()*+,;=:");
+}
++ (id)URLFragmentAllowedCharacterSet
+{
+    return character_set_from_cstr(
+        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        "0123456789-._~!$&'()*+,;=:@/?");
+}
++ (id)URLUserAllowedCharacterSet
+{
+    return character_set_from_cstr(
+        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        "0123456789-._~!$&'()*+,;=");
+}
++ (id)URLPasswordAllowedCharacterSet
+{
+    return character_set_from_cstr(
+        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        "0123456789-._~!$&'()*+,;=:");
 }
 - (BOOL)characterIsMember:(unsigned short)character
 {
@@ -3443,6 +3562,294 @@ static void defaults_path(char *out, unsigned long cap)
 }
 @end
 
+@implementation NSValue
++ (id)valueWithBytes:(const void *)value objCType:(const char *)type
+{
+    NSValue *result = [[self alloc] init];
+    unsigned long n = 0;
+    if (type)
+    {
+        const char *p = type;
+        while (*p && *p != '}' && n < sizeof(result->_storage))
+        {
+            if (*p == 'd' || *p == 'f' || *p == 'i' || *p == 'I' ||
+                *p == 'q' || *p == 'Q' || *p == 'B' || *p == 'c' ||
+                *p == 's' || *p == 'S' || *p == 'l' || *p == 'L')
+                n += (*p == 'd' || *p == 'q' || *p == 'Q') ? 8 : 4;
+            p++;
+        }
+    }
+    if (n == 0)
+        n = 8;
+    if (n > sizeof(result->_storage))
+        n = sizeof(result->_storage);
+    memcpy(result->_storage, value, n);
+    result->_size = n;
+    if (type)
+    {
+        unsigned long i = 0;
+        while (type[i] && i < sizeof(result->_type) - 1)
+        {
+            result->_type[i] = type[i];
+            i++;
+        }
+        result->_type[i] = 0;
+    }
+    return [result autorelease];
+}
++ (id)value:(const void *)value withObjCType:(const char *)type
+{
+    return [self valueWithBytes:value objCType:type];
+}
++ (id)valueWithCGPoint:(CGPoint)point
+{
+    return [self valueWithBytes:&point objCType:"{CGPoint=dd}"];
+}
++ (id)valueWithCGSize:(CGSize)size
+{
+    return [self valueWithBytes:&size objCType:"{CGSize=dd}"];
+}
++ (id)valueWithCGRect:(CGRect)rect
+{
+    return [self valueWithBytes:&rect objCType:"{CGRect={CGPoint=dd}{CGSize=dd}}"];
+}
++ (id)valueWithCGAffineTransform:(CGAffineTransform)transform
+{
+    return [self valueWithBytes:&transform
+                       objCType:"{CGAffineTransform=dddddd}"];
+}
++ (id)valueWithCATransform3D:(CATransform3D)transform
+{
+    return [self valueWithBytes:&transform
+                       objCType:"{CATransform3D=dddddddddddddddd}"];
+}
++ (id)valueWithUIEdgeInsets:(UIEdgeInsets)insets
+{
+    return [self valueWithBytes:&insets
+                       objCType:"{UIEdgeInsets=dddd}"];
+}
++ (id)valueWithRange:(NSRange)range
+{
+    return [self valueWithBytes:&range objCType:"{_NSRange=QQ}"];
+}
++ (id)valueWithNonretainedObject:(id)object
+{
+    return [self valueWithBytes:&object objCType:"@"];
+}
++ (id)valueWithPointer:(const void *)pointer
+{
+    return [self valueWithBytes:&pointer objCType:"^v"];
+}
+- (void)getValue:(void *)value size:(unsigned long)size
+{
+    if (!value)
+        return;
+    unsigned long n = size < _size ? size : _size;
+    memcpy(value, _storage, n);
+}
+- (const char *)objCType { return _type; }
+- (CGPoint)CGPointValue
+{
+    CGPoint point = { 0, 0 };
+    if (_size >= sizeof(point))
+        memcpy(&point, _storage, sizeof(point));
+    return point;
+}
+- (CGSize)CGSizeValue
+{
+    CGSize size = { 0, 0 };
+    if (_size >= sizeof(size))
+        memcpy(&size, _storage, sizeof(size));
+    return size;
+}
+- (CGRect)CGRectValue
+{
+    CGRect rect = { { 0, 0 }, { 0, 0 } };
+    if (_size >= sizeof(rect))
+        memcpy(&rect, _storage, sizeof(rect));
+    return rect;
+}
+- (CGAffineTransform)CGAffineTransformValue
+{
+    CGAffineTransform transform = CGAffineTransformMake(1, 0, 0, 1, 0, 0);
+    if (_size >= sizeof(transform))
+        memcpy(&transform, _storage, sizeof(transform));
+    return transform;
+}
+- (CATransform3D)CATransform3DValue
+{
+    CATransform3D transform = CATransform3DIdentityValue();
+    if (_size >= sizeof(transform))
+        memcpy(&transform, _storage, sizeof(transform));
+    return transform;
+}
+- (UIEdgeInsets)UIEdgeInsetsValue
+{
+    UIEdgeInsets insets = { 0, 0, 0, 0 };
+    if (_size >= sizeof(insets))
+        memcpy(&insets, _storage, sizeof(insets));
+    return insets;
+}
+- (NSRange)rangeValue
+{
+    NSRange range = { 0, 0 };
+    if (_size >= sizeof(range))
+        memcpy(&range, _storage, sizeof(range));
+    return range;
+}
+- (id)nonretainedObjectValue
+{
+    id object = nil;
+    if (_size >= sizeof(object))
+        memcpy(&object, _storage, sizeof(object));
+    return object;
+}
+- (void *)pointerValue
+{
+    void *pointer = 0;
+    if (_size >= sizeof(pointer))
+        memcpy(&pointer, _storage, sizeof(pointer));
+    return pointer;
+}
+- (BOOL)isEqualToValue:(id)other
+{
+    if (!other || ![other isKindOfClass:[NSValue class]])
+        return NO;
+    NSValue *value = (NSValue *)other;
+    return _size == value->_size &&
+           strcmp(_type, value->_type) == 0 &&
+           memcmp(_storage, value->_storage, _size) == 0;
+}
+@end
+
+@implementation NSIndexSet
++ (id)indexSet { return [[[self alloc] init] autorelease]; }
++ (id)indexSetWithIndex:(unsigned long)index
+{
+    NSMutableIndexSet *set = [NSMutableIndexSet indexSet];
+    [set addIndex:index];
+    return set;
+}
++ (id)indexSetWithIndexesInRange:(NSRange)range
+{
+    NSMutableIndexSet *set = [NSMutableIndexSet indexSet];
+    [set addIndexesInRange:range];
+    return set;
+}
+- (unsigned long)count { return _count; }
+- (unsigned long)firstIndex { return _count ? _indexes[0] : NSNotFound; }
+- (unsigned long)lastIndex
+{
+    return _count ? _indexes[_count - 1] : NSNotFound;
+}
+- (BOOL)containsIndex:(unsigned long)index
+{
+    for (unsigned long i = 0; i < _count; i++)
+        if (_indexes[i] == index)
+            return YES;
+    return NO;
+}
+- (unsigned long)indexGreaterThanIndex:(unsigned long)index
+{
+    for (unsigned long i = 0; i < _count; i++)
+        if (_indexes[i] > index)
+            return _indexes[i];
+    return NSNotFound;
+}
+- (unsigned long)indexLessThanIndex:(unsigned long)index
+{
+    for (unsigned long i = _count; i > 0; i--)
+        if (_indexes[i - 1] < index)
+            return _indexes[i - 1];
+    return NSNotFound;
+}
+- (unsigned long)indexGreaterThanOrEqualToIndex:(unsigned long)index
+{
+    for (unsigned long i = 0; i < _count; i++)
+        if (_indexes[i] >= index)
+            return _indexes[i];
+    return NSNotFound;
+}
+- (void)enumerateIndexesUsingBlock:(void (^)(unsigned long, BOOL *))block
+{
+    if (!block)
+        return;
+    BOOL stop = NO;
+    for (unsigned long i = 0; i < _count && !stop; i++)
+        block(_indexes[i], &stop);
+}
+- (void)enumerateRangesUsingBlock:(void (^)(NSRange, BOOL *))block
+{
+    if (!block)
+        return;
+    BOOL stop = NO;
+    unsigned long i = 0;
+    while (i < _count && !stop)
+    {
+        unsigned long start = _indexes[i];
+        unsigned long end = start;
+        while (i + 1 < _count && _indexes[i + 1] == end + 1)
+        {
+            end = _indexes[++i];
+        }
+        block(NSMakeRange(start, end - start + 1), &stop);
+        i++;
+    }
+}
+@end
+
+@implementation NSMutableIndexSet
+- (void)addIndex:(unsigned long)index
+{
+    if ([self containsIndex:index])
+        return;
+    if (_count == _capacity)
+    {
+        unsigned long capacity = _capacity ? _capacity * 2 : 8;
+        unsigned long *indexes = malloc(capacity * sizeof(unsigned long));
+        if (!indexes)
+            return;
+        if (_indexes)
+        {
+            memcpy(indexes, _indexes, _count * sizeof(unsigned long));
+            free(_indexes);
+        }
+        _indexes = indexes;
+        _capacity = capacity;
+    }
+    unsigned long i = _count;
+    while (i > 0 && _indexes[i - 1] > index)
+    {
+        _indexes[i] = _indexes[i - 1];
+        i--;
+    }
+    _indexes[i] = index;
+    _count++;
+}
+- (void)addIndexesInRange:(NSRange)range
+{
+    for (unsigned long i = 0; i < range.length; i++)
+        [self addIndex:range.location + i];
+}
+- (void)removeIndex:(unsigned long)index
+{
+    for (unsigned long i = 0; i < _count; i++)
+    {
+        if (_indexes[i] == index)
+        {
+            for (unsigned long j = i; j + 1 < _count; j++)
+                _indexes[j] = _indexes[j + 1];
+            _count--;
+            return;
+        }
+    }
+}
+- (void)removeAllIndexes { _count = 0; }
+@end
+
+static const char iosim_base64_chars[] =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
 @implementation NSData
 + (id)data { return [[[self alloc] init] autorelease]; }
 + (id)dataWithBytes:(const void *)bytes length:(unsigned long)length
@@ -3532,6 +3939,85 @@ static void defaults_path(char *out, unsigned long cap)
     NSData *data = (NSData *)other;
     return data->_length == _length &&
            (_length == 0 || memcmp(data->_bytes, _bytes, _length) == 0);
+}
+- (id)base64EncodedStringWithOptions:(unsigned long)options
+{
+    (void)options;
+    if (_length == 0)
+        return @"";
+    unsigned long outLength = ((_length + 2) / 3) * 4;
+    char *out = malloc(outLength + 1);
+    if (!out)
+        return @"";
+    const unsigned char *bytes = (const unsigned char *)_bytes;
+    unsigned long in = 0;
+    unsigned long pos = 0;
+    while (in + 3 <= _length)
+    {
+        unsigned long value = (bytes[in] << 16) | (bytes[in + 1] << 8) |
+                              bytes[in + 2];
+        out[pos++] = iosim_base64_chars[(value >> 18) & 63];
+        out[pos++] = iosim_base64_chars[(value >> 12) & 63];
+        out[pos++] = iosim_base64_chars[(value >> 6) & 63];
+        out[pos++] = iosim_base64_chars[value & 63];
+        in += 3;
+    }
+    if (in < _length)
+    {
+        unsigned long value = bytes[in] << 16;
+        if (in + 1 < _length)
+            value |= bytes[in + 1] << 8;
+        out[pos++] = iosim_base64_chars[(value >> 18) & 63];
+        out[pos++] = iosim_base64_chars[(value >> 12) & 63];
+        out[pos++] = in + 1 < _length ?
+            iosim_base64_chars[(value >> 6) & 63] : '=';
+        out[pos++] = '=';
+    }
+    out[pos] = 0;
+    id result = [NSString stringWithUTF8String:out];
+    free(out);
+    return result;
+}
+- (id)initWithBase64EncodedString:(id)string options:(unsigned long)options
+{
+    (void)options;
+    self = [self init];
+    if (!self)
+        return nil;
+    const char *text = iosim_string_cstr(string);
+    unsigned long length = 0;
+    unsigned char *out = malloc((text ? strlen(text) : 0) + 1);
+    if (!out)
+        return self;
+    unsigned long accumulator = 0;
+    int bits = 0;
+    for (const char *p = text; p && *p; p++)
+    {
+        int value = -1;
+        if (*p >= 'A' && *p <= 'Z')
+            value = *p - 'A';
+        else if (*p >= 'a' && *p <= 'z')
+            value = *p - 'a' + 26;
+        else if (*p >= '0' && *p <= '9')
+            value = *p - '0' + 52;
+        else if (*p == '+')
+            value = 62;
+        else if (*p == '/')
+            value = 63;
+        else
+            continue;
+        accumulator = (accumulator << 6) | (unsigned long)value;
+        bits += 6;
+        if (bits >= 8)
+        {
+            bits -= 8;
+            out[length++] = (unsigned char)(accumulator >> bits);
+        }
+    }
+    free(_bytes);
+    _bytes = out;
+    _length = length;
+    return self;
 }
 - (id)description
 {
@@ -3874,11 +4360,25 @@ static void defaults_path(char *out, unsigned long cap)
 }
 @end
 
+static id url_string_between(const char *start, const char *end)
+{
+    if (!start || !end || end <= start)
+        return nil;
+    unsigned long n = (unsigned long)(end - start);
+    if (n >= 500)
+        n = 499;
+    char buf[512];
+    memcpy(buf, start, n);
+    buf[n] = 0;
+    return [NSString stringWithUTF8String:buf];
+}
+
 @implementation NSURL
 + (id)fileURLWithPath:(id)path
 {
     NSURL *url = [[self alloc] init];
     url->_path = path;
+    url->_scheme = @"file";
     url->_fileURL = YES;
     const char *c = iosim_string_cstr(path);
     char buf[1024];
@@ -3892,11 +4392,64 @@ static void defaults_path(char *out, unsigned long cap)
     url->_string = string;
     const char *c = iosim_string_cstr(string);
     url->_fileURL = strncmp(c, "file://", 7) == 0;
-    url->_path = url->_fileURL
-        ? [NSString stringWithUTF8String:c + 7] : nil;
+    if (url->_fileURL)
+    {
+        url->_path = [NSString stringWithUTF8String:c + 7];
+        url->_scheme = @"file";
+        return url;
+    }
+    const char *colon = strchr(c, ':');
+    if (colon)
+    {
+        url->_scheme = url_string_between(c, colon);
+        if (colon[1] == '/' && colon[2] == '/')
+        {
+            const char *auth = colon + 3;
+            const char *end = auth;
+            while (*end && *end != '/' && *end != '?' && *end != '#')
+                end++;
+            const char *at = auth;
+            while (at < end && *at != '@')
+                at++;
+            const char *hp = at < end ? at + 1 : auth;
+            const char *hcolon = hp;
+            while (hcolon < end && *hcolon != ':')
+                hcolon++;
+            url->_host = url_string_between(hp, hcolon);
+            if (hcolon < end)
+                url->_port = (int)strtol(hcolon + 1, 0, 10);
+            if (end < c + strlen(c))
+            {
+                const char *pathEnd = end;
+                while (*pathEnd && *pathEnd != '?' && *pathEnd != '#')
+                    pathEnd++;
+                url->_path = url_string_between(end, pathEnd);
+                if (*pathEnd == '?')
+                {
+                    const char *qend = pathEnd + 1;
+                    while (*qend && *qend != '#')
+                        qend++;
+                    url->_query = url_string_between(pathEnd + 1, qend);
+                }
+            }
+        }
+        else
+        {
+            const char *q = strchr(colon + 1, '?');
+            if (q)
+                url->_query = [NSString stringWithUTF8String:q + 1];
+            url->_path = url_string_between(colon + 1,
+                                            q ? q : c + strlen(c));
+        }
+    }
     return url;
 }
 - (id)path { return _path; }
+- (id)absolutePath { return _path; }
+- (id)scheme { return _scheme; }
+- (id)host { return _host; }
+- (id)query { return _query; }
+- (int)port { return _port; }
 - (id)absoluteString { return _string; }
 - (BOOL)isFileURL { return _fileURL; }
 - (id)lastPathComponent { return [_path lastPathComponent]; }
@@ -3906,11 +4459,268 @@ static void defaults_path(char *out, unsigned long cap)
     return [NSURL fileURLWithPath:
         [_path stringByAppendingPathComponent:component]];
 }
+- (id)URLByAppendingPathComponent:(id)component isDirectory:(BOOL)isDirectory
+{
+    (void)isDirectory;
+    return [self URLByAppendingPathComponent:component];
+}
 - (id)URLByDeletingLastPathComponent
 {
     return [NSURL fileURLWithPath:[_path stringByDeletingLastPathComponent]];
 }
+- (id)URLByAppendingPathExtension:(id)extension
+{
+    char buf[1024];
+    snprintf(buf, sizeof(buf), "%s.%s", iosim_string_cstr(_path),
+             iosim_string_cstr(extension));
+    return [NSURL fileURLWithPath:[NSString stringWithUTF8String:buf]];
+}
+- (id)URLByDeletingPathExtension
+{
+    return [NSURL fileURLWithPath:[_path stringByDeletingPathExtension]];
+}
+- (id)URLByStandardizingPath { return self; }
+- (id)URLByResolvingSymlinksInPath { return self; }
+- (NSArray *)pathComponents
+{
+    if (!_path)
+        return @[];
+    return [_path componentsSeparatedByString:@"/"];
+}
 - (id)description { return _string; }
+@end
+
+@implementation NSProcessInfo
++ (NSProcessInfo *)processInfo
+{
+    static NSProcessInfo *info;
+    if (!info)
+        info = [[NSProcessInfo alloc] init];
+    return info;
+}
+- (NSDictionary *)environment { return @{}; }
+- (NSArray *)arguments { return @[]; }
+- (id)processName { return @"iosim"; }
+- (id)globallyUniqueString
+{
+    return [[NSUUID UUID] UUIDString];
+}
+- (id)operatingSystemVersionString { return @"iOS 18.0"; }
+- (unsigned long long)physicalMemory { return 4ULL * 1024 * 1024 * 1024; }
+- (unsigned long)processorCount { return 4; }
+- (unsigned long)activeProcessorCount { return 4; }
+- (double)systemUptime { return iosim_now(); }
+- (id)hostName { return @"localhost"; }
+- (BOOL)isLowPowerModeEnabled { return NO; }
+@end
+
+@implementation NSUUID
++ (id)UUID
+{
+    return [[[self alloc] init] autorelease];
+}
+- (id)init
+{
+    self = [super init];
+    if (self)
+    {
+        static unsigned long counter;
+        unsigned long seed = (unsigned long)self ^ (counter++ * 2654435761u);
+        for (int i = 0; i < 16; i++)
+        {
+            seed = seed * 6364136223846793005ULL + 1442695040888963407ULL;
+            _bytes[i] = (unsigned char)(seed >> 56);
+        }
+        _bytes[6] = (unsigned char)((_bytes[6] & 0x0f) | 0x40);
+        _bytes[8] = (unsigned char)((_bytes[8] & 0x3f) | 0x80);
+    }
+    return self;
+}
+- (id)initWithUUIDString:(id)string
+{
+    self = [self init];
+    if (!self)
+        return nil;
+    const char *text = iosim_string_cstr(string);
+    int nibble = 0;
+    for (const char *p = text; *p && nibble < 32; p++)
+    {
+        int value = -1;
+        if (*p >= '0' && *p <= '9')
+            value = *p - '0';
+        else if (*p >= 'a' && *p <= 'f')
+            value = *p - 'a' + 10;
+        else if (*p >= 'A' && *p <= 'F')
+            value = *p - 'A' + 10;
+        if (value < 0)
+            continue;
+        if (nibble % 2 == 0)
+            _bytes[nibble / 2] = (unsigned char)(value << 4);
+        else
+            _bytes[nibble / 2] |= (unsigned char)value;
+        nibble++;
+    }
+    return self;
+}
+- (BOOL)isEqual:(id)other
+{
+    if (!other || ![other isKindOfClass:[NSUUID class]])
+        return NO;
+    return memcmp(_bytes, ((NSUUID *)other)->_bytes, 16) == 0;
+}
+- (unsigned long)hash
+{
+    unsigned long value = 0;
+    for (int i = 0; i < 16; i++)
+        value = value * 31 + _bytes[i];
+    return value;
+}
+- (id)UUIDString
+{
+    static const char digits[] = "0123456789ABCDEF";
+    char text[37];
+    int out = 0;
+    for (int i = 0; i < 16; i++)
+    {
+        if (i == 4 || i == 6 || i == 8 || i == 10)
+            text[out++] = '-';
+        text[out++] = digits[_bytes[i] >> 4];
+        text[out++] = digits[_bytes[i] & 15];
+    }
+    text[out] = 0;
+    return [NSString stringWithUTF8String:text];
+}
+@end
+
+@implementation NSURLQueryItem
++ (id)queryItemWithName:(id)name value:(id)value
+{
+    return [[[self alloc] initWithName:name value:value] autorelease];
+}
+- (id)initWithName:(id)name value:(id)value
+{
+    self = [super init];
+    if (self)
+    {
+        _name = name;
+        _value = value;
+    }
+    return self;
+}
+- (id)name { return _name; }
+- (id)value { return _value; }
+@end
+
+@implementation NSURLComponents
++ (id)componentsWithString:(id)string
+{
+    NSURL *url = [NSURL URLWithString:string];
+    if (!url)
+        return nil;
+    return [self componentsWithURL:url resolvingAgainstBaseURL:NO];
+}
++ (id)componentsWithURL:(id)url resolvingAgainstBaseURL:(BOOL)resolve
+{
+    (void)resolve;
+    NSURLComponents *components = [[self alloc] init];
+    components->_scheme = [url scheme];
+    components->_host = [url host];
+    components->_path = [url path];
+    components->_query = [url query];
+    components->_port = [url port];
+    return components;
+}
+- (id)string
+{
+    const char *scheme = iosim_string_cstr(_scheme);
+    const char *host = iosim_string_cstr(_host);
+    const char *path = iosim_string_cstr(_path);
+    const char *query = iosim_string_cstr(_query);
+    const char *fragment = iosim_string_cstr(_fragment);
+    char buf[2048];
+    unsigned long used = 0;
+    if (scheme && *scheme)
+        used += (unsigned long)snprintf(buf + used, sizeof(buf) - used,
+                                        "%s:", scheme);
+    if (host && *host)
+    {
+        if (_port > 0)
+            used += (unsigned long)snprintf(buf + used, sizeof(buf) - used,
+                                            "//%s:%d", host, _port);
+        else
+            used += (unsigned long)snprintf(buf + used, sizeof(buf) - used,
+                                            "//%s", host);
+    }
+    if (path && *path)
+        used += (unsigned long)snprintf(buf + used, sizeof(buf) - used,
+                                        "%s%s", host && *host &&
+                                        *path != '/' ? "/" : "", path);
+    if (query)
+        used += (unsigned long)snprintf(buf + used, sizeof(buf) - used,
+                                        "?%s", query);
+    if (fragment)
+        used += (unsigned long)snprintf(buf + used, sizeof(buf) - used,
+                                        "#%s", fragment);
+    return [NSString stringWithUTF8String:buf];
+}
+- (NSURL *)URL { return [NSURL URLWithString:[self string]]; }
+- (id)scheme { return _scheme; }
+- (void)setScheme:(id)scheme { _scheme = scheme; }
+- (id)host { return _host; }
+- (void)setHost:(id)host { _host = host; }
+- (id)path { return _path; }
+- (void)setPath:(id)path { _path = path; }
+- (id)query { return _query; }
+- (void)setQuery:(id)query { _query = query; }
+- (NSArray *)queryItems
+{
+    if (!_query || [_query length] == 0)
+        return @[];
+    NSMutableArray *items = [NSMutableArray array];
+    NSArray *parts = [_query componentsSeparatedByString:@"&"];
+    for (unsigned long i = 0; i < [parts count]; i++)
+    {
+        id part = [parts objectAtIndex:i];
+        NSRange equals = [part rangeOfString:@"="];
+        if (equals.location == NSNotFound)
+            [items addObject:[NSURLQueryItem queryItemWithName:part value:nil]];
+        else
+            [items addObject:[NSURLQueryItem queryItemWithName:
+                [part substringToIndex:equals.location]
+                value:[part substringFromIndex:equals.location + 1]]];
+    }
+    return items;
+}
+- (void)setQueryItems:(NSArray *)items
+{
+    if (!items || [items count] == 0)
+    {
+        _query = nil;
+        return;
+    }
+    NSMutableString *query = [NSMutableString string];
+    for (unsigned long i = 0; i < [items count]; i++)
+    {
+        NSURLQueryItem *item = (NSURLQueryItem *)[items objectAtIndex:i];
+        if (i > 0)
+            [query appendString:@"&"];
+        [query appendString:[item name]];
+        if ([item value])
+        {
+            [query appendString:@"="];
+            [query appendString:[item value]];
+        }
+    }
+    _query = query;
+}
+- (id)percentEncodedQuery { return _query; }
+- (void)setPercentEncodedQuery:(id)query { _query = query; }
+- (id)percentEncodedPath { return _path; }
+- (void)setPercentEncodedPath:(id)path { _path = path; }
+- (id)fragment { return _fragment; }
+- (void)setFragment:(id)fragment { _fragment = fragment; }
+- (int)port { return _port; }
+- (void)setPort:(int)port { _port = port; }
 @end
 
 /* ------------------------------------------------------- Notifications */
@@ -4417,6 +5227,25 @@ static double number_formatter_pow10(int digits)
         value *= 10.0;
     return value;
 }
+
+@implementation NSISO8601DateFormatter
+- (unsigned long)formatOptions { return _formatOptions; }
+- (void)setFormatOptions:(unsigned long)options { _formatOptions = options; }
+- (id)timeZone { return _timeZone; }
+- (void)setTimeZone:(id)zone { _timeZone = zone; }
+- (id)stringFromDate:(NSDate *)date
+{
+    NSDateFormatter *formatter = [[[NSDateFormatter alloc] init] autorelease];
+    [formatter setDateFormat:@"yyyy-MM-dd'T'HH:mm:ssZ"];
+    return [formatter stringFromDate:date];
+}
+- (NSDate *)dateFromString:(id)string
+{
+    NSDateFormatter *formatter = [[[NSDateFormatter alloc] init] autorelease];
+    [formatter setDateFormat:@"yyyy-MM-dd'T'HH:mm:ssZ"];
+    return [formatter dateFromString:string];
+}
+@end
 
 @implementation NSNumberFormatter
 - (id)init

@@ -4,6 +4,17 @@
 extern int printf(const char *fmt, ...);
 extern int fflush(void *stream);
 
+@interface FoundationSearchUpdater : NSObject <UISearchResultsUpdating>
+@end
+
+@implementation FoundationSearchUpdater
+- (void)updateSearchResultsForSearchController:
+    (UISearchController *)searchController
+{
+    printf("[fnd] searchupdate %d\n", [searchController isActive]);
+}
+@end
+
 @interface FoundationController : UIViewController
 @end
 
@@ -72,6 +83,158 @@ extern int fflush(void *stream);
            [root contentScaleFactor]);
 
     self.view = root;
+    NSURL *url = [NSURL URLWithString:
+        @"https://example.com:8080/a/b?x=1#frag"];
+    printf("[fnd] url %s %s %d %s %s\n", [[url scheme] UTF8String],
+           [[url host] UTF8String], [url port], [[url path] UTF8String],
+           [[url query] UTF8String]);
+    NSURLComponents *components = [NSURLComponents componentsWithString:
+        @"https://example.com:8080/a?q=2"];
+    components.fragment = @"top";
+    printf("[fnd] comp %s %s\n", [[components string] UTF8String],
+           [[components host] UTF8String]);
+    printf("[fnd] pfont %.0f\n",
+           [[UIFont preferredFontForTextStyle:UIFontTextStyleBody] pointSize]);
+
+    NSURLComponents *queryComponents = [NSURLComponents componentsWithString:
+        @"https://example.com/?a=1&b=two"];
+    NSArray *queryItems = [queryComponents queryItems];
+    printf("[fnd] qitems %lu %s %s\n", [queryItems count],
+           [[[queryItems objectAtIndex:0] name] UTF8String],
+           [[[queryItems objectAtIndex:1] value] UTF8String]);
+    [queryComponents setQueryItems:@[
+        [NSURLQueryItem queryItemWithName:@"k" value:@"v"]]];
+    printf("[fnd] qbuild %s\n", [[queryComponents query] UTF8String]);
+
+    UIDevice *device = [UIDevice currentDevice];
+    printf("[fnd] device %s %s %ld %ld\n", [[device model] UTF8String],
+           [[device systemVersion] UTF8String], [device userInterfaceIdiom],
+           [device orientation]);
+    printf("[fnd] vendor %d\n", [device identifierForVendor] != nil);
+    NSProcessInfo *process = [NSProcessInfo processInfo];
+    printf("[fnd] process %s %lu %lu\n", [[process processName] UTF8String],
+           [process processorCount], [process activeProcessorCount]);
+    NSUUID *uuid = [NSUUID UUID];
+    NSString *uuidString = [uuid UUIDString];
+    NSUUID *parsedUUID = [[NSUUID alloc] initWithUUIDString:uuidString];
+    printf("[fnd] uuid %lu %d\n", [uuidString length],
+           [uuid isEqual:parsedUUID]);
+
+    NSValue *transformValue = [NSValue valueWithCGAffineTransform:
+        CGAffineTransformMakeTranslation(7, 9)];
+    CGAffineTransform transform = [transformValue CGAffineTransformValue];
+    printf("[fnd] affine %.0f %.0f\n", transform.tx, transform.ty);
+
+    UIViewController *vc = [[UIViewController alloc] init];
+    vc.preferredContentSize = CGSizeMake(320, 480);
+    printf("[fnd] vcprops %lu %d %d %.0f %.0f\n",
+           [vc edgesForExtendedLayout],
+           [vc automaticallyAdjustsScrollViewInsets],
+           [vc isModalInPresentation],
+           [vc preferredContentSize].width,
+           [vc preferredContentSize].height);
+
+    UISearchController *searchController = [[UISearchController alloc]
+        initWithSearchResultsController:nil];
+    searchController.searchResultsUpdater =
+        [[FoundationSearchUpdater alloc] init];
+    searchController.active = YES;
+    printf("[fnd] search %d %d %lu\n", searchController.searchBar != nil,
+           [searchController isActive],
+           [[searchController.searchBar scopeButtonTitles] count]);
+
+    UIViewController *controller = [[UIViewController alloc] init];
+    controller.modalPresentationStyle = UIModalPresentationPopover;
+    controller.popoverPresentationController.sourceView = root;
+    controller.sheetPresentationController.detents = @[
+        [UISheetPresentationControllerDetent mediumDetent],
+        [UISheetPresentationControllerDetent largeDetent]];
+    controller.navigationItem.largeTitleDisplayMode = 2;
+    NSArray *emptyItems = @[];
+    controller.navigationItem.leftBarButtonItems = emptyItems;
+    NSValue *pointValue = [NSValue valueWithCGPoint:CGPointMake(3, 4)];
+    CGPoint point = [pointValue CGPointValue];
+    NSValue *rangeValue = [NSValue valueWithRange:NSMakeRange(2, 5)];
+    NSRange range = [rangeValue rangeValue];
+    printf("[fnd] value %.0f %.0f %lu %lu %d\n", point.x, point.y,
+           range.location, range.length,
+           [pointValue isEqualToValue:
+               [NSValue valueWithCGPoint:CGPointMake(3, 4)]]);
+    NSMutableIndexSet *indexes = [NSMutableIndexSet indexSet];
+    [indexes addIndex:5];
+    [indexes addIndex:2];
+    [indexes addIndexesInRange:NSMakeRange(10, 2)];
+    __block unsigned long indexSum = 0;
+    [indexes enumerateIndexesUsingBlock:^(unsigned long index, BOOL *stop) {
+        (void)stop;
+        indexSum += index;
+    }];
+    printf("[fnd] idx %lu %lu %lu %d %lu\n", [indexes count],
+           [indexes firstIndex], [indexes lastIndex],
+           [indexes containsIndex:5], indexSum);
+    printf("[fnd] idxmore %lu %lu %lu\n",
+           [indexes indexGreaterThanIndex:5],
+           [indexes indexLessThanIndex:10],
+           [indexes indexGreaterThanOrEqualToIndex:10]);
+
+    NSData *plainData = [NSData dataWithBytes:"hello" length:5];
+    NSString *encodedData = [plainData base64EncodedStringWithOptions:0];
+    NSData *decodedData = [[NSData alloc]
+        initWithBase64EncodedString:encodedData options:0];
+    printf("[fnd] b64 %s %lu\n", [encodedData UTF8String],
+           [decodedData length]);
+
+    NSURL *appendURL = [[NSURL fileURLWithPath:@"/tmp/a"]
+        URLByAppendingPathComponent:@"b" isDirectory:YES];
+    printf("[fnd] urlappend %s\n", [[appendURL path] UTF8String]);
+
+    UIAccessibilityElement *element = [[UIAccessibilityElement alloc]
+        initWithAccessibilityContainer:root];
+    element.accessibilityLabel = @"E";
+    element.accessibilityFrame = CGRectMake(1, 2, 3, 4);
+    printf("[fnd] axel %s %d %.0f %.0f\n",
+           [[element accessibilityLabel] UTF8String],
+           [element isAccessibilityElement],
+           [element accessibilityFrame].size.width,
+           [element accessibilityFrame].size.height);
+
+    printf("[fnd] present %ld %d %lu %ld %lu\n",
+           [controller modalPresentationStyle],
+           [controller popoverPresentationController].sourceView == root,
+           [[controller sheetPresentationController].detents count],
+           [controller.navigationItem largeTitleDisplayMode],
+           [[controller.navigationItem leftBarButtonItems] count]);
+
+    NSString *pct = [@"a b&c" stringByAddingPercentEncodingWithAllowedCharacters:
+        [NSCharacterSet URLQueryAllowedCharacterSet]];
+    printf("[fnd] pct %s\n", [pct UTF8String]);
+
+    double hval = 0, sval = 0, bval = 0, aval = 0;
+    [[UIColor redColor] getHue:&hval saturation:&sval
+                    brightness:&bval alpha:&aval];
+    printf("[fnd] hue %.0f %.0f %.0f %.0f\n", hval, sval, bval, aval);
+
+    UIAlertController *alert = [UIAlertController
+        alertControllerWithTitle:@"T" message:@"M"
+                 preferredStyle:UIAlertControllerStyleAlert];
+    __block int configured = 0;
+    [alert addTextFieldWithConfigurationHandler:^(UITextField *field) {
+        field.placeholder = @"P";
+        configured = 1;
+    }];
+    UIAlertAction *preferred = [UIAlertAction
+        actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil];
+    preferred.enabled = NO;
+    alert.preferredAction = preferred;
+    printf("[fnd] alert %lu %d %d %d\n", [[alert textFields] count],
+           configured, [preferred isEnabled],
+           [alert preferredAction] == preferred);
+
+    printf("[fnd] appext %s %s\n",
+           [[@"a" stringByAppendingPathExtension:@"txt"] UTF8String],
+           [[[[NSURL fileURLWithPath:@"/tmp/a"]
+               URLByAppendingPathExtension:@"txt"] path] UTF8String]);
+
     printf("[fnd] ready\n");
     fflush(0);
 }
@@ -108,6 +271,17 @@ extern int fflush(void *stream);
     self.window.frame = [[UIScreen mainScreen] bounds];
     self.window.rootViewController = [[FoundationController alloc] init];
     [self.window makeKeyAndVisible];
+    UIView *rootView = [[self.window rootViewController] view];
+    printf("[fnd] viewwin %d %ld\n", rootView.window != nil,
+           [rootView effectiveUserInterfaceLayoutDirection]);
+    printf("[fnd] scene2 %d %ld\n",
+           [(UIWindowScene *)scene screen] == [UIScreen mainScreen],
+           [(UIWindowScene *)scene interfaceOrientation]);
+    printf("[fnd] scene %lu %ld %s\n",
+           [[(UIWindowScene *)scene windows] count],
+           [(UIScene *)scene activationState],
+           [[[(UIScene *)scene session] persistentIdentifier] UTF8String]);
+    fflush(0);
 }
 @end
 

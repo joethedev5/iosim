@@ -691,9 +691,102 @@ management.
   `NSFontAttributeName` and `NSForegroundColorAttributeName` from it and
   render the plain string. Attribute-name symbols live in UIKit, not as
   macros, because UIKit already defines them as globals.
+- Empty Objective-C collection literals do not send a factory message:
+  clang emits a load of the `__NSArray0__`/`__NSDictionary0__` globals and
+  dereferences the object pointer stored there. Foundation must export those
+  globals and initialize them (a constructor works); without them an app
+  crashes at the first `@[]` even though non-empty literals use
+  `arrayWithObjects:count:` and work.
+- `UIButtonConfiguration` is plain data in this runtime. Assigning one applies
+  its title, image, foreground/background colors and corner style to the
+  button; `contentInsets` insets the title label and a capsule style uses
+  half the current height as the corner radius. Button images are real
+  `UIImageView` subviews positioned beside the title, so the normal image
+  renderer handles them.
+- `UITextField.borderStyle` is a renderer branch, not a background view: the
+  rounded-rect style paints `0x1c1c1e` behind the field and shifts the text
+  origin right by 8pt. The field still has no text-selection or clear-button
+  behavior behind the other styles.
+- Empty array literals were only one half of the literal surface: Foundation
+  also exports `__NSDictionary0__` for `@{}`. Both are ordinary objects, not
+  classes, and the compiler dereferences the global before sending `count`.
+- `CATextLayer` has no backing view, so its string has to be drawn in
+  `render_layer` after the contents blit. Its baseline starts at the layer's
+  top edge plus the font ascent; alignment 1 is right and 2 is center.
+- `UIView.transitionFromView:toView:` is a structural swap here: it moves the
+  destination into the source's superview at the same frame. Cross-dissolve
+  compositing is not animated, but the completion runs with `finished:YES`.
+- `NSValue` stores bytes and a type string; the factory for a struct must
+  count scalar fields in the type encoding to know how many bytes to copy.
+  `NSIndexSet` is a sorted dynamic array so `firstIndex`/`lastIndex` are O(1)
+  and enumeration is ascending without a sort step.
+- `NSURLQueryItem` values are not percent-decoded by `queryItems`; keeping the
+  raw substring preserves round-tripping through `setQueryItems:`, which only
+  joins names and values with `&` and `=`.
+- `NSUUID` bytes need RFC 4122 version/variant bits (`0x40` in byte 6 and
+  `0x80` in byte 8) or Foundation's `UUIDString` shape checks reject it even
+  when the hyphenation is right.
+- `NSProcessInfo.processInfo` is a singleton but not a constant: the
+  environment and argument arrays can be empty objects, while
+  `globallyUniqueString` still has to look like a UUID string.
+- `UIAccessibility*` symbols are C functions, not class methods; apps link
+  them by name, so the runtime exports them even though VoiceOver is off.
+- Gesture defaults are part of the contract: tap has one tap and one touch,
+  pan has minimum one and maximum two touches, swipe has one touch, and all
+  recognizers delay touches and cancel touches in view until configured
+  otherwise.
+- Base64 decoding must drop every non-alphabet character before grouping, or
+  newlines in wrapped payloads shift the six-bit window and corrupt the tail.
+  The encoder pads a one- or two-byte tail with `=` rather than emitting a
+  partial quartet.
+- `NSIndexSet.enumerateRangesUsingBlock:` is the only place a run length is
+  needed; grouping adjacent indexes on the fly avoids materializing a second
+  range array for sets that are already sorted.
+- `UIAccessibilityElement` is not a view, so its frame is absolute; a UIView's
+  default accessibility frame has to be walked up the superview chain, which
+  is why an explicitly assigned frame wins over the computed one.
+- `UITableView` and `UICollectionView` configuration properties are stored even
+  when the renderer ignores them. Apps set dozens in `viewDidLoad`, and an
+  unimplemented setter crashes the app before a single cell is asked for.
+- `NSURL` parsing splits scheme at the first colon, authority at `//`, user
+  info at `@`, host/port at the last colon in the authority, then path at the
+  first `/` and query at `?`. `NSURLComponents` rebuilds its string from the
+  parts and only inserts `//` when a host exists.
 - CAAnimationDelegate is a queued event, not a per-frame callback: start is
   due at `now + delay`, stop at `now + delay + duration * repeatCount`, and
   removal/replacement of the same key fires `finished:NO` immediately. An
   infinite animation is only stopped by removal. `[UIColor redColor]` and
   the other fixed palette colors are plain constants; only `system*` colors
   carry light/dark variants.
+- `UITableView` must not reimplement `refreshControl` storage: the spinner is
+  a real subview installed by `UIScrollView.setRefreshControl:`. Overriding the
+  setter in the table and assigning the ivar alone leaves the control out of
+  the subview tree, so the renderer draws no spinner even though `isRefreshing`
+  is true. The table override delegates to super.
+- A view's `window` is not stored: walk the superview chain and return the
+  first `UIWindow`. A root view only has a window after `setRootViewController:`
+  attaches it, so code that reads `view.window` inside `loadView` sees nil.
+- `UIAlertController` text fields are ordinary `UITextField` objects created by
+  the configuration-handler API; the handler runs before the field is added, so
+  a nil handler still appends a default 240x30 field. `preferredAction` is just
+  a stored reference, not a replacement for the action list.
+- Percent encoding is byte-oriented: encode every byte outside the allowed set
+  as `%HH` with uppercase hex, and leave allowed ASCII bytes alone. A UTF-8
+  continuation byte is encoded as its own `%HH`, which is what URL consumers
+  expect.
+- `UIColor.getHue:saturation:brightness:alpha:` is a pure RGB-to-HSV
+  conversion; hue is zero for gray, saturation is zero at black, and the
+  returned values are normalized to 0..1. The fixed palette colors have no
+  separate hue storage.
+- `CATransformLayer` and `CATransition` can be API-complete without renderer
+  support: the former inherits CALayer drawing, and the latter only stores its
+  type/subtype/progress/filter fields for apps that configure and enqueue it.
+- `UINavigationController.navigationBar` can return the controller's own bar
+  when that bar is allocated as a `UINavigationBar`; the controller still owns
+  its separate title label and content view, and the bar's default empty title
+  label draws nothing, so appearance APIs work without a second bar.
+- `UINavigationController` delegate callbacks are paired around installation:
+  `willShowViewController:` runs before the new stack is installed and
+  `didShowViewController:` after the appearing controller's appearance
+  callbacks. `UIRefreshControl.attributedTitle` is stored but the spinner is
+  still drawn by the blade renderer, not by a label.

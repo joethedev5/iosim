@@ -17,6 +17,18 @@ extern void *stderr;
 extern char *getenv(const char *name);
 extern int atoi(const char *s);
 extern double atof(const char *s);
+void UIAccessibilityPostNotification(unsigned int notification, id argument)
+{
+    (void)notification;
+    (void)argument;
+}
+BOOL UIAccessibilityIsVoiceOverRunning(void) { return NO; }
+BOOL UIAccessibilityIsReduceMotionEnabled(void) { return NO; }
+BOOL UIAccessibilityIsReduceTransparencyEnabled(void) { return NO; }
+BOOL UIAccessibilityIsSwitchControlRunning(void) { return NO; }
+BOOL UIAccessibilityIsBoldTextEnabled(void) { return NO; }
+BOOL UIAccessibilityIsInvertColorsEnabled(void) { return NO; }
+BOOL UIAccessibilityIsGrayscaleEnabled(void) { return NO; }
 extern void *objc_getClass(const char *name);
 extern void *objc_msgSend(void *self, void *sel, ...);
 
@@ -242,6 +254,12 @@ struct layer_anim {
 - (CAAnimation *)animationForKey:(id)key;
 - (CALayer *)presentationLayer;
 - (CALayer *)modelLayer;
+- (CGPoint)convertPoint:(CGPoint)point fromLayer:(CALayer *)layer;
+- (CGPoint)convertPoint:(CGPoint)point toLayer:(CALayer *)layer;
+- (CGRect)convertRect:(CGRect)rect fromLayer:(CALayer *)layer;
+- (CGRect)convertRect:(CGRect)rect toLayer:(CALayer *)layer;
+- (double)convertTime:(double)time fromLayer:(CALayer *)layer;
+- (double)convertTime:(double)time toLayer:(CALayer *)layer;
 - (CGRect)contentsRect;
 - (void)setContentsRect:(CGRect)rect;
 - (id)contentsGravity;
@@ -281,6 +299,9 @@ struct layer_anim {
     double _strokeEnd;
     int _lineCap;
     int _lineJoin;
+    id _lineDashPattern;
+    double _lineDashPhase;
+    double _miterLimit;
     CGPathRef _cgPath;
     CGColorRef _cgFillColor;
     CGColorRef _cgStrokeColor;
@@ -301,6 +322,12 @@ struct layer_anim {
 - (int)lineCap;
 - (void)setLineJoin:(int)join;
 - (int)lineJoin;
+- (NSArray *)lineDashPattern;
+- (void)setLineDashPattern:(NSArray *)pattern;
+- (double)lineDashPhase;
+- (void)setLineDashPhase:(double)phase;
+- (double)miterLimit;
+- (void)setMiterLimit:(double)limit;
 @end
 
 @interface CAGradientLayer : CALayer {
@@ -321,6 +348,29 @@ struct layer_anim {
 - (CGPoint)endPoint;
 - (void)setType:(id)type;
 - (id)type;
+@end
+
+@interface CATextLayer : CALayer {
+@public
+    id _string;
+    id _font;
+    double _fontSize;
+    id _foregroundColor;
+    long _alignmentMode;
+    BOOL _wrapped;
+}
+- (id)string;
+- (void)setString:(id)string;
+- (id)font;
+- (void)setFont:(id)font;
+- (double)fontSize;
+- (void)setFontSize:(double)size;
+- (id)foregroundColor;
+- (void)setForegroundColor:(id)color;
+- (long)alignmentMode;
+- (void)setAlignmentMode:(long)mode;
+- (BOOL)isWrapped;
+- (void)setWrapped:(BOOL)wrapped;
 @end
 
 @interface UIBezierPath : NSObject {
@@ -466,6 +516,29 @@ extern id kCAMediaTimingFunctionEaseInEaseOut;
 }
 - (void)setAnimations:(NSArray *)animations;
 - (NSArray *)animations;
+@end
+
+@interface CATransition : CAAnimation {
+@public
+    id _type;
+    id _subtype;
+    float _startProgress;
+    float _endProgress;
+    id _filter;
+}
+- (id)type;
+- (void)setType:(id)type;
+- (id)subtype;
+- (void)setSubtype:(id)subtype;
+- (float)startProgress;
+- (void)setStartProgress:(float)progress;
+- (float)endProgress;
+- (void)setEndProgress:(float)progress;
+- (id)filter;
+- (void)setFilter:(id)filter;
+@end
+
+@interface CATransformLayer : CALayer
 @end
 
 @interface CATransaction : NSObject
@@ -698,6 +771,8 @@ enum {
 - (BOOL)getRed:(double *)red green:(double *)green blue:(double *)blue
          alpha:(double *)alpha;
 - (BOOL)getWhite:(double *)white alpha:(double *)alpha;
+- (BOOL)getHue:(double *)hue saturation:(double *)saturation
+    brightness:(double *)brightness alpha:(double *)alpha;
 + (UIColor *)colorWithDynamicProvider:(id (^)(UITraitCollection *traits))provider;
 + (UIColor *)whiteColor;
 + (UIColor *)blackColor;
@@ -778,6 +853,9 @@ enum {
 + (UIFont *)fontWithName:(id)name size:(double)size;
 + (UIFont *)fontWithDescriptor:(UIFontDescriptor *)descriptor
                           size:(double)size;
++ (UIFont *)preferredFontForTextStyle:(id)style;
++ (UIFont *)preferredFontForTextStyle:(id)style
+              compatibleWithTraitCollection:(UITraitCollection *)traits;
 - (double)pointSize;
 - (id)fontName;
 - (id)familyName;
@@ -809,6 +887,37 @@ enum {
 - (double)brightness;
 - (void)setBrightness:(double)brightness;
 - (BOOL)isCaptured;
+@end
+
+extern NSString *UIDeviceOrientationDidChangeNotification;
+
+@interface UIDevice : NSObject {
+@public
+    long _orientation;
+    long _batteryState;
+    double _batteryLevel;
+    BOOL _proximityMonitoringEnabled;
+    BOOL _generatingOrientationNotifications;
+}
++ (UIDevice *)currentDevice;
+- (id)name;
+- (id)model;
+- (id)localizedModel;
+- (id)systemName;
+- (id)systemVersion;
+- (id)identifierForVendor;
+- (long)userInterfaceIdiom;
+- (long)orientation;
+- (void)setOrientation:(long)orientation;
+- (long)batteryState;
+- (double)batteryLevel;
+- (BOOL)isProximityMonitoringEnabled;
+- (void)setProximityMonitoringEnabled:(BOOL)enabled;
+- (BOOL)isMultitaskingSupported;
+- (BOOL)isGeneratingDeviceOrientationNotifications;
+- (void)beginGeneratingDeviceOrientationNotifications;
+- (void)endGeneratingDeviceOrientationNotifications;
+- (void)playInputClick;
 @end
 
 typedef enum {
@@ -990,6 +1099,12 @@ typedef enum {
     CGPoint _location;
     CGPoint _translation;
     BOOL _enabled;
+    BOOL _delaysTouchesBegan;
+    BOOL _delaysTouchesEnded;
+    BOOL _cancelsTouchesInView;
+    unsigned long _numberOfTouches;
+    id _delegate;
+    id _allowedTouchTypes;
 }
 - (id)initWithTarget:(id)target action:(SEL)action;
 - (void)addTarget:(id)target action:(SEL)action;
@@ -998,23 +1113,44 @@ typedef enum {
 - (CGPoint)locationInView:(UIView *)view;
 - (void)setEnabled:(BOOL)enabled;
 - (BOOL)isEnabled;
+- (id)delegate;
+- (void)setDelegate:(id)delegate;
+- (void)requireGestureRecognizerToFail:(UIGestureRecognizer *)other;
+- (unsigned long)numberOfTouches;
+- (BOOL)delaysTouchesBegan;
+- (void)setDelaysTouchesBegan:(BOOL)delays;
+- (BOOL)delaysTouchesEnded;
+- (void)setDelaysTouchesEnded:(BOOL)delays;
+- (BOOL)cancelsTouchesInView;
+- (void)setCancelsTouchesInView:(BOOL)cancels;
+- (NSArray *)allowedTouchTypes;
+- (void)setAllowedTouchTypes:(NSArray *)types;
 @end
 
 @interface UITapGestureRecognizer : UIGestureRecognizer {
 @public
     int _numberOfTapsRequired;
+    int _numberOfTouchesRequired;
 }
 - (void)setNumberOfTapsRequired:(int)count;
 - (int)numberOfTapsRequired;
+- (void)setNumberOfTouchesRequired:(int)count;
+- (int)numberOfTouchesRequired;
 @end
 
 @interface UIPanGestureRecognizer : UIGestureRecognizer {
 @public
     CGPoint _panVelocity;
+    unsigned long _minimumNumberOfTouches;
+    unsigned long _maximumNumberOfTouches;
 }
 - (CGPoint)translationInView:(UIView *)view;
 - (CGPoint)velocityInView:(UIView *)view;
 - (void)setTranslation:(CGPoint)translation inView:(UIView *)view;
+- (unsigned long)minimumNumberOfTouches;
+- (void)setMinimumNumberOfTouches:(unsigned long)count;
+- (unsigned long)maximumNumberOfTouches;
+- (void)setMaximumNumberOfTouches:(unsigned long)count;
 @end
 
 typedef enum {
@@ -1058,9 +1194,12 @@ typedef enum {
 @interface UISwipeGestureRecognizer : UIGestureRecognizer {
 @public
     long _direction;
+    int _numberOfTouchesRequired;
 }
 - (void)setDirection:(long)direction;
 - (long)direction;
+- (void)setNumberOfTouchesRequired:(int)count;
+- (int)numberOfTouchesRequired;
 @end
 
 @interface UILongPressGestureRecognizer : UIGestureRecognizer {
@@ -1167,6 +1306,19 @@ typedef enum {
     UIView *_maskView;
     id _interactions[8];
     int _interactionCount;
+    BOOL _isAccessibilityElement;
+    id _accessibilityLabel;
+    id _accessibilityIdentifier;
+    id _accessibilityHint;
+    id _accessibilityValue;
+    unsigned long long _accessibilityTraits;
+    BOOL _accessibilityElementsHidden;
+    BOOL _accessibilityViewIsModal;
+    BOOL _shouldGroupAccessibilityChildren;
+    id _accessibilityElements;
+    CGRect _accessibilityFrame;
+    long _semanticContentAttribute;
+    double _contentScaleFactor;
 }
 - (id)initWithFrame:(CGRect)frame;
 - (CGRect)frame;
@@ -1191,6 +1343,12 @@ typedef enum {
 - (void)setOverrideUserInterfaceStyle:(long)style;
 - (void)traitCollectionDidChange:(UITraitCollection *)previous;
 - (void)addSubview:(UIView *)view;
+- (void)didAddSubview:(UIView *)subview;
+- (void)willRemoveSubview:(UIView *)subview;
+- (void)willMoveToSuperview:(UIView *)newSuperview;
+- (void)didMoveToSuperview;
+- (void)willMoveToWindow:(id)window;
+- (void)didMoveToWindow;
 - (NSArray *)subviews;
 - (void)insertSubview:(UIView *)view atIndex:(long)index;
 - (void)bringSubviewToFront:(UIView *)view;
@@ -1199,6 +1357,28 @@ typedef enum {
 - (void)addInteraction:(id)interaction;
 - (void)removeInteraction:(id)interaction;
 - (NSArray *)interactions;
+- (BOOL)isAccessibilityElement;
+- (void)setIsAccessibilityElement:(BOOL)element;
+- (id)accessibilityLabel;
+- (void)setAccessibilityLabel:(id)label;
+- (id)accessibilityIdentifier;
+- (void)setAccessibilityIdentifier:(id)identifier;
+- (id)accessibilityHint;
+- (void)setAccessibilityHint:(id)hint;
+- (id)accessibilityValue;
+- (void)setAccessibilityValue:(id)value;
+- (unsigned long long)accessibilityTraits;
+- (void)setAccessibilityTraits:(unsigned long long)traits;
+- (BOOL)accessibilityElementsHidden;
+- (void)setAccessibilityElementsHidden:(BOOL)hidden;
+- (BOOL)accessibilityViewIsModal;
+- (void)setAccessibilityViewIsModal:(BOOL)modal;
+- (BOOL)shouldGroupAccessibilityChildren;
+- (void)setShouldGroupAccessibilityChildren:(BOOL)group;
+- (NSArray *)accessibilityElements;
+- (void)setAccessibilityElements:(NSArray *)elements;
+- (CGRect)accessibilityFrame;
+- (void)setAccessibilityFrame:(CGRect)frame;
 + (Class)layerClass;
 - (CALayer *)layer;
 - (void)setHidden:(BOOL)hidden;
@@ -1209,6 +1389,10 @@ typedef enum {
 - (void)setOpaque:(BOOL)opaque;
 - (long)contentMode;
 - (void)setContentMode:(long)mode;
+- (long)semanticContentAttribute;
+- (void)setSemanticContentAttribute:(long)attribute;
++ (long)userInterfaceLayoutDirectionForSemanticContentAttribute:(long)attribute;
+- (long)effectiveUserInterfaceLayoutDirection;
 - (BOOL)clearsContextBeforeDrawing;
 - (void)setClearsContextBeforeDrawing:(BOOL)clears;
 - (BOOL)isExclusiveTouch;
@@ -1226,10 +1410,13 @@ typedef enum {
 - (BOOL)pointInside:(CGPoint)point;
 - (UIView *)hitTest:(CGPoint)point;
 - (id)superview;
+- (UIWindow *)window;
 - (CGAffineTransform)transform;
 - (void)setTransform:(CGAffineTransform)transform;
 - (void)layoutSubviews;
 - (void)setNeedsLayout;
+- (void)setNeedsDisplay;
+- (void)setNeedsDisplayInRect:(CGRect)rect;
 - (void)layoutIfNeeded;
 - (void)setNeedsUpdateConstraints;
 - (void)updateConstraints;
@@ -1284,6 +1471,43 @@ typedef enum {
 + (void)addKeyframeWithRelativeStartTime:(double)start
                         relativeDuration:(double)duration
                               animations:(void (^)(void))animations;
++ (void)transitionWithView:(UIView *)view duration:(double)duration
+                   options:(unsigned long)options
+                animations:(void (^)(void))animations
+                completion:(void (^)(BOOL finished))completion;
++ (void)transitionFromView:(UIView *)fromView toView:(UIView *)toView
+                  duration:(double)duration
+                   options:(unsigned long)options
+                completion:(void (^)(BOOL finished))completion;
+@end
+
+@interface UIAccessibilityElement : NSObject {
+@public
+    id _accessibilityContainer;
+    id _accessibilityLabel;
+    id _accessibilityIdentifier;
+    id _accessibilityHint;
+    id _accessibilityValue;
+    unsigned long long _accessibilityTraits;
+    CGRect _accessibilityFrame;
+    BOOL _isAccessibilityElement;
+}
+- (id)initWithAccessibilityContainer:(id)container;
+- (id)accessibilityContainer;
+- (BOOL)isAccessibilityElement;
+- (void)setIsAccessibilityElement:(BOOL)element;
+- (id)accessibilityLabel;
+- (void)setAccessibilityLabel:(id)label;
+- (id)accessibilityIdentifier;
+- (void)setAccessibilityIdentifier:(id)identifier;
+- (id)accessibilityHint;
+- (void)setAccessibilityHint:(id)hint;
+- (id)accessibilityValue;
+- (void)setAccessibilityValue:(id)value;
+- (unsigned long long)accessibilityTraits;
+- (void)setAccessibilityTraits:(unsigned long long)traits;
+- (CGRect)accessibilityFrame;
+- (void)setAccessibilityFrame:(CGRect)frame;
 @end
 
 @interface UILabel : UIView {
@@ -1294,6 +1518,10 @@ typedef enum {
     UIFont *_font;
     int _textAlignment;
     int _numberOfLines;
+    long _lineBreakMode;
+    double _preferredMaxLayoutWidth;
+    BOOL _adjustsFontSizeToFitWidth;
+    double _minimumScaleFactor;
 }
 - (void)setText:(id)text;
 - (id)text;
@@ -1307,6 +1535,14 @@ typedef enum {
 - (int)textAlignment;
 - (void)setNumberOfLines:(int)n;
 - (int)numberOfLines;
+- (long)lineBreakMode;
+- (void)setLineBreakMode:(long)mode;
+- (double)preferredMaxLayoutWidth;
+- (void)setPreferredMaxLayoutWidth:(double)width;
+- (BOOL)adjustsFontSizeToFitWidth;
+- (void)setAdjustsFontSizeToFitWidth:(BOOL)adjusts;
+- (double)minimumScaleFactor;
+- (void)setMinimumScaleFactor:(double)scale;
 - (CGSize)intrinsicContentSize;
 - (CGSize)sizeThatFits:(CGSize)size;
 @end
@@ -1461,6 +1697,72 @@ enum {
 - (UIView *)contentView;
 @end
 
+@interface UIPresentationController : NSObject {
+@public
+    id _presentedViewController;
+    id _presentingViewController;
+    UIView *_containerView;
+}
+- (id)presentedViewController;
+- (id)presentingViewController;
+- (UIView *)containerView;
+- (CGRect)frameOfPresentedViewInContainerView;
+@end
+
+@interface UIPopoverPresentationController : UIPresentationController {
+@public
+    UIView *_sourceView;
+    CGRect _sourceRect;
+    id _barButtonItem;
+    long _permittedArrowDirections;
+    id _delegate;
+    UIEdgeInsets _popoverLayoutMargins;
+}
+- (UIView *)sourceView;
+- (void)setSourceView:(UIView *)view;
+- (CGRect)sourceRect;
+- (void)setSourceRect:(CGRect)rect;
+- (id)barButtonItem;
+- (void)setBarButtonItem:(id)item;
+- (long)permittedArrowDirections;
+- (void)setPermittedArrowDirections:(long)directions;
+- (id)delegate;
+- (void)setDelegate:(id)delegate;
+- (UIEdgeInsets)popoverLayoutMargins;
+- (void)setPopoverLayoutMargins:(UIEdgeInsets)insets;
+@end
+
+@interface UISheetPresentationControllerDetent : NSObject {
+@public
+    id _identifier;
+}
++ (id)mediumDetent;
++ (id)largeDetent;
++ (id)customDetentWithIdentifier:(id)identifier
+                        resolver:(double (^)(id))resolver;
+- (id)identifier;
+@end
+
+@interface UISheetPresentationController : UIPresentationController {
+@public
+    NSArray *_detents;
+    BOOL _prefersGrabberVisible;
+    double _preferredCornerRadius;
+    id _largestUndimmedDetentIdentifier;
+    BOOL _prefersScrollingExpandsWhenScrolledToEdge;
+}
+- (NSArray *)detents;
+- (void)setDetents:(NSArray *)detents;
+- (BOOL)prefersGrabberVisible;
+- (void)setPrefersGrabberVisible:(BOOL)visible;
+- (double)preferredCornerRadius;
+- (void)setPreferredCornerRadius:(double)radius;
+- (id)largestUndimmedDetentIdentifier;
+- (void)setLargestUndimmedDetentIdentifier:(id)identifier;
+- (BOOL)prefersScrollingExpandsWhenScrolledToEdge;
+- (void)setPrefersScrollingExpandsWhenScrolledToEdge:(BOOL)expands;
+@end
+
 @interface UIViewController : NSObject {
 @public
     UIView *_view;
@@ -1473,15 +1775,28 @@ enum {
     long _modalPresentationStyle;
     UIEdgeInsets _additionalSafeAreaInsets;
     id _parentController;
+    id _popoverPresentationController;
+    id _sheetPresentationController;
     id _children[16];
     int _childCount;
+    unsigned long _edgesForExtendedLayout;
+    BOOL _extendedLayoutIncludesOpaqueBars;
+    BOOL _automaticallyAdjustsScrollViewInsets;
+    BOOL _definesPresentationContext;
+    BOOL _modalInPresentation;
+    id _restorationIdentifier;
+    CGSize _preferredContentSize;
 }
 - (id)init;
 - (id)title;
+- (UIPopoverPresentationController *)popoverPresentationController;
+- (UISheetPresentationController *)sheetPresentationController;
+- (UIPresentationController *)presentationController;
 - (long)modalPresentationStyle;
 - (void)setModalPresentationStyle:(long)style;
 - (void)setTitle:(id)title;
 - (id)navigationController;
+- (id)tabBarController;
 - (id)tabBarItem;
 - (void)setTabBarItem:(id)item;
 - (id)navigationItem;
@@ -1489,12 +1804,39 @@ enum {
 - (UIView *)viewIfLoaded;
 - (BOOL)isViewLoaded;
 - (void)setView:(UIView *)view;
+- (void)loadViewIfNeeded;
+- (BOOL)isBeingPresented;
+- (BOOL)isBeingDismissed;
+- (BOOL)isMovingFromParentViewController;
+- (BOOL)isMovingToParentViewController;
+- (BOOL)shouldAutorotate;
+- (unsigned long)supportedInterfaceOrientations;
+- (unsigned long)edgesForExtendedLayout;
+- (void)setEdgesForExtendedLayout:(unsigned long)edges;
+- (BOOL)extendedLayoutIncludesOpaqueBars;
+- (void)setExtendedLayoutIncludesOpaqueBars:(BOOL)includes;
+- (BOOL)automaticallyAdjustsScrollViewInsets;
+- (void)setAutomaticallyAdjustsScrollViewInsets:(BOOL)adjusts;
+- (BOOL)definesPresentationContext;
+- (void)setDefinesPresentationContext:(BOOL)defines;
+- (BOOL)isModalInPresentation;
+- (void)setModalInPresentation:(BOOL)modal;
+- (id)restorationIdentifier;
+- (void)setRestorationIdentifier:(id)identifier;
+- (CGSize)preferredContentSize;
+- (void)setPreferredContentSize:(CGSize)size;
 - (UIViewController *)parentViewController;
 - (NSArray *)children;
 - (void)addChildViewController:(UIViewController *)controller;
 - (void)removeFromParentViewController;
 - (void)willMoveToParentViewController:(UIViewController *)parent;
 - (void)didMoveToParentViewController:(UIViewController *)parent;
+- (void)transitionFromViewController:(UIViewController *)fromViewController
+                    toViewController:(UIViewController *)toViewController
+                            duration:(double)duration
+                             options:(unsigned long)options
+                          animations:(void (^)(void))animations
+                          completion:(void (^)(BOOL finished))completion;
 - (void)loadView;
 - (void)viewDidLoad;
 - (void)viewWillAppear:(BOOL)animated;
@@ -1510,6 +1852,8 @@ enum {
 - (void)viewDidLayoutSubviews;
 - (void)presentViewController:(UIViewController *)controller animated:(BOOL)animated
                    completion:(void (^)(void))completion;
+- (void)showViewController:(UIViewController *)controller sender:(id)sender;
+- (void)showDetailViewController:(UIViewController *)controller sender:(id)sender;
 - (void)dismissViewControllerAnimated:(BOOL)animated
                            completion:(void (^)(void))completion;
 - (UIViewController *)presentedViewController;
@@ -1539,14 +1883,22 @@ enum {
 @public
     id _title;
     long _style;
+    id _image;
+    BOOL _enabled;
     void (^_handler)(UIAlertAction *);
 }
 + (id)actionWithTitle:(id)title style:(long)style
               handler:(void (^)(UIAlertAction *action))handler;
 - (id)title;
 - (long)style;
+- (UIImage *)image;
+- (void)setImage:(UIImage *)image;
+- (BOOL)isEnabled;
+- (void)setEnabled:(BOOL)enabled;
 - (void (^)(UIAlertAction *))handler;
 @end
+
+@class UITextField;
 
 @interface UIAlertController : UIViewController {
 @public
@@ -1554,6 +1906,8 @@ enum {
     id _actions[8];
     int _actionCount;
     long _preferredStyle;
+    id _textFields;
+    id _preferredAction;
 }
 + (id)alertControllerWithTitle:(id)title message:(id)message
                  preferredStyle:(long)style;
@@ -1561,6 +1915,11 @@ enum {
 - (id)message;
 - (long)preferredStyle;
 - (NSArray *)actions;
+- (NSArray *)textFields;
+- (void)addTextFieldWithConfigurationHandler:
+    (void (^)(UITextField *textField))configurationHandler;
+- (UIAlertAction *)preferredAction;
+- (void)setPreferredAction:(UIAlertAction *)action;
 @end
 
 /* ---------------------------------------------------------- activities */
@@ -1779,10 +2138,24 @@ enum {
     long _systemItem;
     id _target;
     SEL _action;
+    UIImage *_image;
+    UIColor *_tintColor;
+    id _customView;
+    double _width;
     BOOL _enabled;
 }
 - (id)initWithTitle:(id)title style:(long)style target:(id)target
              action:(SEL)action;
+- (id)initWithImage:(UIImage *)image style:(long)style target:(id)target
+             action:(SEL)action;
+- (id)initWithCustomView:(UIView *)view;
+- (UIImage *)image;
+- (void)setImage:(UIImage *)image;
+- (UIColor *)tintColor;
+- (void)setTintColor:(UIColor *)color;
+- (id)customView;
+- (double)width;
+- (void)setWidth:(double)width;
 - (id)initWithBarButtonSystemItem:(long)item target:(id)target
                            action:(SEL)action;
 - (id)title;
@@ -1802,6 +2175,12 @@ enum {
     id _leftBarButtonItem;
     id _rightBarButtonItem;
     id _backBarButtonItem;
+    id _backButtonTitle;
+    id _leftBarButtonItems;
+    id _rightBarButtonItems;
+    id _prompt;
+    id _searchController;
+    long _largeTitleDisplayMode;
     BOOL _hidesBackButton;
 }
 - (id)initWithTitle:(id)title;
@@ -1815,6 +2194,20 @@ enum {
 - (void)setBackBarButtonItem:(id)item;
 - (BOOL)hidesBackButton;
 - (void)setHidesBackButton:(BOOL)hidden;
+- (id)backButtonTitle;
+- (void)setBackButtonTitle:(id)title;
+- (NSArray *)leftBarButtonItems;
+- (void)setLeftBarButtonItems:(NSArray *)items;
+- (void)setLeftBarButtonItems:(NSArray *)items animated:(BOOL)animated;
+- (NSArray *)rightBarButtonItems;
+- (void)setRightBarButtonItems:(NSArray *)items;
+- (void)setRightBarButtonItems:(NSArray *)items animated:(BOOL)animated;
+- (id)prompt;
+- (void)setPrompt:(id)prompt;
+- (id)searchController;
+- (void)setSearchController:(id)controller;
+- (long)largeTitleDisplayMode;
+- (void)setLargeTitleDisplayMode:(long)mode;
 @end
 
 @interface UINavigationBar : UIView {
@@ -1825,6 +2218,11 @@ enum {
     UIView *_leftControl;
     UIView *_rightControl;
     UIColor *_barTintColor;
+    id _titleTextAttributes;
+    id _largeTitleTextAttributes;
+    long _barStyle;
+    BOOL _prefersLargeTitles;
+    BOOL _translucent;
 }
 - (void)setItems:(NSArray *)items animated:(BOOL)animated;
 - (NSArray *)items;
@@ -1833,6 +2231,16 @@ enum {
 - (UINavigationItem *)popNavigationItemAnimated:(BOOL)animated;
 - (void)setBarTintColor:(UIColor *)color;
 - (UIColor *)barTintColor;
+- (long)barStyle;
+- (void)setBarStyle:(long)style;
+- (BOOL)prefersLargeTitles;
+- (void)setPrefersLargeTitles:(BOOL)prefers;
+- (BOOL)isTranslucent;
+- (void)setTranslucent:(BOOL)translucent;
+- (id)titleTextAttributes;
+- (void)setTitleTextAttributes:(id)attributes;
+- (id)largeTitleTextAttributes;
+- (void)setLargeTitleTextAttributes:(id)attributes;
 @end
 
 @interface UIToolbar : UIView {
@@ -1867,14 +2275,21 @@ enum {
     id _leftButton;
     id _rightButton;
     UIPanGestureRecognizer *_interactivePopGesture;
+    id _delegate;
 }
+- (id)delegate;
+- (void)setDelegate:(id)delegate;
 - (id)initWithRootViewController:(UIViewController *)root;
+- (UINavigationBar *)navigationBar;
 - (UIViewController *)topViewController;
 - (NSArray *)viewControllers;
+- (void)setViewControllers:(NSArray *)controllers animated:(BOOL)animated;
 - (void)pushViewController:(UIViewController *)controller animated:(BOOL)animated;
 - (UIViewController *)popViewControllerAnimated:(BOOL)animated;
 - (void)setNavigationBarHidden:(BOOL)hidden animated:(BOOL)animated;
 - (BOOL)isNavigationBarHidden;
+- (BOOL)navigationBarHidden;
+- (void)setNavigationBarHidden:(BOOL)hidden;
 - (UIGestureRecognizer *)interactivePopGestureRecognizer;
 @end
 
@@ -1903,8 +2318,12 @@ enum {
     UIView *_tabContent;
     id _tabItemViews[16];
     id _tabItemLabels[16];
+    id _delegate;
 }
+- (id)delegate;
+- (void)setDelegate:(id)delegate;
 - (void)setViewControllers:(NSArray *)controllers;
+- (void)setViewControllers:(NSArray *)controllers animated:(BOOL)animated;
 - (NSArray *)viewControllers;
 - (void)setSelectedIndex:(int)index;
 - (int)selectedIndex;
@@ -1976,25 +2395,90 @@ enum {
     BOOL _refreshing;
     double _pullProgress;
     id _scrollView;
+    id _attributedTitle;
 }
 - (BOOL)isRefreshing;
 - (void)beginRefreshing;
 - (void)endRefreshing;
+- (id)attributedTitle;
+- (void)setAttributedTitle:(id)title;
+@end
+
+typedef enum {
+    UIButtonConfigurationCornerStyleFixed = 0,
+    UIButtonConfigurationCornerStyleDynamic = 1,
+    UIButtonConfigurationCornerStyleCapsule = 2,
+    UIButtonConfigurationCornerStyleLarge = 3
+} UIButtonConfigurationCornerStyle;
+
+@interface UIButtonConfiguration : NSObject {
+@public
+    id _title;
+    id _subtitle;
+    UIImage *_image;
+    UIColor *_baseForegroundColor;
+    UIColor *_baseBackgroundColor;
+    long _cornerStyle;
+    UIEdgeInsets _contentInsets;
+    double _imagePadding;
+}
++ (id)plainButtonConfiguration;
++ (id)filledButtonConfiguration;
++ (id)grayButtonConfiguration;
++ (id)tintedButtonConfiguration;
++ (id)borderedButtonConfiguration;
++ (id)borderlessButtonConfiguration;
++ (id)configurationWithTitle:(id)title;
+- (id)title;
+- (void)setTitle:(id)title;
+- (id)subtitle;
+- (void)setSubtitle:(id)subtitle;
+- (UIImage *)image;
+- (void)setImage:(UIImage *)image;
+- (UIColor *)baseForegroundColor;
+- (void)setBaseForegroundColor:(UIColor *)color;
+- (UIColor *)baseBackgroundColor;
+- (void)setBaseBackgroundColor:(UIColor *)color;
+- (long)cornerStyle;
+- (void)setCornerStyle:(long)style;
+- (UIEdgeInsets)contentInsets;
+- (void)setContentInsets:(UIEdgeInsets)insets;
+- (double)imagePadding;
+- (void)setImagePadding:(double)padding;
 @end
 
 @interface UIButton : UIControl {
 @public
     id _title;
     id _attributedTitle;
+    UIImage *_image;
+    UIImageView *_imageView;
     UIColor *_titleColor;
     UILabel *_titleLabel;
+    UIButtonConfiguration *_configuration;
+    UIEdgeInsets _contentEdgeInsets;
+    UIEdgeInsets _titleEdgeInsets;
+    UIEdgeInsets _imageEdgeInsets;
     BOOL _titleColorCustom;
 }
 + (id)buttonWithType:(int)type;
+- (UIButtonConfiguration *)configuration;
+- (void)setConfiguration:(UIButtonConfiguration *)configuration;
+- (void)setNeedsUpdateConfiguration;
+- (void)updateConfiguration;
+- (void)setImage:(UIImage *)image forState:(unsigned long)state;
+- (UIImage *)imageForState:(unsigned long)state;
+- (UIImageView *)imageView;
 - (void)setTitle:(id)title forState:(unsigned long)state;
 - (void)setAttributedTitle:(id)title forState:(unsigned long)state;
 - (id)attributedTitleForState:(unsigned long)state;
 - (void)setTitleColor:(UIColor *)color forState:(unsigned long)state;
+- (UIEdgeInsets)contentEdgeInsets;
+- (void)setContentEdgeInsets:(UIEdgeInsets)insets;
+- (UIEdgeInsets)titleEdgeInsets;
+- (void)setTitleEdgeInsets:(UIEdgeInsets)insets;
+- (UIEdgeInsets)imageEdgeInsets;
+- (void)setImageEdgeInsets:(UIEdgeInsets)insets;
 @end
 
 
@@ -2024,6 +2508,13 @@ enum {
     int _textAlignment;
     int _keyboardType;
     int _returnKeyType;
+    int _borderStyle;
+    BOOL _clearsOnBeginEditing;
+    id _leftView;
+    id _rightView;
+    long _leftViewMode;
+    long _rightViewMode;
+    long _clearButtonMode;
     id _delegate;
 }
 - (void)setText:(id)text;
@@ -2042,6 +2533,20 @@ enum {
 - (int)keyboardType;
 - (void)setReturnKeyType:(int)type;
 - (int)returnKeyType;
+- (int)borderStyle;
+- (void)setBorderStyle:(int)style;
+- (BOOL)clearsOnBeginEditing;
+- (void)setClearsOnBeginEditing:(BOOL)clears;
+- (id)leftView;
+- (void)setLeftView:(id)view;
+- (id)rightView;
+- (void)setRightView:(id)view;
+- (long)leftViewMode;
+- (void)setLeftViewMode:(long)mode;
+- (long)rightViewMode;
+- (void)setRightViewMode:(long)mode;
+- (long)clearButtonMode;
+- (void)setClearButtonMode:(long)mode;
 - (void)setDelegate:(id)delegate;
 - (id)delegate;
 - (BOOL)becomeFirstResponder;
@@ -2060,7 +2565,13 @@ enum {
     id _field;
     id _cancelButton;
     id _placeholder;
+    id _scopeButtonTitles;
+    id _barTintColor;
+    id _backgroundImage;
+    long _selectedScopeButtonIndex;
+    long _searchBarStyle;
     BOOL _showsCancelButton;
+    BOOL _showsScopeBar;
 }
 - (void)setDelegate:(id)delegate;
 - (id)delegate;
@@ -2070,7 +2581,54 @@ enum {
 - (void)setPlaceholder:(id)text;
 - (BOOL)showsCancelButton;
 - (void)setShowsCancelButton:(BOOL)shows animated:(BOOL)animated;
+- (NSArray *)scopeButtonTitles;
+- (void)setScopeButtonTitles:(NSArray *)titles;
+- (long)selectedScopeButtonIndex;
+- (void)setSelectedScopeButtonIndex:(long)index;
+- (BOOL)showsScopeBar;
+- (void)setShowsScopeBar:(BOOL)shows;
+- (UIColor *)barTintColor;
+- (void)setBarTintColor:(UIColor *)color;
+- (long)searchBarStyle;
+- (void)setSearchBarStyle:(long)style;
+- (UIImage *)backgroundImage;
+- (void)setBackgroundImage:(UIImage *)image;
 - (void)searchButtonClicked;
+@end
+
+@class UISearchController;
+@protocol UISearchResultsUpdating
+- (void)updateSearchResultsForSearchController:
+    (UISearchController *)searchController;
+@end
+
+@interface UISearchController : UIViewController {
+@public
+    id _searchResultsUpdater;
+    id _searchResultsController;
+    id _delegate;
+    UISearchBar *_searchBar;
+    BOOL _active;
+    BOOL _obscuresBackgroundDuringPresentation;
+    BOOL _dimsBackgroundDuringPresentation;
+    BOOL _hidesNavigationBarDuringPresentation;
+}
+- (id)initWithSearchResultsController:(UIViewController *)controller;
+- (UISearchBar *)searchBar;
+- (id)searchResultsUpdater;
+- (void)setSearchResultsUpdater:(id)updater;
+- (id)delegate;
+- (void)setDelegate:(id)delegate;
+- (UIViewController *)searchResultsController;
+- (BOOL)isActive;
+- (void)setActive:(BOOL)active;
+- (void)setActive:(BOOL)active animated:(BOOL)animated;
+- (BOOL)obscuresBackgroundDuringPresentation;
+- (void)setObscuresBackgroundDuringPresentation:(BOOL)value;
+- (BOOL)dimsBackgroundDuringPresentation;
+- (void)setDimsBackgroundDuringPresentation:(BOOL)value;
+- (BOOL)hidesNavigationBarDuringPresentation;
+- (void)setHidesNavigationBarDuringPresentation:(BOOL)value;
 @end
 
 
@@ -2387,6 +2945,9 @@ enum {
     CGPoint _offsetAnimationTarget;
     id _delegate;
     UIRefreshControl *_refreshControl;
+    long _keyboardDismissMode;
+    long _indicatorStyle;
+    BOOL _scrollsToTop;
 }
 - (CGSize)contentSize;
 - (void)setContentSize:(CGSize)size;
@@ -2420,6 +2981,12 @@ enum {
 - (void)setAlwaysBounceHorizontal:(BOOL)value;
 - (double)decelerationRate;
 - (void)setDecelerationRate:(double)rate;
+- (long)keyboardDismissMode;
+- (void)setKeyboardDismissMode:(long)mode;
+- (long)indicatorStyle;
+- (void)setIndicatorStyle:(long)style;
+- (BOOL)scrollsToTop;
+- (void)setScrollsToTop:(BOOL)scrolls;
 - (void)setDelegate:(id)delegate;
 - (id)delegate;
 - (BOOL)showsVerticalScrollIndicator;
@@ -2503,6 +3070,27 @@ enum {
     BOOL _editing;
     long _swipeRow;
     long _swipeSection;
+    long _separatorStyle;
+    UIColor *_separatorColor;
+    UIEdgeInsets _separatorInset;
+    id _tableHeaderView;
+    id _tableFooterView;
+    id _backgroundView;
+    id _prefetchDataSource;
+    id _dragDelegate;
+    id _dropDelegate;
+    BOOL _allowsSelection;
+    BOOL _allowsMultipleSelection;
+    BOOL _allowsSelectionDuringEditing;
+    BOOL _allowsMultipleSelectionDuringEditing;
+    BOOL _dragInteractionEnabled;
+    BOOL _cellLayoutMarginsFollowReadableWidth;
+    BOOL _insetsContentViewsToSafeArea;
+    double _estimatedRowHeight;
+    double _estimatedSectionHeaderHeight;
+    double _estimatedSectionFooterHeight;
+    double _sectionHeaderHeight;
+    double _sectionFooterHeight;
 }
 - (void)setDataSource:(id)dataSource;
 - (id)dataSource;
@@ -2520,6 +3108,50 @@ enum {
 - (BOOL)isEditing;
 - (void)deleteRowsAtIndexPaths:(NSArray *)indexPaths
            withRowAnimation:(long)animation;
+- (long)separatorStyle;
+- (void)setSeparatorStyle:(long)style;
+- (UIColor *)separatorColor;
+- (void)setSeparatorColor:(UIColor *)color;
+- (UIEdgeInsets)separatorInset;
+- (void)setSeparatorInset:(UIEdgeInsets)inset;
+- (UIView *)tableHeaderView;
+- (void)setTableHeaderView:(UIView *)view;
+- (UIView *)tableFooterView;
+- (void)setTableFooterView:(UIView *)view;
+- (UIView *)backgroundView;
+- (void)setBackgroundView:(UIView *)view;
+- (id)prefetchDataSource;
+- (void)setPrefetchDataSource:(id)source;
+- (id)dragDelegate;
+- (void)setDragDelegate:(id)delegate;
+- (id)dropDelegate;
+- (void)setDropDelegate:(id)delegate;
+- (UIRefreshControl *)refreshControl;
+- (void)setRefreshControl:(UIRefreshControl *)control;
+- (BOOL)allowsSelection;
+- (void)setAllowsSelection:(BOOL)allows;
+- (BOOL)allowsMultipleSelection;
+- (void)setAllowsMultipleSelection:(BOOL)allows;
+- (BOOL)allowsSelectionDuringEditing;
+- (void)setAllowsSelectionDuringEditing:(BOOL)allows;
+- (BOOL)allowsMultipleSelectionDuringEditing;
+- (void)setAllowsMultipleSelectionDuringEditing:(BOOL)allows;
+- (BOOL)dragInteractionEnabled;
+- (void)setDragInteractionEnabled:(BOOL)enabled;
+- (BOOL)cellLayoutMarginsFollowReadableWidth;
+- (void)setCellLayoutMarginsFollowReadableWidth:(BOOL)follows;
+- (BOOL)insetsContentViewsToSafeArea;
+- (void)setInsetsContentViewsToSafeArea:(BOOL)insets;
+- (double)estimatedRowHeight;
+- (void)setEstimatedRowHeight:(double)height;
+- (double)estimatedSectionHeaderHeight;
+- (void)setEstimatedSectionHeaderHeight:(double)height;
+- (double)estimatedSectionFooterHeight;
+- (void)setEstimatedSectionFooterHeight:(double)height;
+- (double)sectionHeaderHeight;
+- (void)setSectionHeaderHeight:(double)height;
+- (double)sectionFooterHeight;
+- (void)setSectionFooterHeight:(double)height;
 @end
 
 enum {
@@ -2606,6 +3238,13 @@ enum {
     id _cells;
     long _selectedItem;
     long _selectedSection;
+    id _prefetchDataSource;
+    id _dragDelegate;
+    id _dropDelegate;
+    id _backgroundView;
+    BOOL _allowsSelection;
+    BOOL _allowsMultipleSelection;
+    BOOL _dragInteractionEnabled;
 }
 - (id)initWithFrame:(CGRect)frame
  collectionViewLayout:(UICollectionViewLayout *)layout;
@@ -2620,6 +3259,24 @@ enum {
                                forIndexPath:(NSIndexPath *)indexPath;
 - (void)reloadData;
 - (void)handleTapAtPoint:(CGPoint)point;
+- (id)prefetchDataSource;
+- (void)setPrefetchDataSource:(id)source;
+- (id)dragDelegate;
+- (void)setDragDelegate:(id)delegate;
+- (id)dropDelegate;
+- (void)setDropDelegate:(id)delegate;
+- (UIView *)backgroundView;
+- (void)setBackgroundView:(UIView *)view;
+- (BOOL)allowsSelection;
+- (void)setAllowsSelection:(BOOL)allows;
+- (BOOL)allowsMultipleSelection;
+- (void)setAllowsMultipleSelection:(BOOL)allows;
+- (BOOL)dragInteractionEnabled;
+- (void)setDragInteractionEnabled:(BOOL)enabled;
+- (NSArray *)visibleCells;
+- (NSArray *)indexPathsForVisibleItems;
+- (long)numberOfSections;
+- (long)numberOfItemsInSection:(long)section;
 @end
 
 enum {
@@ -2721,6 +3378,9 @@ enum {
     completionHandler:(void (^)(BOOL success))completion;
 - (BOOL)isIdleTimerDisabled;
 - (void)setIdleTimerDisabled:(BOOL)disabled;
+- (void)registerForRemoteNotifications;
+- (void)unregisterForRemoteNotifications;
+- (BOOL)isRegisteredForRemoteNotifications;
 - (NSArray *)windows;
 - (UIWindow *)keyWindow;
 - (NSArray *)connectedScenes;
@@ -2771,18 +3431,40 @@ enum {
 - (BOOL)isMenuVisible;
 @end
 
+@class UISceneSession;
+
 @interface UIScene : NSObject {
 @public
     id _delegate;
+    id _session;
+    long _activationState;
 }
 - (void)setDelegate:(id)delegate;
 - (id)delegate;
+- (UISceneSession *)session;
+- (long)activationState;
 @end
 
-@interface UIWindowScene : UIScene
+@interface UIWindowScene : UIScene {
+@public
+    id _windows;
+}
+- (NSArray *)windows;
+- (UIWindow *)keyWindow;
+- (UIScreen *)screen;
+- (long)interfaceOrientation;
 @end
 
-@interface UISceneSession : NSObject
+@interface UISceneSession : NSObject {
+@public
+    id _persistentIdentifier;
+    id _role;
+    id _configuration;
+}
+- (id)persistentIdentifier;
+- (id)role;
+- (id)configuration;
+- (void)setConfiguration:(id)configuration;
 @end
 
 @interface UISceneConnectionOptions : NSObject
@@ -3205,6 +3887,39 @@ static int anim_delegates_pending(void)
     return presentation;
 }
 - (CALayer *)modelLayer { return self; }
+- (CGPoint)convertPoint:(CGPoint)point fromLayer:(CALayer *)layer
+{
+    (void)layer;
+    return point;
+}
+- (CGPoint)convertPoint:(CGPoint)point toLayer:(CALayer *)layer
+{
+    (void)layer;
+    return point;
+}
+- (CGRect)convertRect:(CGRect)rect fromLayer:(CALayer *)layer
+{
+    (void)layer;
+    return rect;
+}
+- (CGRect)convertRect:(CGRect)rect toLayer:(CALayer *)layer
+{
+    (void)layer;
+    return rect;
+}
+- (double)convertTime:(double)time fromLayer:(CALayer *)layer
+{
+    (void)layer;
+    return time;
+}
+- (double)convertTime:(double)time toLayer:(CALayer *)layer
+{
+    (void)layer;
+    return time;
+}
+@end
+
+@implementation CATransformLayer
 @end
 
 @implementation CAReplicatorLayer
@@ -3454,6 +4169,19 @@ double CACurrentMediaTime(void)
 @implementation CAAnimationGroup
 - (void)setAnimations:(NSArray *)animations { _animations = animations; }
 - (NSArray *)animations { return _animations; }
+@end
+
+@implementation CATransition
+- (id)type { return _type; }
+- (void)setType:(id)type { _type = type; }
+- (id)subtype { return _subtype; }
+- (void)setSubtype:(id)subtype { _subtype = subtype; }
+- (float)startProgress { return _startProgress; }
+- (void)setStartProgress:(float)progress { _startProgress = progress; }
+- (float)endProgress { return _endProgress; }
+- (void)setEndProgress:(float)progress { _endProgress = progress; }
+- (id)filter { return _filter; }
+- (void)setFilter:(id)filter { _filter = filter; }
 @end
 
 /* CATransaction groups layer changes and carries the animation duration and
@@ -3801,6 +4529,31 @@ NSString *const UITraitCollectionDidChangeNotification =
     if (_r != _g || _r != _b)
         return NO;
     if (white) *white = _r;
+    if (alpha) *alpha = _a;
+    return YES;
+}
+- (BOOL)getHue:(double *)hue saturation:(double *)saturation
+    brightness:(double *)brightness alpha:(double *)alpha
+{
+    double maximum = _r > _g ? (_r > _b ? _r : _b) : (_g > _b ? _g : _b);
+    double minimum = _r < _g ? (_r < _b ? _r : _b) : (_g < _b ? _g : _b);
+    double delta = maximum - minimum;
+    double h = 0;
+    if (delta > 0)
+    {
+        if (maximum == _r)
+            h = (_g - _b) / delta;
+        else if (maximum == _g)
+            h = 2 + (_b - _r) / delta;
+        else
+            h = 4 + (_r - _g) / delta;
+        h /= 6;
+        if (h < 0)
+            h += 1;
+    }
+    if (hue) *hue = h;
+    if (saturation) *saturation = maximum > 0 ? delta / maximum : 0;
+    if (brightness) *brightness = maximum;
     if (alpha) *alpha = _a;
     return YES;
 }
@@ -4338,6 +5091,17 @@ static int text_wrap_lines(const char *text, double max_width, UIFont *font,
     f->_name = descriptor ? descriptor->_name : nil;
     return f;
 }
++ (UIFont *)preferredFontForTextStyle:(id)style
+{
+    (void)style;
+    return [self systemFontOfSize:17];
+}
++ (UIFont *)preferredFontForTextStyle:(id)style
+              compatibleWithTraitCollection:(UITraitCollection *)traits
+{
+    (void)traits;
+    return [self preferredFontForTextStyle:style];
+}
 - (UIFontDescriptor *)fontDescriptor
 {
     UIFontDescriptor *descriptor = [[UIFontDescriptor alloc] init];
@@ -4372,6 +5136,70 @@ static int text_wrap_lines(const char *text, double max_width, UIFont *font,
 @end
 
 /* --------------------------------------------------------------- screens */
+
+NSString *UIDeviceOrientationDidChangeNotification;
+__attribute__((constructor)) static void iosim_ui_device_notification(void)
+{
+    UIDeviceOrientationDidChangeNotification =
+        @"UIDeviceOrientationDidChangeNotification";
+}
+
+@implementation UIDevice
++ (UIDevice *)currentDevice
+{
+    static UIDevice *device;
+    if (!device)
+        device = [[UIDevice alloc] init];
+    return device;
+}
+- (id)init
+{
+    self = [super init];
+    if (self)
+    {
+        _orientation = 1;
+        _batteryState = 0;
+        _batteryLevel = -1.0;
+    }
+    return self;
+}
+- (id)name { return @"iPhone"; }
+- (id)model { return @"iPhone"; }
+- (id)localizedModel { return @"iPhone"; }
+- (id)systemName { return @"iOS"; }
+- (id)systemVersion { return @"18.0"; }
+- (id)identifierForVendor
+{
+    static NSUUID *vendor;
+    if (!vendor)
+        vendor = [NSUUID UUID];
+    return vendor;
+}
+- (long)userInterfaceIdiom { return 0; }
+- (long)orientation { return _orientation; }
+- (void)setOrientation:(long)orientation { _orientation = orientation; }
+- (long)batteryState { return _batteryState; }
+- (double)batteryLevel { return _batteryLevel; }
+- (BOOL)isProximityMonitoringEnabled { return _proximityMonitoringEnabled; }
+- (void)setProximityMonitoringEnabled:(BOOL)enabled
+{
+    _proximityMonitoringEnabled = enabled;
+}
+- (BOOL)isMultitaskingSupported { return YES; }
+- (BOOL)isGeneratingDeviceOrientationNotifications
+{
+    return _generatingOrientationNotifications;
+}
+- (void)beginGeneratingDeviceOrientationNotifications
+{
+    _generatingOrientationNotifications = YES;
+}
+- (void)endGeneratingDeviceOrientationNotifications
+{
+    _generatingOrientationNotifications = NO;
+}
+- (void)playInputClick { }
+@end
 
 @implementation UIScreen
 + (UIScreen *)mainScreen
@@ -4898,6 +5726,9 @@ static NSLayoutConstraint *make_layout_constraint(id item1, long attr1,
         _action = action;
         _state = UIGestureRecognizerStatePossible;
         _enabled = YES;
+        _delaysTouchesBegan = YES;
+        _delaysTouchesEnded = YES;
+        _cancelsTouchesInView = YES;
     }
     return self;
 }
@@ -4911,14 +5742,66 @@ static NSLayoutConstraint *make_layout_constraint(id item1, long attr1,
 - (CGPoint)locationInView:(UIView *)view { (void)view; return _location; }
 - (void)setEnabled:(BOOL)enabled { _enabled = enabled; }
 - (BOOL)isEnabled { return _enabled; }
+- (id)delegate { return _delegate; }
+- (void)setDelegate:(id)delegate { _delegate = delegate; }
+- (void)requireGestureRecognizerToFail:(UIGestureRecognizer *)other
+{
+    (void)other;
+}
+- (unsigned long)numberOfTouches { return _numberOfTouches; }
+- (BOOL)delaysTouchesBegan { return _delaysTouchesBegan; }
+- (void)setDelaysTouchesBegan:(BOOL)delays
+{
+    _delaysTouchesBegan = delays;
+}
+- (BOOL)delaysTouchesEnded { return _delaysTouchesEnded; }
+- (void)setDelaysTouchesEnded:(BOOL)delays
+{
+    _delaysTouchesEnded = delays;
+}
+- (BOOL)cancelsTouchesInView { return _cancelsTouchesInView; }
+- (void)setCancelsTouchesInView:(BOOL)cancels
+{
+    _cancelsTouchesInView = cancels;
+}
+- (NSArray *)allowedTouchTypes { return _allowedTouchTypes; }
+- (void)setAllowedTouchTypes:(NSArray *)types
+{
+    _allowedTouchTypes = types;
+}
 @end
 
 @implementation UITapGestureRecognizer
+- (id)initWithTarget:(id)target action:(SEL)action
+{
+    self = [super initWithTarget:target action:action];
+    if (self)
+    {
+        _numberOfTapsRequired = 1;
+        _numberOfTouchesRequired = 1;
+    }
+    return self;
+}
 - (void)setNumberOfTapsRequired:(int)count { _numberOfTapsRequired = count; }
 - (int)numberOfTapsRequired { return _numberOfTapsRequired; }
+- (void)setNumberOfTouchesRequired:(int)count
+{
+    _numberOfTouchesRequired = count;
+}
+- (int)numberOfTouchesRequired { return _numberOfTouchesRequired; }
 @end
 
 @implementation UIPanGestureRecognizer
+- (id)initWithTarget:(id)target action:(SEL)action
+{
+    self = [super initWithTarget:target action:action];
+    if (self)
+    {
+        _minimumNumberOfTouches = 1;
+        _maximumNumberOfTouches = 2;
+    }
+    return self;
+}
 - (CGPoint)translationInView:(UIView *)view
 {
     (void)view;
@@ -4933,6 +5816,16 @@ static NSLayoutConstraint *make_layout_constraint(id item1, long attr1,
 {
     (void)view;
     _translation = translation;
+}
+- (unsigned long)minimumNumberOfTouches { return _minimumNumberOfTouches; }
+- (void)setMinimumNumberOfTouches:(unsigned long)count
+{
+    _minimumNumberOfTouches = count;
+}
+- (unsigned long)maximumNumberOfTouches { return _maximumNumberOfTouches; }
+- (void)setMaximumNumberOfTouches:(unsigned long)count
+{
+    _maximumNumberOfTouches = count;
 }
 @end
 
@@ -4961,8 +5854,20 @@ static NSLayoutConstraint *make_layout_constraint(id item1, long attr1,
 @end
 
 @implementation UISwipeGestureRecognizer
+- (id)initWithTarget:(id)target action:(SEL)action
+{
+    self = [super initWithTarget:target action:action];
+    if (self)
+        _numberOfTouchesRequired = 1;
+    return self;
+}
 - (void)setDirection:(long)direction { _direction = direction; }
 - (long)direction { return _direction; }
+- (void)setNumberOfTouchesRequired:(int)count
+{
+    _numberOfTouchesRequired = count;
+}
+- (int)numberOfTouchesRequired { return _numberOfTouchesRequired; }
 @end
 
 @implementation UILongPressGestureRecognizer
@@ -5363,11 +6268,20 @@ static CGPoint window_point_for_view(UIView *view, CGPoint point)
 {
     if (!view)
         return;
+    [view willMoveToSuperview:self];
     view->_superview = self;
     if (_subviewCount < 32)
         _subviews[_subviewCount++] = view;
+    [view didMoveToSuperview];
+    [self didAddSubview:view];
     [view tintColorDidChange];
 }
+- (void)didAddSubview:(UIView *)subview { (void)subview; }
+- (void)willRemoveSubview:(UIView *)subview { (void)subview; }
+- (void)willMoveToSuperview:(UIView *)newSuperview { (void)newSuperview; }
+- (void)didMoveToSuperview { }
+- (void)willMoveToWindow:(id)window { (void)window; }
+- (void)didMoveToWindow { }
 - (NSArray *)subviews
 {
     NSMutableArray *array = [NSMutableArray array];
@@ -5406,6 +6320,69 @@ static CGPoint window_point_for_view(UIView *view, CGPoint point)
 {
     return [NSArray arrayWithObjects:_interactions
                                 count:(unsigned long)_interactionCount];
+}
+- (BOOL)isAccessibilityElement { return _isAccessibilityElement; }
+- (void)setIsAccessibilityElement:(BOOL)element
+{
+    _isAccessibilityElement = element;
+}
+- (id)accessibilityLabel { return _accessibilityLabel; }
+- (void)setAccessibilityLabel:(id)label { _accessibilityLabel = label; }
+- (id)accessibilityIdentifier { return _accessibilityIdentifier; }
+- (void)setAccessibilityIdentifier:(id)identifier
+{
+    _accessibilityIdentifier = identifier;
+}
+- (id)accessibilityHint { return _accessibilityHint; }
+- (void)setAccessibilityHint:(id)hint { _accessibilityHint = hint; }
+- (id)accessibilityValue { return _accessibilityValue; }
+- (void)setAccessibilityValue:(id)value { _accessibilityValue = value; }
+- (unsigned long long)accessibilityTraits { return _accessibilityTraits; }
+- (void)setAccessibilityTraits:(unsigned long long)traits
+{
+    _accessibilityTraits = traits;
+}
+- (BOOL)accessibilityElementsHidden { return _accessibilityElementsHidden; }
+- (void)setAccessibilityElementsHidden:(BOOL)hidden
+{
+    _accessibilityElementsHidden = hidden;
+}
+- (BOOL)accessibilityViewIsModal { return _accessibilityViewIsModal; }
+- (void)setAccessibilityViewIsModal:(BOOL)modal
+{
+    _accessibilityViewIsModal = modal;
+}
+- (BOOL)shouldGroupAccessibilityChildren
+{
+    return _shouldGroupAccessibilityChildren;
+}
+- (void)setShouldGroupAccessibilityChildren:(BOOL)group
+{
+    _shouldGroupAccessibilityChildren = group;
+}
+- (NSArray *)accessibilityElements { return _accessibilityElements; }
+- (void)setAccessibilityElements:(NSArray *)elements
+{
+    _accessibilityElements = elements;
+}
+- (CGRect)accessibilityFrame
+{
+    if (_accessibilityFrame.size.width != 0 ||
+        _accessibilityFrame.size.height != 0)
+        return _accessibilityFrame;
+    CGRect frame = _frame;
+    UIView *parent = _superview;
+    while (parent)
+    {
+        frame.origin.x += parent->_frame.origin.x;
+        frame.origin.y += parent->_frame.origin.y;
+        parent = parent->_superview;
+    }
+    return frame;
+}
+- (void)setAccessibilityFrame:(CGRect)frame
+{
+    _accessibilityFrame = frame;
 }
 - (void)insertSubview:(UIView *)view atIndex:(long)index
 {
@@ -5458,6 +6435,8 @@ static CGPoint window_point_for_view(UIView *view, CGPoint point)
     if (!_superview)
         return;
     UIView *parent = (UIView *)_superview;
+    [parent willRemoveSubview:self];
+    [self willMoveToSuperview:nil];
     for (int i = 0; i < parent->_subviewCount; i++)
         if (parent->_subviews[i] == self)
         {
@@ -5467,6 +6446,7 @@ static CGPoint window_point_for_view(UIView *view, CGPoint point)
             break;
         }
     _superview = nil;
+    [self didMoveToSuperview];
 }
 - (CALayer *)layer { return _layer; }
 - (void)setHidden:(BOOL)hidden { _hidden = hidden; }
@@ -5480,6 +6460,21 @@ static CGPoint window_point_for_view(UIView *view, CGPoint point)
 - (void)setOpaque:(BOOL)opaque { _opaque = opaque; }
 - (long)contentMode { return _contentMode; }
 - (void)setContentMode:(long)mode { _contentMode = mode; }
+- (long)semanticContentAttribute { return _semanticContentAttribute; }
+- (void)setSemanticContentAttribute:(long)attribute
+{
+    _semanticContentAttribute = attribute;
+}
++ (long)userInterfaceLayoutDirectionForSemanticContentAttribute:(long)attribute
+{
+    (void)attribute;
+    return 0;
+}
+- (long)effectiveUserInterfaceLayoutDirection
+{
+    return [[self class] userInterfaceLayoutDirectionForSemanticContentAttribute:
+        _semanticContentAttribute];
+}
 - (BOOL)clearsContextBeforeDrawing { return _clearsContextBeforeDrawing; }
 - (void)setClearsContextBeforeDrawing:(BOOL)clears
 {
@@ -5499,8 +6494,15 @@ static CGPoint window_point_for_view(UIView *view, CGPoint point)
 }
 - (unsigned long)autoresizingMask { return _autoresizingMask; }
 - (void)setAutoresizingMask:(unsigned long)mask { _autoresizingMask = mask; }
-- (double)contentScaleFactor { return [[UIScreen mainScreen] scale]; }
-- (void)setContentScaleFactor:(double)scale { (void)scale; }
+- (double)contentScaleFactor
+{
+    return _contentScaleFactor > 0 ? _contentScaleFactor
+                                   : [[UIScreen mainScreen] scale];
+}
+- (void)setContentScaleFactor:(double)scale
+{
+    _contentScaleFactor = scale;
+}
 - (void)setAlpha:(double)alpha
 {
     if (g_animating && alpha != _alpha)
@@ -5521,6 +6523,17 @@ static CGPoint window_point_for_view(UIView *view, CGPoint point)
 }
 - (double)alpha { return _alpha; }
 - (id)superview { return _superview; }
+- (UIWindow *)window
+{
+    UIView *view = self;
+    while (view)
+    {
+        if ([view isKindOfClass:[UIWindow class]])
+            return (UIWindow *)view;
+        view = (UIView *)view->_superview;
+    }
+    return nil;
+}
 - (UIResponder *)nextResponder { return _superview; }
 - (CGAffineTransform)transform { return _transform; }
 - (void)setTransform:(CGAffineTransform)transform
@@ -5544,6 +6557,8 @@ static CGPoint window_point_for_view(UIView *view, CGPoint point)
 - (void)layoutSubviews { }
 - (void)drawRect:(CGRect)rect { (void)rect; }
 - (void)setNeedsLayout { _needsLayout = YES; }
+- (void)setNeedsDisplay { }
+- (void)setNeedsDisplayInRect:(CGRect)rect { (void)rect; }
 - (void)layoutIfNeeded
 {
     UIView *root = self;
@@ -5827,6 +6842,36 @@ static CGPoint window_point_for_view(UIView *view, CGPoint point)
         return;
     keyframe_add(start, duration, animations);
 }
++ (void)transitionWithView:(UIView *)view duration:(double)duration
+                   options:(unsigned long)options
+                animations:(void (^)(void))animations
+                completion:(void (^)(BOOL finished))completion
+{
+    (void)view;
+    (void)duration;
+    (void)options;
+    if (animations)
+        animations();
+    if (completion)
+        completion(YES);
+}
++ (void)transitionFromView:(UIView *)fromView toView:(UIView *)toView
+                  duration:(double)duration
+                   options:(unsigned long)options
+                completion:(void (^)(BOOL finished))completion
+{
+    (void)duration;
+    (void)options;
+    UIView *parent = [fromView superview];
+    if (parent && toView)
+    {
+        [toView setFrame:[fromView frame]];
+        [fromView removeFromSuperview];
+        [parent addSubview:toView];
+    }
+    if (completion)
+        completion(YES);
+}
 + (void)animateWithDuration:(double)duration animations:(void (^)(void))animations
 {
     [self animateWithDuration:duration delay:0.0 options:0
@@ -5871,20 +6916,71 @@ static CGPoint window_point_for_view(UIView *view, CGPoint point)
 }
 @end
 
+@implementation UIAccessibilityElement
+- (id)initWithAccessibilityContainer:(id)container
+{
+    self = [super init];
+    if (self)
+    {
+        _accessibilityContainer = container;
+        _isAccessibilityElement = YES;
+    }
+    return self;
+}
+- (id)accessibilityContainer { return _accessibilityContainer; }
+- (BOOL)isAccessibilityElement { return _isAccessibilityElement; }
+- (void)setIsAccessibilityElement:(BOOL)element
+{
+    _isAccessibilityElement = element;
+}
+- (id)accessibilityLabel { return _accessibilityLabel; }
+- (void)setAccessibilityLabel:(id)label { _accessibilityLabel = label; }
+- (id)accessibilityIdentifier { return _accessibilityIdentifier; }
+- (void)setAccessibilityIdentifier:(id)identifier
+{
+    _accessibilityIdentifier = identifier;
+}
+- (id)accessibilityHint { return _accessibilityHint; }
+- (void)setAccessibilityHint:(id)hint { _accessibilityHint = hint; }
+- (id)accessibilityValue { return _accessibilityValue; }
+- (void)setAccessibilityValue:(id)value { _accessibilityValue = value; }
+- (unsigned long long)accessibilityTraits { return _accessibilityTraits; }
+- (void)setAccessibilityTraits:(unsigned long long)traits
+{
+    _accessibilityTraits = traits;
+}
+- (CGRect)accessibilityFrame { return _accessibilityFrame; }
+- (void)setAccessibilityFrame:(CGRect)frame
+{
+    _accessibilityFrame = frame;
+}
+@end
+
 @implementation UILabel
 - (id)init
 {
     self = [super init];
     if (self)
+    {
         _numberOfLines = 1;
+        _accessibilityTraits = 64;
+    }
     return self;
 }
 - (id)initWithFrame:(CGRect)frame
 {
     self = [super initWithFrame:frame];
     if (self)
+    {
         _numberOfLines = 1;
+        _accessibilityTraits = 64;
+    }
     return self;
+}
+- (BOOL)isAccessibilityElement { return YES; }
+- (id)accessibilityLabel
+{
+    return _accessibilityLabel ? _accessibilityLabel : _text;
 }
 - (void)setText:(id)text { _text = text; _attributedText = nil; }
 - (id)text { return _text; }
@@ -5910,6 +7006,20 @@ static CGPoint window_point_for_view(UIView *view, CGPoint point)
 - (int)textAlignment { return _textAlignment; }
 - (void)setNumberOfLines:(int)n { _numberOfLines = n; }
 - (int)numberOfLines { return _numberOfLines; }
+- (long)lineBreakMode { return _lineBreakMode; }
+- (void)setLineBreakMode:(long)mode { _lineBreakMode = mode; }
+- (double)preferredMaxLayoutWidth { return _preferredMaxLayoutWidth; }
+- (void)setPreferredMaxLayoutWidth:(double)width
+{
+    _preferredMaxLayoutWidth = width;
+}
+- (BOOL)adjustsFontSizeToFitWidth { return _adjustsFontSizeToFitWidth; }
+- (void)setAdjustsFontSizeToFitWidth:(BOOL)adjusts
+{
+    _adjustsFontSizeToFitWidth = adjusts;
+}
+- (double)minimumScaleFactor { return _minimumScaleFactor; }
+- (void)setMinimumScaleFactor:(double)scale { _minimumScaleFactor = scale; }
 - (UIView *)hitTest:(CGPoint)point
 {
     (void)point;
@@ -6498,6 +7608,11 @@ static int iosim_text_press_tick(void)
     }
     return self;
 }
+- (BOOL)isAccessibilityElement { return YES; }
+- (id)accessibilityValue
+{
+    return _accessibilityValue ? _accessibilityValue : _text;
+}
 - (void)setText:(id)text { _text = text; }
 - (id)text { return _text; }
 - (void)setPlaceholder:(id)text { _placeholder = text; }
@@ -6514,6 +7629,23 @@ static int iosim_text_press_tick(void)
 - (int)keyboardType { return _keyboardType; }
 - (void)setReturnKeyType:(int)type { _returnKeyType = type; }
 - (int)returnKeyType { return _returnKeyType; }
+- (int)borderStyle { return _borderStyle; }
+- (void)setBorderStyle:(int)style { _borderStyle = style; }
+- (BOOL)clearsOnBeginEditing { return _clearsOnBeginEditing; }
+- (void)setClearsOnBeginEditing:(BOOL)clears
+{
+    _clearsOnBeginEditing = clears;
+}
+- (id)leftView { return _leftView; }
+- (void)setLeftView:(id)view { _leftView = view; }
+- (id)rightView { return _rightView; }
+- (void)setRightView:(id)view { _rightView = view; }
+- (long)leftViewMode { return _leftViewMode; }
+- (void)setLeftViewMode:(long)mode { _leftViewMode = mode; }
+- (long)rightViewMode { return _rightViewMode; }
+- (void)setRightViewMode:(long)mode { _rightViewMode = mode; }
+- (long)clearButtonMode { return _clearButtonMode; }
+- (void)setClearButtonMode:(long)mode { _clearButtonMode = mode; }
 - (void)setDelegate:(id)delegate { _delegate = delegate; }
 - (id)delegate { return _delegate; }
 - (BOOL)becomeFirstResponder
@@ -6749,6 +7881,28 @@ static int iosim_text_press_tick(void)
         [(UITextField *)_field setPlaceholder:text];
 }
 - (BOOL)showsCancelButton { return _showsCancelButton; }
+- (NSArray *)scopeButtonTitles { return _scopeButtonTitles; }
+- (void)setScopeButtonTitles:(NSArray *)titles
+{
+    _scopeButtonTitles = titles;
+}
+- (long)selectedScopeButtonIndex { return _selectedScopeButtonIndex; }
+- (void)setSelectedScopeButtonIndex:(long)index
+{
+    _selectedScopeButtonIndex = index;
+}
+- (BOOL)showsScopeBar { return _showsScopeBar; }
+- (void)setShowsScopeBar:(BOOL)shows
+{
+    _showsScopeBar = shows;
+    _needsLayout = YES;
+}
+- (UIColor *)barTintColor { return _barTintColor; }
+- (void)setBarTintColor:(UIColor *)color { _barTintColor = color; }
+- (long)searchBarStyle { return _searchBarStyle; }
+- (void)setSearchBarStyle:(long)style { _searchBarStyle = style; }
+- (UIImage *)backgroundImage { return _backgroundImage; }
+- (void)setBackgroundImage:(UIImage *)image { _backgroundImage = image; }
 - (void)setShowsCancelButton:(BOOL)shows animated:(BOOL)animated
 {
     (void)animated;
@@ -6793,6 +7947,73 @@ static int iosim_text_press_tick(void)
         [_delegate respondsToSelector:
             @selector(searchBarSearchButtonClicked:)])
         [_delegate searchBarSearchButtonClicked:self];
+}
+@end
+
+@implementation UISearchController
+- (id)initWithSearchResultsController:(UIViewController *)controller
+{
+    self = [super init];
+    if (self)
+    {
+        _searchResultsController = controller;
+        _searchBar = [[UISearchBar alloc] initWithFrame:
+            CGRectMake(0, 0, 320, 44)];
+        _obscuresBackgroundDuringPresentation = YES;
+        _hidesNavigationBarDuringPresentation = YES;
+    }
+    return self;
+}
+- (UISearchBar *)searchBar { return _searchBar; }
+- (id)searchResultsUpdater { return _searchResultsUpdater; }
+- (void)setSearchResultsUpdater:(id)updater
+{
+    _searchResultsUpdater = updater;
+}
+- (id)delegate { return _delegate; }
+- (void)setDelegate:(id)delegate { _delegate = delegate; }
+- (UIViewController *)searchResultsController
+{
+    return _searchResultsController;
+}
+- (BOOL)isActive { return _active; }
+- (void)setActive:(BOOL)active
+{
+    [self setActive:active animated:NO];
+}
+- (void)setActive:(BOOL)active animated:(BOOL)animated
+{
+    (void)animated;
+    _active = active;
+    if (_searchResultsUpdater &&
+        [_searchResultsUpdater respondsToSelector:
+            @selector(updateSearchResultsForSearchController:)])
+        [_searchResultsUpdater
+            updateSearchResultsForSearchController:self];
+}
+- (BOOL)obscuresBackgroundDuringPresentation
+{
+    return _obscuresBackgroundDuringPresentation;
+}
+- (void)setObscuresBackgroundDuringPresentation:(BOOL)value
+{
+    _obscuresBackgroundDuringPresentation = value;
+}
+- (BOOL)dimsBackgroundDuringPresentation
+{
+    return _dimsBackgroundDuringPresentation;
+}
+- (void)setDimsBackgroundDuringPresentation:(BOOL)value
+{
+    _dimsBackgroundDuringPresentation = value;
+}
+- (BOOL)hidesNavigationBarDuringPresentation
+{
+    return _hidesNavigationBarDuringPresentation;
+}
+- (void)setHidesNavigationBarDuringPresentation:(BOOL)value
+{
+    _hidesNavigationBarDuringPresentation = value;
 }
 @end
 
@@ -8145,6 +9366,12 @@ static void cg_to_bezier_applier(void *info, const CGPathElement *element)
 - (int)lineCap { return _lineCap; }
 - (void)setLineJoin:(int)join { _lineJoin = join; }
 - (int)lineJoin { return _lineJoin; }
+- (NSArray *)lineDashPattern { return _lineDashPattern; }
+- (void)setLineDashPattern:(NSArray *)pattern { _lineDashPattern = pattern; }
+- (double)lineDashPhase { return _lineDashPhase; }
+- (void)setLineDashPhase:(double)phase { _lineDashPhase = phase; }
+- (double)miterLimit { return _miterLimit; }
+- (void)setMiterLimit:(double)limit { _miterLimit = limit; }
 @end
 
 @implementation CAGradientLayer
@@ -8169,6 +9396,32 @@ static void cg_to_bezier_applier(void *info, const CGPathElement *element)
 - (CGPoint)endPoint { return _endPoint; }
 - (void)setType:(id)type { _type = type; }
 - (id)type { return _type; }
+@end
+
+@implementation CATextLayer
+- (id)init
+{
+    self = [super init];
+    if (self)
+    {
+        _fontSize = 36;
+        _foregroundColor = [UIColor whiteColor];
+        _alignmentMode = 0;
+    }
+    return self;
+}
+- (id)string { return _string; }
+- (void)setString:(id)string { _string = string; }
+- (id)font { return _font; }
+- (void)setFont:(id)font { _font = font; }
+- (double)fontSize { return _fontSize; }
+- (void)setFontSize:(double)size { _fontSize = size; }
+- (id)foregroundColor { return _foregroundColor; }
+- (void)setForegroundColor:(id)color { _foregroundColor = color; }
+- (long)alignmentMode { return _alignmentMode; }
+- (void)setAlignmentMode:(long)mode { _alignmentMode = mode; }
+- (BOOL)isWrapped { return _wrapped; }
+- (void)setWrapped:(BOOL)wrapped { _wrapped = wrapped; }
 @end
 
 /* ------------------------------------------------------------ image views */
@@ -8628,15 +9881,174 @@ static int g_status_bar_hidden_override = -1;
 static int g_status_bar_dirty;
 static int app_status_bar_hidden(void);
 
+@implementation UIPresentationController
+- (id)presentedViewController { return _presentedViewController; }
+- (id)presentingViewController { return _presentingViewController; }
+- (UIView *)containerView { return _containerView; }
+- (CGRect)frameOfPresentedViewInContainerView
+{
+    if (_containerView)
+        return _containerView->_frame;
+    return CGRectMake(0, 0, 390, 844);
+}
+@end
+
+@implementation UIPopoverPresentationController
+- (UIView *)sourceView { return _sourceView; }
+- (void)setSourceView:(UIView *)view { _sourceView = view; }
+- (CGRect)sourceRect { return _sourceRect; }
+- (void)setSourceRect:(CGRect)rect { _sourceRect = rect; }
+- (id)barButtonItem { return _barButtonItem; }
+- (void)setBarButtonItem:(id)item { _barButtonItem = item; }
+- (long)permittedArrowDirections { return _permittedArrowDirections; }
+- (void)setPermittedArrowDirections:(long)directions
+{
+    _permittedArrowDirections = directions;
+}
+- (id)delegate { return _delegate; }
+- (void)setDelegate:(id)delegate { _delegate = delegate; }
+- (UIEdgeInsets)popoverLayoutMargins { return _popoverLayoutMargins; }
+- (void)setPopoverLayoutMargins:(UIEdgeInsets)insets
+{
+    _popoverLayoutMargins = insets;
+}
+@end
+
+@implementation UISheetPresentationControllerDetent
++ (id)mediumDetent
+{
+    UISheetPresentationControllerDetent *detent = [[self alloc] init];
+    detent->_identifier = @"com.apple.UIKit.medium";
+    return detent;
+}
++ (id)largeDetent
+{
+    UISheetPresentationControllerDetent *detent = [[self alloc] init];
+    detent->_identifier = @"com.apple.UIKit.large";
+    return detent;
+}
++ (id)customDetentWithIdentifier:(id)identifier
+                        resolver:(double (^)(id))resolver
+{
+    (void)resolver;
+    UISheetPresentationControllerDetent *detent = [[self alloc] init];
+    detent->_identifier = identifier;
+    return detent;
+}
+- (id)identifier { return _identifier; }
+@end
+
+@implementation UISheetPresentationController
+- (NSArray *)detents
+{
+    if (!_detents)
+        _detents = @[ [UISheetPresentationControllerDetent largeDetent] ];
+    return _detents;
+}
+- (void)setDetents:(NSArray *)detents { _detents = detents; }
+- (BOOL)prefersGrabberVisible { return _prefersGrabberVisible; }
+- (void)setPrefersGrabberVisible:(BOOL)visible
+{
+    _prefersGrabberVisible = visible;
+}
+- (double)preferredCornerRadius { return _preferredCornerRadius; }
+- (void)setPreferredCornerRadius:(double)radius
+{
+    _preferredCornerRadius = radius;
+}
+- (id)largestUndimmedDetentIdentifier
+{
+    return _largestUndimmedDetentIdentifier;
+}
+- (void)setLargestUndimmedDetentIdentifier:(id)identifier
+{
+    _largestUndimmedDetentIdentifier = identifier;
+}
+- (BOOL)prefersScrollingExpandsWhenScrolledToEdge
+{
+    return _prefersScrollingExpandsWhenScrolledToEdge;
+}
+- (void)setPrefersScrollingExpandsWhenScrolledToEdge:(BOOL)expands
+{
+    _prefersScrollingExpandsWhenScrolledToEdge = expands;
+}
+@end
+
 @implementation UIViewController
 - (id)init
 {
     self = [super init];
     if (self)
+    {
         _modalPresentationStyle = -2; /* automatic: page sheet on iPhone */
+        _edgesForExtendedLayout = 15;
+        _automaticallyAdjustsScrollViewInsets = YES;
+    }
     return self;
 }
+- (unsigned long)edgesForExtendedLayout { return _edgesForExtendedLayout; }
+- (void)setEdgesForExtendedLayout:(unsigned long)edges
+{
+    _edgesForExtendedLayout = edges;
+}
+- (BOOL)extendedLayoutIncludesOpaqueBars
+{
+    return _extendedLayoutIncludesOpaqueBars;
+}
+- (void)setExtendedLayoutIncludesOpaqueBars:(BOOL)includes
+{
+    _extendedLayoutIncludesOpaqueBars = includes;
+}
+- (BOOL)automaticallyAdjustsScrollViewInsets
+{
+    return _automaticallyAdjustsScrollViewInsets;
+}
+- (void)setAutomaticallyAdjustsScrollViewInsets:(BOOL)adjusts
+{
+    _automaticallyAdjustsScrollViewInsets = adjusts;
+}
+- (BOOL)definesPresentationContext { return _definesPresentationContext; }
+- (void)setDefinesPresentationContext:(BOOL)defines
+{
+    _definesPresentationContext = defines;
+}
+- (BOOL)isModalInPresentation { return _modalInPresentation; }
+- (void)setModalInPresentation:(BOOL)modal { _modalInPresentation = modal; }
+- (id)restorationIdentifier { return _restorationIdentifier; }
+- (void)setRestorationIdentifier:(id)identifier
+{
+    _restorationIdentifier = identifier;
+}
+- (CGSize)preferredContentSize { return _preferredContentSize; }
+- (void)setPreferredContentSize:(CGSize)size
+{
+    _preferredContentSize = size;
+}
 - (id)title { return _title; }
+- (UIPopoverPresentationController *)popoverPresentationController
+{
+    if (!_popoverPresentationController)
+    {
+        _popoverPresentationController = [[UIPopoverPresentationController alloc] init];
+        ((UIPopoverPresentationController *)_popoverPresentationController)->_presentedViewController = self;
+    }
+    return _popoverPresentationController;
+}
+- (UISheetPresentationController *)sheetPresentationController
+{
+    if (!_sheetPresentationController)
+    {
+        _sheetPresentationController = [[UISheetPresentationController alloc] init];
+        ((UISheetPresentationController *)_sheetPresentationController)->_presentedViewController = self;
+    }
+    return _sheetPresentationController;
+}
+- (UIPresentationController *)presentationController
+{
+    if (_modalPresentationStyle == 7)
+        return [self sheetPresentationController];
+    return [self popoverPresentationController];
+}
 - (long)modalPresentationStyle { return _modalPresentationStyle; }
 - (void)setModalPresentationStyle:(long)style
 {
@@ -8650,6 +10062,13 @@ static int app_status_bar_hidden(void);
         nav->_navTitleLabel->_text = title;
 }
 - (id)navigationController { return _navigationController; }
+- (id)tabBarController
+{
+    if (_parentController &&
+        [_parentController isKindOfClass:[UITabBarController class]])
+        return _parentController;
+    return nil;
+}
 - (id)tabBarItem
 {
     if (!_tabBarItem)
@@ -8722,6 +10141,13 @@ static int app_status_bar_hidden(void);
 }
 - (UIView *)viewIfLoaded { return _view; }
 - (BOOL)isViewLoaded { return _view != nil; }
+- (void)loadViewIfNeeded { (void)[self view]; }
+- (BOOL)isBeingPresented { return NO; }
+- (BOOL)isBeingDismissed { return NO; }
+- (BOOL)isMovingFromParentViewController { return NO; }
+- (BOOL)isMovingToParentViewController { return NO; }
+- (BOOL)shouldAutorotate { return YES; }
+- (unsigned long)supportedInterfaceOrientations { return 0x1e; }
 - (UIViewController *)parentViewController { return _parentController; }
 - (NSArray *)children
 {
@@ -8758,6 +10184,27 @@ static int app_status_bar_hidden(void);
 - (void)willMoveToParentViewController:(UIViewController *)parent
 {
     (void)parent;
+}
+- (void)transitionFromViewController:(UIViewController *)fromViewController
+                    toViewController:(UIViewController *)toViewController
+                            duration:(double)duration
+                             options:(unsigned long)options
+                          animations:(void (^)(void))animations
+                          completion:(void (^)(BOOL finished))completion
+{
+    (void)duration;
+    (void)options;
+    UIView *fromView = [fromViewController view];
+    UIView *toView = [toViewController view];
+    if (toView)
+        [toView setFrame:[fromView frame]];
+    if (animations)
+        animations();
+    [fromView removeFromSuperview];
+    if (toView)
+        [[self view] addSubview:toView];
+    if (completion)
+        completion(YES);
 }
 - (void)didMoveToParentViewController:(UIViewController *)parent
 {
@@ -8818,6 +10265,16 @@ static int app_status_bar_hidden(void);
     if (completion)
         completion();
 }
+- (void)showViewController:(UIViewController *)controller sender:(id)sender
+{
+    (void)sender;
+    [self presentViewController:controller animated:YES completion:nil];
+}
+- (void)showDetailViewController:(UIViewController *)controller sender:(id)sender
+{
+    (void)sender;
+    [self presentViewController:controller animated:YES completion:nil];
+}
 - (void)dismissViewControllerAnimated:(BOOL)animated
                            completion:(void (^)(void))completion
 {
@@ -8855,12 +10312,17 @@ static int app_status_bar_hidden(void);
     UIAlertAction *action = [[self alloc] init];
     action->_title = title;
     action->_style = style;
+    action->_enabled = YES;
     if (handler)
         action->_handler = (void (^)(UIAlertAction *))_Block_copy(handler);
     return action;
 }
 - (id)title { return _title; }
 - (long)style { return _style; }
+- (UIImage *)image { return _image; }
+- (void)setImage:(UIImage *)image { _image = image; }
+- (BOOL)isEnabled { return _enabled; }
+- (void)setEnabled:(BOOL)enabled { _enabled = enabled; }
 - (void (^)(UIAlertAction *))handler { return _handler; }
 @end
 
@@ -8885,6 +10347,26 @@ static int app_status_bar_hidden(void);
 {
     return [NSArray arrayWithObjects:_actions
                                 count:(unsigned long)_actionCount];
+}
+- (NSArray *)textFields
+{
+    return _textFields ? _textFields : @[];
+}
+- (void)addTextFieldWithConfigurationHandler:
+    (void (^)(UITextField *textField))configurationHandler
+{
+    if (!_textFields)
+        _textFields = [NSMutableArray array];
+    UITextField *field = [[UITextField alloc]
+        initWithFrame:CGRectMake(0, 0, 240, 30)];
+    if (configurationHandler)
+        configurationHandler(field);
+    [(NSMutableArray *)_textFields addObject:field];
+}
+- (UIAlertAction *)preferredAction { return _preferredAction; }
+- (void)setPreferredAction:(UIAlertAction *)action
+{
+    _preferredAction = action;
 }
 @end
 
@@ -9217,6 +10699,24 @@ static id bar_system_title(long item)
     return [self initWithTitle:bar_system_title(item) style:UIBarButtonItemStylePlain
                         target:target action:action];
 }
+- (id)initWithImage:(UIImage *)image style:(long)style target:(id)target
+             action:(SEL)action
+{
+    self = [self initWithTitle:nil style:style target:target action:action];
+    if (self)
+        _image = image;
+    return self;
+}
+- (id)initWithCustomView:(UIView *)view
+{
+    self = [super init];
+    if (self)
+    {
+        _customView = view;
+        _enabled = YES;
+    }
+    return self;
+}
 - (id)title { return _title; }
 - (void)setTitle:(id)title { _title = title; }
 - (long)style { return _style; }
@@ -9224,6 +10724,13 @@ static id bar_system_title(long item)
 - (long)systemItem { return _systemItem; }
 - (id)target { return _target; }
 - (SEL)action { return _action; }
+- (UIImage *)image { return _image; }
+- (void)setImage:(UIImage *)image { _image = image; }
+- (UIColor *)tintColor { return _tintColor; }
+- (void)setTintColor:(UIColor *)color { _tintColor = color; }
+- (id)customView { return _customView; }
+- (double)width { return _width; }
+- (void)setWidth:(double)width { _width = width; }
 - (void)setEnabled:(BOOL)enabled { _enabled = enabled; }
 - (BOOL)isEnabled { return _enabled; }
 @end
@@ -9240,13 +10747,67 @@ static id bar_system_title(long item)
 - (id)title { return _title; }
 - (void)setTitle:(id)title { _title = title; }
 - (id)leftBarButtonItem { return _leftBarButtonItem; }
-- (void)setLeftBarButtonItem:(id)item { _leftBarButtonItem = item; }
+- (void)setLeftBarButtonItem:(id)item
+{
+    _leftBarButtonItem = item;
+    _leftBarButtonItems = nil;
+}
 - (id)rightBarButtonItem { return _rightBarButtonItem; }
-- (void)setRightBarButtonItem:(id)item { _rightBarButtonItem = item; }
+- (void)setRightBarButtonItem:(id)item
+{
+    _rightBarButtonItem = item;
+    _rightBarButtonItems = nil;
+}
 - (id)backBarButtonItem { return _backBarButtonItem; }
 - (void)setBackBarButtonItem:(id)item { _backBarButtonItem = item; }
 - (BOOL)hidesBackButton { return _hidesBackButton; }
 - (void)setHidesBackButton:(BOOL)hidden { _hidesBackButton = hidden; }
+- (id)backButtonTitle { return _backButtonTitle; }
+- (void)setBackButtonTitle:(id)title { _backButtonTitle = title; }
+- (NSArray *)leftBarButtonItems
+{
+    if (_leftBarButtonItems)
+        return _leftBarButtonItems;
+    return _leftBarButtonItem ? @[ _leftBarButtonItem ] : @[];
+}
+- (void)setLeftBarButtonItems:(NSArray *)items
+{
+    _leftBarButtonItems = items;
+    _leftBarButtonItem = [items count] ? [items objectAtIndex:0] : nil;
+}
+- (void)setLeftBarButtonItems:(NSArray *)items animated:(BOOL)animated
+{
+    (void)animated;
+    [self setLeftBarButtonItems:items];
+}
+- (NSArray *)rightBarButtonItems
+{
+    if (_rightBarButtonItems)
+        return _rightBarButtonItems;
+    return _rightBarButtonItem ? @[ _rightBarButtonItem ] : @[];
+}
+- (void)setRightBarButtonItems:(NSArray *)items
+{
+    _rightBarButtonItems = items;
+    _rightBarButtonItem = [items count] ? [items objectAtIndex:0] : nil;
+}
+- (void)setRightBarButtonItems:(NSArray *)items animated:(BOOL)animated
+{
+    (void)animated;
+    [self setRightBarButtonItems:items];
+}
+- (id)prompt { return _prompt; }
+- (void)setPrompt:(id)prompt { _prompt = prompt; }
+- (id)searchController { return _searchController; }
+- (void)setSearchController:(id)controller
+{
+    _searchController = controller;
+}
+- (long)largeTitleDisplayMode { return _largeTitleDisplayMode; }
+- (void)setLargeTitleDisplayMode:(long)mode
+{
+    _largeTitleDisplayMode = mode;
+}
 @end
 
 static UIControl *nav_bar_control(UIBarButtonItem *item, CGRect frame,
@@ -9260,7 +10821,18 @@ static UIControl *nav_bar_control(UIBarButtonItem *item, CGRect frame,
     label->_textColor = [UIColor colorWithRed:0.04 green:0.52 blue:1.0
                                           alpha:1.0];
     label->_textAlignment = alignRight ? 2 : 0;
-    [control addSubview:label];
+    if (item && item->_image)
+    {
+        label->_text = nil;
+        UIImageView *imageView = [[UIImageView alloc] initWithImage:item->_image];
+        double size = 24;
+        imageView->_frame = CGRectMake(alignRight ? frame.size.width - size : 0,
+                                       (frame.size.height - size) / 2,
+                                       size, size);
+        [control addSubview:imageView];
+    }
+    else
+        [control addSubview:label];
     if (item)
         [control addTarget:item->_target action:item->_action
          forControlEvents:UIControlEventTouchUpInside];
@@ -9432,6 +11004,30 @@ static int iosim_nav_tick(void)
 }
 
 @implementation UINavigationController
+- (id)delegate { return _delegate; }
+- (void)setDelegate:(id)delegate { _delegate = delegate; }
+- (void)notifyShowViewController:(UIViewController *)controller
+                        animated:(BOOL)animated
+                            will:(BOOL)will
+{
+    SEL selector = will
+        ? @selector(navigationController:willShowViewController:animated:)
+        : @selector(navigationController:didShowViewController:animated:);
+    if (_delegate && [(_delegate) respondsToSelector:selector])
+    {
+        if (will)
+            [_delegate navigationController:self
+                     willShowViewController:controller animated:animated];
+        else
+            [_delegate navigationController:self
+                      didShowViewController:controller animated:animated];
+    }
+}
+- (UINavigationBar *)navigationBar
+{
+    (void)[self view];
+    return (UINavigationBar *)_navBar;
+}
 - (id)initWithRootViewController:(UIViewController *)root
 {
     self = [super init];
@@ -9455,6 +11051,25 @@ static int iosim_nav_tick(void)
         [a addObject:_stack[i]];
     return a;
 }
+- (void)setViewControllers:(NSArray *)controllers animated:(BOOL)animated
+{
+    (void)animated;
+    _stackCount = 0;
+    for (unsigned long i = 0;
+         controllers && i < [controllers count] && _stackCount < 32; i++)
+    {
+        UIViewController *controller = [controllers objectAtIndex:i];
+        _stack[_stackCount++] = controller;
+        controller->_navigationController = self;
+    }
+    if (_viewLoaded)
+    {
+        UIViewController *top = [self topViewController];
+        [self notifyShowViewController:top animated:animated will:YES];
+        [self installTopViewController];
+        [self notifyShowViewController:top animated:animated will:NO];
+    }
+}
 - (void)loadView
 {
     _view = [[UIView alloc] initWithFrame:[[UIScreen mainScreen] bounds]];
@@ -9467,7 +11082,7 @@ static int iosim_nav_tick(void)
         unsigned color = 0x05070d;
         _view->_backgroundColor = [UIColor colorWithRed:0.02 green:0.03 blue:0.05
                                                   alpha:1.0];
-        _navBar = [[UIView alloc] initWithFrame:CGRectMake(0, 0, bounds.size.width,
+        _navBar = [[UINavigationBar alloc] initWithFrame:CGRectMake(0, 0, bounds.size.width,
                                                           100)];
         _navBar->_backgroundColor = [UIColor colorWithRed:0.04 green:0.055
                                                     blue:0.10 alpha:1.0];
@@ -9600,9 +11215,11 @@ static int iosim_nav_tick(void)
     }
     controller->_navigationController = self;
     _stack[_stackCount++] = controller;
+    [self notifyShowViewController:controller animated:animated will:YES];
     [self installTopViewController];
     [controller viewWillAppear:NO];
     [controller viewDidAppear:NO];
+    [self notifyShowViewController:controller animated:animated will:NO];
 }
 - (UIViewController *)popViewControllerAnimated:(BOOL)animated
 {
@@ -9614,9 +11231,11 @@ static int iosim_nav_tick(void)
     [old viewDidDisappear:NO];
     _stackCount--;
     UIViewController *top = [self topViewController];
+    [self notifyShowViewController:top animated:animated will:YES];
     [self installTopViewController];
     [top viewWillAppear:NO];
     [top viewDidAppear:NO];
+    [self notifyShowViewController:top animated:animated will:NO];
     return old;
 }
 - (void)setNavigationBarHidden:(BOOL)hidden animated:(BOOL)animated
@@ -9633,6 +11252,11 @@ static int iosim_nav_tick(void)
     }
 }
 - (BOOL)isNavigationBarHidden { return _navBarHidden; }
+- (BOOL)navigationBarHidden { return _navBarHidden; }
+- (void)setNavigationBarHidden:(BOOL)hidden
+{
+    [self setNavigationBarHidden:hidden animated:NO];
+}
 @end
 
 /* ------------------------------------------------------- standalone bars */
@@ -9716,6 +11340,26 @@ static UIControl *toolbar_text_control(UIBarButtonItem *item, CGRect frame,
         _backgroundColor = color;
 }
 - (UIColor *)barTintColor { return _barTintColor; }
+- (long)barStyle { return _barStyle; }
+- (void)setBarStyle:(long)style { _barStyle = style; }
+- (BOOL)prefersLargeTitles { return _prefersLargeTitles; }
+- (void)setPrefersLargeTitles:(BOOL)prefers
+{
+    _prefersLargeTitles = prefers;
+    [self setNeedsLayout];
+}
+- (BOOL)isTranslucent { return _translucent; }
+- (void)setTranslucent:(BOOL)translucent { _translucent = translucent; }
+- (id)titleTextAttributes { return _titleTextAttributes; }
+- (void)setTitleTextAttributes:(id)attributes
+{
+    _titleTextAttributes = attributes;
+}
+- (id)largeTitleTextAttributes { return _largeTitleTextAttributes; }
+- (void)setLargeTitleTextAttributes:(id)attributes
+{
+    _largeTitleTextAttributes = attributes;
+}
 - (void)layoutSubviews
 {
     double width = _frame.size.width;
@@ -9867,6 +11511,8 @@ static UIControl *toolbar_text_control(UIBarButtonItem *item, CGRect frame,
         _selectedIndex = 0;
     return self;
 }
+- (id)delegate { return _delegate; }
+- (void)setDelegate:(id)delegate { _delegate = delegate; }
 - (void)setViewControllers:(NSArray *)controllers
 {
     int count = controllers ? (int)[controllers count] : 0;
@@ -9881,6 +11527,11 @@ static UIControl *toolbar_text_control(UIBarButtonItem *item, CGRect frame,
         _selectedIndex = count > 0 ? count - 1 : 0;
     if (_view)
         [self buildTabBar];
+}
+- (void)setViewControllers:(NSArray *)controllers animated:(BOOL)animated
+{
+    (void)animated;
+    [self setViewControllers:controllers];
 }
 - (NSArray *)viewControllers
 {
@@ -10023,6 +11674,10 @@ static UIControl *toolbar_text_control(UIBarButtonItem *item, CGRect frame,
     }
     printf("[tab] selected %d\n", _selectedIndex);
     fflush(0);
+    if (_delegate && selected &&
+        [_delegate respondsToSelector:
+            @selector(tabBarController:didSelectViewController:)])
+        [_delegate tabBarController:self didSelectViewController:selected];
     [self updateTabAppearance];
 }
 - (int)selectedIndex { return _selectedIndex; }
@@ -10165,7 +11820,82 @@ static UIControl *toolbar_text_control(UIBarButtonItem *item, CGRect frame,
 }
 @end
 
+@implementation UIButtonConfiguration
++ (id)plainButtonConfiguration { return [[self alloc] init]; }
++ (id)filledButtonConfiguration
+{
+    UIButtonConfiguration *config = [[self alloc] init];
+    config->_baseBackgroundColor = [UIColor systemBlueColor];
+    config->_baseForegroundColor = [UIColor whiteColor];
+    config->_cornerStyle = UIButtonConfigurationCornerStyleDynamic;
+    return config;
+}
++ (id)grayButtonConfiguration
+{
+    UIButtonConfiguration *config = [[self alloc] init];
+    config->_baseBackgroundColor = [UIColor colorWithWhite:0.5 alpha:0.25];
+    config->_cornerStyle = UIButtonConfigurationCornerStyleDynamic;
+    return config;
+}
++ (id)tintedButtonConfiguration
+{
+    UIButtonConfiguration *config = [[self alloc] init];
+    config->_baseForegroundColor = [UIColor systemBlueColor];
+    config->_cornerStyle = UIButtonConfigurationCornerStyleDynamic;
+    return config;
+}
++ (id)borderedButtonConfiguration
+{
+    UIButtonConfiguration *config = [[self alloc] init];
+    config->_cornerStyle = UIButtonConfigurationCornerStyleDynamic;
+    return config;
+}
++ (id)borderlessButtonConfiguration { return [[self alloc] init]; }
++ (id)configurationWithTitle:(id)title
+{
+    UIButtonConfiguration *config = [[self alloc] init];
+    config->_title = title;
+    return config;
+}
+- (id)title { return _title; }
+- (void)setTitle:(id)title { _title = title; }
+- (id)subtitle { return _subtitle; }
+- (void)setSubtitle:(id)subtitle { _subtitle = subtitle; }
+- (UIImage *)image { return _image; }
+- (void)setImage:(UIImage *)image { _image = image; }
+- (UIColor *)baseForegroundColor { return _baseForegroundColor; }
+- (void)setBaseForegroundColor:(UIColor *)color { _baseForegroundColor = color; }
+- (UIColor *)baseBackgroundColor { return _baseBackgroundColor; }
+- (void)setBaseBackgroundColor:(UIColor *)color { _baseBackgroundColor = color; }
+- (long)cornerStyle { return _cornerStyle; }
+- (void)setCornerStyle:(long)style { _cornerStyle = style; }
+- (UIEdgeInsets)contentInsets { return _contentInsets; }
+- (void)setContentInsets:(UIEdgeInsets)insets { _contentInsets = insets; }
+- (double)imagePadding { return _imagePadding; }
+- (void)setImagePadding:(double)padding { _imagePadding = padding; }
+@end
+
 @implementation UIButton
+- (UIButtonConfiguration *)configuration { return _configuration; }
+- (void)setConfiguration:(UIButtonConfiguration *)configuration
+{
+    _configuration = configuration;
+    if (!configuration)
+        return;
+    [self setTitle:configuration->_title forState:0];
+    if (configuration->_image)
+        [self setImage:configuration->_image forState:0];
+    if (configuration->_baseForegroundColor)
+        [self setTitleColor:configuration->_baseForegroundColor forState:0];
+    if (configuration->_baseBackgroundColor)
+        [self setBackgroundColor:configuration->_baseBackgroundColor];
+    if (configuration->_cornerStyle == UIButtonConfigurationCornerStyleCapsule)
+        [[self layer] setCornerRadius:_frame.size.height / 2];
+    else if (configuration->_cornerStyle != 0)
+        [[self layer] setCornerRadius:8];
+}
+- (void)setNeedsUpdateConfiguration { }
+- (void)updateConfiguration { }
 - (id)initWithFrame:(CGRect)frame
 {
     self = [super initWithFrame:frame];
@@ -10179,6 +11909,8 @@ static UIControl *toolbar_text_control(UIBarButtonItem *item, CGRect frame,
         label->_textColor = [self tintColor];
         [self addSubview:label];
         _titleLabel = label;
+        _isAccessibilityElement = YES;
+        _accessibilityTraits = 1;
     }
     return self;
 }
@@ -10189,10 +11921,68 @@ static UIControl *toolbar_text_control(UIBarButtonItem *item, CGRect frame,
 }
 - (void)layoutTitle
 {
+    double inset = 0;
+    if (_imageView && _image)
+    {
+        double iw = _image->_width / 3.0;
+        double ih = _image->_height / 3.0;
+        if (iw <= 0 || ih <= 0)
+        {
+            iw = _image->_width;
+            ih = _image->_height;
+        }
+        double x = 0;
+        if (_title && [_title length] > 0)
+        {
+            x = 12;
+            inset = iw + 20;
+        }
+        else
+        {
+            x = (_frame.size.width - iw) / 2;
+        }
+        _imageView->_frame = CGRectMake(x, (_frame.size.height - ih) / 2,
+                                        iw, ih);
+    }
     if (_titleLabel)
-        _titleLabel->_frame = CGRectMake(0, 0, _frame.size.width,
-                                         _frame.size.height);
+        _titleLabel->_frame = CGRectMake(inset + _contentEdgeInsets.left,
+                                         _contentEdgeInsets.top,
+                                         _frame.size.width - inset -
+                                             _contentEdgeInsets.left -
+                                             _contentEdgeInsets.right,
+                                         _frame.size.height -
+                                             _contentEdgeInsets.top -
+                                             _contentEdgeInsets.bottom);
 }
+- (UIEdgeInsets)contentEdgeInsets { return _contentEdgeInsets; }
+- (void)setContentEdgeInsets:(UIEdgeInsets)insets
+{
+    _contentEdgeInsets = insets;
+    [self layoutTitle];
+}
+- (UIEdgeInsets)titleEdgeInsets { return _titleEdgeInsets; }
+- (void)setTitleEdgeInsets:(UIEdgeInsets)insets { _titleEdgeInsets = insets; }
+- (UIEdgeInsets)imageEdgeInsets { return _imageEdgeInsets; }
+- (void)setImageEdgeInsets:(UIEdgeInsets)insets { _imageEdgeInsets = insets; }
+- (void)setImage:(UIImage *)image forState:(unsigned long)state
+{
+    (void)state;
+    _image = image;
+    if (!_imageView)
+    {
+        _imageView = [[UIImageView alloc] initWithImage:image];
+        [self addSubview:_imageView];
+    }
+    else
+        [_imageView setImage:image];
+    [self layoutTitle];
+}
+- (UIImage *)imageForState:(unsigned long)state
+{
+    (void)state;
+    return _image;
+}
+- (UIImageView *)imageView { return _imageView; }
 - (void)setFrame:(CGRect)frame
 {
     [super setFrame:frame];
@@ -10411,6 +12201,15 @@ static double clamp_scroll(double value, double low, double high);
 - (void)setAlwaysBounceHorizontal:(BOOL)value { _alwaysBounceHorizontal = value; }
 - (double)decelerationRate { return _decelerationRate; }
 - (void)setDecelerationRate:(double)rate { _decelerationRate = rate; }
+- (long)keyboardDismissMode { return _keyboardDismissMode; }
+- (void)setKeyboardDismissMode:(long)mode
+{
+    _keyboardDismissMode = mode;
+}
+- (long)indicatorStyle { return _indicatorStyle; }
+- (void)setIndicatorStyle:(long)style { _indicatorStyle = style; }
+- (BOOL)scrollsToTop { return _scrollsToTop; }
+- (void)setScrollsToTop:(BOOL)scrolls { _scrollsToTop = scrolls; }
 - (BOOL)showsVerticalScrollIndicator { return _showsVerticalScrollIndicator; }
 - (void)setShowsVerticalScrollIndicator:(BOOL)shows
 { _showsVerticalScrollIndicator = shows; }
@@ -10468,6 +12267,8 @@ static double clamp_scroll(double value, double low, double high);
             scroll->_contentOffset.y = 0;
     }
 }
+- (id)attributedTitle { return _attributedTitle; }
+- (void)setAttributedTitle:(id)title { _attributedTitle = title; }
 @end
 
 /* ------------------------------------------------------------ table views */
@@ -10681,6 +12482,11 @@ static int table_can_edit_row(UITableView *table, long section, long row)
         _selectedSection = -1;
         _swipeRow = -1;
         _swipeSection = -1;
+        _separatorStyle = 1;
+        _allowsSelection = YES;
+        _dragInteractionEnabled = YES;
+        _cellLayoutMarginsFollowReadableWidth = YES;
+        _insetsContentViewsToSafeArea = YES;
     }
     return self;
 }
@@ -10709,6 +12515,104 @@ static int table_can_edit_row(UITableView *table, long section, long row)
     [self updateContentSize];
 }
 - (double)rowHeight { return _rowHeight; }
+- (long)separatorStyle { return _separatorStyle; }
+- (void)setSeparatorStyle:(long)style { _separatorStyle = style; }
+- (UIColor *)separatorColor { return _separatorColor; }
+- (void)setSeparatorColor:(UIColor *)color { _separatorColor = color; }
+- (UIEdgeInsets)separatorInset { return _separatorInset; }
+- (void)setSeparatorInset:(UIEdgeInsets)inset { _separatorInset = inset; }
+- (UIView *)tableHeaderView { return _tableHeaderView; }
+- (void)setTableHeaderView:(UIView *)view { _tableHeaderView = view; }
+- (UIView *)tableFooterView { return _tableFooterView; }
+- (void)setTableFooterView:(UIView *)view { _tableFooterView = view; }
+- (UIView *)backgroundView { return _backgroundView; }
+- (void)setBackgroundView:(UIView *)view { _backgroundView = view; }
+- (id)prefetchDataSource { return _prefetchDataSource; }
+- (void)setPrefetchDataSource:(id)source { _prefetchDataSource = source; }
+- (id)dragDelegate { return _dragDelegate; }
+- (void)setDragDelegate:(id)delegate { _dragDelegate = delegate; }
+- (id)dropDelegate { return _dropDelegate; }
+- (void)setDropDelegate:(id)delegate { _dropDelegate = delegate; }
+- (UIRefreshControl *)refreshControl { return _refreshControl; }
+- (void)setRefreshControl:(UIRefreshControl *)control
+{
+    [super setRefreshControl:control];
+}
+- (BOOL)allowsSelection { return _allowsSelection; }
+- (void)setAllowsSelection:(BOOL)allows { _allowsSelection = allows; }
+- (BOOL)allowsMultipleSelection { return _allowsMultipleSelection; }
+- (void)setAllowsMultipleSelection:(BOOL)allows
+{
+    _allowsMultipleSelection = allows;
+}
+- (BOOL)allowsSelectionDuringEditing
+{
+    return _allowsSelectionDuringEditing;
+}
+- (void)setAllowsSelectionDuringEditing:(BOOL)allows
+{
+    _allowsSelectionDuringEditing = allows;
+}
+- (BOOL)allowsMultipleSelectionDuringEditing
+{
+    return _allowsMultipleSelectionDuringEditing;
+}
+- (void)setAllowsMultipleSelectionDuringEditing:(BOOL)allows
+{
+    _allowsMultipleSelectionDuringEditing = allows;
+}
+- (BOOL)dragInteractionEnabled { return _dragInteractionEnabled; }
+- (void)setDragInteractionEnabled:(BOOL)enabled
+{
+    _dragInteractionEnabled = enabled;
+}
+- (BOOL)cellLayoutMarginsFollowReadableWidth
+{
+    return _cellLayoutMarginsFollowReadableWidth;
+}
+- (void)setCellLayoutMarginsFollowReadableWidth:(BOOL)follows
+{
+    _cellLayoutMarginsFollowReadableWidth = follows;
+}
+- (BOOL)insetsContentViewsToSafeArea
+{
+    return _insetsContentViewsToSafeArea;
+}
+- (void)setInsetsContentViewsToSafeArea:(BOOL)insets
+{
+    _insetsContentViewsToSafeArea = insets;
+}
+- (double)estimatedRowHeight { return _estimatedRowHeight; }
+- (void)setEstimatedRowHeight:(double)height
+{
+    _estimatedRowHeight = height;
+}
+- (double)estimatedSectionHeaderHeight
+{
+    return _estimatedSectionHeaderHeight;
+}
+- (void)setEstimatedSectionHeaderHeight:(double)height
+{
+    _estimatedSectionHeaderHeight = height;
+}
+- (double)estimatedSectionFooterHeight
+{
+    return _estimatedSectionFooterHeight;
+}
+- (void)setEstimatedSectionFooterHeight:(double)height
+{
+    _estimatedSectionFooterHeight = height;
+}
+- (double)sectionHeaderHeight { return _sectionHeaderHeight; }
+- (void)setSectionHeaderHeight:(double)height
+{
+    _sectionHeaderHeight = height;
+}
+- (double)sectionFooterHeight { return _sectionFooterHeight; }
+- (void)setSectionFooterHeight:(double)height
+{
+    _sectionFooterHeight = height;
+}
 - (void)reloadData
 {
     _needsReload = NO;
@@ -10992,9 +12896,57 @@ static int collection_columns(double width, double itemW, double interitem,
         _cells = [NSMutableArray array];
         _selectedItem = -1;
         _selectedSection = -1;
+        _allowsSelection = YES;
+        _dragInteractionEnabled = YES;
         [self setBackgroundColor:[UIColor clearColor]];
     }
     return self;
+}
+- (id)prefetchDataSource { return _prefetchDataSource; }
+- (void)setPrefetchDataSource:(id)source { _prefetchDataSource = source; }
+- (id)dragDelegate { return _dragDelegate; }
+- (void)setDragDelegate:(id)delegate { _dragDelegate = delegate; }
+- (id)dropDelegate { return _dropDelegate; }
+- (void)setDropDelegate:(id)delegate { _dropDelegate = delegate; }
+- (UIView *)backgroundView { return _backgroundView; }
+- (void)setBackgroundView:(UIView *)view { _backgroundView = view; }
+- (BOOL)allowsSelection { return _allowsSelection; }
+- (void)setAllowsSelection:(BOOL)allows { _allowsSelection = allows; }
+- (BOOL)allowsMultipleSelection { return _allowsMultipleSelection; }
+- (void)setAllowsMultipleSelection:(BOOL)allows
+{
+    _allowsMultipleSelection = allows;
+}
+- (BOOL)dragInteractionEnabled { return _dragInteractionEnabled; }
+- (void)setDragInteractionEnabled:(BOOL)enabled
+{
+    _dragInteractionEnabled = enabled;
+}
+- (NSArray *)visibleCells
+{
+    NSMutableArray *cells = [NSMutableArray array];
+    for (unsigned long i = 0; i < [_cells count]; i++)
+    {
+        id cell = [_cells objectAtIndex:i];
+        if (cell != [NSNull null])
+            [cells addObject:cell];
+    }
+    return cells;
+}
+- (NSArray *)indexPathsForVisibleItems { return @[]; }
+- (long)numberOfSections { return 1; }
+- (long)numberOfItemsInSection:(long)section
+{
+    (void)section;
+    if (_dataSource &&
+        [_dataSource respondsToSelector:
+            @selector(collectionView:numberOfItemsInSection:)])
+    {
+        SEL sel = @selector(collectionView:numberOfItemsInSection:);
+        return ((long (*)(id, void *, id, long))objc_msgSend)(
+            _dataSource, (void *)sel, self, 0);
+    }
+    return 0;
 }
 - (void)setDataSource:(id)dataSource { _dataSource = dataSource; }
 - (id)dataSource { return _dataSource; }
@@ -11971,7 +13923,15 @@ static int context_menu_handle_tap(int px, int py)
 {
     self = [self initWithFrame:[[UIScreen mainScreen] bounds]];
     if (self)
+    {
         _windowScene = scene;
+        if (scene)
+        {
+            if (!scene->_windows)
+                scene->_windows = [NSMutableArray array];
+            [(NSMutableArray *)scene->_windows addObject:self];
+        }
+    }
     return self;
 }
 - (UIWindowScene *)windowScene { return (UIWindowScene *)_windowScene; }
@@ -12843,6 +14803,9 @@ int iosim_ui_appearance_tick(void)
 }
 - (BOOL)isIdleTimerDisabled { return _idleTimerDisabled; }
 - (void)setIdleTimerDisabled:(BOOL)disabled { _idleTimerDisabled = disabled; }
+- (void)registerForRemoteNotifications { }
+- (void)unregisterForRemoteNotifications { }
+- (BOOL)isRegisteredForRemoteNotifications { return NO; }
 - (NSArray *)windows
 {
     if (g_keyWindow)
@@ -13079,18 +15042,56 @@ static void pasteboard_path(char *out, unsigned long cap)
 
 /* ---------------------------------------------------------------- scenes */
 
+@implementation UISceneConnectionOptions
+@end
+
 @implementation UIScene
 - (void)setDelegate:(id)delegate { _delegate = delegate; }
 - (id)delegate { return _delegate; }
+- (UISceneSession *)session
+{
+    if (!_session)
+        _session = [[UISceneSession alloc] init];
+    return _session;
+}
+- (long)activationState { return _activationState; }
 @end
 
 @implementation UIWindowScene
+- (NSArray *)windows
+{
+    if (!_windows)
+        _windows = [NSMutableArray array];
+    return _windows;
+}
+- (UIWindow *)keyWindow
+{
+    if (g_keyWindow && g_keyWindow->_windowScene == self)
+        return g_keyWindow;
+    return nil;
+}
+- (UIScreen *)screen { return [UIScreen mainScreen]; }
+- (long)interfaceOrientation { return 1; }
 @end
 
 @implementation UISceneSession
-@end
-
-@implementation UISceneConnectionOptions
+- (id)persistentIdentifier
+{
+    if (!_persistentIdentifier)
+        _persistentIdentifier = @"iosim-scene-session";
+    return _persistentIdentifier;
+}
+- (id)role
+{
+    if (!_role)
+        _role = UIWindowSceneSessionRoleApplication;
+    return _role;
+}
+- (id)configuration { return _configuration; }
+- (void)setConfiguration:(id)configuration
+{
+    _configuration = configuration;
+}
 @end
 
 @implementation UISceneConfiguration
@@ -14463,6 +16464,35 @@ static void render_layer(CALayer *layer, double parentX, double parentY,
                           layer_key_value(sl, "strokeEnd", sl->_strokeEnd),
                           sl->_lineCap);
     }
+    else if ([layer isKindOfClass:[CATextLayer class]])
+    {
+        CATextLayer *tl = (CATextLayer *)layer;
+        const char *text = string_cstr(tl->_string);
+        if (text && *text && w > 0 && h > 0)
+        {
+            double points = tl->_fontSize;
+            int style = IOSIM_FONT_REGULAR;
+            if (tl->_font && [tl->_font isKindOfClass:[UIFont class]])
+            {
+                UIFont *font = (UIFont *)tl->_font;
+                points = font->_size;
+                style = font->_bold ? IOSIM_FONT_BOLD : IOSIM_FONT_REGULAR;
+            }
+            int ascent = 0, descent = 0, lineHeight = 0;
+            iosim_fb_font_metrics(style, points, scale, &ascent, &descent,
+                                  &lineHeight);
+            int width = iosim_fb_font_text_width(text, style, points, scale);
+            int tx = x;
+            if (tl->_alignmentMode == 1)
+                tx = x + w - width;
+            else if (tl->_alignmentMode == 2)
+                tx = x + (w - width) / 2;
+            unsigned color = tl->_foregroundColor
+                ? color_rgb((UIColor *)tl->_foregroundColor) : 0xffffff;
+            iosim_fb_font_text(tx, y + ascent, text, style, points, scale,
+                               color);
+        }
+    }
 
     if ([layer isKindOfClass:[CAReplicatorLayer class]])
     {
@@ -15501,7 +17531,12 @@ static void render_view(UIView *view, double originX, double originY,
         int ascent = 0, descent = 0, lineHeight = 0;
         iosim_fb_font_metrics(style, points, scale, &ascent, &descent,
                               &lineHeight);
-        int tx = x;
+        if (field->_borderStyle != 0)
+        {
+            int radius = field->_borderStyle == 3 ? (int)(8 * scale) : 0;
+            iosim_fb_fill_round_rect(x, y, w, h, radius, 0x1c1c1e);
+        }
+        int tx = x + (field->_borderStyle != 0 ? (int)(8 * scale) : 0);
         int baseline = y + (h - lineHeight) / 2 + ascent;
         unsigned color = field->_textColor ? color_rgb(field->_textColor)
                                            : 0xffffff;
