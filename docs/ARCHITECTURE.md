@@ -879,8 +879,19 @@ from `contentInset` (and the always-bounce flags); the same bounds feed
 to the nearest page on the scrollable axis before the delegate's
 `scrollViewWillEndDragging:withVelocity:targetContentOffset:` sees the target.
 The drag delegate also receives begin, scroll and end callbacks, and
-`isDragging`/`isDecelerating`/`isTracking` report state. Tap, pan and swipe
-`UIGestureRecognizer` subclasses deliver target actions.
+`isDragging`/`isDecelerating`/`isTracking` report state. Tap, pan, swipe,
+pinch and rotation `UIGestureRecognizer` subclasses deliver target actions.
+Two-finger `pinchN`/`rotateN` FIFO records carry both finger points (the
+centroid in x/y, the other finger through `iosim_event_second_point`). The
+window hit-tests the centroid, sends `Began`/`Changed`/`Ended` to every
+pinch and rotation recognizer on the ancestor chain with the measured
+distance ratio and angle delta, and lets a zooming `UIScrollView` on that
+chain follow the same scale. `UIScrollView` zooming applies a scale
+transform to the delegate's `viewForZoomingInScrollView:` view, resizes
+`contentSize`, and keeps the content point under the bounds center fixed
+across `setZoomScale:`, `zoomToRect:` and interactive pinches; the renderer
+composites any non-identity view transform (rotation, scale or translation)
+through an offscreen pass.
 `UILongPressGestureRecognizer` records the down point and time, lets the
 window's per-frame tick fire `Began` once `minimumPressDuration` elapses,
 sends `Changed` with each move while the press is active, ends it on lift and

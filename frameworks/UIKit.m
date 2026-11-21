@@ -56,6 +56,7 @@ extern void iosim_fb_font_metrics(int style, double size_pt, double scale,
                                   int *line_height);
 extern int  iosim_fb_present(const char *path);
 extern int  iosim_event_next(int *type, int *x, int *y);
+extern void iosim_event_second_point(int *x, int *y);
 extern int  iosim_event_open(void);
 extern void iosim_fb_set_opacity(double opacity);
 extern int iosim_fb_push_clip(int x, int y, int w, int h);
@@ -631,6 +632,26 @@ typedef enum {
 - (CGPoint)translationInView:(UIView *)view;
 - (CGPoint)velocityInView:(UIView *)view;
 - (void)setTranslation:(CGPoint)translation inView:(UIView *)view;
+@end
+
+@interface UIPinchGestureRecognizer : UIGestureRecognizer {
+@public
+    double _scale;
+    double _velocity;
+}
+- (double)scale;
+- (void)setScale:(double)scale;
+- (double)velocity;
+@end
+
+@interface UIRotationGestureRecognizer : UIGestureRecognizer {
+@public
+    double _rotation;
+    double _velocity;
+}
+- (double)rotation;
+- (void)setRotation:(double)rotation;
+- (double)velocity;
 @end
 
 @interface UISwipeGestureRecognizer : UIGestureRecognizer {
@@ -1499,6 +1520,13 @@ enum {
     CGSize _contentSize;
     CGPoint _contentOffset;
     UIEdgeInsets _contentInset;
+    double _zoomScale;
+    double _minimumZoomScale;
+    double _maximumZoomScale;
+    double _pinchStartZoom;
+    UIView *_zoomView;
+    CGSize _zoomBaseSize;
+    BOOL _zoomViewResolved;
     BOOL _scrollEnabled;
     BOOL _showsVerticalScrollIndicator;
     BOOL _showsHorizontalScrollIndicator;
@@ -1525,6 +1553,18 @@ enum {
 - (CGSize)contentSize;
 - (void)setContentSize:(CGSize)size;
 - (CGPoint)contentOffset;
+- (double)zoomScale;
+- (void)setZoomScale:(double)scale;
+- (void)setZoomScale:(double)scale animated:(BOOL)animated;
+- (double)minimumZoomScale;
+- (void)setMinimumZoomScale:(double)scale;
+- (double)maximumZoomScale;
+- (void)setMaximumZoomScale:(double)scale;
+- (void)zoomToRect:(CGRect)rect animated:(BOOL)animated;
+- (BOOL)isZooming;
+- (BOOL)isZoomBouncing;
+- (void)beginPinchZoom;
+- (void)applyPinchScale:(double)factor;
 - (void)setContentOffset:(CGPoint)offset;
 - (void)setContentOffset:(CGPoint)offset animated:(BOOL)animated;
 - (UIEdgeInsets)contentInset;
@@ -1761,6 +1801,15 @@ enum {
     UIGestureRecognizer *_longPress;
     CGPoint _pressStartPoint;
     double _pressStartTime;
+    id _twoFingerTargets[8];
+    int _twoFingerTargetCount;
+    double _pinchStartDistance;
+    double _pinchStartAngle;
+    double _pinchLastDistance;
+    double _pinchLastAngle;
+    double _pinchLastTime;
+    BOOL _pinchRotationOnly;
+    UIScrollView *_pinchScroll;
 }
 - (id)initWithWindowScene:(UIWindowScene *)scene;
 - (void)setRootViewController:(UIViewController *)controller;
@@ -1770,6 +1819,10 @@ enum {
 - (void)dispatchTouchMoveX:(int)x y:(int)y;
 - (void)dispatchTouchUpX:(int)x y:(int)y;
 - (int)tickGestureRecognizers;
+- (void)beginTwoFingerX1:(double)x1 y1:(double)y1 x2:(double)x2 y2:(double)y2
+           rotationOnly:(BOOL)rotationOnly;
+- (void)moveTwoFingerX1:(double)x1 y1:(double)y1 x2:(double)x2 y2:(double)y2;
+- (void)endTwoFingerX1:(double)x1 y1:(double)y1 x2:(double)x2 y2:(double)y2;
 - (void)makeKeyAndVisible;
 + (UIWindow *)keyWindow;
 @end
@@ -3006,6 +3059,25 @@ static NSLayoutConstraint *make_layout_constraint(id item1, long attr1,
     (void)view;
     _translation = translation;
 }
+@end
+
+@implementation UIPinchGestureRecognizer
+- (id)initWithTarget:(id)target action:(SEL)action
+{
+    self = [super initWithTarget:target action:action];
+    if (self)
+        _scale = 1.0;
+    return self;
+}
+- (double)scale { return _scale; }
+- (void)setScale:(double)scale { _scale = scale; }
+- (double)velocity { return _velocity; }
+@end
+
+@implementation UIRotationGestureRecognizer
+- (double)rotation { return _rotation; }
+- (void)setRotation:(double)rotation { _rotation = rotation; }
+- (double)velocity { return _velocity; }
 @end
 
 @implementation UISwipeGestureRecognizer
@@ -7158,6 +7230,8 @@ static void scroll_anim_remove(UIScrollView *scroll);
 static void scroll_stop_for_touch(UIScrollView *scroll);
 static void scroll_finish_deceleration(UIScrollView *scroll);
 
+static double clamp_scroll(double value, double low, double high);
+
 @implementation UIScrollView
 - (id)initWithFrame:(CGRect)frame
 {
@@ -7169,6 +7243,9 @@ static void scroll_finish_deceleration(UIScrollView *scroll);
         _showsVerticalScrollIndicator = YES;
         _bounces = YES;
         _decelerationRate = 0.998;
+        _zoomScale = 1.0;
+        _minimumZoomScale = 1.0;
+        _maximumZoomScale = 1.0;
     }
     return self;
 }
@@ -7202,6 +7279,108 @@ static void scroll_finish_deceleration(UIScrollView *scroll);
 }
 - (UIEdgeInsets)contentInset { return _contentInset; }
 - (void)setContentInset:(UIEdgeInsets)insets { _contentInset = insets; }
+- (double)zoomScale { return _zoomScale; }
+- (double)minimumZoomScale { return _minimumZoomScale; }
+- (void)setMinimumZoomScale:(double)scale { _minimumZoomScale = scale; }
+- (double)maximumZoomScale { return _maximumZoomScale; }
+- (void)setMaximumZoomScale:(double)scale { _maximumZoomScale = scale; }
+- (BOOL)isZooming { return _pinchStartZoom > 0; }
+- (BOOL)isZoomBouncing { return NO; }
+- (UIView *)zoomDelegateView
+{
+    id delegate = _delegate;
+    if (delegate && [delegate respondsToSelector:
+                        @selector(viewForZoomingInScrollView:)])
+        return ((UIView * (*)(id, SEL, id))objc_msgSend)(
+            delegate, @selector(viewForZoomingInScrollView:), self);
+    return nil;
+}
+- (void)applyZoomScale:(double)scale
+{
+    if (_minimumZoomScale > 0 && scale < _minimumZoomScale)
+        scale = _minimumZoomScale;
+    if (_maximumZoomScale > 0 && scale > _maximumZoomScale)
+        scale = _maximumZoomScale;
+    UIView *zoomView = [self zoomDelegateView];
+    if (!zoomView)
+        zoomView = _zoomView;
+    if (!zoomView)
+        return;
+    if (!_zoomViewResolved || _zoomView != zoomView)
+    {
+        _zoomView = zoomView;
+        _zoomBaseSize = zoomView->_frame.size;
+        _zoomViewResolved = YES;
+    }
+    double oldScale = _zoomScale > 0 ? _zoomScale : 1.0;
+    double baseCenterX = _zoomBaseSize.width / 2;
+    double baseCenterY = _zoomBaseSize.height / 2;
+    double pointX = (_contentOffset.x + _frame.size.width / 2 - baseCenterX) /
+                        oldScale + baseCenterX;
+    double pointY = (_contentOffset.y + _frame.size.height / 2 - baseCenterY) /
+                        oldScale + baseCenterY;
+    _zoomScale = scale;
+    zoomView->_transform = CGAffineTransformMakeScale(scale, scale);
+    _contentSize = CGSizeMake(_zoomBaseSize.width * scale,
+                              _zoomBaseSize.height * scale);
+    double maxX = _contentSize.width - _frame.size.width;
+    double maxY = _contentSize.height - _frame.size.height;
+    if (maxX < 0)
+        maxX = 0;
+    if (maxY < 0)
+        maxY = 0;
+    _contentOffset.x = clamp_scroll(
+        baseCenterX + (pointX - baseCenterX) * scale -
+            _frame.size.width / 2, 0, maxX);
+    _contentOffset.y = clamp_scroll(
+        baseCenterY + (pointY - baseCenterY) * scale -
+            _frame.size.height / 2, 0, maxY);
+    _needsLayout = YES;
+    zoomView->_needsLayout = YES;
+}
+- (void)setZoomScale:(double)scale { [self applyZoomScale:scale]; }
+- (void)setZoomScale:(double)scale animated:(BOOL)animated
+{
+    (void)animated;
+    [self applyZoomScale:scale];
+}
+- (void)zoomToRect:(CGRect)rect animated:(BOOL)animated
+{
+    (void)animated;
+    double sx = rect.size.width > 0 ? _frame.size.width / rect.size.width
+                                    : _zoomScale;
+    double sy = rect.size.height > 0 ? _frame.size.height / rect.size.height
+                                     : _zoomScale;
+    double scale = sx < sy ? sx : sy;
+    [self applyZoomScale:scale];
+    double maxX = _contentSize.width - _frame.size.width;
+    double maxY = _contentSize.height - _frame.size.height;
+    if (maxX < 0)
+        maxX = 0;
+    if (maxY < 0)
+        maxY = 0;
+    double baseCenterX = _zoomBaseSize.width / 2;
+    double baseCenterY = _zoomBaseSize.height / 2;
+    _contentOffset.x = clamp_scroll(
+        baseCenterX +
+            (rect.origin.x + rect.size.width / 2 - baseCenterX) * _zoomScale -
+            _frame.size.width / 2, 0, maxX);
+    _contentOffset.y = clamp_scroll(
+        baseCenterY +
+            (rect.origin.y + rect.size.height / 2 - baseCenterY) * _zoomScale -
+            _frame.size.height / 2, 0, maxY);
+    _needsLayout = YES;
+}
+- (void)beginPinchZoom
+{
+    _pinchStartZoom = _zoomScale > 0 ? _zoomScale : 1.0;
+}
+- (void)applyPinchScale:(double)factor
+{
+    if (_pinchStartZoom <= 0)
+        _pinchStartZoom = _zoomScale > 0 ? _zoomScale : 1.0;
+    [self applyZoomScale:_pinchStartZoom * factor];
+}
 - (BOOL)isScrollEnabled { return _scrollEnabled; }
 - (void)setScrollEnabled:(BOOL)enabled { _scrollEnabled = enabled; }
 - (BOOL)isPagingEnabled { return _pagingEnabled; }
@@ -8593,6 +8772,146 @@ int iosim_scroll_tick(void)
     [self endTouchAtPoint:point cancelled:NO];
     _touchHit = nil;
 }
+/* Two-finger gestures bypass the single-touch path: the centroid hit-tests
+ * to a view and every pinch/rotation recognizer on its ancestor chain gets
+ * Began/Changed/Ended with the measured distance and angle. A zooming
+ * UIScrollView on the chain follows the same scale. */
+static double two_finger_distance(double x1, double y1, double x2, double y2)
+{
+    double dx = x2 - x1;
+    double dy = y2 - y1;
+    return __builtin_sqrt(dx * dx + dy * dy);
+}
+
+static double two_finger_angle(double x1, double y1, double x2, double y2)
+{
+    return __builtin_atan2(y2 - y1, x2 - x1);
+}
+
+- (void)beginTwoFingerX1:(double)x1 y1:(double)y1 x2:(double)x2 y2:(double)y2
+           rotationOnly:(BOOL)rotationOnly
+{
+    _twoFingerTargetCount = 0;
+    _pinchScroll = 0;
+    _pinchRotationOnly = rotationOnly;
+    _pinchStartDistance = two_finger_distance(x1, y1, x2, y2);
+    if (_pinchStartDistance < 1.0)
+        _pinchStartDistance = 1.0;
+    _pinchStartAngle = two_finger_angle(x1, y1, x2, y2);
+    _pinchLastDistance = _pinchStartDistance;
+    _pinchLastAngle = _pinchStartAngle;
+    _pinchLastTime = iosim_now();
+    CGPoint centroid = CGPointMake((x1 + x2) / 2, (y1 + y2) / 2);
+    UIView *hit = [self hitTest:centroid];
+    for (UIView *v = hit; v; v = [v superview])
+    {
+        if (!_pinchScroll && [v isKindOfClass:[UIScrollView class]])
+        {
+            UIScrollView *scroll = (UIScrollView *)v;
+            if ([scroll zoomDelegateView])
+            {
+                _pinchScroll = scroll;
+                [scroll beginPinchZoom];
+            }
+        }
+        for (int i = 0; i < v->_gestureRecognizerCount; i++)
+        {
+            UIGestureRecognizer *g = v->_gestureRecognizers[i];
+            if (!g || !g->_enabled || _twoFingerTargetCount >= 8)
+                continue;
+            BOOL pinch = [g isKindOfClass:[UIPinchGestureRecognizer class]];
+            BOOL rotation = [g isKindOfClass:[UIRotationGestureRecognizer class]];
+            if (!pinch && !rotation)
+                continue;
+            if (rotationOnly && !rotation)
+                continue;
+            g->_location = centroid;
+            if (pinch)
+                ((UIPinchGestureRecognizer *)g)->_scale = 1.0;
+            if (rotation)
+                ((UIRotationGestureRecognizer *)g)->_rotation = 0.0;
+            _twoFingerTargets[_twoFingerTargetCount++] = g;
+            send_gesture_action(g, UIGestureRecognizerStateBegan);
+        }
+    }
+}
+
+- (void)moveTwoFingerX1:(double)x1 y1:(double)y1 x2:(double)x2 y2:(double)y2
+{
+    double distance = two_finger_distance(x1, y1, x2, y2);
+    if (distance < 1.0)
+        distance = 1.0;
+    double angle = two_finger_angle(x1, y1, x2, y2);
+    double now = iosim_now();
+    double dt = now - _pinchLastTime;
+    if (dt <= 0.0001)
+        dt = 0.0001;
+    double scale = distance / _pinchStartDistance;
+    double rotation = angle - _pinchStartAngle;
+    double scale_velocity =
+        (distance - _pinchLastDistance) / dt / _pinchStartDistance;
+    double rotation_velocity = (angle - _pinchLastAngle) / dt;
+    CGPoint centroid = CGPointMake((x1 + x2) / 2, (y1 + y2) / 2);
+    for (int i = 0; i < _twoFingerTargetCount; i++)
+    {
+        UIGestureRecognizer *g = (UIGestureRecognizer *)_twoFingerTargets[i];
+        if (!g)
+            continue;
+        g->_location = centroid;
+        if ([g isKindOfClass:[UIPinchGestureRecognizer class]])
+        {
+            UIPinchGestureRecognizer *pinch = (UIPinchGestureRecognizer *)g;
+            pinch->_scale = scale;
+            pinch->_velocity = scale_velocity;
+        }
+        else if ([g isKindOfClass:[UIRotationGestureRecognizer class]])
+        {
+            UIRotationGestureRecognizer *rotate =
+                (UIRotationGestureRecognizer *)g;
+            rotate->_rotation = rotation;
+            rotate->_velocity = rotation_velocity;
+        }
+        send_gesture_action(g, UIGestureRecognizerStateChanged);
+    }
+    if (_pinchScroll)
+    {
+        [_pinchScroll applyPinchScale:scale];
+        if (_pinchScroll->_delegate && [_pinchScroll->_delegate
+                respondsToSelector:@selector(scrollViewDidZoom:)])
+            [_pinchScroll->_delegate scrollViewDidZoom:_pinchScroll];
+    }
+    _pinchLastDistance = distance;
+    _pinchLastAngle = angle;
+    _pinchLastTime = now;
+}
+
+- (void)endTwoFingerX1:(double)x1 y1:(double)y1 x2:(double)x2 y2:(double)y2
+{
+    double distance = two_finger_distance(x1, y1, x2, y2);
+    if (distance < 1.0)
+        distance = 1.0;
+    double angle = two_finger_angle(x1, y1, x2, y2);
+    double scale = distance / _pinchStartDistance;
+    double rotation = angle - _pinchStartAngle;
+    CGPoint centroid = CGPointMake((x1 + x2) / 2, (y1 + y2) / 2);
+    for (int i = 0; i < _twoFingerTargetCount; i++)
+    {
+        UIGestureRecognizer *g = (UIGestureRecognizer *)_twoFingerTargets[i];
+        if (!g)
+            continue;
+        g->_location = centroid;
+        if ([g isKindOfClass:[UIPinchGestureRecognizer class]])
+            ((UIPinchGestureRecognizer *)g)->_scale = scale;
+        else if ([g isKindOfClass:[UIRotationGestureRecognizer class]])
+            ((UIRotationGestureRecognizer *)g)->_rotation = rotation;
+        send_gesture_action(g, UIGestureRecognizerStateEnded);
+    }
+    if (_pinchScroll)
+        [_pinchScroll applyPinchScale:scale];
+    _twoFingerTargetCount = 0;
+    _pinchScroll = 0;
+}
+
 /* Called once per run-loop frame while a touch is down: a long press whose
  * minimum duration has elapsed becomes Began without needing another event. */
 - (int)tickGestureRecognizers
@@ -10154,10 +10473,11 @@ static void render_view(UIView *view, double originX, double originY,
     if (h < 0) h = 0;
 
     CGAffineTransform tf = view->_transform;
-    int rotated = (tf.b != 0.0 || tf.c != 0.0);
-    if (rotated && view != g_no_transform_view && w > 0 && h > 0)
+    int transformed = (tf.a != 1.0 || tf.b != 0.0 || tf.c != 0.0 ||
+                       tf.d != 1.0 || tf.tx != 0.0 || tf.ty != 0.0);
+    if (transformed && view != g_no_transform_view && w > 0 && h > 0)
     {
-        /* A rotated view is rendered into an offscreen pass and then
+        /* A transformed view is rendered into an offscreen pass and then
          * composited with the affine transform around its center. */
         void *state = iosim_fb_begin_offscreen((unsigned)w, (unsigned)h);
         if (state)
@@ -15184,6 +15504,24 @@ int UIApplicationMain(int argc, char **argv, id principal, id delegateName)
             else if (r == 1 && type == 6 && g_firstResponder)
             {
                 [g_firstResponder deleteBackward];
+                redraw = 1;
+            }
+            else if (r == 1 && type >= 12 && type <= 17)
+            {
+                int secondX = 0, secondY = 0;
+                iosim_event_second_point(&secondX, &secondY);
+                double x1 = x / scale;
+                double y1 = y / scale;
+                double x2 = secondX / scale;
+                double y2 = secondY / scale;
+                BOOL rotationOnly = type >= 15;
+                if (type == 12 || type == 15)
+                    [window beginTwoFingerX1:x1 y1:y1 x2:x2 y2:y2
+                               rotationOnly:rotationOnly];
+                else if (type == 13 || type == 16)
+                    [window moveTwoFingerX1:x1 y1:y1 x2:x2 y2:y2];
+                else
+                    [window endTwoFingerX1:x1 y1:y1 x2:x2 y2:y2];
                 redraw = 1;
             }
             else if (r == 1 && type == 2)

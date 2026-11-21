@@ -614,7 +614,14 @@ extern id UIWindowSceneSessionRoleApplication;
 @property(nonatomic) BOOL alwaysBounceHorizontal;
 @property(nonatomic) double decelerationRate;
 @property(nonatomic, assign) id delegate;
+@property(nonatomic) double zoomScale;
+@property(nonatomic) double minimumZoomScale;
+@property(nonatomic) double maximumZoomScale;
+@property(nonatomic, readonly, getter=isZooming) BOOL zooming;
+@property(nonatomic, readonly, getter=isZoomBouncing) BOOL zoomBouncing;
 - (void)setContentOffset:(CGPoint)offset animated:(BOOL)animated;
+- (void)setZoomScale:(double)scale animated:(BOOL)animated;
+- (void)zoomToRect:(CGRect)rect animated:(BOOL)animated;
 @end
 
 @interface UIWindow : UIView
@@ -637,6 +644,8 @@ extern id UIWindowSceneSessionRoleApplication;
 - (void)scrollViewWillEndDragging:(UIScrollView *)scrollView
                      withVelocity:(CGPoint)velocity
               targetContentOffset:(CGPoint *)targetContentOffset;
+- (UIView *)viewForZoomingInScrollView:(UIScrollView *)scrollView;
+- (void)scrollViewDidZoom:(UIScrollView *)scrollView;
 @end
 
 enum {
@@ -1011,6 +1020,16 @@ typedef enum {
 @interface UILongPressGestureRecognizer : UIGestureRecognizer
 @property double minimumPressDuration;
 @property double allowableMovement;
+@end
+
+@interface UIPinchGestureRecognizer : UIGestureRecognizer
+@property double scale;
+@property(readonly) double velocity;
+@end
+
+@interface UIRotationGestureRecognizer : UIGestureRecognizer
+@property double rotation;
+@property(readonly) double velocity;
 @end
 
 #define CGRectZero CGRectMake(0, 0, 0, 0)

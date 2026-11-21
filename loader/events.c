@@ -11,6 +11,17 @@
 #include <errno.h>
 
 static int event_fd = -1;
+static int second_x;
+static int second_y;
+
+/* The second finger of the last pinch/rotate record, in device pixels. */
+void iosim_event_second_point(int *x, int *y)
+{
+    if (x)
+        *x = second_x;
+    if (y)
+        *y = second_y;
+}
 
 /* A FIFO with no current writer is not a closed event stream: the device
  * manager opens it per event. Treat transient HUP/EOF as idle time. */
@@ -164,6 +175,31 @@ int iosim_event_next(int *type, int *x, int *y)
         *x = px;
         *y = 0;
         return 1;
+    }
+    {
+        int x1, y1, x2, y2;
+        int pinch_type = 0;
+        if (sscanf(line, "pinch1 %d %d %d %d", &x1, &y1, &x2, &y2) == 4)
+            pinch_type = 12;
+        else if (sscanf(line, "pinch2 %d %d %d %d", &x1, &y1, &x2, &y2) == 4)
+            pinch_type = 13;
+        else if (sscanf(line, "pinch3 %d %d %d %d", &x1, &y1, &x2, &y2) == 4)
+            pinch_type = 14;
+        else if (sscanf(line, "rotate1 %d %d %d %d", &x1, &y1, &x2, &y2) == 4)
+            pinch_type = 15;
+        else if (sscanf(line, "rotate2 %d %d %d %d", &x1, &y1, &x2, &y2) == 4)
+            pinch_type = 16;
+        else if (sscanf(line, "rotate3 %d %d %d %d", &x1, &y1, &x2, &y2) == 4)
+            pinch_type = 17;
+        if (pinch_type)
+        {
+            second_x = x2;
+            second_y = y2;
+            *type = pinch_type;
+            *x = (x1 + x2) / 2;
+            *y = (y1 + y2) / 2;
+            return 1;
+        }
     }
     if (strncmp(line, "backspace", 9) == 0)
     {

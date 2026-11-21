@@ -3861,6 +3861,59 @@ else
     echo "FAIL modal presentation animation"; echo "$out"; fails=$((fails+1))
 fi
 
+rm -f "$T/zoom.fifo"
+mkfifo "$T/zoom.fifo"
+"$ROOT/tools/build_app.sh" "$ROOT/tests/zoom_pinch_test.m" \
+    "$T/zoom_pinch_test" >/dev/null
+out="$(IOSIM_EVENT_FIFO="$T/zoom.fifo" \
+    IOSIM_TEST_PNG1="$T/zoom1.png" IOSIM_TEST_PNG2="$T/zoom2.png" \
+    DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/zoom_pinch_test" 2>&1)"
+check "[zoom] programmatic 1 1" "$out" \
+    "setZoomScale scales the delegate's zoom view"
+check "[zoom] rect 1 1 1" "$out" \
+    "zoomToRect fits the rectangle and centers it"
+check "[zoom] pinch 2.00" "$out" \
+    "an injected pinch drives UIPinchGestureRecognizer to scale 2"
+check "[zoom] scroll 2.00" "$out" \
+    "the scroll view follows the pinch with its own zoomScale"
+check "[zoom] didzoom 1" "$out" \
+    "scrollViewDidZoom reaches the delegate"
+check "[zoom] rotation 90" "$out" \
+    "injected rotate records drive UIRotationGestureRecognizer to 90 degrees"
+check "[zoom] done 1 1" "$out" \
+    "the pinch and rotation endpoints match their inputs"
+check "[zoom] png written" "$out" \
+    "the zoom fixture captures both frames"
+if out="$(python3 - "$ROOT/tools" "$T/zoom1.png" "$T/zoom2.png" <<'ZOOMPNG'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+
+def magenta(path):
+    w, h, bpp, rows = pngpixel.load(path)
+    n = 0
+    for y in range(240 * 3, 360 * 3):
+        for x in range(140 * 3, 260 * 3):
+            c = pngpixel.px(rows, bpp, x, y)
+            r, g, b = ((c >> 16) & 255), ((c >> 8) & 255), (c & 255)
+            if abs(r - 230) < 25 and abs(g - 26) < 25 and abs(b - 153) < 25:
+                n += 1
+    return n
+
+one = magenta(sys.argv[2])
+two = magenta(sys.argv[3])
+if one < 2500 or one > 5000:
+    raise SystemExit("unzoomed marker unexpected: %d" % one)
+if two < 8000:
+    raise SystemExit("zoomed marker did not scale: %d" % two)
+print("ok   zoomed marker grows from %d to %d pixels" % (one, two))
+ZOOMPNG
+)"; then
+    echo "$out"
+else
+    echo "FAIL UIScrollView zoom/pinch"; echo "$out"; fails=$((fails+1))
+fi
+
 if [ "$fails" -ne 0 ]; then
     echo "$fails test(s) failed" >&2
     exit 1

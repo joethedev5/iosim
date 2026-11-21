@@ -1048,6 +1048,7 @@ static const struct iosim_shim shims[] = {
     SHIM_DIRECT(iosim_fb_present),
     SHIM_DIRECT(iosim_event_open),
     SHIM_DIRECT(iosim_event_next),
+    SHIM_DIRECT(iosim_event_second_point),
     SHIM_DIRECT(iosim_event_close),
     SHIM_DIRECT(iosim_fs_exists),
     SHIM_DIRECT(iosim_fs_is_dir),

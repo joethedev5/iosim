@@ -374,6 +374,12 @@ management.
 - Modal presentation: non-alert controllers slide up over a dimming layer
   driven by a UI-loop tick (0.35 s), and dismissal slides them back down from
   a dismissing slot after they leave the presentation stack.
+- Zoom and two-finger gestures: pinchN/rotateN event records carry two
+  points; the window sends pinch/rotation recognizer actions from the
+  centroid chain and lets a zooming scroll view follow the distance ratio.
+  UIScrollView applies a scale transform to the delegate zoom view and keeps
+  the center content point fixed; the renderer now composites any
+  non-identity view transform, not only rotations.
 - Remaining text-selection gaps: multi-line drag affordances beyond the
   single active touch.
 

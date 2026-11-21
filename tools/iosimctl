@@ -15,6 +15,7 @@ import os
 import plistlib
 import shutil
 import signal
+import math
 import socket
 import subprocess
 import sys
@@ -703,6 +704,39 @@ def cmd_ui(args):
                 f"{int(round(y * scale))}")
         send(line)
         print(f"sent {line}")
+    elif args.action in ("pinch", "rotate"):
+        if len(params) not in (3, 4):
+            die(f"usage: iosimctl ui <device> {args.action} <x> <y> "
+                "<factor> [seconds]")
+        cx, cy = float(params[0]), float(params[1])
+        factor = float(params[2])
+        seconds = float(params[3]) if len(params) == 4 else 0.3
+        if seconds <= 0:
+            seconds = 0.3
+        steps = max(4, int(seconds / 0.02))
+        radius = 40.0
+        for i in range(steps + 1):
+            t = i / steps
+            if args.action == "pinch":
+                r = radius * (1.0 + (factor - 1.0) * t)
+                angle = 0.0
+            else:
+                r = radius
+                angle = math.radians(factor * t)
+            x1 = cx + r * math.cos(angle)
+            y1 = cy + r * math.sin(angle)
+            x2 = cx - r * math.cos(angle)
+            y2 = cy - r * math.sin(angle)
+            if i == 0:
+                prefix = "pinch1" if args.action == "pinch" else "rotate1"
+            elif i == steps:
+                prefix = "pinch3" if args.action == "pinch" else "rotate3"
+            else:
+                prefix = "pinch2" if args.action == "pinch" else "rotate2"
+            send(f"{prefix} {int(round(x1 * scale))} {int(round(y1 * scale))} "
+                 f"{int(round(x2 * scale))} {int(round(y2 * scale))}")
+            time.sleep(seconds / steps)
+        print(f"sent {args.action} factor={factor}")
     elif args.action in ("swipe", "drag"):
         if len(params) not in (4, 5):
             die(f"usage: iosimctl ui <device> {args.action} <x0> <y0> "
@@ -862,8 +896,8 @@ def main():
     p.add_argument("device")
     p.add_argument("action",
                    choices=["tap", "down", "move", "up", "swipe", "drag",
-                            "key", "backspace", "home", "apps", "switcher",
-                            "lock", "unlock"])
+                            "pinch", "rotate", "key", "backspace", "home",
+                            "apps", "switcher", "lock", "unlock"])
     p.add_argument("params", nargs="*")
     p.set_defaults(func=cmd_ui)
 

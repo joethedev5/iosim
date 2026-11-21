@@ -827,6 +827,21 @@ calls `setContentOffset:animated:YES` to 200, observes an intermediate value
 after one tick and exactly 200 after 40 ticks, with
 `scrollViewDidEndScrollingAnimation:` delivered.
 
+### UIKit: scroll-view zoom, pinch and rotation
+
+`tests/zoom_pinch_test.m` puts a 400×400 content view with a centered 20 pt
+magenta marker inside a 402×400 scroll view. `setZoomScale:2` reports
+`[zoom] programmatic 1 1` (zoomScale 2, content transform scale 2), and
+`zoomToRect:` on a centered 100×100 rect reports `[zoom] rect 1 1 1` (scale
+4, centered offsets). The fixture then writes `pinch1`/`pinch2`/`pinch3`
+records moving two fingers from 80 pt apart to 160 pt through the event
+FIFO: `UIPinchGestureRecognizer` ends at 2.00 and the scroll view's own
+zoomScale follows to 2.00 with `scrollViewDidZoom:` delivered. Rotating the
+fingers from 0° to 90° ends `UIRotationGestureRecognizer` at 90°, and
+`[zoom] done 1 1` confirms both endpoints. The first capture counts 3600
+magenta marker pixels; after the pinch the marker is twice as wide and
+counts 13924.
+
 ### Foundation: NSURLSession
 
 The suite starts `python -m http.server` on a loopback ephemeral port and a
