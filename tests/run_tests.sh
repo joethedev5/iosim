@@ -3707,6 +3707,59 @@ else
     echo "FAIL UITextView long press"; echo "$out"; fails=$((fails+1))
 fi
 
+rm -f "$T/textview_menu.fifo"
+mkfifo "$T/textview_menu.fifo"
+"$ROOT/tools/build_app.sh" "$ROOT/tests/textview_edit_menu_test.m" \
+    "$T/textview_edit_menu_test" >/dev/null
+out="$(IOSIM_EVENT_FIFO="$T/textview_menu.fifo" \
+    IOSIM_TEST_PNG="$T/textview_menu.png" \
+    IOSIM_TEST_PNG2="$T/textview_menu_after.png" \
+    DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" \
+    "$T/textview_edit_menu_test" 2>&1)"
+check "[menu] visible 1" "$out" \
+    "a long press shows the edit menu above the selected word"
+check "[menu] pasteboard 1" "$out" \
+    "tapping Copy places the selected word on the pasteboard"
+check "[menu] hidden 1" "$out" \
+    "the edit menu hides after the Copy tap"
+check "[menu] png written" "$out" \
+    "the edit-menu fixture captures both frames"
+if out="$(python3 - "$ROOT/tools" "$T/textview_menu.png" \
+    "$T/textview_menu_after.png" <<'MENUPNG'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+
+def count(path):
+    w, h, bpp, rows = pngpixel.load(path)
+    panel = labels = 0
+    for y in range(198, 312):
+        for x in range(179, 615):
+            c = pngpixel.px(rows, bpp, x, y)
+            r, g, b = ((c >> 16) & 255), ((c >> 8) & 255), (c & 255)
+            if abs(r - 0x2c) < 6 and abs(g - 0x2c) < 6 and abs(b - 0x2e) < 6:
+                panel += 1
+            if r > 230 and g > 230 and b > 230:
+                labels += 1
+    return panel, labels
+
+shown = count(sys.argv[2])
+after = count(sys.argv[3])
+if shown[0] < 5000:
+    raise SystemExit("edit menu panel missing: %d" % shown[0])
+if shown[1] < 400:
+    raise SystemExit("edit menu labels missing: %d" % shown[1])
+if after[0] > 100:
+    raise SystemExit("edit menu did not clear: %d" % after[0])
+print("ok   edit menu paints %d panel and %d label pixels, clears after Copy" %
+      (shown[0], shown[1]))
+MENUPNG
+)"; then
+    echo "$out"
+else
+    echo "FAIL UITextView edit menu"; echo "$out"; fails=$((fails+1))
+fi
+
 if [ "$fails" -ne 0 ]; then
     echo "$fails test(s) failed" >&2
     exit 1

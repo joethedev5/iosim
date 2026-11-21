@@ -33,7 +33,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | `UITouch`/`UIEvent` responder delivery, continuous control tracking | ✅ |
 | Drag scrolling with rubber-band clamp, tap/pan/swipe gesture recognizers | ✅ |
 | Auto Layout: NSLayoutConstraint, anchors, guides, intrinsic sizing, priorities | ✅ (subset) |
-| Multiline UILabel wrapping, UITextField/UITextView editing and delegates, UITextView drag selection, long press and draggable handles, software keyboard | ✅ |
+| Multiline UILabel wrapping, UITextField/UITextView editing and delegates, UITextView drag selection, long press, draggable handles and a Copy/Paste edit menu, software keyboard | ✅ |
 | UISwitch, UISlider, UISegmentedControl, UIPageControl, UIActivityIndicatorView, UIProgressView | ✅ |
 | UIAlertController alerts, actions and modal presentation | ✅ |
 | UINavigationController push/pop, UITabBarController, UIStackView, UIButton titles | ✅ |

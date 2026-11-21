@@ -328,6 +328,13 @@ new start knob and pulls it right; the selection start moves to 3 with a
 block at 900 ms observes `{6,5}`, captures the frame and exits. The PNG holds
 12976 highlight pixels and 1908 blue handle/caret pixels, proving the
 per-frame long-press tick selected the word and marked it with handles.
+`tests/textview_edit_menu_test.m` extends that run: the 900 ms block sees
+`UIMenuController` visible, captures the menu above the selection, and writes
+a `tap` for the Copy item's center into the FIFO. The event loop consumes the
+tap, invokes `copy:` on the first responder and hides the menu; at 1500 ms
+the app reports the pasteboard now holds `world` and the menu is hidden. The
+first PNG carries 17896 menu-panel and 1365 label pixels; after the tap the
+same region has none.
 
 ### Text input: multiline UITextView and hardware keys
 

@@ -363,8 +363,12 @@ management.
   have passed. A move past 10 points or a touch end cancels it. The fixture
   runs through a real event FIFO and checks the selection plus captured
   handles.
-- Remaining text-selection gaps: the edit menu (UIMenuController) and
-  multi-line drag affordances beyond the single active touch.
+- Edit menu: UIMenuController stores a target rect and items. The renderer
+  lays out a dark panel above the selection; menu taps are consumed before
+  the view hit-test and send the item action to the first responder.
+  UITextView implements copy:/paste: over the shared pasteboard.
+- Remaining text-selection gaps: multi-line drag affordances beyond the
+  single active touch.
 
 ## 2026-11-20: CALayer.transform (2D CATransform3D)
 

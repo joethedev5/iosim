@@ -362,6 +362,8 @@ enum {
 - (void)deleteBackward;
 - (BOOL)becomeFirstResponder;
 - (BOOL)resignFirstResponder;
+- (void)copy:(id)sender;
+- (void)paste:(id)sender;
 @end
 
 @interface UISearchBar : UIView
@@ -648,6 +650,22 @@ enum {
 - (void)setItems:(id)items;
 - (id)dataForPasteboardType:(id)type;
 - (void)setData:(id)data forPasteboardType:(id)type;
+@end
+
+@interface UIMenuItem : NSObject
+- (id)initWithTitle:(id)title action:(SEL)action;
+- (id)title;
+- (SEL)action;
+@end
+
+@interface UIMenuController : NSObject
++ (UIMenuController *)sharedMenuController;
+- (void)setMenuItems:(NSArray *)items;
+- (NSArray *)menuItems;
+- (void)setTargetRect:(CGRect)rect inView:(UIView *)view;
+- (void)setMenuVisible:(BOOL)visible;
+- (void)setMenuVisible:(BOOL)visible animated:(BOOL)animated;
+- (BOOL)isMenuVisible;
 @end
 
 extern int UIApplicationMain(int argc, char **argv, id principal,

@@ -819,6 +819,8 @@ typedef enum {
 - (BOOL)becomeFirstResponder;
 - (BOOL)resignFirstResponder;
 - (BOOL)isFirstResponder;
+- (void)copy:(id)sender;
+- (void)paste:(id)sender;
 @end
 
 /* The text view holding a touch that may become a long-press selection;
@@ -1766,6 +1768,32 @@ enum {
 - (id)dataForPasteboardType:(id)type;
 - (void)setData:(id)data forPasteboardType:(id)type;
 - (long)numberOfItems;
+@end
+
+@interface UIMenuItem : NSObject {
+@public
+    id _title;
+    SEL _action;
+}
+- (id)initWithTitle:(id)title action:(SEL)action;
+- (id)title;
+- (SEL)action;
+@end
+
+@interface UIMenuController : NSObject {
+@public
+    BOOL _menuVisible;
+    CGRect _targetRect;
+    UIView *_targetView;
+    NSArray *_items;
+}
++ (UIMenuController *)sharedMenuController;
+- (void)setMenuItems:(NSArray *)items;
+- (NSArray *)menuItems;
+- (void)setTargetRect:(CGRect)rect inView:(UIView *)view;
+- (void)setMenuVisible:(BOOL)visible;
+- (void)setMenuVisible:(BOOL)visible animated:(BOOL)animated;
+- (BOOL)isMenuVisible;
 @end
 
 @interface UIScene : NSObject {
@@ -3793,6 +3821,40 @@ static void text_index_point_in_view(UITextView *editor,
     out->y = 12.0 + py / scale + line_height_pts;
 }
 
+/* Place the edit menu above the selected text. */
+static void text_view_show_edit_menu(UITextView *editor)
+{
+    NSRange selection = editor->_selectedRange;
+    if (selection.length == 0)
+        return;
+    CGPoint start, end;
+    text_index_point_in_view(editor, selection.location, &start);
+    text_index_point_in_view(editor, selection.location + selection.length,
+                             &end);
+    double scale = [[UIScreen mainScreen] scale];
+    if (scale <= 0)
+        scale = 1.0;
+    double points = editor->_font ? editor->_font->_size : 17.0;
+    int style = editor->_font && editor->_font->_bold ? IOSIM_FONT_BOLD
+                                                       : IOSIM_FONT_REGULAR;
+    int ascent = 0, descent = 0, lineHeight = 0;
+    iosim_fb_font_metrics(style, points, scale, &ascent, &descent,
+                          &lineHeight);
+    double line_height_pts = lineHeight / scale;
+    if (line_height_pts <= 0)
+        line_height_pts = points * 1.2;
+    CGRect rect;
+    if (__builtin_fabs(end.y - start.y) < 0.5)
+        rect = CGRectMake(start.x, start.y - line_height_pts,
+                          end.x - start.x, line_height_pts);
+    else
+        rect = CGRectMake(0, start.y - line_height_pts,
+                          editor->_frame.size.width, end.y - start.y);
+    [[UIMenuController sharedMenuController] setTargetRect:rect
+                                                    inView:editor];
+    [[UIMenuController sharedMenuController] setMenuVisible:YES];
+}
+
 - (id)initWithFrame:(CGRect)frame
 {
     self = [super initWithFrame:frame];
@@ -3849,6 +3911,7 @@ static void text_index_point_in_view(UITextView *editor,
     (void)event;
     UITouch *touch = [touches anyObject];
     CGPoint point = touch ? [touch locationInView:self] : CGPointMake(0, 0);
+    [[UIMenuController sharedMenuController] setMenuVisible:NO];
     const char *text = _text ? iosim_string_cstr(_text) : "";
     unsigned long index = text_index_at_point(self, point);
     if (_selectedRange.length > 0)
@@ -3891,6 +3954,7 @@ static void text_index_point_in_view(UITextView *editor,
             _lastTapIndex = index;
             _dragAnchor = word.location;
             _dragging = YES;
+            text_view_show_edit_menu(self);
         }
         else
         {
@@ -4036,6 +4100,38 @@ static void text_index_point_in_view(UITextView *editor,
     _selectedRange = NSMakeRange(location, 0);
     _needsLayout = YES;
 }
+- (void)copy:(id)sender
+{
+    (void)sender;
+    const char *text = _text ? iosim_string_cstr(_text) : "";
+    if (!text)
+        return;
+    unsigned long length = strlen(text);
+    unsigned long location = _selectedRange.location;
+    unsigned long count = _selectedRange.length;
+    if (location > length)
+        location = length;
+    if (count > length - location)
+        count = length - location;
+    if (count == 0)
+        return;
+    char *copy = malloc(count + 1);
+    if (!copy)
+        return;
+    memcpy(copy, text + location, count);
+    copy[count] = 0;
+    [[UIPasteboard generalPasteboard]
+        setString:[NSString stringWithUTF8String:copy]];
+    free(copy);
+    _needsLayout = YES;
+}
+- (void)paste:(id)sender
+{
+    (void)sender;
+    id string = [[UIPasteboard generalPasteboard] string];
+    if (string)
+        [self insertText:string];
+}
 @end
 
 /* Once a held touch passes the long-press duration, select the word under
@@ -4060,6 +4156,7 @@ static int iosim_text_press_tick(void)
         editor->_dragAnchor = word.location;
         editor->_dragging = YES;
         editor->_dragHandle = 0;
+        text_view_show_edit_menu(editor);
     }
     else
     {
@@ -8478,6 +8575,53 @@ static void pasteboard_path(char *out, unsigned long cap)
 {
     return (long)[[self items] count];
 }
+@end
+
+@implementation UIMenuItem
+- (id)initWithTitle:(id)title action:(SEL)action
+{
+    self = [super init];
+    if (self)
+    {
+        _title = title;
+        _action = action;
+    }
+    return self;
+}
+- (id)title { return _title; }
+- (SEL)action { return _action; }
+@end
+
+@implementation UIMenuController
++ (UIMenuController *)sharedMenuController
+{
+    static UIMenuController *controller;
+    if (!controller)
+    {
+        controller = [[UIMenuController alloc] init];
+        UIMenuItem *copy =
+            [[UIMenuItem alloc] initWithTitle:@"Copy" action:@selector(copy:)];
+        UIMenuItem *paste =
+            [[UIMenuItem alloc] initWithTitle:@"Paste" action:@selector(paste:)];
+        id items[2] = { copy, paste };
+        controller->_items = [NSArray arrayWithObjects:items count:2];
+    }
+    return controller;
+}
+- (void)setMenuItems:(NSArray *)items { _items = items; }
+- (NSArray *)menuItems { return _items; }
+- (void)setTargetRect:(CGRect)rect inView:(UIView *)view
+{
+    _targetRect = rect;
+    _targetView = view;
+}
+- (void)setMenuVisible:(BOOL)visible { _menuVisible = visible; }
+- (void)setMenuVisible:(BOOL)visible animated:(BOOL)animated
+{
+    (void)animated;
+    _menuVisible = visible;
+}
+- (BOOL)isMenuVisible { return _menuVisible; }
 @end
 
 /* ---------------------------------------------------------------- scenes */
@@ -14322,9 +14466,120 @@ static void draw_alert(UIAlertController *alert, int fbW, int fbH,
     }
 }
 
+/* Edit menu drawing and hit testing. The menu is laid out at draw time in
+ * device pixels; the item rectangles feed the next tap. */
+static int g_edit_menu_rects[8][4];
+static int g_edit_menu_item_count;
+
+static void menu_screen_origin(UIView *view, double *ox, double *oy)
+{
+    double x = 0, y = 0;
+    for (UIView *v = view; v; v = (UIView *)v->_superview)
+    {
+        x += v->_frame.origin.x;
+        y += v->_frame.origin.y;
+        if (v && [v isKindOfClass:[UIScrollView class]])
+        {
+            UIScrollView *scroll = (UIScrollView *)v;
+            x -= scroll->_contentOffset.x;
+            y -= scroll->_contentOffset.y;
+        }
+    }
+    *ox = x;
+    *oy = y;
+}
+
+static void draw_edit_menu(int fbW, double scale)
+{
+    g_edit_menu_item_count = 0;
+    UIMenuController *menu = [UIMenuController sharedMenuController];
+    if (!menu || !menu->_menuVisible || !menu->_items ||
+        menu->_items->_count == 0)
+        return;
+    int count = (int)menu->_items->_count;
+    if (count > 8)
+        count = 8;
+    int widths[8];
+    int total = 0;
+    int pad = (int)(15.0 * scale + 0.5);
+    int panelH = (int)(38.0 * scale + 0.5);
+    for (int i = 0; i < count; i++)
+    {
+        UIMenuItem *item = (UIMenuItem *)[menu->_items objectAtIndex:i];
+        const char *title = item && item->_title ? iosim_string_cstr(item->_title)
+                                                 : "";
+        widths[i] = iosim_fb_font_text_width(title, IOSIM_FONT_REGULAR, 17.0,
+                                             scale) + 2 * pad;
+        total += widths[i];
+    }
+    double viewX = 0, viewY = 0;
+    if (menu->_targetView)
+        menu_screen_origin(menu->_targetView, &viewX, &viewY);
+    double originX = viewX + menu->_targetRect.origin.x;
+    double originY = viewY + menu->_targetRect.origin.y;
+    int panelW = total;
+    int px = (int)((originX + menu->_targetRect.size.width / 2) * scale + 0.5) -
+             panelW / 2;
+    int py = (int)(originY * scale + 0.5) - (int)(8.0 * scale + 0.5) - panelH;
+    if (py < (int)(40.0 * scale))
+        py = (int)((originY + menu->_targetRect.size.height) * scale + 0.5) +
+             (int)(8.0 * scale + 0.5);
+    if (px < 0)
+        px = 0;
+    if (px + panelW > fbW)
+        px = fbW - panelW;
+    iosim_fb_fill_round_rect(px, py, panelW, panelH,
+                             (int)(9.0 * scale + 0.5), 0x2c2c2e);
+    int ascent = 0, descent = 0, lineHeight = 0;
+    iosim_fb_font_metrics(IOSIM_FONT_REGULAR, 17.0, scale, &ascent, &descent,
+                          &lineHeight);
+    int baseline = py + (panelH - lineHeight) / 2 + ascent;
+    int cx = px;
+    for (int i = 0; i < count; i++)
+    {
+        UIMenuItem *item = (UIMenuItem *)[menu->_items objectAtIndex:i];
+        const char *title = item && item->_title ? iosim_string_cstr(item->_title)
+                                                 : "";
+        iosim_fb_font_text(cx + pad, baseline, title, IOSIM_FONT_REGULAR, 17.0,
+                           scale, 0xffffff);
+        g_edit_menu_rects[i][0] = cx;
+        g_edit_menu_rects[i][1] = py;
+        g_edit_menu_rects[i][2] = cx + widths[i];
+        g_edit_menu_rects[i][3] = py + panelH;
+        cx += widths[i];
+    }
+    g_edit_menu_item_count = count;
+}
+
+/* Returns 1 when the tap belonged to the menu (an item or the dismissal
+ * area), which also swallows the tap from the view hierarchy. */
+static int edit_menu_handle_tap(int px, int py)
+{
+    UIMenuController *menu = [UIMenuController sharedMenuController];
+    if (!menu || !menu->_menuVisible)
+        return 0;
+    menu->_menuVisible = NO;
+    for (int i = 0; i < g_edit_menu_item_count; i++)
+    {
+        if (px >= g_edit_menu_rects[i][0] && px < g_edit_menu_rects[i][2] &&
+            py >= g_edit_menu_rects[i][1] && py < g_edit_menu_rects[i][3])
+        {
+            UIMenuItem *item = (UIMenuItem *)[menu->_items objectAtIndex:i];
+            id target = g_firstResponder;
+            if (!target)
+                target = (id)menu->_targetView;
+            if (item && target && [target respondsToSelector:item->_action])
+                ((void (*)(id, SEL, id))objc_msgSend)(target, item->_action, nil);
+            break;
+        }
+    }
+    return 1;
+}
+
 static void draw_modals(UIViewController *root, int fbW, int fbH,
                         double scale)
 {
+    draw_edit_menu(fbW, scale);
     if (!root || !root->_presentedController)
         return;
     UIViewController *top = top_presented(root);
@@ -14571,7 +14826,9 @@ int UIApplicationMain(int argc, char **argv, id principal, id delegateName)
             int redraw = 0;
             if (r == 1 && type == 1)
             {
-                if (alert_handle_tap(rootController, x, y, fbWidth, fbHeight,
+                if (edit_menu_handle_tap(x, y))
+                    redraw = 1;
+                else if (alert_handle_tap(rootController, x, y, fbWidth, fbHeight,
                                      scale))
                     redraw = 1;
                 else if (keyboard_handle_tap(x, y, fbWidth, fbHeight, scale))

@@ -922,7 +922,13 @@ end and, for a non-empty selection, draws the two handle stems and knobs at
 the span's start and end lines. A touch that lands within 14 points of a knob
 grabs it: dragging the start knob moves the selection start and dragging the
 end knob extends or shrinks the end, sampling the index on the handle's line
-rather than under the knob itself. Hardware input reaches both views through
+rather than under the knob itself. A double tap or long press also raises the
+`UIMenuController` edit menu: the controller stores a target rect in the text
+view, the renderer lays out a 38 pt dark panel above the selection with a
+Copy and a Paste item, and a tap on the panel is consumed before the view
+hit-test, invokes the item's action on the first responder, and hides the
+menu. `copy:` writes the selected bytes to the shared pasteboard and
+`paste:` inserts its string. Hardware input reaches both views through
 `ui key` records, which
 `iosimctl` emits per character (`key return` for a newline, `key space` for a
 space) and `ui backspace`; the on-screen keyboard taps use the same edit
