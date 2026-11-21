@@ -477,6 +477,15 @@ static int g_animatorRuns;
            [animator state]);
     [animator startAnimation];
 
+    NSIndexPath *indexPath = [NSIndexPath indexPathForItem:3 inSection:2];
+    NSIndexPath *addedPath = [indexPath indexPathByAddingIndex:7];
+    NSIndexPath *removedPath = [addedPath indexPathByRemovingLastIndex];
+    printf("[fnd] idxpath %ld %ld %ld %ld %ld %ld %ld %ld\n",
+           [addedPath length], [indexPath section], [indexPath item],
+           [addedPath indexAtPosition:0], [addedPath indexAtPosition:1],
+           [addedPath indexAtPosition:2], [removedPath length],
+           [indexPath compare:addedPath]);
+
     FoundationSizeController *sizeController =
         [[FoundationSizeController alloc] init];
     sizeController.view =

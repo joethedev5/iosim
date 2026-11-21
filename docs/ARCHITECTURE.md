@@ -1441,3 +1441,6 @@ Size transitions are detected in `viewWillLayoutSubviews` by comparing the
 view size to the last one; a `_UIViewControllerTransitionCoordinator` carries
 the container, controllers and duration, and the default
 `viewWillTransitionToSize:` fans out to child controllers.
+`NSIndexPath` holds a small fixed index vector with row/section and
+item/section constructors; equality and ordering compare the vector
+lexicographically.

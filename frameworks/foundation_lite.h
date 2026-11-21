@@ -305,10 +305,20 @@ enum {
 @public
     long _row;
     long _section;
+    long _indexes[8];
+    int _length;
 }
 + (id)indexPathForRow:(long)row inSection:(long)section;
++ (id)indexPathForItem:(long)item inSection:(long)section;
 - (long)row;
 - (long)section;
+- (long)item;
+- (long)length;
+- (long)indexAtPosition:(unsigned long)position;
+- (id)indexPathByAddingIndex:(long)index;
+- (id)indexPathByRemovingLastIndex;
+- (long)compare:(NSIndexPath *)other;
+- (void)getIndexes:(long *)indexes;
 @end
 
 @interface NSNumber : NSObject {

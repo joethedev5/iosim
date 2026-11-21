@@ -2127,14 +2127,103 @@ static id mutable_attribute_copy(id attributes)
     NSIndexPath *path = [[self alloc] init];
     path->_row = row;
     path->_section = section;
+    path->_indexes[0] = section;
+    path->_indexes[1] = row;
+    path->_length = 2;
     return path;
 }
-- (long)row { return _row; }
-- (long)section { return _section; }
++ (id)indexPathForItem:(long)item inSection:(long)section
+{
+    return [self indexPathForRow:item inSection:section];
+}
+- (long)row
+{
+    return _length >= 2 ? _indexes[_length - 1] : _row;
+}
+- (long)section
+{
+    return _length >= 1 ? _indexes[0] : _section;
+}
+- (long)item { return [self row]; }
+- (long)length { return _length > 0 ? _length : 2; }
+- (long)indexAtPosition:(unsigned long)position
+{
+    if (position < (unsigned long)[self length])
+        return _indexes[position];
+    return 0;
+}
+- (id)indexPathByAddingIndex:(long)index
+{
+    NSIndexPath *path = [[NSIndexPath alloc] init];
+    int length = (int)[self length];
+    if (length > 8)
+        length = 8;
+    for (int i = 0; i < length; i++)
+        path->_indexes[i] = _indexes[i];
+    if (length < 8)
+    {
+        path->_indexes[length] = index;
+        length++;
+    }
+    path->_length = length;
+    return path;
+}
+- (id)indexPathByRemovingLastIndex
+{
+    NSIndexPath *path = [[NSIndexPath alloc] init];
+    int length = (int)[self length];
+    if (length > 0)
+        length--;
+    for (int i = 0; i < length; i++)
+        path->_indexes[i] = _indexes[i];
+    path->_length = length;
+    return path;
+}
+- (long)compare:(NSIndexPath *)other
+{
+    long leftLength = [self length];
+    long rightLength = other ? [other length] : 0;
+    long common = leftLength < rightLength ? leftLength : rightLength;
+    for (long i = 0; i < common; i++)
+    {
+        long left = [self indexAtPosition:i];
+        long right = [other indexAtPosition:i];
+        if (left < right)
+            return -1;
+        if (left > right)
+            return 1;
+    }
+    if (leftLength < rightLength)
+        return -1;
+    if (leftLength > rightLength)
+        return 1;
+    return 0;
+}
+- (void)getIndexes:(long *)indexes
+{
+    if (!indexes)
+        return;
+    for (int i = 0; i < [self length]; i++)
+        indexes[i] = _indexes[i];
+}
+- (BOOL)isEqual:(id)other
+{
+    if (!other || ![other isKindOfClass:[NSIndexPath class]])
+        return NO;
+    return [self compare:other] == 0;
+}
+- (unsigned long)hash
+{
+    unsigned long hash = 5381;
+    for (int i = 0; i < [self length]; i++)
+        hash = hash * 33 + (unsigned long)_indexes[i];
+    return hash;
+}
 - (id)description
 {
-    return [NSString stringWithFormat:@"<NSIndexPath: %p> {length = 2, path = %ld - %ld}",
-            self, _section, _row];
+    return [NSString stringWithFormat:
+        @"<NSIndexPath: %p> {length = %ld, path = %ld - %ld}",
+        self, [self length], [self section], [self row]];
 }
 @end
 

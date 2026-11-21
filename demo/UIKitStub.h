@@ -2102,8 +2102,16 @@ enum {
 
 @interface NSIndexPath : NSObject
 + (id)indexPathForRow:(long)row inSection:(long)section;
++ (id)indexPathForItem:(long)item inSection:(long)section;
 @property(readonly) long row;
 @property(readonly) long section;
+@property(readonly) long item;
+@property(readonly) long length;
+- (long)indexAtPosition:(unsigned long)position;
+- (id)indexPathByAddingIndex:(long)index;
+- (id)indexPathByRemovingLastIndex;
+- (long)compare:(NSIndexPath *)other;
+- (void)getIndexes:(long *)indexes;
 @end
 
 @class UICollectionView, UICollectionViewCell;

@@ -842,3 +842,7 @@ management.
   implementation forwards to children, and the coordinator runs
   alongside/completion blocks synchronously with its container view and
   animated/duration state.
+- `NSIndexPath` stores up to eight indexes and exposes both row/section and
+  item/section constructors, positional access, `indexPathByAddingIndex:`,
+  `indexPathByRemovingLastIndex`, `compare:` and `getIndexes:`. Table and
+  collection views keep using the same two-index representation.
