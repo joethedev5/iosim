@@ -3760,6 +3760,107 @@ else
     echo "FAIL UITextView edit menu"; echo "$out"; fails=$((fails+1))
 fi
 
+rm -f "$T/bars.fifo"
+mkfifo "$T/bars.fifo"
+"$ROOT/tools/build_app.sh" "$ROOT/tests/bars_test.m" "$T/bars_test" >/dev/null
+out="$(IOSIM_EVENT_FIFO="$T/bars.fifo" IOSIM_TEST_PNG="$T/bars.png" \
+    DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/bars_test" 2>&1)"
+check "[bars] items 1 1" "$out" \
+    "standalone navigation bar push and pop change the top item"
+check "[bars] nav 1 tool 3" "$out" \
+    "navigation and toolbar item taps reach their targets"
+check "[bars] png written" "$out" \
+    "the bars fixture captures the frame"
+if out="$(python3 - "$ROOT/tools" "$T/bars.png" <<'BARSPNG'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+
+def count(y0, y1):
+    n = 0
+    for y in range(y0, y1, 3):
+        for x in range(0, w, 3):
+            c = pngpixel.px(rows, bpp, x, y)
+            r, g, b = ((c >> 16) & 255), ((c >> 8) & 255), (c & 255)
+            if abs(r - 27) < 7 and abs(g - 28) < 7 and abs(b - 29) < 7:
+                n += 1
+    return n
+
+nav = count(182, 310)
+tool = count(2354, 2497)
+if nav < 5000:
+    raise SystemExit("navigation bar background missing: %d" % nav)
+if tool < 5000:
+    raise SystemExit("toolbar background missing: %d" % tool)
+print("ok   bars paint %d nav and %d toolbar sampled background pixels" %
+      (nav, tool))
+BARSPNG
+)"; then
+    echo "$out"
+else
+    echo "FAIL UINavigationBar/UIToolbar"; echo "$out"; fails=$((fails+1))
+fi
+
+rm -f "$T/modal.fifo"
+mkfifo "$T/modal.fifo"
+"$ROOT/tools/build_app.sh" "$ROOT/tests/modal_animation_test.m" \
+    "$T/modal_animation_test" >/dev/null
+out="$(IOSIM_EVENT_FIFO="$T/modal.fifo" \
+    IOSIM_TEST_PNG_MID1="$T/modal_mid1.png" \
+    IOSIM_TEST_PNG_FULL="$T/modal_full.png" \
+    IOSIM_TEST_PNG_MID2="$T/modal_mid2.png" \
+    IOSIM_TEST_PNG_END="$T/modal_end.png" \
+    DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" \
+    "$T/modal_animation_test" 2>&1)"
+check "[modal] presented" "$out" \
+    "presentViewController starts an animated page sheet"
+check "[modal] dismissed" "$out" \
+    "dismissViewControllerAnimated starts the slide-down"
+check "[modal] png written" "$out" \
+    "the modal fixture captures all four phases"
+if out="$(python3 - "$ROOT/tools" "$T" <<'MODALPNG'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+
+def green(path, y0, y1):
+    w, h, bpp, rows = pngpixel.load(path)
+    n = 0
+    for y in range(y0 * 3, y1 * 3, 3):
+        for x in range(0, w, 3):
+            c = pngpixel.px(rows, bpp, x, y)
+            r, g, b = ((c >> 16) & 255), ((c >> 8) & 255), (c & 255)
+            if abs(r - 26) < 20 and abs(g - 204) < 25 and abs(b - 77) < 25:
+                n += 1
+    return n
+
+root = sys.argv[2]
+mid1 = root + "/modal_mid1.png"
+full = root + "/modal_full.png"
+mid2 = root + "/modal_mid2.png"
+end = root + "/modal_end.png"
+if green(mid1, 650, 850) < 3000:
+    raise SystemExit("mid-present sheet not at the bottom")
+if green(mid1, 50, 300) > 50:
+    raise SystemExit("mid-present sheet covers the top")
+if green(full, 50, 300) < 3000:
+    raise SystemExit("presented sheet does not cover the top")
+if green(mid2, 20, 140) > 50:
+    raise SystemExit("mid-dismiss sheet still covers the top")
+if green(mid2, 400, 500) < 3000:
+    raise SystemExit("mid-dismiss sheet missing from the middle")
+if green(end, 0, 874) > 100:
+    raise SystemExit("sheet still visible after dismissal")
+print("ok   modal sheet slides up, covers, slides down and clears")
+MODALPNG
+)"; then
+    echo "$out"
+else
+    echo "FAIL modal presentation animation"; echo "$out"; fails=$((fails+1))
+fi
+
 if [ "$fails" -ne 0 ]; then
     echo "$fails test(s) failed" >&2
     exit 1

@@ -878,9 +878,12 @@ enum {
     id _presentedController;
     id _tabBarItem;
     id _navigationItem;
+    long _modalPresentationStyle;
 }
 - (id)init;
 - (id)title;
+- (long)modalPresentationStyle;
+- (void)setModalPresentationStyle:(long)style;
 - (void)setTitle:(id)title;
 - (id)navigationController;
 - (id)tabBarItem;
@@ -1030,6 +1033,46 @@ enum {
 - (void)setBackBarButtonItem:(id)item;
 - (BOOL)hidesBackButton;
 - (void)setHidesBackButton:(BOOL)hidden;
+@end
+
+@interface UINavigationBar : UIView {
+@public
+    id _items;
+    UINavigationItem *_topItem;
+    UILabel *_titleLabel;
+    UIView *_leftControl;
+    UIView *_rightControl;
+    UIColor *_barTintColor;
+}
+- (void)setItems:(NSArray *)items animated:(BOOL)animated;
+- (NSArray *)items;
+- (UINavigationItem *)topItem;
+- (void)pushNavigationItem:(UINavigationItem *)item animated:(BOOL)animated;
+- (UINavigationItem *)popNavigationItemAnimated:(BOOL)animated;
+- (void)setBarTintColor:(UIColor *)color;
+- (UIColor *)barTintColor;
+@end
+
+@interface UIToolbar : UIView {
+@public
+    id _items;
+    UIColor *_barTintColor;
+    UIColor *_tintColor;
+    int _barStyle;
+    BOOL _translucent;
+    UIView *_controls[16];
+    int _controlCount;
+}
+- (void)setItems:(NSArray *)items animated:(BOOL)animated;
+- (NSArray *)items;
+- (void)setBarTintColor:(UIColor *)color;
+- (UIColor *)barTintColor;
+- (void)setTintColor:(UIColor *)color;
+- (UIColor *)tintColor;
+- (void)setBarStyle:(int)style;
+- (int)barStyle;
+- (void)setTranslucent:(BOOL)translucent;
+- (BOOL)isTranslucent;
 @end
 
 @interface UINavigationController : UIViewController {
@@ -5967,9 +6010,55 @@ void UIGraphicsEndImageContext(void)
 - (UIView *)contentView { return _contentView; }
 @end
 
+/* Animated modal presentation state. The presenting sheet slides up from
+ * the bottom over a dimming backdrop; dismissal slides it back down after
+ * the controller has already left the presentation stack. */
+static int g_modal_animating; /* 1 presenting, -1 dismissing */
+static double g_modal_anim_start;
+static double g_modal_anim_duration = 0.35;
+static void *g_modal_anim_controller;
+static void *g_modal_dismissing_controller;
+
+static double modal_progress(void)
+{
+    if (!g_modal_animating)
+        return 1.0;
+    double t = (iosim_now() - g_modal_anim_start) / g_modal_anim_duration;
+    if (t < 0)
+        t = 0;
+    if (t > 1)
+        t = 1;
+    return t;
+}
+
+/* Returns 1 while a modal slide is in flight so the UI loop redraws. */
+static int iosim_modal_tick(void)
+{
+    if (!g_modal_animating)
+        return 0;
+    if (modal_progress() >= 1.0)
+    {
+        g_modal_animating = 0;
+        g_modal_anim_controller = 0;
+        g_modal_dismissing_controller = 0;
+    }
+    return 1;
+}
+
 @implementation UIViewController
-- (id)init { return [super init]; }
+- (id)init
+{
+    self = [super init];
+    if (self)
+        _modalPresentationStyle = -2; /* automatic: page sheet on iPhone */
+    return self;
+}
 - (id)title { return _title; }
+- (long)modalPresentationStyle { return _modalPresentationStyle; }
+- (void)setModalPresentationStyle:(long)style
+{
+    _modalPresentationStyle = style;
+}
 - (void)setTitle:(id)title
 {
     _title = title;
@@ -6035,6 +6124,13 @@ void UIGraphicsEndImageContext(void)
     (void)[controller view];
     [controller viewWillAppear:animated];
     [controller viewDidAppear:animated];
+    if (animated && ![controller isKindOfClass:[UIAlertController class]])
+    {
+        g_modal_animating = 1;
+        g_modal_anim_start = iosim_now();
+        g_modal_anim_controller = controller;
+        g_modal_dismissing_controller = 0;
+    }
     if (completion)
         completion();
 }
@@ -6049,6 +6145,13 @@ void UIGraphicsEndImageContext(void)
         [controller viewDidDisappear:animated];
     }
     _presentedController = nil;
+    if (animated && controller &&
+        ![controller isKindOfClass:[UIAlertController class]])
+    {
+        g_modal_animating = -1;
+        g_modal_anim_start = iosim_now();
+        g_modal_dismissing_controller = controller;
+    }
     if (completion)
         completion();
 }
@@ -6471,6 +6574,212 @@ static UIControl *nav_bar_control(UIBarButtonItem *item, CGRect frame,
     }
 }
 - (BOOL)isNavigationBarHidden { return _navBarHidden; }
+@end
+
+/* ------------------------------------------------------- standalone bars */
+
+static UIControl *toolbar_text_control(UIBarButtonItem *item, CGRect frame,
+                                       UIColor *color)
+{
+    UIControl *control = [[UIControl alloc] initWithFrame:frame];
+    UILabel *label = [[UILabel alloc]
+        initWithFrame:CGRectMake(0, 0, frame.size.width, frame.size.height)];
+    label->_text = item ? item->_title : @"";
+    label->_font = [UIFont systemFontOfSize:17];
+    label->_textColor = color ? color
+                              : [UIColor colorWithRed:0.04 green:0.52
+                                                 blue:1.0 alpha:1.0];
+    label->_textAlignment = 1;
+    [control addSubview:label];
+    if (item)
+        [control addTarget:item->_target action:item->_action
+         forControlEvents:UIControlEventTouchUpInside];
+    return control;
+}
+
+@implementation UINavigationBar
+- (id)initWithFrame:(CGRect)frame
+{
+    self = [super initWithFrame:frame];
+    if (self)
+    {
+        _backgroundColor = [UIColor colorWithRed:0.11 green:0.11 blue:0.12
+                                             alpha:0.96];
+        _titleLabel = [[UILabel alloc]
+            initWithFrame:CGRectMake(0, 0, frame.size.width,
+                                     frame.size.height)];
+        _titleLabel->_textAlignment = 1;
+        _titleLabel->_font = [UIFont systemFontOfSize:17];
+        _titleLabel->_textColor = [UIColor whiteColor];
+        [self addSubview:_titleLabel];
+    }
+    return self;
+}
+- (void)setItems:(NSArray *)items animated:(BOOL)animated
+{
+    (void)animated;
+    _items = items;
+    _topItem = items && [items count] > 0
+        ? (UINavigationItem *)[items objectAtIndex:[items count] - 1]
+        : nil;
+    [self setNeedsLayout];
+}
+- (NSArray *)items { return _items; }
+- (UINavigationItem *)topItem { return _topItem; }
+- (void)pushNavigationItem:(UINavigationItem *)item animated:(BOOL)animated
+{
+    (void)animated;
+    if (!item)
+        return;
+    NSMutableArray *items = [NSMutableArray arrayWithArray:_items];
+    [items addObject:item];
+    _items = items;
+    _topItem = item;
+    [self setNeedsLayout];
+}
+- (UINavigationItem *)popNavigationItemAnimated:(BOOL)animated
+{
+    (void)animated;
+    if (!_items || [_items count] <= 1)
+        return nil;
+    NSMutableArray *items = [NSMutableArray arrayWithArray:_items];
+    UINavigationItem *old = _topItem;
+    [items removeObjectAtIndex:[items count] - 1];
+    _items = items;
+    _topItem = (UINavigationItem *)[items objectAtIndex:[items count] - 1];
+    [self setNeedsLayout];
+    return old;
+}
+- (void)setBarTintColor:(UIColor *)color
+{
+    _barTintColor = color;
+    if (color)
+        _backgroundColor = color;
+}
+- (UIColor *)barTintColor { return _barTintColor; }
+- (void)layoutSubviews
+{
+    double width = _frame.size.width;
+    double height = _frame.size.height;
+    if (_titleLabel)
+    {
+        _titleLabel->_frame = CGRectMake(70, (height - 24) / 2, width - 140, 24);
+        _titleLabel->_text = _topItem ? _topItem->_title : nil;
+        _titleLabel->_needsLayout = YES;
+    }
+    if (_leftControl)
+        [(UIView *)_leftControl removeFromSuperview];
+    if (_rightControl)
+        [(UIView *)_rightControl removeFromSuperview];
+    _leftControl = nil;
+    _rightControl = nil;
+    if (_topItem && _topItem->_leftBarButtonItem)
+    {
+        _leftControl = nav_bar_control(
+            (UIBarButtonItem *)_topItem->_leftBarButtonItem,
+            CGRectMake(8, (height - 32) / 2, 120, 32), 0);
+        [self addSubview:_leftControl];
+    }
+    if (_topItem && _topItem->_rightBarButtonItem)
+    {
+        _rightControl = nav_bar_control(
+            (UIBarButtonItem *)_topItem->_rightBarButtonItem,
+            CGRectMake(width - 128, (height - 32) / 2, 120, 32), 2);
+        [self addSubview:_rightControl];
+    }
+}
+- (void)drawRect:(CGRect)rect
+{
+    (void)rect;
+    CGContextRef context = 0;
+    CGContextSetRGBFillColor(context, 1, 1, 1, 0.08);
+    CGContextFillRect(context, CGRectMake(0, _frame.size.height - 1,
+                                          _frame.size.width, 1));
+}
+@end
+
+@implementation UIToolbar
+- (id)initWithFrame:(CGRect)frame
+{
+    self = [super initWithFrame:frame];
+    if (self)
+    {
+        _backgroundColor = [UIColor colorWithRed:0.11 green:0.11 blue:0.12
+                                             alpha:0.96];
+        _barStyle = 0;
+        _translucent = YES;
+    }
+    return self;
+}
+- (void)setItems:(NSArray *)items animated:(BOOL)animated
+{
+    (void)animated;
+    _items = items;
+    [self setNeedsLayout];
+}
+- (NSArray *)items { return _items; }
+- (void)setBarTintColor:(UIColor *)color
+{
+    _barTintColor = color;
+    if (color)
+        _backgroundColor = color;
+}
+- (UIColor *)barTintColor { return _barTintColor; }
+- (void)setTintColor:(UIColor *)color { _tintColor = color; }
+- (UIColor *)tintColor { return _tintColor; }
+- (void)setBarStyle:(int)style { _barStyle = style; }
+- (int)barStyle { return _barStyle; }
+- (void)setTranslucent:(BOOL)translucent { _translucent = translucent; }
+- (BOOL)isTranslucent { return _translucent; }
+- (void)layoutSubviews
+{
+    for (int i = 0; i < _controlCount; i++)
+        if (_controls[i])
+            [(UIView *)_controls[i] removeFromSuperview];
+    _controlCount = 0;
+    int count = _items ? (int)[_items count] : 0;
+    if (count > 16)
+        count = 16;
+    if (count <= 0)
+        return;
+    double widths[16];
+    double total = 0;
+    double padding = 24.0;
+    double gap = 16.0;
+    for (int i = 0; i < count; i++)
+    {
+        UIBarButtonItem *item = (UIBarButtonItem *)[_items objectAtIndex:i];
+        const char *title = item && item->_title ? iosim_string_cstr(item->_title)
+                                                 : "";
+        widths[i] = iosim_fb_font_text_width(title, IOSIM_FONT_REGULAR, 17.0,
+                                             1.0) + 2 * padding;
+        total += widths[i];
+        if (i > 0)
+            total += gap;
+    }
+    double width = _frame.size.width;
+    double height = _frame.size.height;
+    double x = (width - total) / 2;
+    if (x < 8)
+        x = 8;
+    for (int i = 0; i < count; i++)
+    {
+        UIBarButtonItem *item = (UIBarButtonItem *)[_items objectAtIndex:i];
+        _controls[i] = toolbar_text_control(
+            item, CGRectMake(x, (height - 32) / 2, widths[i], 32),
+            _tintColor);
+        [self addSubview:_controls[i]];
+        _controlCount++;
+        x += widths[i] + gap;
+    }
+}
+- (void)drawRect:(CGRect)rect
+{
+    (void)rect;
+    CGContextRef context = 0;
+    CGContextSetRGBFillColor(context, 1, 1, 1, 0.08);
+    CGContextFillRect(context, CGRectMake(0, 0, _frame.size.width, 1));
+}
 @end
 
 @implementation UITabBarItem
@@ -14580,6 +14889,20 @@ static void draw_modals(UIViewController *root, int fbW, int fbH,
                         double scale)
 {
     draw_edit_menu(fbW, scale);
+    double screen_height = fbH / scale;
+    if (g_modal_animating == -1 && g_modal_dismissing_controller)
+    {
+        double progress = modal_progress();
+        UIView *view = [(UIViewController *)g_modal_dismissing_controller view];
+        if (view)
+        {
+            iosim_fb_set_opacity(0.47 * (1.0 - progress));
+            iosim_fb_fill_rect(0, 0, fbW, fbH, 0);
+            iosim_fb_set_opacity(1.0);
+            render_view(view, 0, progress * screen_height, scale, 1.0);
+        }
+        return;
+    }
     if (!root || !root->_presentedController)
         return;
     UIViewController *top = top_presented(root);
@@ -14590,8 +14913,18 @@ static void draw_modals(UIViewController *root, int fbW, int fbH,
     else
     {
         UIView *view = [top view];
-        if (view)
-            render_view(view, 0, 0, scale, 1.0);
+        if (!view)
+            return;
+        double progress = 1.0;
+        if (g_modal_animating == 1 && g_modal_anim_controller == top)
+            progress = modal_progress();
+        if (top->_modalPresentationStyle != 0 /* not full screen */)
+        {
+            iosim_fb_set_opacity(0.47 * progress);
+            iosim_fb_fill_rect(0, 0, fbW, fbH, 0);
+            iosim_fb_set_opacity(1.0);
+        }
+        render_view(view, 0, (1.0 - progress) * screen_height, scale, 1.0);
     }
 }
 
@@ -14913,6 +15246,8 @@ int UIApplicationMain(int argc, char **argv, id principal, id delegateName)
             if (iosim_display_link_tick())
                 redraw = 1;
             if (iosim_animation_tick())
+                redraw = 1;
+            if (iosim_modal_tick())
                 redraw = 1;
             if (iosim_scroll_tick())
                 redraw = 1;

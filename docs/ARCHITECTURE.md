@@ -804,6 +804,13 @@ decoded with libpng in `loader/image.c`.
   in the bar, so their targets fire through normal touch tracking. A pushed
   controller gets an automatic "‹ Previous" back control that pops the stack;
   an explicit left item or `hidesBackButton` replaces it.
+- `UINavigationBar` and `UIToolbar` also stand alone as real views. The bar
+  lays out the top item's title and left/right buttons across its own bounds
+  and rebuilds them in `layoutSubviews`: `setItems:`, `pushNavigationItem:`
+  and `popNavigationItemAnimated:` change the top item. The toolbar centers
+  its items using 17 pt label widths plus 24 pt padding and 16 pt gaps, each
+  item a `UIControl` that fires its `UIBarButtonItem` target. Both paint a
+  translucent dark background with a one-pixel hairline in `drawRect:`.
 - `UITabBarController` is a real container: it owns up to 16 view controllers,
   gives each a `UITabBarItem` (title and optional bundle image), and lays out a
   floating glass bar inset 16 pt from the sides, 64 pt tall, 12 pt above the
@@ -940,7 +947,13 @@ corners, left-aligned title and message, and side-by-side pill actions. The
 dimming view is painted at the measured 0.47 black and the status bar is
 redrawn above it, matching the reference. Action blocks are copied to the heap
 with `_Block_copy`, run on tap, then the modal dismisses through the same
-presentation stack as any other controller.
+presentation stack as any other controller. Non-alert controllers present as
+page sheets: `presentViewController:animated:` records a 0.35 s start time and
+the renderer slides the controller up from the bottom over a 0.47 black dim
+while `iosim_modal_tick` keeps the loop redrawing; `dismiss...Animated:` keeps
+the controller in a dismissing slot and slides it back down before clearing
+it. `modalPresentationStyle` can request full-screen presentation, which
+skips the dim. Alerts keep their measured form and their own dim.
 
 Standard controls render with the measured iOS 26 design. `UISwitch` paints
 a 63 x 28 pt capsule with a 36.3 x 23.3 pt white knob; `UISlider` uses a

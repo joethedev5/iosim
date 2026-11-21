@@ -35,8 +35,8 @@ runners**, combined with the public Darling and Apple dyld sources.
 | Auto Layout: NSLayoutConstraint, anchors, guides, intrinsic sizing, priorities | ✅ (subset) |
 | Multiline UILabel wrapping, UITextField/UITextView editing and delegates, UITextView drag selection, long press, draggable handles and a Copy/Paste edit menu, software keyboard | ✅ |
 | UISwitch, UISlider, UISegmentedControl, UIPageControl, UIActivityIndicatorView, UIProgressView | ✅ |
-| UIAlertController alerts, actions and modal presentation | ✅ |
-| UINavigationController push/pop, UITabBarController, UIStackView, UIButton titles | ✅ |
+| UIAlertController alerts and actions, animated page-sheet modal presentation and dismissal | ✅ |
+| UINavigationController push/pop, UITabBarController, UIStackView, standalone UINavigationBar/UIToolbar with item targets, UIButton titles | ✅ |
 | UIView animations (frame, alpha), delay/curve/repeat options, completion blocks | ✅ |
 | `CADisplayLink`, presentation layers, multiple concurrent layer animations | ✅ |
 | `CAAnimationGroup`: grouped opacity/corner animations, group removal clears children | ✅ |

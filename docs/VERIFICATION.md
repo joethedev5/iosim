@@ -252,6 +252,17 @@ changes from `#d93333` to `#33cc4d`; tapping the first item logs
 swapped content instead of the content covering it. The item controls use the
 same `UIControl` tracking path as buttons.
 
+### UIKit: standalone navigation bar and toolbar
+
+`tests/bars_test.m` places a `UINavigationBar` at (0,60) with a "Photos" item
+and a "Done" right button, and a `UIToolbar` at the bottom with Bold, Italic
+and Share items. It first pushes a "Detail" item and pops it, printing
+`[bars] items 1 1`. At 800 ms it injects four taps through the event FIFO:
+the three toolbar item centers and the navigation bar's Done center. The app
+reports `[bars] nav 1 tool 3`, so every bar item fired its target through the
+normal control path. The captured frame samples 16839 navigation-bar and
+18288 toolbar background pixels at the expected positions.
+
 ### UIKit layout: Auto Layout constraints and anchors
 
 `demo/AutoLayoutApp.m` positions every view with `NSLayoutAnchor` constraints:
@@ -368,6 +379,18 @@ status bar is redrawn above it exactly as on the reference.
 
 Tapping Delete through the event FIFO runs the handler and dismisses the
 alert; the post-action capture shows the updated "Deleted" label.
+
+### Modal presentation: animated page sheet
+
+`tests/modal_animation_test.m` presents a green `SheetController` from a dark
+parent at 150 ms and dismisses it at 900 ms. Four timed captures prove the
+motion: at 250 ms the bottom band is green while the top is dimmed parent
+(`#0a0d17`), at 700 ms the sheet covers the full frame, at 1000 ms the sheet
+has slid back down so the top is dimmed parent and the middle is green, and
+at 1400 ms the sheet is gone and the parent's `#0b0e1a` is restored
+everywhere. The renderer slides the sheet by the remaining fraction of the
+screen height and scales the 0.47 dim with progress; no frames are captured
+from a static state.
 
 ### Numeric keypad
 

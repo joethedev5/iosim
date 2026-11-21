@@ -384,8 +384,17 @@ enum {
 
 @class UINavigationItem;
 
+enum {
+    UIModalPresentationFullScreen = 0,
+    UIModalPresentationPageSheet = 1,
+    UIModalPresentationFormSheet = 2,
+    UIModalPresentationOverFullScreen = 5,
+    UIModalPresentationAutomatic = -2
+};
+
 @interface UIViewController : NSObject
 - (id)init;
+@property(nonatomic) long modalPresentationStyle;
 @property(nonatomic, retain) UIView *view;
 @property(nonatomic, retain) id title;
 @property(readonly) id navigationController;
@@ -958,6 +967,24 @@ enum {
 @property(nonatomic, retain) UIBarButtonItem *leftBarButtonItem;
 @property(nonatomic, retain) UIBarButtonItem *rightBarButtonItem;
 @property BOOL hidesBackButton;
+@end
+
+@interface UINavigationBar : UIView
+- (void)setItems:(NSArray *)items animated:(BOOL)animated;
+- (NSArray *)items;
+- (UINavigationItem *)topItem;
+- (void)pushNavigationItem:(UINavigationItem *)item animated:(BOOL)animated;
+- (UINavigationItem *)popNavigationItemAnimated:(BOOL)animated;
+@property(nonatomic, retain) UIColor *barTintColor;
+@end
+
+@interface UIToolbar : UIView
+- (void)setItems:(NSArray *)items animated:(BOOL)animated;
+- (NSArray *)items;
+@property(nonatomic, retain) UIColor *barTintColor;
+@property(nonatomic, retain) UIColor *tintColor;
+@property int barStyle;
+@property BOOL translucent;
 @end
 
 @interface UINavigationController : UIViewController

@@ -367,6 +367,13 @@ management.
   lays out a dark panel above the selection; menu taps are consumed before
   the view hit-test and send the item action to the first responder.
   UITextView implements copy:/paste: over the shared pasteboard.
+- Standalone bars: UINavigationBar tracks items with push/pop and rebuilds
+  its title and left/right controls on layout; UIToolbar centers up to 16
+  items as UIControls with 24 pt padding and 16 pt gaps. Both use 17 pt
+  labels and draw translucent dark backgrounds with hairlines.
+- Modal presentation: non-alert controllers slide up over a dimming layer
+  driven by a UI-loop tick (0.35 s), and dismissal slides them back down from
+  a dismissing slot after they leave the presentation stack.
 - Remaining text-selection gaps: multi-line drag affordances beyond the
   single active touch.
 
