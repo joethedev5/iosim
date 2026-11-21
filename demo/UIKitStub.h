@@ -1003,6 +1003,11 @@ enum {
 @property BOOL definesPresentationContext;
 @property(getter=isModalInPresentation) BOOL modalInPresentation;
 @property(nonatomic, retain) id restorationIdentifier;
+@property long modalTransitionStyle;
+@property BOOL modalPresentationCapturesStatusBarAppearance;
+@property BOOL hidesBottomBarWhenPushed;
+@property(copy) NSArray *toolbarItems;
+- (void)setToolbarItems:(NSArray *)items animated:(BOOL)animated;
 @property CGSize preferredContentSize;
 @property(readonly) UIPopoverPresentationController *popoverPresentationController;
 @property(readonly) UISheetPresentationController *sheetPresentationController;
@@ -2143,6 +2148,9 @@ enum {
 - (id)initWithRootViewController:(UIViewController *)root;
 @property(readonly) UINavigationBar *navigationBar;
 @property(getter=isNavigationBarHidden) BOOL navigationBarHidden;
+@property(readonly) UIToolbar *toolbar;
+- (void)setToolbarHidden:(BOOL)hidden animated:(BOOL)animated;
+@property(getter=isToolbarHidden) BOOL toolbarHidden;
 - (void)pushViewController:(UIViewController *)controller animated:(BOOL)animated;
 - (UIViewController *)popViewControllerAnimated:(BOOL)animated;
 - (NSArray *)viewControllers;

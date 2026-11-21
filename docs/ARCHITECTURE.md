@@ -950,7 +950,10 @@ decoded with libpng in `loader/image.c`.
   renders its title plus left/right `UIBarButtonItem`s as real `UIControl`s
   in the bar, so their targets fire through normal touch tracking. A pushed
   controller gets an automatic "‹ Previous" back control that pops the stack;
-  an explicit left item or `hidesBackButton` replaces it. The controller also
+  an explicit left item or `hidesBackButton` replaces it. A real `UIToolbar`
+  at the bottom shows the top controller's `toolbarItems` when toolbar hiding
+  is turned off, and its 49pt band is subtracted from the content view. The
+  controller also
   vends a left-edge `UIScreenEdgePanGestureRecognizer` as
   `interactivePopGestureRecognizer` (disabled at depth one and when the bar is
   hidden). During a drag both the outgoing and previous controller's views

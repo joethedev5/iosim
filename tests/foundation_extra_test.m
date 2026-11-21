@@ -253,6 +253,24 @@ extern int fflush(void *stream);
            [split viewControllerForColumn:UISplitViewControllerColumnPrimary]
                == left);
 
+    UIViewController *toolbarController = [[UIViewController alloc] init];
+    toolbarController.modalTransitionStyle = 3;
+    toolbarController.hidesBottomBarWhenPushed = YES;
+    toolbarController.modalPresentationCapturesStatusBarAppearance = YES;
+    UIBarButtonItem *toolbarItem = [[UIBarButtonItem alloc]
+        initWithTitle:@"T" style:0 target:nil action:nil];
+    [toolbarController setToolbarItems:@[toolbarItem] animated:NO];
+    UINavigationController *nav = [[UINavigationController alloc]
+        initWithRootViewController:toolbarController];
+    [nav setToolbarHidden:NO animated:NO];
+    (void)[nav view];
+    printf("[fnd] navtoolbar %d %lu %.0f %ld %d %d\n",
+           [nav isToolbarHidden], (unsigned long)[[[nav toolbar] items] count],
+           [toolbarController.view frame].size.height,
+           [toolbarController modalTransitionStyle],
+           [toolbarController hidesBottomBarWhenPushed],
+           [toolbarController modalPresentationCapturesStatusBarAppearance]);
+
     printf("[fnd] ready\n");
     fflush(0);
 }

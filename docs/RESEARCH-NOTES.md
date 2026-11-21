@@ -793,5 +793,8 @@ management.
 - `UINavigationController` delegate callbacks are paired around installation:
   `willShowViewController:` runs before the new stack is installed and
   `didShowViewController:` after the appearing controller's appearance
-  callbacks. `UIRefreshControl.attributedTitle` is stored but the spinner is
-  still drawn by the blade renderer, not by a label.
+  callbacks. The navigation toolbar is a real `UIToolbar` pinned to the
+  bottom; installation copies the top controller's `toolbarItems`, subtracts
+  its 49pt height from the content view and keeps it hidden by default.
+  `UIRefreshControl.attributedTitle` is stored but the spinner is still drawn
+  by the blade renderer, not by a label.

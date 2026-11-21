@@ -1773,6 +1773,10 @@ enum {
     id _tabBarItem;
     id _navigationItem;
     long _modalPresentationStyle;
+    long _modalTransitionStyle;
+    BOOL _modalPresentationCapturesStatusBarAppearance;
+    BOOL _hidesBottomBarWhenPushed;
+    id _toolbarItems;
     UIEdgeInsets _additionalSafeAreaInsets;
     id _parentController;
     id _popoverPresentationController;
@@ -1794,6 +1798,15 @@ enum {
 - (UIPresentationController *)presentationController;
 - (long)modalPresentationStyle;
 - (void)setModalPresentationStyle:(long)style;
+- (long)modalTransitionStyle;
+- (void)setModalTransitionStyle:(long)style;
+- (BOOL)modalPresentationCapturesStatusBarAppearance;
+- (void)setModalPresentationCapturesStatusBarAppearance:(BOOL)captures;
+- (BOOL)hidesBottomBarWhenPushed;
+- (void)setHidesBottomBarWhenPushed:(BOOL)hides;
+- (NSArray *)toolbarItems;
+- (void)setToolbarItems:(NSArray *)items;
+- (void)setToolbarItems:(NSArray *)items animated:(BOOL)animated;
 - (void)setTitle:(id)title;
 - (id)navigationController;
 - (id)tabBarController;
@@ -2271,6 +2284,8 @@ enum {
     UIView *_navBar;
     UILabel *_navTitleLabel;
     BOOL _navBarHidden;
+    UIToolbar *_navToolbar;
+    BOOL _toolbarHidden;
     UIView *_contentView;
     id _leftButton;
     id _rightButton;
@@ -2290,6 +2305,10 @@ enum {
 - (BOOL)isNavigationBarHidden;
 - (BOOL)navigationBarHidden;
 - (void)setNavigationBarHidden:(BOOL)hidden;
+- (UIToolbar *)toolbar;
+- (void)setToolbarHidden:(BOOL)hidden animated:(BOOL)animated;
+- (void)setToolbarHidden:(BOOL)hidden;
+- (BOOL)isToolbarHidden;
 - (UIGestureRecognizer *)interactivePopGestureRecognizer;
 @end
 
@@ -10413,6 +10432,37 @@ static int app_status_bar_hidden(void);
 {
     _modalPresentationStyle = style;
 }
+- (long)modalTransitionStyle { return _modalTransitionStyle; }
+- (void)setModalTransitionStyle:(long)style
+{
+    _modalTransitionStyle = style;
+}
+- (BOOL)modalPresentationCapturesStatusBarAppearance
+{
+    return _modalPresentationCapturesStatusBarAppearance;
+}
+- (void)setModalPresentationCapturesStatusBarAppearance:(BOOL)captures
+{
+    _modalPresentationCapturesStatusBarAppearance = captures;
+}
+- (BOOL)hidesBottomBarWhenPushed { return _hidesBottomBarWhenPushed; }
+- (void)setHidesBottomBarWhenPushed:(BOOL)hides
+{
+    _hidesBottomBarWhenPushed = hides;
+}
+- (NSArray *)toolbarItems
+{
+    return _toolbarItems ? _toolbarItems : @[];
+}
+- (void)setToolbarItems:(NSArray *)items
+{
+    _toolbarItems = items;
+}
+- (void)setToolbarItems:(NSArray *)items animated:(BOOL)animated
+{
+    (void)animated;
+    _toolbarItems = items;
+}
 - (void)setTitle:(id)title
 {
     _title = title;
@@ -11452,6 +11502,10 @@ static int iosim_nav_tick(void)
         _navTitleLabel->_font = [UIFont systemFontOfSize:17];
         _navTitleLabel->_textColor = [UIColor whiteColor];
         [_navBar addSubview:_navTitleLabel];
+        _navToolbar = [[UIToolbar alloc] initWithFrame:
+            CGRectMake(0, bounds.size.height - 49, bounds.size.width, 49)];
+        _navToolbar.hidden = YES;
+        [_view addSubview:_navToolbar];
         (void)color;
         [self installTopViewController];
         _interactivePopGesture = [[UIScreenEdgePanGestureRecognizer alloc]
@@ -11466,6 +11520,26 @@ static int iosim_nav_tick(void)
     (void)[self view];
     return _interactivePopGesture;
 }
+- (UIToolbar *)toolbar
+{
+    (void)[self view];
+    return _navToolbar;
+}
+- (void)setToolbarHidden:(BOOL)hidden animated:(BOOL)animated
+{
+    (void)animated;
+    _toolbarHidden = hidden;
+    if (_navToolbar)
+    {
+        _navToolbar.hidden = hidden;
+        [self installTopViewController];
+    }
+}
+- (void)setToolbarHidden:(BOOL)hidden
+{
+    [self setToolbarHidden:hidden animated:NO];
+}
+- (BOOL)isToolbarHidden { return _toolbarHidden; }
 - (void)handleInteractivePop:(UIScreenEdgePanGestureRecognizer *)gesture
 {
     if (_stackCount <= 1 || _navBarHidden)
@@ -11500,10 +11574,18 @@ static int iosim_nav_tick(void)
     if (_contentView)
         [_contentView removeFromSuperview];
     double navHeight = _navBarHidden ? 0 : 100;
+    double toolbarHeight = (_toolbarHidden || !_navToolbar) ? 0 : 49;
     CGRect bounds = _view->_frame;
+    if (_navToolbar)
+    {
+        _navToolbar.frame = CGRectMake(0, bounds.size.height - 49,
+                                       bounds.size.width, 49);
+        _navToolbar.hidden = _toolbarHidden;
+        [_navToolbar setItems:[top toolbarItems] animated:NO];
+    }
     UIView *content = [top view];
     content->_frame = CGRectMake(0, navHeight, bounds.size.width,
-                                 bounds.size.height - navHeight);
+                                 bounds.size.height - navHeight - toolbarHeight);
     [_view addSubview:content];
     _contentView = content;
 

@@ -6034,7 +6034,8 @@ if wait_log "[fnd] trim 'Hello World'" &&
    wait_log "[fnd] viewwin 1 0" &&
    wait_log "[fnd] appext a.txt /tmp/a.txt" &&
    wait_log "[fnd] scene2 1 1" &&
-   wait_log "[fnd] split 0 2 307 307 717 2 1"; then
+   wait_log "[fnd] split 0 2 307 307 717 2 1" &&
+   wait_log "[fnd] navtoolbar 0 1 725 3 1 1"; then
     echo "ok   Foundation helpers, colors, fonts and readable guides"
 else
     echo "FAIL Foundation helpers"; fails=$((fails+1))
