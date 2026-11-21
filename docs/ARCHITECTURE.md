@@ -1463,3 +1463,8 @@ stay on `iosim_fb_blit_affine`.
 data source for a header/footer view at the section's zero item path, and
 places it at the flow layout's `headerReferenceSize`/`footerReferenceSize`
 band while accumulating the same cursor used by hit testing.
+`UIApplication` stores background tasks as `[token, handler]` pairs. Entering
+the background sets a five-second deadline and polls the task list while
+worker queues run; `endBackgroundTask:` releases the handler and removes the
+pair, and any pair left at the deadline has its handler invoked before
+`iosim_suspend_self`.

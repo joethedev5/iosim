@@ -1980,6 +1980,9 @@ enum {
 - (void)setStatusBarStyle:(long)style animated:(BOOL)animated;
 - (BOOL)isStatusBarHidden;
 - (void)setStatusBarHidden:(BOOL)hidden animated:(BOOL)animated;
+- (double)backgroundTimeRemaining;
+- (unsigned long)beginBackgroundTaskWithExpirationHandler:(void (^)(void))handler;
+- (void)endBackgroundTask:(unsigned long)task;
 @property(nonatomic) long applicationIconBadgeNumber;
 - (BOOL)canOpenURL:(id)url;
 - (BOOL)openURL:(id)url;

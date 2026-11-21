@@ -6,6 +6,7 @@
 
 extern int printf(const char *fmt, ...);
 extern int fflush(void *stream);
+extern int usleep(unsigned int usec);
 
 /* Lifecycle fixture: prints every application/scene transition with the
  * UIApplication state the runtime reports at that moment. */
@@ -17,7 +18,11 @@ extern int fflush(void *stream);
 @property(nonatomic, retain) UIWindow *window;
 @end
 
-@interface LifeAppDelegate : UIResponder <UIApplicationDelegate>
+@interface LifeAppDelegate : UIResponder <UIApplicationDelegate> {
+@public
+    unsigned long _task;
+    BOOL _taskStarted;
+}
 @end
 
 @implementation LifeAppDelegate
@@ -54,6 +59,23 @@ extern int fflush(void *stream);
     printf("[life] background state=%ld\n",
            (long)[application applicationState]);
     fflush(0);
+    if (_taskStarted)
+        return;
+    _taskStarted = YES;
+    _task = [application beginBackgroundTaskWithExpirationHandler:^{
+        printf("[life] bg expired\n");
+        fflush(0);
+    }];
+    printf("[life] bg began %d remaining %.0f\n", _task != 0,
+           [application backgroundTimeRemaining]);
+    fflush(0);
+    NSOperationQueue *queue = [[NSOperationQueue alloc] init];
+    [queue addOperationWithBlock:^{
+        usleep(300000);
+        printf("[life] bg work\n");
+        fflush(0);
+        [application endBackgroundTask:_task];
+    }];
 }
 - (void)applicationWillEnterForeground:(UIApplication *)application
 {

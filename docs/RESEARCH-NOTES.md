@@ -869,3 +869,8 @@ components.
   heights around each section, adds the returned views as subviews, and
   includes those heights in content size and tap cursor math. Reuse is
   allocate-per-reload, like cells.
+- A background task is a token plus a copied expiration handler. The first
+  task begun while backgrounded opens a five-second deadline; the suspend path
+  waits for the task list to empty (or the deadline), calls remaining
+  expiration handlers, then stops the process. Active-app tasks get a token but
+  no window.

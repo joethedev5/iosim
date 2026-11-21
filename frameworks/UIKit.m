@@ -80,6 +80,7 @@ extern int iosim_fb_push_clip_alpha(const unsigned char *alpha, int w,
                                     int h, int x, int y);
 extern void iosim_fb_pop_clip_mask(void);
 extern double iosim_now(void);
+extern int usleep(unsigned int usec);
 extern int  iosim_foundation_tick(void);
 extern int  iosim_dispatch_drain_main(void);
 extern const char *iosim_string_cstr(id string);
@@ -104,6 +105,7 @@ static void shell_badge_store(const char *bundle, int count);
 extern int  iosim_png_load(const char *path, unsigned char **out_rgba,
                            int *out_width, int *out_height);
 extern void *_Block_copy(void *block);
+extern void _Block_release(void *block);
 extern void iosim_fb_fill_ellipse(int cx, int cy, int rx, int ry,
                                   unsigned color);
 extern void iosim_fb_draw_line(int x0, int y0, int x1, int y1, int thickness,
@@ -3767,6 +3769,9 @@ enum {
     long _state;
     long _iconBadgeNumber;
     BOOL _idleTimerDisabled;
+    id _backgroundTasks;
+    unsigned long _nextBackgroundTask;
+    double _backgroundTaskDeadline;
 }
 + (UIApplication *)sharedApplication;
 - (void)setDelegate:(id)delegate;
@@ -16280,15 +16285,44 @@ int iosim_ui_appearance_tick(void)
     if (bundle)
         shell_badge_store(iosim_string_cstr(bundle), (int)value);
 }
-- (double)backgroundTimeRemaining { return 0xFFFFFFFF; }
+- (double)backgroundTimeRemaining
+{
+    if (!_backgroundTasks || [_backgroundTasks count] == 0)
+        return 0;
+    double remaining = _backgroundTaskDeadline - iosim_now();
+    return remaining > 0 ? remaining : 0;
+}
 - (unsigned long)beginBackgroundTaskWithExpirationHandler:(void (^)(void))handler
 {
-    /* The runtime suspends the process as soon as the scene backgrounds, so
-     * no background execution window exists to hand out. */
-    (void)handler;
-    return 0;
+    if (!_backgroundTasks)
+        _backgroundTasks = [NSMutableArray array];
+    unsigned long token = ++_nextBackgroundTask;
+    id stored = handler ? (id)_Block_copy(handler) : [NSNull null];
+    [_backgroundTasks addObject:[NSArray arrayWithObjects:
+        [NSNumber numberWithLongLong:(long long)token], stored, nil]];
+    if (_state == UIApplicationStateBackground && _backgroundTaskDeadline <= 0)
+        _backgroundTaskDeadline = iosim_now() + 5.0;
+    return token;
 }
-- (void)endBackgroundTask:(unsigned long)task { (void)task; }
+- (void)endBackgroundTask:(unsigned long)task
+{
+    if (!_backgroundTasks)
+        return;
+    for (unsigned long i = 0; i < [_backgroundTasks count]; i++)
+    {
+        NSArray *entry = [_backgroundTasks objectAtIndex:i];
+        if ([(NSNumber *)[entry objectAtIndex:0] longLongValue] !=
+            (long long)task)
+            continue;
+        id handler = [entry objectAtIndex:1];
+        if (handler != [NSNull null])
+            _Block_release((void *)handler);
+        [(NSMutableArray *)_backgroundTasks removeObjectAtIndex:i];
+        break;
+    }
+    if ([_backgroundTasks count] == 0)
+        _backgroundTaskDeadline = 0;
+}
 - (BOOL)canOpenURL:(id)url { (void)url; return YES; }
 - (BOOL)openURL:(id)url { (void)url; return NO; }
 - (void)openURL:(id)url options:(id)options
@@ -25338,6 +25372,30 @@ static void app_enter_background(id sceneDelegate, id scene,
                       object:app];
     app_lifecycle_call(sceneDelegate, @selector(sceneDidEnterBackground:), scene);
 
+    if (app->_backgroundTasks && [app->_backgroundTasks count] > 0)
+    {
+        app->_backgroundTaskDeadline = iosim_now() + 5.0;
+        printf("[UIKit-lite] background task window open\n");
+        fflush(0);
+        while ([app->_backgroundTasks count] > 0 &&
+               iosim_now() < app->_backgroundTaskDeadline)
+            usleep(20000);
+        if ([app->_backgroundTasks count] > 0)
+        {
+            NSArray *pending =
+                [NSArray arrayWithArray:app->_backgroundTasks];
+            for (unsigned long i = 0; i < [pending count]; i++)
+            {
+                id handler = [[pending objectAtIndex:i] objectAtIndex:1];
+                if (handler != [NSNull null])
+                    ((void (^)(void))handler)();
+            }
+            [(NSMutableArray *)app->_backgroundTasks removeAllObjects];
+        }
+        app->_backgroundTaskDeadline = 0;
+        printf("[UIKit-lite] background task window closed\n");
+        fflush(0);
+    }
     printf("[UIKit-lite] backgrounded by the system; suspending\n");
     fflush(0);
     if (requestSwitcher)

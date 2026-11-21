@@ -1644,6 +1644,14 @@ callbacks. Resuming from the icon logs `foreground state=1`,
 `ready` line still appears only once — the same stopped process continued.
 The `UIApplicationWillResignActive`/`DidEnterBackground`/`WillEnterForeground`/
 `DidBecomeActive` notifications are posted alongside the delegate calls.
+The fixture also begins a background task from `applicationDidEnterBackground:`
+and runs 300 ms of work on an `NSOperationQueue`. The suite observes
+`bg began 1 remaining`, then `bg work`, `background task window closed` and
+only then `backgrounded by the system; suspending`: the process stays live
+until the task ends instead of stopping immediately. A separate fixture checks
+that `beginBackgroundTaskWithExpirationHandler:` returns token 1 while the app
+is active, that `backgroundTimeRemaining` is 0 outside a window, and that
+ending the task clears it without invoking the expiration handler.
 
 ### Kernel symbolication and XNU dispatch tables
 
@@ -1770,9 +1778,10 @@ widgets; unlocking is the swipe-up/home gesture.
 Backgrounded apps are suspended in place (SIGSTOP) and resumed from their icon
 or switcher card, with no memory-pressure termination policy.
 `UIApplication` tracks active/inactive/background state and posts the
-lifecycle notifications, but `beginBackgroundTaskWithExpirationHandler:`
-returns 0: the model suspends the process immediately instead of granting a
-background execution window. CoreText shaping is limited to the glyphs in SFUI;
+lifecycle notifications. `beginBackgroundTaskWithExpirationHandler:` returns a
+live token and opens a five-second execution window before suspension; ending
+all tasks closes the window early, and tasks still active at the deadline get
+their expiration handlers before the process stops. CoreText shaping is limited to the glyphs in SFUI;
 right-to-left and complex scripts are not shaped. `UIView.transform` applies a
 full 2D affine transform (translation, scale and rotation) through an offscreen
 composite; animating one interpolates decomposed rotation, scale and

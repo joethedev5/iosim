@@ -1337,6 +1337,14 @@ if wait_log "[life] resign state=1" &&
 else
     echo "FAIL lifecycle background"; fails=$((fails+1))
 fi
+if wait_log "[life] bg began 1 remaining" &&
+    wait_log "[life] bg work" &&
+    wait_log "background task window closed" &&
+    wait_log "backgrounded by the system; suspending"; then
+    echo "ok   a background task keeps the app running until its work ends"
+else
+    echo "FAIL lifecycle background task"; fails=$((fails+1))
+fi
 sleep 0.4
 "$ROOT/tools/iosimctl" ui "$UDID" tap 154.7222 322.5 >/dev/null
 if wait_log "[life] foreground state=1" &&
@@ -1777,6 +1785,16 @@ else
 fi
 "$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
 sleep 0.4
+
+# ---------- background task bookkeeping ----------
+"$ROOT/tools/build_app.sh" "$ROOT/tests/background_task_test.m" \
+    "$T/background_task_test" >/dev/null
+out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" \
+    "$T/background_task_test" 2>&1)"
+check "[bg] token 1 remaining 0" "$out" \
+    "beginBackgroundTask returns a token and an active app has no window"
+check "[bg] ended 0 expired 0" "$out" \
+    "ending a background task clears it without firing the expiration handler"
 
 # ---------- collection supplementary header/footer views ----------
 "$ROOT/tools/build_app.sh" "$ROOT/tests/collection_supplementary_test.m" \

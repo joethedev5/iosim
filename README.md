@@ -75,7 +75,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | UIPasteboard general pasteboard shared across processes, with changeCount | ✅ |
 | SpringBoard system UI: measured iOS 26 home screen, installed apps, real app launching | ✅ |
 | Real app suspension: home stops the process, the icon resumes it in place | ✅ |
-| Application/scene lifecycle callbacks, notifications and UIApplication state | ✅ |
+| Application/scene lifecycle callbacks, notifications, UIApplication state and a background execution window for `beginBackgroundTaskWithExpirationHandler:` | ✅ |
 | App switcher: bottom-edge gestures, cached frames, resume, swipe-up kill | ✅ |
 | Multi-page home screen: 16-slot pages, page dots, horizontal swipe paging | ✅ |
 | Home-screen folders: drag to group apps, member launch, persisted across boots | ✅ |
