@@ -629,6 +629,13 @@ management.
   glass take a dark translucent overlay in dark appearance. System material
   blur styles (3-7) tint dark in dark appearance and light in light, with
   thickness increasing the tint alpha.
+- Status bar hiding and child-controller resolution: `prefersStatusBarHidden`,
+  `childForStatusBarStyle/Hidden`, navigation/tab traversal,
+  `setStatusBarHidden:animated:`, and Info.plist `UIStatusBarHidden`,
+  `UIViewControllerBasedStatusBarAppearance` and `UIStatusBarStyle`. The
+  plist is applied before the scene connects so controller/app calls still
+  override it. `UIButton initWithFrame:` now creates its title label; before,
+  `setTitle:forState:` on a frame-initialized button dereferenced nil.
 
 ## Open directions
 
@@ -641,10 +648,32 @@ management.
   reference for deeper dispatch and pthread fidelity; `dispatch_source`
   (timer, data add/or/replace, read/write) is already implemented and
   covered by section 23.
-- `CAReplicatorLayer` plan: render the replicator's sublayers once into an
-  offscreen XRGB buffer, then blit `instanceCount` copies with the
-  accumulated `instanceTransform` applied around the layer's center; apply
-  per-instance RGB/alpha offsets to the buffer copy and tint by
-  `instanceColor`. `instanceDelay` (staggering child animations) is a
-  follow-on once copy rendering works; a spinner/dot-row fixture will verify
-  it.
+- `CAReplicatorLayer` is implemented by rendering the replicator's sublayers
+  once into an offscreen XRGB buffer, then blitting `instanceCount` copies
+  with the accumulated `instanceTransform` around the layer's center.
+  `instanceColor` tints the copies and per-instance RGB/alpha offsets shift
+  each successive copy; `instanceDelay` is accepted but copies render in the
+  same animation phase. A ring-of-dots fixture verifies it.
+- Offscreen layer passes use the offscreen buffer's local coordinates: child
+  layers must be rendered from parent origin (0,0), not the host layer's
+  frame origin. Using `-frame.origin` made every replicator child land outside
+  the buffer, so the buffer came back with zero alpha.
+- `CAAnimation` timing now covers `beginTime` (absolute media time, converted
+  to a start delay at add time), `speed`, `timeOffset`, `autoreverses`
+  (triangular progress that ends at the start value) and backwards/both
+  `fillMode`. `CATransaction` tracks begin/commit nesting and runs a
+  completion block on the outermost commit; `performWithoutAnimation:` and
+  `setAnimationsEnabled:` execute animation blocks immediately.
+- `CAEmitterLayer` uses a repeating lifetime ring per cell instead of
+  retained particle state: particle `i` of `n = birthRate * lifetime` sits at
+  phase `i / n`, and its age is `(now - epoch + phase * lifetime) mod
+  lifetime`. A small LCG derives angle, velocity, scale and RGBA variation
+  from the emitter seed and indices, so screenshots are stable.
+- UIView keyframe animations are queued by relative start time and applied by
+  the run-loop tick as ordinary UIView animation blocks. Sampling the model
+  frame during the animation shows the final value immediately; tests must
+  read `[[view layer] presentationLayer].frame` instead.
+- Tint colors inherit through the superview chain and end at
+  `UIColor.tintColor` (system blue). `setTintColor:` and `addSubview:` call
+  `tintColorDidChange`; UIButton tracks whether a title color was set
+  explicitly and otherwise repaints its title with the inherited tint.

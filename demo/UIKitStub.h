@@ -4,6 +4,8 @@
 #include "../frameworks/objc_lite.h"
 #include "../frameworks/coregraphics_lite.h"
 
+double CACurrentMediaTime(void);
+
 typedef struct {
     unsigned long location;
     unsigned long length;
@@ -38,7 +40,11 @@ __attribute__((objc_root_class))
 @end
 
 @interface NSData : NSObject
++ (NSData *)dataWithBytes:(const void *)bytes length:(unsigned long)length;
 + (NSData *)dataWithContentsOfFile:(NSString *)path;
+- (const void *)bytes;
+- (unsigned long)length;
+- (BOOL)writeToFile:(NSString *)path atomically:(BOOL)atomically;
 @end
 
 @interface NSTimer : NSObject
@@ -169,10 +175,76 @@ typedef enum {
 @property(nonatomic, retain) id backgroundColor;
 @property(nonatomic, retain) CALayer *mask;
 @property CATransform3D transform;
+@property CGRect contentsRect;
+@property(nonatomic, retain) id contentsGravity;
+@property double contentsScale;
+@property(nonatomic, retain) id shadowPath;
+@property BOOL shouldRasterize;
+@property double rasterizationScale;
+@property(nonatomic, retain) id cornerCurve;
+@property unsigned long maskedCorners;
+@property double speed;
+@property double timeOffset;
+@property double beginTime;
+@property(nonatomic, retain) id name;
 - (void)addSublayer:(CALayer *)layer;
 - (void)addAnimation:(id)animation forKey:(id)key;
 - (void)removeAnimationForKey:(id)key;
 - (CALayer *)presentationLayer;
+@end
+
+@interface CAReplicatorLayer : CALayer
+@property long instanceCount;
+@property double instanceDelay;
+@property CATransform3D instanceTransform;
+@property(nonatomic, retain) id instanceColor;
+@property float instanceRedOffset;
+@property float instanceGreenOffset;
+@property float instanceBlueOffset;
+@property float instanceAlphaOffset;
+@property BOOL preservesDepth;
+@end
+
+@class NSArray;
+
+@interface CAEmitterCell : NSObject
+@property(nonatomic, retain) id contents;
+@property(nonatomic, retain) id color;
+@property float birthRate;
+@property float lifetime;
+@property float velocity;
+@property float velocityRange;
+@property float emissionRange;
+@property float scale;
+@property float scaleRange;
+@property float spin;
+@property float spinRange;
+@property float alphaSpeed;
+@property float alphaRange;
+@property float redSpeed;
+@property float greenSpeed;
+@property float blueSpeed;
+@property float redRange;
+@property float greenRange;
+@property float blueRange;
+@property float xAcceleration;
+@property float yAcceleration;
+@property(getter=isEnabled) BOOL enabled;
+@property(nonatomic, retain) id name;
+@end
+
+@interface CAEmitterLayer : CALayer
+@property(nonatomic, retain) NSArray *emitterCells;
+@property float birthRate;
+@property float lifetime;
+@property CGPoint emitterPosition;
+@property CGSize emitterSize;
+@property(nonatomic, retain) id emitterShape;
+@property(nonatomic, retain) id renderMode;
+@property unsigned seed;
+@property float scale;
+@property float velocity;
+@property float spin;
 @end
 
 @class NSArray;
@@ -184,6 +256,18 @@ typedef enum {
 - (void)setDuration:(double)duration;
 - (void)setRepeatCount:(double)count;
 - (void)setTimingFunction:(id)function;
+- (void)setBeginTime:(double)time;
+- (double)beginTime;
+- (void)setSpeed:(double)speed;
+- (double)speed;
+- (void)setTimeOffset:(double)offset;
+- (double)timeOffset;
+- (void)setAutoreverses:(BOOL)autoreverses;
+- (BOOL)autoreverses;
+- (void)setRemovedOnCompletion:(BOOL)removed;
+- (BOOL)removedOnCompletion;
+- (void)setFillMode:(id)fillMode;
+- (id)fillMode;
 @end
 
 @interface CABasicAnimation : CAAnimation
@@ -205,6 +289,20 @@ typedef enum {
 @interface CAAnimationGroup : CAAnimation
 - (void)setAnimations:(NSArray *)animations;
 - (NSArray *)animations;
+@end
+
+@interface CATransaction : NSObject
++ (void)begin;
++ (void)commit;
++ (void)flush;
++ (void)setAnimationDuration:(double)duration;
++ (double)animationDuration;
++ (void)setDisableActions:(BOOL)disable;
++ (BOOL)disableActions;
++ (void)setCompletionBlock:(void (^)(void))block;
++ (void (^)(void))completionBlock;
++ (void)lock;
++ (void)unlock;
 @end
 
 @interface CADisplayLink : NSObject
@@ -243,6 +341,7 @@ enum {
 + (UIColor *)whiteColor;
 + (UIColor *)blackColor;
 + (UIColor *)systemBlueColor;
++ (UIColor *)tintColor;
 + (UIColor *)systemRedColor;
 + (UIColor *)systemGreenColor;
 + (UIColor *)systemOrangeColor;
@@ -273,7 +372,11 @@ enum {
 @interface UIScreen : NSObject
 + (UIScreen *)mainScreen;
 - (CGRect)bounds;
+- (CGRect)nativeBounds;
 - (double)scale;
+- (double)nativeScale;
+@property double brightness;
+@property(readonly) BOOL captured;
 @end
 
 @class NSArray;
@@ -315,6 +418,12 @@ enum {
 @property(readonly) NSLayoutAnchor *centerXAnchor;
 @property(readonly) NSLayoutAnchor *centerYAnchor;
 @end
+
+enum {
+    UIViewTintAdjustmentModeNormal = 0,
+    UIViewTintAdjustmentModeDimmed = 1,
+    UIViewTintAdjustmentModeAutomatic = 2
+};
 
 enum {
     UIViewAnimationOptionLayoutSubviews = 1 << 0,
@@ -368,6 +477,21 @@ enum {
                     options:(unsigned long)options
                  animations:(void (^)(void))animations
                  completion:(void (^)(BOOL finished))completion;
++ (BOOL)areAnimationsEnabled;
++ (void)setAnimationsEnabled:(BOOL)enabled;
++ (void)performWithoutAnimation:(void (^)(void))actionsWithoutAnimation;
++ (void)animateKeyframesWithDuration:(double)duration delay:(double)delay
+                             options:(unsigned long)options
+                          animations:(void (^)(void))animations
+                          completion:(void (^)(BOOL finished))completion;
++ (void)addKeyframeWithRelativeStartTime:(double)start
+                        relativeDuration:(double)duration
+                              animations:(void (^)(void))animations;
+@property(nonatomic, retain) UIColor *tintColor;
+- (void)tintColorDidChange;
+@property long tintAdjustmentMode;
+@property(readonly) UIEdgeInsets safeAreaInsets;
+- (void)safeAreaInsetsDidChange;
 @end
 
 @class UITextField;
@@ -446,6 +570,9 @@ enum {
 @property(nonatomic) long overrideUserInterfaceStyle;
 - (void)traitCollectionDidChange:(UITraitCollection *)previous;
 - (long)preferredStatusBarStyle;
+- (BOOL)prefersStatusBarHidden;
+- (UIViewController *)childForStatusBarStyle;
+- (UIViewController *)childForStatusBarHidden;
 - (void)setNeedsStatusBarAppearanceUpdate;
 @property(nonatomic, retain) id title;
 @property(readonly) id navigationController;
@@ -690,6 +817,38 @@ enum {
 @property(readonly) UIView *contentView;
 @end
 
+enum {
+    UIImpactFeedbackStyleLight = 0,
+    UIImpactFeedbackStyleMedium = 1,
+    UIImpactFeedbackStyleHeavy = 2,
+    UIImpactFeedbackStyleSoft = 3,
+    UIImpactFeedbackStyleRigid = 4
+};
+
+enum {
+    UINotificationFeedbackTypeSuccess = 0,
+    UINotificationFeedbackTypeWarning = 1,
+    UINotificationFeedbackTypeError = 2
+};
+
+@interface UIFeedbackGenerator : NSObject
+- (void)prepare;
+@end
+
+@interface UIImpactFeedbackGenerator : UIFeedbackGenerator
+- (id)initWithStyle:(long)style;
+- (void)impactOccurred;
+- (void)impactOccurredWithIntensity:(double)intensity;
+@end
+
+@interface UISelectionFeedbackGenerator : UIFeedbackGenerator
+- (void)selectionChanged;
+@end
+
+@interface UINotificationFeedbackGenerator : UIFeedbackGenerator
+- (void)notificationOccurred:(long)type;
+@end
+
 @interface UIPageControl : UIView
 - (void)setNumberOfPages:(long)pages;
 - (void)setCurrentPage:(long)page;
@@ -864,7 +1023,14 @@ enum {
 - (long)applicationState;
 - (long)statusBarStyle;
 - (void)setStatusBarStyle:(long)style animated:(BOOL)animated;
+- (BOOL)isStatusBarHidden;
+- (void)setStatusBarHidden:(BOOL)hidden animated:(BOOL)animated;
 @property(nonatomic) long applicationIconBadgeNumber;
+- (BOOL)canOpenURL:(id)url;
+- (BOOL)openURL:(id)url;
+- (void)openURL:(id)url options:(id)options
+    completionHandler:(void (^)(BOOL success))completion;
+@property(nonatomic, getter=isIdleTimerDisabled) BOOL idleTimerDisabled;
 @end
 
 @interface UIPasteboard : NSObject
@@ -1123,6 +1289,25 @@ void UIGraphicsPushContext(CGContextRef context);
 void UIGraphicsPopContext(void);
 UIImage *UIGraphicsGetImageFromCurrentImageContext(void);
 void UIGraphicsEndImageContext(void);
+NSData *UIImagePNGRepresentation(UIImage *image);
+
+@interface UIGraphicsImageRendererFormat : NSObject
++ (id)defaultFormat;
+@property double scale;
+@property BOOL opaque;
+@end
+
+@interface UIGraphicsImageRendererContext : NSObject
+@property(readonly) CGContextRef CGContext;
+@end
+
+@interface UIGraphicsImageRenderer : NSObject
+- (id)initWithSize:(CGSize)size;
+- (id)initWithSize:(CGSize)size
+            format:(UIGraphicsImageRendererFormat *)format;
+- (UIImage *)imageWithActions:(void (^)(UIGraphicsImageRendererContext *context))actions;
+- (NSData *)PNGDataWithActions:(void (^)(UIGraphicsImageRendererContext *context))actions;
+@end
 
 @interface UIImage (Drawing)
 - (void)drawInRect:(CGRect)rect;

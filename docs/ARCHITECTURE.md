@@ -433,12 +433,34 @@ tracks both the rect clip and mask depths. Fills, strokes, glyphs and image
 blits consult the mask. Refcounted `CGImage` objects own
 RGBA pixels; `CGContextDrawImage` scales one into a rectangle, `UIImage
 CGImage` exposes a cached image and `imageWithCGImage:` copies one back.
-`CALayer.contents` accepts a `CGImage` or `UIImage` and the renderer blits it
-for both standalone sublayers and a view's backing layer. Device RGB and gray
+`UIGraphicsImageRenderer` wraps the image-context stack: it allocates a
+bitmap at the format's scale, runs the actions block with a renderer context
+exposing the current `CGContext`, and returns the captured `UIImage` or a PNG
+`NSData`. `UIImagePNGRepresentation` emits a standards-compliant RGBA PNG
+using stored (uncompressed) deflate blocks, so no zlib dependency is needed.
+`CALayer.contents` accepts a `CGImage` or `UIImage`; the renderer crops it to
+`contentsRect` and honors `contentsGravity` (`resize`, `resizeAspect`,
+`resizeAspectFill` and `center`), blitting for both standalone sublayers and a
+view's backing layer. `UIView.safeAreaInsets` reports the device top/bottom
+insets for a root view (overridable through `IOSIM_SAFE_TOP`/`_BOTTOM`), and
+the feedback generators are accepted no-ops because the framebuffer has no
+haptic device. `CAReplicatorLayer`
+renders its sublayers once into an offscreen buffer, then blits
+`instanceCount` copies with the accumulated `instanceTransform` around the
+layer's center; `instanceColor` tints the copies and the per-channel offsets
+shift each successive copy. `CAEmitterLayer` renders a steady particle field:
+each cell's particles sit on a repeating lifetime ring (`birthRate` times
+`lifetime` slots), with deterministic per-particle angle (`emissionRange`),
+velocity/range, acceleration, scale/range and RGBA speed/range variation from
+a small LCG. Particles are clipped to the emitter frame and drawn as tinted
+round dots, so no per-frame particle state has to be retained. Device RGB and gray
 color spaces are singletons; `CGColorCreate` converts gray components to RGB
 and `CGColorGetColorSpace` reports the originating space. Appearance is
 device-wide: `UITraitCollection` carries the user interface style, display
-scale and size classes; `UIView` and `UIViewController` expose
+scale and size classes; tint colors inherit down the view tree (a view with
+no explicit tint asks its superview, ending at `UIColor.tintColor`), and
+`setTintColor:`/`addSubview:` notify `tintColorDidChange` so controls such as
+`UIButton` update their title color. `UIView` and `UIViewController` expose
 `traitCollection`, `overrideUserInterfaceStyle` and
 `traitCollectionDidChange:`, and an override applies to the view subtree.
 `UIColor` supports dynamic colors (a provider block plus the system palette:
@@ -451,11 +473,16 @@ foreground, which writes the file and updates its window tree, and
 SpringBoard reloads the file when it regains the screen. Apps resolve the
 file before building views, so a cold launch starts in the stored appearance.
 The app status bar follows `UIApplication setStatusBarStyle:animated:` or the
-root controller's `preferredStatusBarStyle`; a plain default style picks
-black or white from the root view's background. SpringBoard's dock and
-search glass darken with the device appearance, and `UIVisualEffectView`'s
-system material styles switch between light and dark tints (thicker
-materials tint more strongly).
+deepest controller's `preferredStatusBarStyle`, walking
+`childForStatusBarStyle` and navigation/tab children; a plain default style
+picks black or white from the root view's background. `prefersStatusBarHidden`
+(with `childForStatusBarHidden`), `setStatusBarHidden:animated:` and
+Info.plist `UIStatusBarHidden` hide the time and glyphs, and
+`UIViewControllerBasedStatusBarAppearance=NO` lets Info.plist
+`UIStatusBarStyle` set the application-wide style before any controller.
+SpringBoard's dock and search glass darken with the device appearance, and
+`UIVisualEffectView`'s system material styles switch between light and dark
+tints (thicker materials tint more strongly).
 Paths support
 bounding boxes, even-odd point containment, copies and rectangle
 constructors. Quadratic and cubic curve entry points flatten adaptively:
@@ -871,7 +898,19 @@ decoded with libpng in `loader/image.c`.
   them unset; children are keyed `key:index`, so removing the group's key
   clears every expanded child at once. `CASpringAnimation` evaluates a damped
   spring (`mass`, `stiffness`, `damping`, `initialVelocity`) and reports a
-  settling duration derived from the damping ratio and natural frequency. A 2D
+  settling duration derived from the damping ratio and natural frequency.
+  `CAAnimation` also honors `beginTime` (an absolute media time that becomes
+  a start delay), `speed`, `timeOffset`, `autoreverses` (a triangular sweep
+  that ends at the start value) and a backwards/both `fillMode` that shows the
+  start value during the delay. `CACurrentMediaTime` returns the runtime
+  clock. `CATransaction` tracks begin/commit nesting and runs its completion
+  block on the outermost commit; `UIView performWithoutAnimation:` and
+  `setAnimationsEnabled:` execute animation blocks immediately with their
+  completion handlers. `UIView animateKeyframesWithDuration:` queues each
+  `addKeyframeWithRelativeStartTime:relativeDuration:animations:` block at
+  its start time; the run loop executes it as an ordinary UIView animation,
+  so each segment interpolates from the previous segment's settled values and
+  the keyframe completion block fires after the total duration. A 2D
   affine transform is applied around the view center through an offscreen
   composite. UIView transform changes inside an animation block are captured
   like frame and alpha and interpolated by decomposing both endpoints into

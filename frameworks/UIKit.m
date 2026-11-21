@@ -159,6 +159,11 @@ struct layer_anim {
     double start;
     double duration;
     double repeatCount;
+    double delay;
+    double speed;
+    double timeOffset;
+    int autoreverses;
+    id fillMode;
     double seq;
     int spring;
     double mass;
@@ -189,8 +194,20 @@ struct layer_anim {
     double _zPosition;
     CGPoint _anchorPoint;
     id _contents;
+    CGRect _contentsRect;
+    id _contentsGravity;
+    double _contentsScale;
     id _mask;
     CATransform3D _transform;
+    id _shadowPath;
+    BOOL _shouldRasterize;
+    double _rasterizationScale;
+    id _cornerCurve;
+    unsigned long _maskedCorners;
+    double _speed;
+    double _timeOffset;
+    double _beginTime;
+    id _name;
 }
 - (double)cornerRadius;
 - (void)setCornerRadius:(double)radius;
@@ -220,6 +237,30 @@ struct layer_anim {
 - (void)removeAnimationForKey:(id)key;
 - (CALayer *)presentationLayer;
 - (CALayer *)modelLayer;
+- (CGRect)contentsRect;
+- (void)setContentsRect:(CGRect)rect;
+- (id)contentsGravity;
+- (void)setContentsGravity:(id)gravity;
+- (double)contentsScale;
+- (void)setContentsScale:(double)scale;
+- (id)shadowPath;
+- (void)setShadowPath:(id)path;
+- (BOOL)shouldRasterize;
+- (void)setShouldRasterize:(BOOL)rasterize;
+- (double)rasterizationScale;
+- (void)setRasterizationScale:(double)scale;
+- (id)cornerCurve;
+- (void)setCornerCurve:(id)curve;
+- (unsigned long)maskedCorners;
+- (void)setMaskedCorners:(unsigned long)corners;
+- (double)speed;
+- (void)setSpeed:(double)speed;
+- (double)timeOffset;
+- (void)setTimeOffset:(double)offset;
+- (double)beginTime;
+- (void)setBeginTime:(double)time;
+- (id)name;
+- (void)setName:(id)name;
 @end
 
 
@@ -340,6 +381,12 @@ extern id kCAMediaTimingFunctionEaseInEaseOut;
     double _duration;
     double _repeatCount;
     id _timingFunction;
+    double _beginTime;
+    double _speed;
+    double _timeOffset;
+    BOOL _autoreverses;
+    BOOL _removedOnCompletion;
+    id _fillMode;
 }
 + (id)animationWithKeyPath:(id)path;
 - (void)setFromValue:(id)value;
@@ -347,6 +394,18 @@ extern id kCAMediaTimingFunctionEaseInEaseOut;
 - (void)setDuration:(double)duration;
 - (void)setRepeatCount:(double)count;
 - (void)setTimingFunction:(id)function;
+- (void)setBeginTime:(double)time;
+- (double)beginTime;
+- (void)setSpeed:(double)speed;
+- (double)speed;
+- (void)setTimeOffset:(double)offset;
+- (double)timeOffset;
+- (void)setAutoreverses:(BOOL)autoreverses;
+- (BOOL)autoreverses;
+- (void)setRemovedOnCompletion:(BOOL)removed;
+- (BOOL)removedOnCompletion;
+- (void)setFillMode:(id)fillMode;
+- (id)fillMode;
 @end
 
 @interface CABasicAnimation : CAAnimation
@@ -384,6 +443,163 @@ extern id kCAMediaTimingFunctionEaseInEaseOut;
 }
 - (void)setAnimations:(NSArray *)animations;
 - (NSArray *)animations;
+@end
+
+@interface CATransaction : NSObject
++ (void)begin;
++ (void)commit;
++ (void)flush;
++ (void)setAnimationDuration:(double)duration;
++ (double)animationDuration;
++ (void)setDisableActions:(BOOL)disable;
++ (BOOL)disableActions;
++ (void)setCompletionBlock:(void (^)(void))block;
++ (void (^)(void))completionBlock;
++ (void)lock;
++ (void)unlock;
+@end
+
+/* Replicates its sublayers instanceCount times, applying instanceTransform
+ * cumulatively. instanceColor tints the copies and the channel offsets shift
+ * each successive copy; instanceDelay is accepted but copies render in the
+ * same animation phase. */
+@interface CAReplicatorLayer : CALayer {
+@public
+    long _instanceCount;
+    double _instanceDelay;
+    CATransform3D _instanceTransform;
+    id _instanceColor;
+    float _instanceRedOffset;
+    float _instanceGreenOffset;
+    float _instanceBlueOffset;
+    float _instanceAlphaOffset;
+    BOOL _preservesDepth;
+}
+- (long)instanceCount;
+- (void)setInstanceCount:(long)count;
+- (double)instanceDelay;
+- (void)setInstanceDelay:(double)delay;
+- (CATransform3D)instanceTransform;
+- (void)setInstanceTransform:(CATransform3D)transform;
+- (id)instanceColor;
+- (void)setInstanceColor:(id)color;
+- (float)instanceRedOffset;
+- (void)setInstanceRedOffset:(float)offset;
+- (float)instanceGreenOffset;
+- (void)setInstanceGreenOffset:(float)offset;
+- (float)instanceBlueOffset;
+- (void)setInstanceBlueOffset:(float)offset;
+- (float)instanceAlphaOffset;
+- (void)setInstanceAlphaOffset:(float)offset;
+- (BOOL)preservesDepth;
+- (void)setPreservesDepth:(BOOL)value;
+@end
+
+@interface CAEmitterCell : NSObject {
+@public
+    id _contents;
+    id _color;
+    float _birthRate;
+    float _lifetime;
+    float _velocity;
+    float _velocityRange;
+    float _emissionRange;
+    float _scale;
+    float _scaleRange;
+    float _spin;
+    float _spinRange;
+    float _alphaSpeed;
+    float _alphaRange;
+    float _redSpeed, _greenSpeed, _blueSpeed;
+    float _redRange, _greenRange, _blueRange;
+    float _xAcceleration, _yAcceleration;
+    BOOL _enabled;
+    id _name;
+}
+- (void)setContents:(id)contents;
+- (id)contents;
+- (void)setColor:(id)color;
+- (id)color;
+- (void)setBirthRate:(float)rate;
+- (float)birthRate;
+- (void)setLifetime:(float)lifetime;
+- (float)lifetime;
+- (void)setVelocity:(float)velocity;
+- (float)velocity;
+- (void)setVelocityRange:(float)range;
+- (float)velocityRange;
+- (void)setEmissionRange:(float)range;
+- (float)emissionRange;
+- (void)setScale:(float)scale;
+- (float)scale;
+- (void)setScaleRange:(float)range;
+- (float)scaleRange;
+- (void)setSpin:(float)spin;
+- (float)spin;
+- (void)setSpinRange:(float)range;
+- (float)spinRange;
+- (void)setAlphaSpeed:(float)speed;
+- (float)alphaSpeed;
+- (void)setAlphaRange:(float)range;
+- (float)alphaRange;
+- (void)setRedSpeed:(float)speed;
+- (float)redSpeed;
+- (void)setGreenSpeed:(float)speed;
+- (float)greenSpeed;
+- (void)setBlueSpeed:(float)speed;
+- (float)blueSpeed;
+- (void)setRedRange:(float)range;
+- (float)redRange;
+- (void)setGreenRange:(float)range;
+- (float)greenRange;
+- (void)setBlueRange:(float)range;
+- (float)blueRange;
+- (void)setXAcceleration:(float)acceleration;
+- (float)xAcceleration;
+- (void)setYAcceleration:(float)acceleration;
+- (float)yAcceleration;
+- (void)setEnabled:(BOOL)enabled;
+- (BOOL)isEnabled;
+- (void)setName:(id)name;
+- (id)name;
+@end
+
+@interface CAEmitterLayer : CALayer {
+@public
+    NSArray *_emitterCells;
+    float _birthRate;
+    float _lifetime;
+    CGPoint _emitterPosition;
+    CGSize _emitterSize;
+    id _emitterShape;
+    id _renderMode;
+    unsigned _seed;
+    float _scale;
+    float _velocity;
+    float _spin;
+}
+- (void)setEmitterCells:(NSArray *)cells;
+- (NSArray *)emitterCells;
+- (void)setBirthRate:(float)rate;
+- (float)birthRate;
+- (void)setLifetime:(float)lifetime;
+- (float)lifetime;
+- (void)setEmitterPosition:(CGPoint)position;
+- (CGPoint)emitterPosition;
+- (void)setEmitterSize:(CGSize)size;
+- (CGSize)emitterSize;
+- (void)setEmitterShape:(id)shape;
+- (id)emitterShape;
+- (void)setRenderMode:(id)mode;
+- (id)renderMode;
+- (void)setSeed:(unsigned)seed;
+- (unsigned)seed;
+- (void)setScale:(float)scale;
+- (float)scale;
+- (void)setVelocity:(float)velocity;
+- (float)velocity;
+- (void)setSpin:(float)spin;
+- (float)spin;
 @end
 
 @interface CADisplayLink : NSObject {
@@ -455,6 +671,7 @@ enum {
 + (UIColor *)blackColor;
 + (UIColor *)clearColor;
 + (UIColor *)systemBlueColor;
++ (UIColor *)tintColor;
 + (UIColor *)systemRedColor;
 + (UIColor *)systemGreenColor;
 + (UIColor *)systemOrangeColor;
@@ -500,10 +717,18 @@ enum {
 + (UIFont *)boldSystemFontOfSize:(double)size;
 @end
 
-@interface UIScreen : NSObject
+@interface UIScreen : NSObject {
+@public
+    double _brightness;
+}
 + (UIScreen *)mainScreen;
 - (CGRect)bounds;
+- (CGRect)nativeBounds;
 - (double)scale;
+- (double)nativeScale;
+- (double)brightness;
+- (void)setBrightness:(double)brightness;
+- (BOOL)isCaptured;
 @end
 
 typedef enum {
@@ -787,6 +1012,8 @@ typedef enum {
 @public
     CGRect _frame;
     UIColor *_backgroundColor;
+    UIColor *_tintColor;
+    long _tintAdjustmentMode;
     long _overrideUserInterfaceStyle;
     id _subviews[32];
     int _subviewCount;
@@ -831,6 +1058,11 @@ typedef enum {
 - (CGRect)convertRect:(CGRect)rect fromView:(UIView *)view;
 - (void)setBackgroundColor:(UIColor *)color;
 - (UIColor *)backgroundColor;
+- (UIColor *)tintColor;
+- (void)setTintColor:(UIColor *)color;
+- (void)tintColorDidChange;
+- (long)tintAdjustmentMode;
+- (void)setTintAdjustmentMode:(long)mode;
 - (UITraitCollection *)traitCollection;
 - (long)overrideUserInterfaceStyle;
 - (void)setOverrideUserInterfaceStyle:(long)style;
@@ -875,6 +1107,8 @@ typedef enum {
 - (NSLayoutDimension *)widthAnchor;
 - (NSLayoutDimension *)heightAnchor;
 - (UILayoutGuide *)safeAreaLayoutGuide;
+- (UIEdgeInsets)safeAreaInsets;
+- (void)safeAreaInsetsDidChange;
 - (void)setClipsToBounds:(BOOL)clips;
 - (BOOL)clipsToBounds;
 - (void)addGestureRecognizer:(UIGestureRecognizer *)recognizer;
@@ -889,6 +1123,16 @@ typedef enum {
                     options:(unsigned long)options
                  animations:(void (^)(void))animations
                  completion:(void (^)(BOOL finished))completion;
++ (BOOL)areAnimationsEnabled;
++ (void)setAnimationsEnabled:(BOOL)enabled;
++ (void)performWithoutAnimation:(void (^)(void))actionsWithoutAnimation;
++ (void)animateKeyframesWithDuration:(double)duration delay:(double)delay
+                             options:(unsigned long)options
+                          animations:(void (^)(void))animations
+                          completion:(void (^)(BOOL finished))completion;
++ (void)addKeyframeWithRelativeStartTime:(double)start
+                        relativeDuration:(double)duration
+                              animations:(void (^)(void))animations;
 @end
 
 @interface UILabel : UIView {
@@ -965,6 +1209,37 @@ static UITextView *g_pendingPressEditor;
 - (int)contentMode;
 @end
 
+@interface UIGraphicsImageRendererFormat : NSObject {
+@public
+    double _scale;
+    BOOL _opaque;
+}
++ (id)defaultFormat;
+- (double)scale;
+- (void)setScale:(double)scale;
+- (BOOL)opaque;
+- (void)setOpaque:(BOOL)opaque;
+@end
+
+@interface UIGraphicsImageRendererContext : NSObject {
+@public
+    CGContextRef _context;
+}
+- (CGContextRef)CGContext;
+@end
+
+@interface UIGraphicsImageRenderer : NSObject {
+@public
+    CGSize _size;
+    UIGraphicsImageRendererFormat *_format;
+}
+- (id)initWithSize:(CGSize)size;
+- (id)initWithSize:(CGSize)size
+            format:(UIGraphicsImageRendererFormat *)format;
+- (UIImage *)imageWithActions:(void (^)(UIGraphicsImageRendererContext *context))actions;
+- (NSData *)PNGDataWithActions:(void (^)(UIGraphicsImageRendererContext *context))actions;
+@end
+
 enum {
     UIBlurEffectStyleExtraLight = 0,
     UIBlurEffectStyleLight = 1,
@@ -985,6 +1260,41 @@ enum {
 
 /* A backdrop-blurring container: its render pass captures the pixels behind
  * it, box-blurs them with the effect's tint and draws its contentView on top. */
+enum {
+    UIImpactFeedbackStyleLight = 0,
+    UIImpactFeedbackStyleMedium = 1,
+    UIImpactFeedbackStyleHeavy = 2,
+    UIImpactFeedbackStyleSoft = 3,
+    UIImpactFeedbackStyleRigid = 4
+};
+
+enum {
+    UINotificationFeedbackTypeSuccess = 0,
+    UINotificationFeedbackTypeWarning = 1,
+    UINotificationFeedbackTypeError = 2
+};
+
+@interface UIFeedbackGenerator : NSObject
+- (void)prepare;
+@end
+
+@interface UIImpactFeedbackGenerator : UIFeedbackGenerator {
+@public
+    long _style;
+}
+- (id)initWithStyle:(long)style;
+- (void)impactOccurred;
+- (void)impactOccurredWithIntensity:(double)intensity;
+@end
+
+@interface UISelectionFeedbackGenerator : UIFeedbackGenerator
+- (void)selectionChanged;
+@end
+
+@interface UINotificationFeedbackGenerator : UIFeedbackGenerator
+- (void)notificationOccurred:(long)type;
+@end
+
 @interface UIVisualEffectView : UIView {
 @public
     UIBlurEffect *_effect;
@@ -1022,6 +1332,9 @@ enum {
 - (void)viewWillAppear:(BOOL)animated;
 - (void)viewDidAppear:(BOOL)animated;
 - (long)preferredStatusBarStyle;
+- (BOOL)prefersStatusBarHidden;
+- (UIViewController *)childForStatusBarStyle;
+- (UIViewController *)childForStatusBarHidden;
 - (void)setNeedsStatusBarAppearanceUpdate;
 - (void)viewWillDisappear:(BOOL)animated;
 - (void)viewDidDisappear:(BOOL)animated;
@@ -1355,7 +1668,6 @@ enum {
 @public
     id _items;
     UIColor *_barTintColor;
-    UIColor *_tintColor;
     int _barStyle;
     BOOL _translucent;
     UIView *_controls[16];
@@ -1504,6 +1816,7 @@ enum {
     id _title;
     UIColor *_titleColor;
     UILabel *_titleLabel;
+    BOOL _titleColorCustom;
 }
 + (id)buttonWithType:(int)type;
 - (void)setTitle:(id)title forState:(unsigned long)state;
@@ -1735,7 +2048,6 @@ enum {
     id _items[8];
     int _itemCount;
     long _selectedSegmentIndex;
-    UIColor *_tintColor;
 }
 - (id)initWithItems:(NSArray *)items;
 - (void)setTitle:(id)title forSegmentAtIndex:(unsigned long)index;
@@ -2130,6 +2442,7 @@ enum {
     id _delegate;
     long _state;
     long _iconBadgeNumber;
+    BOOL _idleTimerDisabled;
 }
 + (UIApplication *)sharedApplication;
 - (void)setDelegate:(id)delegate;
@@ -2137,9 +2450,17 @@ enum {
 - (long)applicationState;
 - (long)statusBarStyle;
 - (void)setStatusBarStyle:(long)style animated:(BOOL)animated;
+- (BOOL)isStatusBarHidden;
+- (void)setStatusBarHidden:(BOOL)hidden animated:(BOOL)animated;
 - (double)backgroundTimeRemaining;
 - (unsigned long)beginBackgroundTaskWithExpirationHandler:(void (^)(void))handler;
 - (void)endBackgroundTask:(unsigned long)task;
+- (BOOL)canOpenURL:(id)url;
+- (BOOL)openURL:(id)url;
+- (void)openURL:(id)url options:(id)options
+    completionHandler:(void (^)(BOOL success))completion;
+- (BOOL)isIdleTimerDisabled;
+- (void)setIdleTimerDisabled:(BOOL)disabled;
 @end
 
 /* The system pasteboard lives in the device's shared resources directory so
@@ -2242,9 +2563,38 @@ static double layer_key_value(CALayer *layer, const char *key, double base);
         _shadowColor = [UIColor blackColor];
         _anchorPoint = CGPointMake(0.5, 0.5);
         _transform = CATransform3DIdentityValue();
+        _contentsRect = CGRectMake(0, 0, 1, 1);
+        _contentsGravity = @"resize";
+        _contentsScale = 1.0;
+        _cornerCurve = @"circular";
+        _speed = 1.0;
     }
     return self;
 }
+- (CGRect)contentsRect { return _contentsRect; }
+- (void)setContentsRect:(CGRect)rect { _contentsRect = rect; }
+- (id)contentsGravity { return _contentsGravity; }
+- (void)setContentsGravity:(id)gravity { _contentsGravity = gravity; }
+- (double)contentsScale { return _contentsScale; }
+- (void)setContentsScale:(double)scale { _contentsScale = scale; }
+- (id)shadowPath { return _shadowPath; }
+- (void)setShadowPath:(id)path { _shadowPath = path; }
+- (BOOL)shouldRasterize { return _shouldRasterize; }
+- (void)setShouldRasterize:(BOOL)rasterize { _shouldRasterize = rasterize; }
+- (double)rasterizationScale { return _rasterizationScale; }
+- (void)setRasterizationScale:(double)scale { _rasterizationScale = scale; }
+- (id)cornerCurve { return _cornerCurve; }
+- (void)setCornerCurve:(id)curve { _cornerCurve = curve; }
+- (unsigned long)maskedCorners { return _maskedCorners; }
+- (void)setMaskedCorners:(unsigned long)corners { _maskedCorners = corners; }
+- (double)speed { return _speed; }
+- (void)setSpeed:(double)speed { _speed = speed; }
+- (double)timeOffset { return _timeOffset; }
+- (void)setTimeOffset:(double)offset { _timeOffset = offset; }
+- (double)beginTime { return _beginTime; }
+- (void)setBeginTime:(double)time { _beginTime = time; }
+- (id)name { return _name; }
+- (void)setName:(id)name { _name = name; }
 - (double)cornerRadius { return _cornerRadius; }
 - (void)setCornerRadius:(double)radius { _cornerRadius = radius; }
 - (void)setMasksToBounds:(BOOL)masks { _masksToBounds = masks; }
@@ -2379,11 +2729,18 @@ static double layer_key_value(CALayer *layer, const char *key, double base);
     entry->duration = anim->_duration;
     entry->repeatCount = anim->_repeatCount;
     entry->start = iosim_now();
+    entry->delay = anim->_beginTime > 0 ? anim->_beginTime - entry->start : 0;
+    if (entry->delay < 0)
+        entry->delay = 0;
+    entry->speed = anim->_speed > 0 ? anim->_speed : 1.0;
+    entry->timeOffset = anim->_timeOffset;
+    entry->autoreverses = anim->_autoreverses;
+    entry->fillMode = anim->_fillMode;
     entry->seq = ++_animSeq;
     entry->infinite = anim->_repeatCount < 0;
     if (entry->duration <= 0)
         entry->duration = 0.25;
-    animation_mark_active(entry->duration, entry->repeatCount);
+    animation_mark_active(entry->delay + entry->duration, entry->repeatCount);
 }
 - (void)removeAnimationForKey:(id)key
 {
@@ -2430,6 +2787,146 @@ static double layer_key_value(CALayer *layer, const char *key, double base);
 - (CALayer *)modelLayer { return self; }
 @end
 
+@implementation CAReplicatorLayer
+- (id)init
+{
+    self = [super init];
+    if (self)
+    {
+        _instanceCount = 1;
+        _instanceTransform = CATransform3DIdentityValue();
+    }
+    return self;
+}
+- (long)instanceCount { return _instanceCount; }
+- (void)setInstanceCount:(long)count { _instanceCount = count; }
+- (double)instanceDelay { return _instanceDelay; }
+- (void)setInstanceDelay:(double)delay { _instanceDelay = delay; }
+- (CATransform3D)instanceTransform { return _instanceTransform; }
+- (void)setInstanceTransform:(CATransform3D)transform
+{
+    _instanceTransform = transform;
+}
+- (id)instanceColor { return _instanceColor; }
+- (void)setInstanceColor:(id)color { _instanceColor = color; }
+- (float)instanceRedOffset { return _instanceRedOffset; }
+- (void)setInstanceRedOffset:(float)offset { _instanceRedOffset = offset; }
+- (float)instanceGreenOffset { return _instanceGreenOffset; }
+- (void)setInstanceGreenOffset:(float)offset
+{
+    _instanceGreenOffset = offset;
+}
+- (float)instanceBlueOffset { return _instanceBlueOffset; }
+- (void)setInstanceBlueOffset:(float)offset { _instanceBlueOffset = offset; }
+- (float)instanceAlphaOffset { return _instanceAlphaOffset; }
+- (void)setInstanceAlphaOffset:(float)offset
+{
+    _instanceAlphaOffset = offset;
+}
+- (BOOL)preservesDepth { return _preservesDepth; }
+- (void)setPreservesDepth:(BOOL)value { _preservesDepth = value; }
+@end
+
+@implementation CAEmitterCell
+- (id)init
+{
+    self = [super init];
+    if (self)
+    {
+        _birthRate = 1.0f;
+        _lifetime = 1.0f;
+        _scale = 0.1f;
+        _enabled = YES;
+        _color = [UIColor whiteColor];
+    }
+    return self;
+}
+- (void)setContents:(id)contents { _contents = contents; }
+- (id)contents { return _contents; }
+- (void)setColor:(id)color { _color = color; }
+- (id)color { return _color; }
+- (void)setBirthRate:(float)rate { _birthRate = rate; }
+- (float)birthRate { return _birthRate; }
+- (void)setLifetime:(float)lifetime { _lifetime = lifetime; }
+- (float)lifetime { return _lifetime; }
+- (void)setVelocity:(float)velocity { _velocity = velocity; }
+- (float)velocity { return _velocity; }
+- (void)setVelocityRange:(float)range { _velocityRange = range; }
+- (float)velocityRange { return _velocityRange; }
+- (void)setEmissionRange:(float)range { _emissionRange = range; }
+- (float)emissionRange { return _emissionRange; }
+- (void)setScale:(float)scale { _scale = scale; }
+- (float)scale { return _scale; }
+- (void)setScaleRange:(float)range { _scaleRange = range; }
+- (float)scaleRange { return _scaleRange; }
+- (void)setSpin:(float)spin { _spin = spin; }
+- (float)spin { return _spin; }
+- (void)setSpinRange:(float)range { _spinRange = range; }
+- (float)spinRange { return _spinRange; }
+- (void)setAlphaSpeed:(float)speed { _alphaSpeed = speed; }
+- (float)alphaSpeed { return _alphaSpeed; }
+- (void)setAlphaRange:(float)range { _alphaRange = range; }
+- (float)alphaRange { return _alphaRange; }
+- (void)setRedSpeed:(float)speed { _redSpeed = speed; }
+- (float)redSpeed { return _redSpeed; }
+- (void)setGreenSpeed:(float)speed { _greenSpeed = speed; }
+- (float)greenSpeed { return _greenSpeed; }
+- (void)setBlueSpeed:(float)speed { _blueSpeed = speed; }
+- (float)blueSpeed { return _blueSpeed; }
+- (void)setRedRange:(float)range { _redRange = range; }
+- (float)redRange { return _redRange; }
+- (void)setGreenRange:(float)range { _greenRange = range; }
+- (float)greenRange { return _greenRange; }
+- (void)setBlueRange:(float)range { _blueRange = range; }
+- (float)blueRange { return _blueRange; }
+- (void)setXAcceleration:(float)acceleration { _xAcceleration = acceleration; }
+- (float)xAcceleration { return _xAcceleration; }
+- (void)setYAcceleration:(float)acceleration { _yAcceleration = acceleration; }
+- (float)yAcceleration { return _yAcceleration; }
+- (void)setEnabled:(BOOL)enabled { _enabled = enabled; }
+- (BOOL)isEnabled { return _enabled; }
+- (void)setName:(id)name { _name = name; }
+- (id)name { return _name; }
+@end
+
+@implementation CAEmitterLayer
+- (id)init
+{
+    self = [super init];
+    if (self)
+    {
+        _birthRate = 1.0f;
+        _lifetime = 1.0f;
+        _emitterShape = @"point";
+        _renderMode = @"unordered";
+        _scale = 1.0f;
+    }
+    return self;
+}
+- (void)setEmitterCells:(NSArray *)cells { _emitterCells = cells; }
+- (NSArray *)emitterCells { return _emitterCells; }
+- (void)setBirthRate:(float)rate { _birthRate = rate; }
+- (float)birthRate { return _birthRate; }
+- (void)setLifetime:(float)lifetime { _lifetime = lifetime; }
+- (float)lifetime { return _lifetime; }
+- (void)setEmitterPosition:(CGPoint)position { _emitterPosition = position; }
+- (CGPoint)emitterPosition { return _emitterPosition; }
+- (void)setEmitterSize:(CGSize)size { _emitterSize = size; }
+- (CGSize)emitterSize { return _emitterSize; }
+- (void)setEmitterShape:(id)shape { _emitterShape = shape; }
+- (id)emitterShape { return _emitterShape; }
+- (void)setRenderMode:(id)mode { _renderMode = mode; }
+- (id)renderMode { return _renderMode; }
+- (void)setSeed:(unsigned)seed { _seed = seed; }
+- (unsigned)seed { return _seed; }
+- (void)setScale:(float)scale { _scale = scale; }
+- (float)scale { return _scale; }
+- (void)setVelocity:(float)velocity { _velocity = velocity; }
+- (float)velocity { return _velocity; }
+- (void)setSpin:(float)spin { _spin = spin; }
+- (float)spin { return _spin; }
+@end
+
 id kCAMediaTimingFunctionLinear = @"linear";
 id kCAMediaTimingFunctionEaseIn = @"easeIn";
 id kCAMediaTimingFunctionEaseOut = @"easeOut";
@@ -2458,6 +2955,16 @@ id kCAMediaTimingFunctionEaseInEaseOut = @"easeInEaseOut";
 @end
 
 @implementation CAAnimation
+- (id)init
+{
+    self = [super init];
+    if (self)
+    {
+        _speed = 1.0;
+        _removedOnCompletion = YES;
+    }
+    return self;
+}
 + (id)animationWithKeyPath:(id)path
 {
     CAAnimation *a = [[self alloc] init];
@@ -2470,7 +2977,24 @@ id kCAMediaTimingFunctionEaseInEaseOut = @"easeInEaseOut";
 - (void)setDuration:(double)duration { _duration = duration; }
 - (void)setRepeatCount:(double)count { _repeatCount = count; }
 - (void)setTimingFunction:(id)function { _timingFunction = function; }
+- (void)setBeginTime:(double)time { _beginTime = time; }
+- (double)beginTime { return _beginTime; }
+- (void)setSpeed:(double)speed { _speed = speed; }
+- (double)speed { return _speed; }
+- (void)setTimeOffset:(double)offset { _timeOffset = offset; }
+- (double)timeOffset { return _timeOffset; }
+- (void)setAutoreverses:(BOOL)autoreverses { _autoreverses = autoreverses; }
+- (BOOL)autoreverses { return _autoreverses; }
+- (void)setRemovedOnCompletion:(BOOL)removed { _removedOnCompletion = removed; }
+- (BOOL)removedOnCompletion { return _removedOnCompletion; }
+- (void)setFillMode:(id)fillMode { _fillMode = fillMode; }
+- (id)fillMode { return _fillMode; }
 @end
+
+double CACurrentMediaTime(void)
+{
+    return iosim_now();
+}
 
 @implementation CABasicAnimation
 @end
@@ -2503,6 +3027,51 @@ id kCAMediaTimingFunctionEaseInEaseOut = @"easeInEaseOut";
 @implementation CAAnimationGroup
 - (void)setAnimations:(NSArray *)animations { _animations = animations; }
 - (NSArray *)animations { return _animations; }
+@end
+
+/* CATransaction groups layer changes and carries the animation duration and
+ * a completion block. The renderer has no implicit animations, so a
+ * transaction only needs to track nesting and run the block when the
+ * outermost commit lands. */
+static int g_transactionDepth;
+static double g_transactionDuration = 0.25;
+static BOOL g_transactionDisable;
+static id g_transactionCompletion;
+
+@implementation CATransaction
++ (void)begin { g_transactionDepth++; }
++ (void)commit
+{
+    if (g_transactionDepth > 0)
+        g_transactionDepth--;
+    if (g_transactionDepth > 0)
+        return;
+    id block = g_transactionCompletion;
+    g_transactionCompletion = nil;
+    if (block)
+    {
+        ((void (^)(void))block)();
+    }
+}
++ (void)flush { }
++ (void)setAnimationDuration:(double)duration
+{
+    if (duration > 0)
+        g_transactionDuration = duration;
+}
++ (double)animationDuration { return g_transactionDuration; }
++ (void)setDisableActions:(BOOL)disable { g_transactionDisable = disable; }
++ (BOOL)disableActions { return g_transactionDisable; }
++ (void)setCompletionBlock:(void (^)(void))block
+{
+    g_transactionCompletion = block ? (id)_Block_copy(block) : nil;
+}
++ (void (^)(void))completionBlock
+{
+    return (void (^)(void))g_transactionCompletion;
+}
++ (void)lock { }
++ (void)unlock { }
 @end
 
 /* Display links are driven by the UIApplicationMain run loop, which wakes
@@ -2758,6 +3327,7 @@ NSString *const UITraitCollectionDidChangeNotification =
                            lightAlpha:1.0 darkRed:0.0392 darkGreen:0.5176
                              darkBlue:1.0 darkAlpha:1.0];
 }
++ (UIColor *)tintColor { return [self systemBlueColor]; }
 + (UIColor *)systemRedColor
 {
     return [self ui_colorWithLightRed:1.0 lightGreen:0.2314 lightBlue:0.1882
@@ -3227,6 +3797,13 @@ static int text_wrap_lines(const char *text, double max_width, UIFont *font,
         screen = [[self alloc] init];
     return screen;
 }
+- (id)init
+{
+    self = [super init];
+    if (self)
+        _brightness = 1.0;
+    return self;
+}
 - (double)scale
 {
     const char *s = getenv("SIMULATOR_MAINSCREEN_SCALE");
@@ -3243,11 +3820,27 @@ static int text_wrap_lines(const char *text, double max_width, UIFont *font,
         scale = 3.0;
     return CGRectMake(0, 0, width / scale, height / scale);
 }
+- (CGRect)nativeBounds
+{
+    const char *w = getenv("SIMULATOR_MAINSCREEN_WIDTH");
+    const char *h = getenv("SIMULATOR_MAINSCREEN_HEIGHT");
+    return CGRectMake(0, 0, w ? atoi(w) : 1206, h ? atoi(h) : 2622);
+}
+- (double)nativeScale { return [self scale]; }
+- (double)brightness { return _brightness; }
+- (void)setBrightness:(double)brightness
+{
+    if (brightness < 0) brightness = 0;
+    if (brightness > 1) brightness = 1;
+    _brightness = brightness;
+}
+- (BOOL)isCaptured { return NO; }
 @end
 
 /* ---------------------------------------------------------------- views */
 
 static BOOL g_animating;
+static BOOL g_animationsEnabled = YES;
 static double g_animStart, g_animDuration;
 static double g_animateDelay;
 static BOOL g_animateInfinite;
@@ -3294,12 +3887,60 @@ static void animation_add_completion(double delay, void (^completion)(BOOL))
     g_completionCount++;
 }
 
+/* UIView keyframe animations are queued at their relative start times and
+ * then run as ordinary UIView animation blocks, so each segment interpolates
+ * from the previous segment's settled model values. */
+#define MAX_UI_KEYFRAMES 16
+struct ui_keyframe {
+    int used;
+    double due;
+    double duration;
+    void (^block)(void);
+};
+static struct ui_keyframe g_keyframes[MAX_UI_KEYFRAMES];
+static int g_keyframeCount;
+static int g_keyframeActive;
+static double g_keyframeDuration;
+static double g_keyframeDelay;
+
+static void keyframe_add(double start, double relativeDuration,
+                         void (^block)(void))
+{
+    if (!block || g_keyframeCount >= MAX_UI_KEYFRAMES)
+        return;
+    struct ui_keyframe *entry = &g_keyframes[g_keyframeCount];
+    entry->used = 1;
+    entry->due = iosim_now() + g_keyframeDelay +
+                 start * g_keyframeDuration;
+    entry->duration = relativeDuration * g_keyframeDuration;
+    entry->block = (void (^)(void))_Block_copy(block);
+    g_keyframeCount++;
+}
+
 /* Fire animations that have reached their end. The run loop calls this on
  * every tick, so a completion block observes the settled model values. */
 int iosim_animation_tick(void)
 {
     int fired = 0;
     double now = iosim_now();
+    int k = 0;
+    while (k < g_keyframeCount)
+    {
+        struct ui_keyframe *entry = &g_keyframes[k];
+        if (entry->used && now >= entry->due)
+        {
+            double duration = entry->duration;
+            void (^block)(void) = entry->block;
+            g_keyframes[k] = g_keyframes[g_keyframeCount - 1];
+            g_keyframeCount--;
+            if (block)
+                [UIView animateWithDuration:duration animations:block
+                                 completion:nil];
+            fired = 1;
+        }
+        else
+            k++;
+    }
     int i = 0;
     while (i < g_completionCount)
     {
@@ -3322,7 +3963,8 @@ int iosim_animation_tick(void)
 int iosim_animations_active(void)
 {
     return g_animInfiniteCount > 0 || iosim_now() < g_animActiveUntil ||
-           g_completionCount > 0 || display_links_active();
+           g_completionCount > 0 || g_keyframeCount > 0 ||
+           display_links_active();
 }
 
 @implementation UIResponder
@@ -4054,6 +4696,30 @@ static CGPoint window_point_for_view(UIView *view, CGPoint point)
 }
 - (void)setBackgroundColor:(UIColor *)color { _backgroundColor = color; }
 - (UIColor *)backgroundColor { return _backgroundColor; }
+- (UIColor *)tintColor
+{
+    if (_tintColor)
+        return _tintColor;
+    if (_superview)
+        return [(UIView *)_superview tintColor];
+    return [UIColor systemBlueColor];
+}
+- (void)setTintColor:(UIColor *)color
+{
+    _tintColor = color;
+    [self tintColorDidChange];
+    for (int i = 0; i < _subviewCount; i++)
+        [(UIView *)_subviews[i] tintColorDidChange];
+}
+- (void)tintColorDidChange { }
+- (long)tintAdjustmentMode { return _tintAdjustmentMode; }
+- (void)setTintAdjustmentMode:(long)mode
+{
+    _tintAdjustmentMode = mode;
+    [self tintColorDidChange];
+    for (int i = 0; i < _subviewCount; i++)
+        [(UIView *)_subviews[i] tintColorDidChange];
+}
 - (UITraitCollection *)traitCollection
 {
     int style = ui_view_style_with_global(self, ui_style_current());
@@ -4085,6 +4751,7 @@ static CGPoint window_point_for_view(UIView *view, CGPoint point)
     view->_superview = self;
     if (_subviewCount < 32)
         _subviews[_subviewCount++] = view;
+    [view tintColorDidChange];
 }
 - (void)addInteraction:(id)interaction
 {
@@ -4134,6 +4801,7 @@ static CGPoint window_point_for_view(UIView *view, CGPoint point)
     _subviews[index] = view;
     _subviewCount++;
     view->_superview = self;
+    [view tintColorDidChange];
 }
 - (void)bringSubviewToFront:(UIView *)view
 {
@@ -4339,6 +5007,16 @@ static CGPoint window_point_for_view(UIView *view, CGPoint point)
     }
     return _safeAreaGuide;
 }
+- (UIEdgeInsets)safeAreaInsets
+{
+    if (_superview)
+        return UIEdgeInsetsMake(0, 0, 0, 0);
+    const char *top = getenv("IOSIM_SAFE_TOP");
+    const char *bottom = getenv("IOSIM_SAFE_BOTTOM");
+    return UIEdgeInsetsMake(top ? atof(top) : 62.0, 0,
+                            bottom ? atof(bottom) : 34.0, 0);
+}
+- (void)safeAreaInsetsDidChange { }
 - (void)addGestureRecognizer:(UIGestureRecognizer *)recognizer
 {
     if (!recognizer)
@@ -4400,6 +5078,48 @@ static CGPoint window_point_for_view(UIView *view, CGPoint point)
     }
     return self;
 }
++ (BOOL)areAnimationsEnabled { return g_animationsEnabled; }
++ (void)setAnimationsEnabled:(BOOL)enabled { g_animationsEnabled = enabled; }
++ (void)performWithoutAnimation:(void (^)(void))actionsWithoutAnimation
+{
+    if (!actionsWithoutAnimation)
+        return;
+    BOOL previous = g_animationsEnabled;
+    g_animationsEnabled = NO;
+    actionsWithoutAnimation();
+    g_animationsEnabled = previous;
+}
++ (void)animateKeyframesWithDuration:(double)duration delay:(double)delay
+                             options:(unsigned long)options
+                          animations:(void (^)(void))animations
+                          completion:(void (^)(BOOL finished))completion
+{
+    (void)options;
+    if (!animations)
+        return;
+    if (!g_animationsEnabled)
+    {
+        animations();
+        if (completion)
+            completion(YES);
+        return;
+    }
+    g_keyframeActive = 1;
+    g_keyframeDuration = duration > 0 ? duration : 0.25;
+    g_keyframeDelay = delay;
+    animations();
+    g_keyframeActive = 0;
+    if (completion)
+        animation_add_completion(delay + g_keyframeDuration, completion);
+}
++ (void)addKeyframeWithRelativeStartTime:(double)start
+                        relativeDuration:(double)duration
+                              animations:(void (^)(void))animations
+{
+    if (!g_keyframeActive)
+        return;
+    keyframe_add(start, duration, animations);
+}
 + (void)animateWithDuration:(double)duration animations:(void (^)(void))animations
 {
     [self animateWithDuration:duration delay:0.0 options:0
@@ -4419,6 +5139,13 @@ static CGPoint window_point_for_view(UIView *view, CGPoint point)
     if (!animations)
         return;
     BOOL repeat = (options & UIViewAnimationOptionRepeat) != 0;
+    if (!g_animationsEnabled)
+    {
+        animations();
+        if (!repeat && completion)
+            completion(YES);
+        return;
+    }
     g_animating = YES;
     g_animStart = iosim_now();
     g_animDuration = duration;
@@ -6791,6 +7518,211 @@ void UIGraphicsEndImageContext(void)
     iosim_cg_end_image(context);
 }
 
+/* PNG encoding with stored (uncompressed) deflate blocks, so no zlib is
+ * needed. The output is a standards-compliant RGBA PNG. */
+static unsigned png_crc_table[256];
+static int png_crc_ready;
+
+static unsigned png_crc32(const unsigned char *data, unsigned long length)
+{
+    if (!png_crc_ready)
+    {
+        for (unsigned n = 0; n < 256; n++)
+        {
+            unsigned c = n;
+            for (int k = 0; k < 8; k++)
+                c = (c & 1) ? 0xedb88320u ^ (c >> 1) : c >> 1;
+            png_crc_table[n] = c;
+        }
+        png_crc_ready = 1;
+    }
+    unsigned c = 0xffffffffu;
+    for (unsigned long i = 0; i < length; i++)
+        c = png_crc_table[(c ^ data[i]) & 255] ^ (c >> 8);
+    return c ^ 0xffffffffu;
+}
+
+static void png_be32(unsigned char *out, unsigned value)
+{
+    out[0] = (unsigned char)(value >> 24);
+    out[1] = (unsigned char)(value >> 16);
+    out[2] = (unsigned char)(value >> 8);
+    out[3] = (unsigned char)value;
+}
+
+static unsigned char *png_emit_chunk(unsigned char *out, const char *type,
+                                     const unsigned char *data,
+                                     unsigned long length)
+{
+    png_be32(out, (unsigned)length);
+    memcpy(out + 4, type, 4);
+    if (data && length)
+        memcpy(out + 8, data, length);
+    unsigned crc = png_crc32(out + 4, length + 4);
+    png_be32(out + 8 + length, crc);
+    return out + 12 + length;
+}
+
+static unsigned png_adler32(const unsigned char *data, unsigned long length)
+{
+    unsigned a = 1, b = 0;
+    for (unsigned long i = 0; i < length; i++)
+    {
+        a = (a + data[i]) % 65521u;
+        b = (b + a) % 65521u;
+    }
+    return (b << 16) | a;
+}
+
+static NSData *png_encode_rgba(const unsigned char *rgba, int width, int height)
+{
+    if (!rgba || width <= 0 || height <= 0)
+        return nil;
+    unsigned long stride = (unsigned long)width * 4 + 1;
+    unsigned long raw_size = stride * (unsigned long)height;
+    unsigned char *raw = malloc(raw_size);
+    if (!raw)
+        return nil;
+    for (int y = 0; y < height; y++)
+    {
+        unsigned char *row = raw + (unsigned long)y * stride;
+        row[0] = 0; /* no filter */
+        memcpy(row + 1, rgba + (unsigned long)y * width * 4,
+               (unsigned long)width * 4);
+    }
+    unsigned long blocks = (raw_size + 65534) / 65535;
+    if (blocks == 0)
+        blocks = 1;
+    unsigned long zlib_size = 2 + raw_size + blocks * 5 + 4;
+    unsigned long total = 8 + 25 + 12 + zlib_size + 12;
+    unsigned char *out = malloc(total);
+    if (!out)
+    {
+        free(raw);
+        return nil;
+    }
+    static const unsigned char signature[8] =
+        { 0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n' };
+    memcpy(out, signature, 8);
+    unsigned char *p = out + 8;
+    unsigned char ihdr[13];
+    png_be32(ihdr, (unsigned)width);
+    png_be32(ihdr + 4, (unsigned)height);
+    ihdr[8] = 8;   /* bit depth */
+    ihdr[9] = 6;   /* RGBA */
+    ihdr[10] = 0;  /* deflate */
+    ihdr[11] = 0;  /* adaptive filtering */
+    ihdr[12] = 0;  /* no interlace */
+    p = png_emit_chunk(p, "IHDR", ihdr, 13);
+    unsigned char *zlib = malloc(zlib_size);
+    if (!zlib)
+    {
+        free(out);
+        free(raw);
+        return nil;
+    }
+    unsigned long zpos = 0;
+    zlib[zpos++] = 0x78;
+    zlib[zpos++] = 0x01;
+    unsigned long offset = 0;
+    do
+    {
+        unsigned long chunk = raw_size - offset;
+        if (chunk > 65535)
+            chunk = 65535;
+        int final = offset + chunk >= raw_size;
+        zlib[zpos++] = (unsigned char)(final ? 1 : 0);
+        zlib[zpos++] = (unsigned char)(chunk & 255);
+        zlib[zpos++] = (unsigned char)((chunk >> 8) & 255);
+        unsigned nlen = (unsigned)(~chunk) & 0xffffu;
+        zlib[zpos++] = (unsigned char)(nlen & 255);
+        zlib[zpos++] = (unsigned char)((nlen >> 8) & 255);
+        memcpy(zlib + zpos, raw + offset, chunk);
+        zpos += chunk;
+        offset += chunk;
+    } while (offset < raw_size);
+    unsigned adler = png_adler32(raw, raw_size);
+    zlib[zpos++] = (unsigned char)(adler >> 24);
+    zlib[zpos++] = (unsigned char)(adler >> 16);
+    zlib[zpos++] = (unsigned char)(adler >> 8);
+    zlib[zpos++] = (unsigned char)adler;
+    p = png_emit_chunk(p, "IDAT", zlib, zpos);
+    p = png_emit_chunk(p, "IEND", 0, 0);
+    free(zlib);
+    free(raw);
+    NSData *data = [NSData dataWithBytes:out length:(unsigned long)(p - out)];
+    free(out);
+    return data;
+}
+
+NSData *UIImagePNGRepresentation(UIImage *image)
+{
+    if (!image || !image->_rgba || image->_width <= 0 || image->_height <= 0)
+        return nil;
+    return png_encode_rgba(image->_rgba, image->_width, image->_height);
+}
+
+@implementation UIGraphicsImageRendererFormat
+- (id)init
+{
+    self = [super init];
+    if (self)
+    {
+        _scale = [[UIScreen mainScreen] scale];
+        if (_scale <= 0)
+            _scale = 1.0;
+        _opaque = NO;
+    }
+    return self;
+}
++ (id)defaultFormat { return [[self alloc] init]; }
+- (double)scale { return _scale; }
+- (void)setScale:(double)scale { _scale = scale > 0 ? scale : 1.0; }
+- (BOOL)opaque { return _opaque; }
+- (void)setOpaque:(BOOL)opaque { _opaque = opaque; }
+@end
+
+@implementation UIGraphicsImageRendererContext
+- (CGContextRef)CGContext { return _context; }
+@end
+
+@implementation UIGraphicsImageRenderer
+- (id)initWithSize:(CGSize)size
+{
+    return [self initWithSize:size
+                       format:[[UIGraphicsImageRendererFormat alloc] init]];
+}
+- (id)initWithSize:(CGSize)size
+            format:(UIGraphicsImageRendererFormat *)format
+{
+    self = [super init];
+    if (self)
+    {
+        _size = size;
+        _format = format ? format
+                         : [[UIGraphicsImageRendererFormat alloc] init];
+    }
+    return self;
+}
+- (UIImage *)imageWithActions:(void (^)(UIGraphicsImageRendererContext *))actions
+{
+    UIGraphicsBeginImageContextWithOptions(_size, _format->_opaque,
+                                           _format->_scale);
+    UIGraphicsImageRendererContext *context =
+        [[UIGraphicsImageRendererContext alloc] init];
+    context->_context = UIGraphicsGetCurrentContext();
+    if (actions)
+        actions(context);
+    UIImage *image = UIGraphicsGetImageFromCurrentImageContext();
+    UIGraphicsEndImageContext();
+    return image;
+}
+- (NSData *)PNGDataWithActions:(void (^)(UIGraphicsImageRendererContext *))actions
+{
+    return UIImagePNGRepresentation([self imageWithActions:actions]);
+}
+@end
+
 @implementation UIImageView
 - (id)initWithImage:(UIImage *)image
 {
@@ -6812,6 +7744,33 @@ void UIGraphicsEndImageContext(void)
     effect->_style = style;
     return effect;
 }
+@end
+
+@implementation UIFeedbackGenerator
+- (void)prepare { }
+@end
+
+@implementation UIImpactFeedbackGenerator
+- (id)initWithStyle:(long)style
+{
+    self = [super init];
+    if (self)
+        _style = style;
+    return self;
+}
+- (void)impactOccurred { }
+- (void)impactOccurredWithIntensity:(double)intensity
+{
+    (void)intensity;
+}
+@end
+
+@implementation UISelectionFeedbackGenerator
+- (void)selectionChanged { }
+@end
+
+@implementation UINotificationFeedbackGenerator
+- (void)notificationOccurred:(long)type { (void)type; }
 @end
 
 @implementation UIVisualEffectView
@@ -6864,6 +7823,13 @@ static int iosim_modal_tick(void)
     }
     return 1;
 }
+
+/* Application-wide status bar overrides set through UIApplication. -1 means
+ * follow the view controller hierarchy. */
+static long g_status_bar_style_override = -1;
+static int g_status_bar_hidden_override = -1;
+static int g_status_bar_dirty;
+static int app_status_bar_hidden(void);
 
 @implementation UIViewController
 - (id)init
@@ -6930,8 +7896,21 @@ static int iosim_modal_tick(void)
 {
     return UIStatusBarStyleDefault;
 }
+- (BOOL)prefersStatusBarHidden
+{
+    return NO;
+}
+- (UIViewController *)childForStatusBarStyle
+{
+    return nil;
+}
+- (UIViewController *)childForStatusBarHidden
+{
+    return nil;
+}
 - (void)setNeedsStatusBarAppearanceUpdate
 {
+    g_status_bar_dirty = 1;
 }
 - (UIView *)view
 {
@@ -8330,18 +9309,26 @@ static UIControl *toolbar_text_control(UIBarButtonItem *item, CGRect frame,
 @end
 
 @implementation UIButton
+- (id)initWithFrame:(CGRect)frame
+{
+    self = [super initWithFrame:frame];
+    if (self)
+    {
+        UILabel *label =
+            [[UILabel alloc] initWithFrame:CGRectMake(0, 0, frame.size.width,
+                                                      frame.size.height)];
+        label->_textAlignment = 1;
+        label->_font = [UIFont systemFontOfSize:17];
+        label->_textColor = [self tintColor];
+        [self addSubview:label];
+        _titleLabel = label;
+    }
+    return self;
+}
 + (id)buttonWithType:(int)type
 {
     (void)type;
-    UIButton *button = [[self alloc] initWithFrame:CGRectMake(0, 0, 0, 0)];
-    UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, 0, 0)];
-    label->_textAlignment = 1;
-    label->_font = [UIFont systemFontOfSize:17];
-    label->_textColor = [UIColor systemBlueColor];
-    [button addSubview:label];
-    button->_titleLabel = label;
-    [button layoutTitle];
-    return button;
+    return [[self alloc] initWithFrame:CGRectMake(0, 0, 0, 0)];
 }
 - (void)layoutTitle
 {
@@ -8358,14 +9345,22 @@ static UIControl *toolbar_text_control(UIBarButtonItem *item, CGRect frame,
 {
     (void)state;
     _title = title;
-    _titleLabel->_text = title;
+    if (_titleLabel)
+        _titleLabel->_text = title;
 }
 - (UILabel *)titleLabel { return _titleLabel; }
 - (void)setTitleColor:(UIColor *)color forState:(unsigned long)state
 {
     (void)state;
     _titleColor = color;
-    _titleLabel->_textColor = color;
+    _titleColorCustom = color != nil;
+    if (_titleLabel)
+        _titleLabel->_textColor = color ? color : [self tintColor];
+}
+- (void)tintColorDidChange
+{
+    if (_titleLabel && !_titleColorCustom)
+        _titleLabel->_textColor = [self tintColor];
 }
 - (CGSize)intrinsicContentSize
 {
@@ -10901,10 +11896,6 @@ int iosim_ui_appearance_tick(void)
 
 /* --------------------------------------------------------- applications */
 
-/* An application-wide status bar style set through UIApplication overrides
- * the root view controller's preference. -1 means no override. */
-static long g_status_bar_style_override = -1;
-
 @implementation UIApplication
 + (UIApplication *)sharedApplication
 {
@@ -10932,6 +11923,17 @@ static long g_status_bar_style_override = -1;
 {
     (void)animated;
     g_status_bar_style_override = style;
+    g_status_bar_dirty = 1;
+}
+- (BOOL)isStatusBarHidden
+{
+    return app_status_bar_hidden() ? YES : NO;
+}
+- (void)setStatusBarHidden:(BOOL)hidden animated:(BOOL)animated
+{
+    (void)animated;
+    g_status_bar_hidden_override = hidden ? 1 : 0;
+    g_status_bar_dirty = 1;
 }
 - (long)applicationIconBadgeNumber { return _iconBadgeNumber; }
 - (void)setApplicationIconBadgeNumber:(long)value
@@ -10950,6 +11952,18 @@ static long g_status_bar_style_override = -1;
     return 0;
 }
 - (void)endBackgroundTask:(unsigned long)task { (void)task; }
+- (BOOL)canOpenURL:(id)url { (void)url; return YES; }
+- (BOOL)openURL:(id)url { (void)url; return NO; }
+- (void)openURL:(id)url options:(id)options
+    completionHandler:(void (^)(BOOL success))completion
+{
+    (void)url;
+    (void)options;
+    if (completion)
+        completion(NO);
+}
+- (BOOL)isIdleTimerDisabled { return _idleTimerDisabled; }
+- (void)setIdleTimerDisabled:(BOOL)disabled { _idleTimerDisabled = disabled; }
 @end
 
 static id g_pasteboard_text_type;
@@ -11518,17 +12532,46 @@ static double layer_key_value(CALayer *layer, const char *key, double base)
     }
     if (!anim)
         return base;
-    double t = (iosim_now() - anim->start) / anim->duration;
+    double elapsed =
+        (iosim_now() - anim->start - anim->delay) * anim->speed +
+        anim->timeOffset;
+    if (elapsed < 0)
+    {
+        const char *fill = anim->fillMode ? iosim_string_cstr(anim->fillMode)
+                                          : 0;
+        int backwards =
+            fill && (strstr(fill, "backward") || strstr(fill, "both"));
+        if (!backwards)
+            return base;
+        elapsed = 0;
+    }
+    double t = elapsed / anim->duration;
     double repeat = anim->repeatCount;
-    if (t < 0)
-        t = 0;
+    int finished = 0;
     if (repeat < 0)
         t = t - (long)t;
     else if (repeat > 1 && t >= repeat)
+    {
         t = 1.0;
+        finished = 1;
+    }
     else if (repeat > 1)
         t = t - (long)t;
     else if (t >= 1.0)
+    {
+        t = 1.0;
+        finished = 1;
+    }
+    if (anim->autoreverses)
+    {
+        if (finished)
+            t = 0.0;
+        else if (t < 0.5)
+            t *= 2.0;
+        else
+            t = (1.0 - t) * 2.0;
+    }
+    if (finished && !anim->autoreverses)
     {
         if (anim->values)
             return layer_keyframe_value(anim->values, anim->keyTimes, 1.0);
@@ -12166,6 +13209,84 @@ static void render_shape_path(UIBezierPath *path, int x, int y, int w, int h,
     }
 }
 
+static void blit_layer_contents(CALayer *layer, int x, int y, int w, int h,
+                                const unsigned char *rgba, int image_w,
+                                int image_h, double alpha)
+{
+    CGRect rect = layer->_contentsRect;
+    if (rect.size.width <= 0 || rect.size.height <= 0)
+        rect = CGRectMake(0, 0, 1, 1);
+    if (rect.origin.x < 0) rect.origin.x = 0;
+    if (rect.origin.y < 0) rect.origin.y = 0;
+    if (rect.origin.x + rect.size.width > 1)
+        rect.size.width = 1 - rect.origin.x;
+    if (rect.origin.y + rect.size.height > 1)
+        rect.size.height = 1 - rect.origin.y;
+    int sx = (int)(rect.origin.x * image_w);
+    int sy = (int)(rect.origin.y * image_h);
+    int sw = (int)(rect.size.width * image_w + 0.5);
+    int sh = (int)(rect.size.height * image_h + 0.5);
+    if (sw < 1) sw = 1;
+    if (sh < 1) sh = 1;
+    if (sx + sw > image_w) sw = image_w - sx;
+    if (sy + sh > image_h) sh = image_h - sy;
+    const char *gravity = layer->_contentsGravity
+        ? iosim_string_cstr(layer->_contentsGravity) : 0;
+    int dx = x, dy = y, dw = w, dh = h;
+    if (gravity && strcmp(gravity, "resizeAspect") == 0)
+    {
+        double fit = (double)w / sw;
+        if ((double)h / sh < fit)
+            fit = (double)h / sh;
+        dw = (int)(sw * fit + 0.5);
+        dh = (int)(sh * fit + 0.5);
+        dx = x + (w - dw) / 2;
+        dy = y + (h - dh) / 2;
+    }
+    else if (gravity && strcmp(gravity, "resizeAspectFill") == 0)
+    {
+        double target = (double)w / h;
+        double source = (double)sw / sh;
+        if (source > target)
+        {
+            int new_sw = (int)(sh * target + 0.5);
+            sx += (sw - new_sw) / 2;
+            sw = new_sw;
+        }
+        else if (source < target)
+        {
+            int new_sh = (int)(sw / target + 0.5);
+            sy += (sh - new_sh) / 2;
+            sh = new_sh;
+        }
+    }
+    else if (gravity && strcmp(gravity, "center") == 0)
+    {
+        dw = sw;
+        dh = sh;
+        dx = x + (w - dw) / 2;
+        dy = y + (h - dh) / 2;
+    }
+    if (sx == 0 && sy == 0 && sw == image_w && sh == image_h)
+    {
+        iosim_fb_blit_rgba_scaled(dx, dy, dw, dh, rgba, sw, sh, sw * 4);
+    }
+    else
+    {
+        unsigned char *crop = malloc((unsigned long)sw * sh * 4);
+        if (crop)
+        {
+            for (int row = 0; row < sh; row++)
+                memcpy(crop + (unsigned long)row * sw * 4,
+                       rgba + ((unsigned long)(sy + row) * image_w + sx) * 4,
+                       (unsigned long)sw * 4);
+            iosim_fb_blit_rgba_scaled(dx, dy, dw, dh, crop, sw, sh, sw * 4);
+            free(crop);
+        }
+    }
+    iosim_fb_set_opacity(alpha);
+}
+
 static void render_layer_contents(CALayer *layer, int x, int y, int w,
                                   int h, double alpha)
 {
@@ -12178,27 +13299,25 @@ static void render_layer_contents(CALayer *layer, int x, int y, int w,
             iosim_cgimage_data((CGImageRef)layer->_contents, &image_w,
                                &image_h);
         if (rgba && image_w > 0 && image_h > 0)
-        {
-            iosim_fb_blit_rgba_scaled(x, y, w, h, rgba, image_w, image_h,
-                                      image_w * 4);
-            iosim_fb_set_opacity(alpha);
-        }
+            blit_layer_contents(layer, x, y, w, h, rgba, image_w, image_h,
+                                alpha);
     }
     else if ([layer->_contents isKindOfClass:[UIImage class]])
     {
         UIImage *image = (UIImage *)layer->_contents;
         if (image->_rgba && image->_width > 0 && image->_height > 0)
-        {
-            iosim_fb_blit_rgba_scaled(x, y, w, h, image->_rgba,
-                                      image->_width, image->_height,
-                                      image->_width * 4);
-            iosim_fb_set_opacity(alpha);
-        }
+            blit_layer_contents(layer, x, y, w, h, image->_rgba,
+                                image->_width, image->_height, alpha);
     }
 }
 
 static void render_layer(CALayer *layer, double parentX, double parentY,
                          double scale, double parentAlpha);
+static void render_replicator(CAReplicatorLayer *rep, int x, int y, int w,
+                              int h, double scale, double alpha,
+                              CGRect frame);
+static void render_emitter(CAEmitterLayer *emitter, int x, int y, int w,
+                           int h, double scale, double alpha, CGRect frame);
 static int g_render_offscreen;
 static UIView *g_no_transform_view;
 static CALayer *g_no_transform_layer;
@@ -12372,12 +13491,240 @@ static void render_layer(CALayer *layer, double parentX, double parentY,
                           sl->_lineCap);
     }
 
+    if ([layer isKindOfClass:[CAReplicatorLayer class]])
+    {
+        render_replicator((CAReplicatorLayer *)layer, x, y, w, h, scale,
+                          alpha, frame);
+        if (masked)
+            iosim_fb_pop_clip_mask();
+        iosim_fb_set_opacity(1.0);
+        return;
+    }
+    if ([layer isKindOfClass:[CAEmitterLayer class]])
+        render_emitter((CAEmitterLayer *)layer, x, y, w, h, scale, alpha,
+                       frame);
     for (int i = 0; i < layer->_sublayerCount; i++)
         render_layer((CALayer *)layer->_sublayers[i], parentX + frame.origin.x,
                      parentY + frame.origin.y, scale, alpha);
     if (masked)
         iosim_fb_pop_clip_mask();
     iosim_fb_set_opacity(1.0);
+}
+
+static void replicator_shift_color(unsigned *pixels, long count, float dr,
+                                   float dg, float db, float da)
+{
+    int ir = (int)(dr * 255.0f + 0.5f);
+    int ig = (int)(dg * 255.0f + 0.5f);
+    int ib = (int)(db * 255.0f + 0.5f);
+    int ia = (int)(da * 255.0f + 0.5f);
+    if (!ir && !ig && !ib && !ia)
+        return;
+    for (long i = 0; i < count; i++)
+    {
+        unsigned p = pixels[i];
+        int a = (int)((p >> 24) & 255) + ia;
+        int r = (int)((p >> 16) & 255) + ir;
+        int g = (int)((p >> 8) & 255) + ig;
+        int b = (int)(p & 255) + ib;
+        if (a < 0) a = 0; if (a > 255) a = 255;
+        if (r < 0) r = 0; if (r > 255) r = 255;
+        if (g < 0) g = 0; if (g > 255) g = 255;
+        if (b < 0) b = 0; if (b > 255) b = 255;
+        pixels[i] = ((unsigned)a << 24) | ((unsigned)r << 16) |
+                    ((unsigned)g << 8) | (unsigned)b;
+    }
+}
+
+static void render_replicator(CAReplicatorLayer *rep, int x, int y, int w,
+                              int h, double scale, double alpha, CGRect frame)
+{
+    long count = rep->_instanceCount;
+    if (count < 1)
+        count = 1;
+    if (count > 64)
+        count = 64;
+    if (w <= 0 || h <= 0 || rep->_sublayerCount == 0)
+        return;
+    void *state = iosim_fb_begin_offscreen((unsigned)w, (unsigned)h);
+    if (!state)
+        return;
+    g_render_offscreen++;
+    for (int i = 0; i < rep->_sublayerCount; i++)
+        render_layer((CALayer *)rep->_sublayers[i], 0, 0, scale, 1.0);
+    g_render_offscreen--;
+    int bw = 0, bh = 0;
+    unsigned *buf = iosim_fb_end_offscreen(state, &bw, &bh);
+    if (!buf || bw <= 0 || bh <= 0)
+    {
+        if (buf)
+            iosim_fb_free_offscreen(buf);
+        return;
+    }
+    unsigned *work = malloc((unsigned long)bw * (unsigned long)bh *
+                            sizeof(unsigned));
+    if (!work)
+    {
+        iosim_fb_free_offscreen(buf);
+        return;
+    }
+    memcpy(work, buf, (unsigned long)bw * (unsigned long)bh *
+                       sizeof(unsigned));
+    if (rep->_instanceColor)
+    {
+        unsigned tint = gradient_entry_rgb(rep->_instanceColor);
+        double tint_alpha =
+            gradient_entry_alpha(rep->_instanceColor) / 255.0;
+        int tr = (int)((tint >> 16) & 255);
+        int tg = (int)((tint >> 8) & 255);
+        int tb = (int)(tint & 255);
+        for (int i = 0; i < bw * bh; i++)
+        {
+            unsigned p = work[i];
+            int a = (int)(((p >> 24) & 255) * tint_alpha);
+            int r = (int)(((p >> 16) & 255) * tr / 255.0);
+            int g = (int)(((p >> 8) & 255) * tg / 255.0);
+            int b = (int)((p & 255) * tb / 255.0);
+            work[i] = ((unsigned)a << 24) | ((unsigned)r << 16) |
+                      ((unsigned)g << 8) | (unsigned)b;
+        }
+    }
+    CATransform3D t = rep->_instanceTransform;
+    double a = 1, b = 0, c = 0, d = 1, tx = 0, ty = 0;
+    for (long i = 0; i < count; i++)
+    {
+        double cx = w / 2.0, cy = h / 2.0;
+        double ftx = x + cx - (a * cx + c * cy) + tx * scale;
+        double fty = y + cy - (b * cx + d * cy) + ty * scale;
+        iosim_fb_blit_affine(work, bw, bh, a, b, c, d, ftx, fty, alpha);
+        if (i + 1 < count)
+        {
+            double na = a * t.m11 + c * t.m12;
+            double nb = b * t.m11 + d * t.m12;
+            double nc = a * t.m21 + c * t.m22;
+            double nd = b * t.m21 + d * t.m22;
+            double ntx = a * t.m41 + c * t.m42 + tx;
+            double nty = b * t.m41 + d * t.m42 + ty;
+            a = na; b = nb; c = nc; d = nd; tx = ntx; ty = nty;
+            replicator_shift_color(work, (long)bw * bh,
+                                   rep->_instanceRedOffset,
+                                   rep->_instanceGreenOffset,
+                                   rep->_instanceBlueOffset,
+                                   rep->_instanceAlphaOffset);
+        }
+    }
+    free(work);
+    iosim_fb_free_offscreen(buf);
+}
+
+/* Deterministic particle field. Each cell's particles are placed on a
+ * repeating lifetime ring, so the emitter reaches a steady state without
+ * retaining per-frame state; a small LCG supplies per-particle variation. */
+static double emitter_rand(unsigned seed)
+{
+    seed = seed * 1664525u + 1013904223u;
+    return (double)((seed >> 8) & 0xffffff) / 16777216.0;
+}
+
+static double emitter_wrap(double value, double period)
+{
+    if (period <= 0.0)
+        return 0.0;
+    double cycles = value / period;
+    return (cycles - (double)(long long)cycles) * period;
+}
+
+static void render_emitter(CAEmitterLayer *emitter, int x, int y, int w,
+                           int h, double scale, double alpha, CGRect frame)
+{
+    (void)frame;
+    if (!emitter || !emitter->_emitterCells || w <= 0 || h <= 0)
+        return;
+    static double epoch = -1.0;
+    double now = iosim_now();
+    if (epoch < 0.0)
+        epoch = now;
+    unsigned long cellCount = [emitter->_emitterCells count];
+    double ex = x + emitter->_emitterPosition.x * scale;
+    double ey = y + emitter->_emitterPosition.y * scale;
+    for (unsigned long c = 0; c < cellCount; c++)
+    {
+        CAEmitterCell *cell =
+            (CAEmitterCell *)[emitter->_emitterCells objectAtIndex:c];
+        if (!cell || !cell->_enabled)
+            continue;
+        double rate = (double)cell->_birthRate * emitter->_birthRate;
+        if (rate <= 0.0)
+            continue;
+        double lifetime = cell->_lifetime > 0.0f ? cell->_lifetime
+                                                 : emitter->_lifetime;
+        if (lifetime <= 0.0)
+            lifetime = 1.0;
+        int count = (int)(rate * lifetime + 0.5);
+        if (count < 1)
+            count = 1;
+        if (count > 128)
+            count = 128;
+        double cycle = emitter_wrap(now - epoch, lifetime);
+        if (cycle < 0.0)
+            cycle += lifetime;
+        double base[4] = { 1.0, 1.0, 1.0, 1.0 };
+        if (cell->_color)
+            [cell->_color ui_components:base];
+        for (int i = 0; i < count; i++)
+        {
+            unsigned seed = emitter->_seed + (unsigned)c * 0x9e3779b9u +
+                            (unsigned)i * 0x85ebca6bu;
+            double age = emitter_wrap(cycle + (double)i / count * lifetime,
+                                      lifetime);
+            double angle = cell->_emissionRange > 0.0f
+                ? (emitter_rand(seed) - 0.5) * cell->_emissionRange : 0.0;
+            double speed = cell->_velocity +
+                cell->_velocityRange * (emitter_rand(seed ^ 0x51u) - 0.5);
+            double px = ex + cos(angle) * speed * age * scale +
+                        0.5 * cell->_xAcceleration * age * age * scale;
+            double py = ey + sin(angle) * speed * age * scale +
+                        0.5 * cell->_yAcceleration * age * age * scale;
+            if (px < x || px >= x + w || py < y || py >= y + h)
+                continue;
+            double size = 12.0 * (double)cell->_scale *
+                (1.0 + cell->_scaleRange *
+                 (emitter_rand(seed ^ 0xa7u) - 0.5)) * scale;
+            if (size < 1.0)
+                size = 1.0;
+            if (size > 256.0)
+                size = 256.0;
+            double red = base[0] + cell->_redSpeed * age +
+                cell->_redRange * (emitter_rand(seed ^ 0x1bu) - 0.5);
+            double green = base[1] + cell->_greenSpeed * age +
+                cell->_greenRange * (emitter_rand(seed ^ 0x2du) - 0.5);
+            double blue = base[2] + cell->_blueSpeed * age +
+                cell->_blueRange * (emitter_rand(seed ^ 0x3fu) - 0.5);
+            double particleAlpha = base[3] + cell->_alphaSpeed * age +
+                cell->_alphaRange * (emitter_rand(seed ^ 0x4eu) - 0.5);
+            if (particleAlpha < 0.0)
+                particleAlpha = 0.0;
+            if (particleAlpha > 1.0)
+                particleAlpha = 1.0;
+            if (particleAlpha <= 0.001)
+                continue;
+            int r = (int)(red * 255.0 + 0.5);
+            int g = (int)(green * 255.0 + 0.5);
+            int b = (int)(blue * 255.0 + 0.5);
+            if (r < 0) r = 0; if (r > 255) r = 255;
+            if (g < 0) g = 0; if (g > 255) g = 255;
+            if (b < 0) b = 0; if (b > 255) b = 255;
+            unsigned color = ((unsigned)r << 16) | ((unsigned)g << 8) |
+                             (unsigned)b;
+            iosim_fb_set_opacity(alpha * particleAlpha);
+            int radius = (int)(size / 2.0 + 0.5);
+            iosim_fb_fill_round_rect((int)(px - size / 2.0 + 0.5),
+                                     (int)(py - size / 2.0 + 0.5),
+                                     (int)(size + 0.5), (int)(size + 0.5),
+                                     radius, color);
+        }
+    }
+    iosim_fb_set_opacity(alpha);
 }
 
 /* Separable box blur over an XRGB rectangle. Two passes approximate the
@@ -13693,15 +15040,59 @@ static int g_sb_overlay_guard;
 static UIViewController *g_app_root_controller;
 static void shell_draw_notification_overlays(int fbWidth, double scale);
 
+/* Walk down through navigation and tab containers (and any explicit
+ * childForStatusBarStyle/Hidden) to the controller that owns the status bar. */
+static UIViewController *app_status_bar_controller(void)
+{
+    UIViewController *vc = g_app_root_controller;
+    while (vc)
+    {
+        UIViewController *child = [vc childForStatusBarStyle];
+        if (!child && [vc isKindOfClass:[UINavigationController class]])
+            child = [(UINavigationController *)vc topViewController];
+        else if (!child && [vc isKindOfClass:[UITabBarController class]])
+            child = [(UITabBarController *)vc selectedViewController];
+        if (!child || child == vc)
+            break;
+        vc = child;
+    }
+    return vc;
+}
+
+static int app_status_bar_hidden(void)
+{
+    if (g_status_bar_hidden_override >= 0)
+        return g_status_bar_hidden_override;
+    UIViewController *vc = g_app_root_controller;
+    while (vc)
+    {
+        if ([vc prefersStatusBarHidden])
+            return 1;
+        UIViewController *child = [vc childForStatusBarHidden];
+        if (!child && [vc isKindOfClass:[UINavigationController class]])
+            child = [(UINavigationController *)vc topViewController];
+        else if (!child && [vc isKindOfClass:[UITabBarController class]])
+            child = [(UITabBarController *)vc selectedViewController];
+        if (!child || child == vc)
+            break;
+        vc = child;
+    }
+    return 0;
+}
+
 /* Status bar glyphs are white over SpringBoard's wallpaper and follow the
  * foreground app's style otherwise. An explicit UIApplication style wins;
- * then the root controller's preferredStatusBarStyle; a plain default style
- * picks the color that reads against the root view's background. */
+ * then the deepest controller's preferredStatusBarStyle; a plain default
+ * style picks the color that reads against the root view's background. */
 static unsigned app_status_bar_color(void)
 {
     long style = g_status_bar_style_override;
-    if (style < 0 && g_app_root_controller)
-        style = [g_app_root_controller preferredStatusBarStyle];
+    if (style < 0)
+    {
+        UIViewController *controller = app_status_bar_controller();
+        if (controller)
+            style = [controller preferredStatusBarStyle];
+    }
     if (style == UIStatusBarStyleLightContent)
         return 0xffffff;
     if (style == UIStatusBarStyleDarkContent)
@@ -13720,8 +15111,34 @@ static unsigned app_status_bar_color(void)
     return 0x000000;
 }
 
+/* Info.plist can set the application-wide status bar before any controller
+ * asks for its own; a later UIApplication call still wins. */
+static void apply_status_bar_plist(void)
+{
+    NSBundle *bundle = [NSBundle mainBundle];
+    NSDictionary *info = bundle ? [bundle infoDictionary] : nil;
+    if (!info)
+        return;
+    id based = [info objectForKey:@"UIViewControllerBasedStatusBarAppearance"];
+    BOOL controllerBased = based ? [based boolValue] : YES;
+    id hidden = [info objectForKey:@"UIStatusBarHidden"];
+    if (hidden && [hidden boolValue])
+        g_status_bar_hidden_override = 1;
+    if (!controllerBased)
+    {
+        id style = [info objectForKey:@"UIStatusBarStyle"];
+        const char *name = style ? iosim_string_cstr(style) : 0;
+        if (name && strstr(name, "LightContent"))
+            g_status_bar_style_override = UIStatusBarStyleLightContent;
+        else if (name && strstr(name, "DarkContent"))
+            g_status_bar_style_override = UIStatusBarStyleDarkContent;
+    }
+}
+
 static void draw_device_chrome(int fbWidth, double scale)
 {
+    if (!g_shell_active && app_status_bar_hidden())
+        return;
     unsigned chrome = g_shell_active ? 0xffffff : app_status_bar_color();
     (void)fbWidth;
     /* Status bar: time, cellular, Wi-Fi and battery. */
@@ -19422,6 +20839,7 @@ int UIApplicationMain(int argc, char **argv, id principal, id delegateName)
     /* The device appearance is shared with SpringBoard; resolve it before
      * any view is built so dynamic colors draw with the right style. */
     g_ui_style = ui_appearance_read_file();
+    apply_status_bar_plist();
 
     /* Open the event stream before the first frame so the system UI can
      * deliver events while the scene is still being built. */
@@ -19540,6 +20958,11 @@ int UIApplicationMain(int argc, char **argv, id principal, id delegateName)
         while ((r = iosim_event_next(&type, &x, &y)) != 0)
         {
             int redraw = 0;
+            if (g_status_bar_dirty)
+            {
+                g_status_bar_dirty = 0;
+                redraw = 1;
+            }
             if (r == 1 && type == 1)
             {
                 if (context_menu_handle_tap(x, y))

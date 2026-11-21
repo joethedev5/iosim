@@ -4973,6 +4973,154 @@ else
 fi
 "$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
 sleep 0.6
+"$ROOT/tools/build_app.sh" "$ROOT/tests/statusbar_test.m" \
+    "$T/StatusBarApp" >/dev/null
+mkdir -p "$T/StatusBarApp.app"
+cp "$T/StatusBarApp" "$T/StatusBarApp.app/StatusBarApp"
+python3 - "$T/StatusBarApp.app/Info.plist" <<'PY'
+import plistlib, sys
+with open(sys.argv[1], "wb") as f:
+    plistlib.dump({
+        "CFBundleIdentifier": "com.iosim.statusbar",
+        "CFBundleExecutable": "StatusBarApp",
+        "CFBundleName": "StatusBar",
+        "CFBundlePackageType": "APPL",
+        "CFBundleVersion": "1",
+        "CFBundleShortVersionString": "1.0",
+    }, f)
+PY
+"$ROOT/tools/iosimctl" install "$UDID" "$T/StatusBarApp.app" >/dev/null
+sleep 0.4
+"$ROOT/tools/iosimctl" ui "$UDID" tap 201 718.5 >/dev/null
+sleep 0.5
+for c in s t a t u s b a r; do
+    "$ROOT/tools/iosimctl" ui "$UDID" key "$c" >/dev/null
+done
+sleep 0.7
+"$ROOT/tools/iosimctl" ui "$UDID" tap 200 270 >/dev/null
+if wait_log "[statusbar] ready"; then
+    echo "ok   the status bar fixture launches"
+else
+    echo "FAIL status bar launch"; fails=$((fails+1))
+fi
+sleep 0.4
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/apstatus-on.png" >/dev/null
+"$ROOT/tools/iosimctl" ui "$UDID" tap 200 340 >/dev/null
+if wait_log "[statusbar] hidden 1"; then
+    echo "ok   prefersStatusBarHidden hides the status bar"
+else
+    echo "FAIL status bar hide"; fails=$((fails+1))
+fi
+sleep 0.4
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/apstatus-off.png" >/dev/null
+"$ROOT/tools/iosimctl" ui "$UDID" tap 200 340 >/dev/null
+if wait_log "[statusbar] hidden 0"; then
+    echo "ok   the status bar returns"
+else
+    echo "FAIL status bar show"; fails=$((fails+1))
+fi
+sleep 0.4
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/apstatus-on2.png" >/dev/null
+if out="$(python3 - "$ROOT/tools" "$T" <<'STPNG'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+root = sys.argv[2]
+def load(name):
+    w, h, bpp, rows = pngpixel.load(root + "/" + name)
+    def rgb(x, y):
+        c = pngpixel.px(rows, bpp, x * 3, y * 3)
+        return ((c >> 16) & 255, (c >> 8) & 255, c & 255)
+    return rgb
+def dark_time(rgb):
+    n = 0
+    for y in range(24, 48):
+        for x in range(55, 106):
+            if max(rgb(x, y)) < 80:
+                n += 1
+    return n
+on = dark_time(load("apstatus-on.png"))
+off = dark_time(load("apstatus-off.png"))
+on2 = dark_time(load("apstatus-on2.png"))
+if on < 20 or on2 < 20:
+    raise SystemExit("the status bar time is missing when visible")
+if off > 5:
+    raise SystemExit("the status bar time is still drawn when hidden")
+print("ok   the status bar hides and returns")
+STPNG
+)"; then
+    echo "$out"
+else
+    echo "FAIL status bar pixels"; echo "$out"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
+sleep 0.6
+"$ROOT/tools/build_app.sh" "$ROOT/tests/statusbar_plist_test.m" \
+    "$T/StatusBarPlistApp" >/dev/null
+mkdir -p "$T/StatusBarPlistApp.app"
+cp "$T/StatusBarPlistApp" "$T/StatusBarPlistApp.app/StatusBarPlistApp"
+python3 - "$T/StatusBarPlistApp.app/Info.plist" <<'PY'
+import plistlib, sys
+with open(sys.argv[1], "wb") as f:
+    plistlib.dump({
+        "CFBundleIdentifier": "com.iosim.statusbarplist",
+        "CFBundleExecutable": "StatusBarPlistApp",
+        "CFBundleName": "StatusBarPlist",
+        "CFBundlePackageType": "APPL",
+        "CFBundleVersion": "1",
+        "CFBundleShortVersionString": "1.0",
+        "UIViewControllerBasedStatusBarAppearance": False,
+        "UIStatusBarStyle": "UIStatusBarStyleLightContent",
+    }, f)
+PY
+"$ROOT/tools/iosimctl" install "$UDID" "$T/StatusBarPlistApp.app" >/dev/null
+sleep 0.4
+"$ROOT/tools/iosimctl" ui "$UDID" tap 201 718.5 >/dev/null
+sleep 0.5
+for c in s t a t u s b a r p l i s t; do
+    "$ROOT/tools/iosimctl" ui "$UDID" key "$c" >/dev/null
+done
+sleep 0.7
+"$ROOT/tools/iosimctl" ui "$UDID" tap 200 270 >/dev/null
+if wait_log "[statusbar-plist] ready"; then
+    echo "ok   the plist status bar fixture launches"
+else
+    echo "FAIL plist status bar launch"; fails=$((fails+1))
+fi
+sleep 0.4
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/apstatusplist.png" >/dev/null
+if out="$(python3 - "$ROOT/tools" "$T" <<'PLPNG'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+root = sys.argv[2]
+w, h, bpp, rows = pngpixel.load(root + "/apstatusplist.png")
+def rgb(x, y):
+    c = pngpixel.px(rows, bpp, x * 3, y * 3)
+    return ((c >> 16) & 255, (c >> 8) & 255, c & 255)
+white = dark = 0
+for y in range(24, 48):
+    for x in range(55, 106):
+        c = rgb(x, y)
+        if min(c) > 200:
+            white += 1
+        if max(c) < 80:
+            dark += 1
+if white < 20:
+    raise SystemExit("the plist light status bar is not white")
+if dark > 5:
+    raise SystemExit("the plist light status bar still draws dark glyphs")
+if abs(rgb(200, 200)[0] - 128) > 12:
+    raise SystemExit("the plist fixture background changed")
+print("ok   UIStatusBarStyle in Info.plist overrides the controller")
+PLPNG
+)"; then
+    echo "$out"
+else
+    echo "FAIL plist status bar pixels"; echo "$out"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
+sleep 0.6
 "$ROOT/tools/iosimctl" ui "$UDID" appearance dark >/dev/null
 if wait_log "[SpringBoard] appearance dark"; then
     echo "ok   SpringBoard records a dark appearance at the home screen"
@@ -5018,6 +5166,489 @@ HOMEPNG
 else
     echo "FAIL appearance home glass"; echo "$out"; fails=$((fails+1))
 fi
+
+# ---------- CAReplicatorLayer ----------
+"$ROOT/tools/build_app.sh" "$ROOT/tests/replicator_test.m" \
+    "$T/ReplicatorApp" >/dev/null
+mkdir -p "$T/ReplicatorApp.app"
+cp "$T/ReplicatorApp" "$T/ReplicatorApp.app/ReplicatorApp"
+python3 - "$T/ReplicatorApp.app/Info.plist" <<'PY'
+import plistlib, sys
+with open(sys.argv[1], "wb") as f:
+    plistlib.dump({
+        "CFBundleIdentifier": "com.iosim.replicator",
+        "CFBundleExecutable": "ReplicatorApp",
+        "CFBundleName": "Replicator",
+        "CFBundlePackageType": "APPL",
+        "CFBundleVersion": "1",
+        "CFBundleShortVersionString": "1.0",
+    }, f)
+PY
+"$ROOT/tools/iosimctl" install "$UDID" "$T/ReplicatorApp.app" >/dev/null
+sleep 0.4
+"$ROOT/tools/iosimctl" ui "$UDID" tap 201 718.5 >/dev/null
+sleep 0.5
+for c in r e p l i c a t o r; do
+    "$ROOT/tools/iosimctl" ui "$UDID" key "$c" >/dev/null
+done
+sleep 0.7
+"$ROOT/tools/iosimctl" ui "$UDID" tap 200 270 >/dev/null
+if wait_log "[replicator] ready"; then
+    echo "ok   the replicator fixture launches"
+else
+    echo "FAIL replicator launch"; fails=$((fails+1))
+fi
+sleep 0.4
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/replicator.png" >/dev/null
+if out="$(python3 - "$ROOT/tools" "$T" <<'REPPNG'
+import sys, math
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+root = sys.argv[2]
+w, h, bpp, rows = pngpixel.load(root + "/replicator.png")
+def rgb(x, y):
+    c = pngpixel.px(rows, bpp, int(round(x * 3)), int(round(y * 3)))
+    return ((c >> 16) & 255, (c >> 8) & 255, c & 255)
+if max(rgb(201, 437)) > 10:
+    raise SystemExit("the replicator center is not empty")
+for k in range(8):
+    a = k * math.pi / 4
+    c = rgb(201 + 90 * math.cos(a), 437 + 90 * math.sin(a))
+    if c[0] < 200 or not (80 < c[1] < 180) or c[2] > 80:
+        raise SystemExit("ring dot %d is wrong: %r" % (k, c))
+blues = [rgb(x, 620)[2] for x in (70, 130, 190, 250)]
+for x, b in zip((70, 130, 190, 250), blues):
+    c = rgb(x, 620)
+    if c[0] < 200 or c[1] > 30:
+        raise SystemExit("row dot at %d is not red: %r" % (x, c))
+if not (blues[0] < 20 and 25 < blues[1] < 55 and
+        60 < blues[2] < 95 and blues[3] > 95):
+    raise SystemExit("row color offsets are wrong: %r" % (blues,))
+print("ok   replicator copies rotate, translate and shift color")
+REPPNG
+)"; then
+    echo "$out"
+else
+    echo "FAIL replicator pixels"; echo "$out"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
+
+# ---------- CAAnimation timing and CATransaction ----------
+"$ROOT/tools/build_app.sh" "$ROOT/tests/animation_timing_test.m" \
+    "$T/TimingApp" >/dev/null
+mkdir -p "$T/TimingApp.app"
+cp "$T/TimingApp" "$T/TimingApp.app/TimingApp"
+python3 - "$T/TimingApp.app/Info.plist" <<'PY'
+import plistlib, sys
+with open(sys.argv[1], "wb") as f:
+    plistlib.dump({
+        "CFBundleIdentifier": "com.iosim.timing",
+        "CFBundleExecutable": "TimingApp",
+        "CFBundleName": "Timing",
+        "CFBundlePackageType": "APPL",
+        "CFBundleVersion": "1",
+        "CFBundleShortVersionString": "1.0",
+    }, f)
+PY
+: > "$SBLOG"
+"$ROOT/tools/iosimctl" install "$UDID" "$T/TimingApp.app" >/dev/null
+sleep 0.4
+"$ROOT/tools/iosimctl" ui "$UDID" tap 201 718.5 >/dev/null
+sleep 0.5
+for c in t i m i n g; do
+    "$ROOT/tools/iosimctl" ui "$UDID" key "$c" >/dev/null
+done
+sleep 0.7
+"$ROOT/tools/iosimctl" ui "$UDID" tap 200 270 >/dev/null
+if wait_log "[timing] ready"; then
+    echo "ok   the animation timing fixture launches"
+else
+    echo "FAIL timing launch"; fails=$((fails+1))
+fi
+sleep 2.0
+if out="$(python3 - "$SBLOG" <<'TIMINGLOG'
+import sys
+text = open(sys.argv[1], errors="replace").read()
+def values(name):
+    prefix = "[timing] %s " % name
+    out = []
+    for line in text.splitlines():
+        if line.startswith(prefix):
+            try:
+                out.append(float(line[len(prefix):]))
+            except ValueError:
+                pass
+    return out
+fill = values("fill")
+if len(fill) != 3:
+    raise SystemExit("expected three fill samples, got %r" % (fill,))
+if not (fill[0] > 0.9 and 0.55 < fill[1] < 0.9 and fill[2] < 0.1):
+    raise SystemExit("fillMode backwards samples are wrong: %r" % (fill,))
+reverse = values("reverse")
+if len(reverse) != 3:
+    raise SystemExit("expected three reverse samples, got %r" % (reverse,))
+if not (0.3 < reverse[0] < 0.7 and 0.3 < reverse[1] < 0.7 and
+        reverse[2] > 0.9):
+    raise SystemExit("autoreverse samples are wrong: %r" % (reverse,))
+speed = values("speed")
+if len(speed) != 1 or not 0.2 < speed[0] < 0.55:
+    raise SystemExit("speed sample is wrong: %r" % (speed,))
+offset = values("offset")
+if len(offset) != 1 or not 0.2 < offset[0] < 0.55:
+    raise SystemExit("timeOffset sample is wrong: %r" % (offset,))
+for line in ("[timing] transaction duration 0.50",
+             "[timing] transaction done",
+             "[timing] no-anim completion 1",
+             "[timing] animations enabled 1"):
+    if line not in text:
+        raise SystemExit("missing %r" % line)
+print("ok   animation timing, transactions and animation toggles")
+TIMINGLOG
+)"; then
+    echo "$out"
+else
+    echo "FAIL timing samples"; echo "$out"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
+
+# ---------- CAEmitterLayer ----------
+"$ROOT/tools/build_app.sh" "$ROOT/tests/emitter_test.m" \
+    "$T/EmitterApp" >/dev/null
+mkdir -p "$T/EmitterApp.app"
+cp "$T/EmitterApp" "$T/EmitterApp.app/EmitterApp"
+python3 - "$T/EmitterApp.app/Info.plist" <<'PY'
+import plistlib, sys
+with open(sys.argv[1], "wb") as f:
+    plistlib.dump({
+        "CFBundleIdentifier": "com.iosim.emitter",
+        "CFBundleExecutable": "EmitterApp",
+        "CFBundleName": "Emitter",
+        "CFBundlePackageType": "APPL",
+        "CFBundleVersion": "1",
+        "CFBundleShortVersionString": "1.0",
+    }, f)
+PY
+"$ROOT/tools/iosimctl" install "$UDID" "$T/EmitterApp.app" >/dev/null
+sleep 0.4
+"$ROOT/tools/iosimctl" ui "$UDID" tap 201 718.5 >/dev/null
+sleep 0.5
+for c in e m i t t e r; do
+    "$ROOT/tools/iosimctl" ui "$UDID" key "$c" >/dev/null
+done
+sleep 0.7
+"$ROOT/tools/iosimctl" ui "$UDID" tap 200 270 >/dev/null
+if wait_log "[emitter] ready"; then
+    echo "ok   the emitter fixture launches"
+else
+    echo "FAIL emitter launch"; fails=$((fails+1))
+fi
+sleep 0.6
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/emitter.png" >/dev/null
+if out="$(python3 - "$ROOT/tools" "$T" <<'EMITPNG'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+root = sys.argv[2]
+w, h, bpp, rows = pngpixel.load(root + "/emitter.png")
+orange = 0
+quadrants = [0, 0, 0, 0]
+for y in range(0, h, 2):
+    for x in range(0, w, 2):
+        c = pngpixel.px(rows, bpp, x, y)
+        r = (c >> 16) & 255
+        g = (c >> 8) & 255
+        b = c & 255
+        if r > 180 and 50 < g < 190 and b < 90:
+            orange += 1
+            quadrants[(0 if x < w // 2 else 1) +
+                      (0 if y < h // 2 else 2)] += 1
+if orange < 1000:
+    raise SystemExit("too few particles: %d" % orange)
+if min(quadrants) < 100:
+    raise SystemExit("particles are not spread around: %r" % (quadrants,))
+print("ok   emitter particles spread across the screen")
+EMITPNG
+)"; then
+    echo "$out"
+else
+    echo "FAIL emitter pixels"; echo "$out"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
+
+# ---------- UIView keyframe animations ----------
+"$ROOT/tools/build_app.sh" "$ROOT/tests/keyframe_test.m" \
+    "$T/KeyframeApp" >/dev/null
+mkdir -p "$T/KeyframeApp.app"
+cp "$T/KeyframeApp" "$T/KeyframeApp.app/KeyframeApp"
+python3 - "$T/KeyframeApp.app/Info.plist" <<'PY'
+import plistlib, sys
+with open(sys.argv[1], "wb") as f:
+    plistlib.dump({
+        "CFBundleIdentifier": "com.iosim.keyframe",
+        "CFBundleExecutable": "KeyframeApp",
+        "CFBundleName": "Keyframe",
+        "CFBundlePackageType": "APPL",
+        "CFBundleVersion": "1",
+        "CFBundleShortVersionString": "1.0",
+    }, f)
+PY
+: > "$SBLOG"
+"$ROOT/tools/iosimctl" install "$UDID" "$T/KeyframeApp.app" >/dev/null
+sleep 0.4
+"$ROOT/tools/iosimctl" ui "$UDID" tap 201 718.5 >/dev/null
+sleep 0.5
+for c in k e y f r a m e; do
+    "$ROOT/tools/iosimctl" ui "$UDID" key "$c" >/dev/null
+done
+sleep 0.7
+"$ROOT/tools/iosimctl" ui "$UDID" tap 200 270 >/dev/null
+if wait_log "[keyframe] ready"; then
+    echo "ok   the keyframe fixture launches"
+else
+    echo "FAIL keyframe launch"; fails=$((fails+1))
+fi
+sleep 1.6
+if out="$(python3 - "$SBLOG" <<'KEYFRAMELOG'
+import sys
+text = open(sys.argv[1], errors="replace").read()
+def point(name):
+    for line in text.splitlines():
+        prefix = "[keyframe] %s " % name
+        if line.startswith(prefix):
+            parts = line[len(prefix):].split()
+            if len(parts) == 2:
+                return float(parts[0]), float(parts[1])
+    return None
+move = point("move")
+turn = point("turn")
+end = point("end")
+if not move or not turn or not end:
+    raise SystemExit("missing keyframe samples: %r %r %r" %
+                     (move, turn, end))
+if not (110 <= move[0] <= 195 and move[1] == 300):
+    raise SystemExit("first keyframe segment is wrong: %r" % (move,))
+if not (turn[0] == 200 and 315 <= turn[1] <= 485):
+    raise SystemExit("second keyframe segment is wrong: %r" % (turn,))
+if end != (200, 500):
+    raise SystemExit("final keyframe position is wrong: %r" % (end,))
+if "[keyframe] done 1" not in text:
+    raise SystemExit("keyframe completion did not run")
+print("ok   keyframe segments interpolate and finish")
+KEYFRAMELOG
+)"; then
+    echo "$out"
+else
+    echo "FAIL keyframe samples"; echo "$out"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
+
+# ---------- tint colors ----------
+"$ROOT/tools/build_app.sh" "$ROOT/tests/tint_test.m" \
+    "$T/TintApp" >/dev/null
+mkdir -p "$T/TintApp.app"
+cp "$T/TintApp" "$T/TintApp.app/TintApp"
+python3 - "$T/TintApp.app/Info.plist" <<'PY'
+import plistlib, sys
+with open(sys.argv[1], "wb") as f:
+    plistlib.dump({
+        "CFBundleIdentifier": "com.iosim.tint",
+        "CFBundleExecutable": "TintApp",
+        "CFBundleName": "Tint",
+        "CFBundlePackageType": "APPL",
+        "CFBundleVersion": "1",
+        "CFBundleShortVersionString": "1.0",
+    }, f)
+PY
+"$ROOT/tools/iosimctl" install "$UDID" "$T/TintApp.app" >/dev/null
+sleep 0.4
+"$ROOT/tools/iosimctl" ui "$UDID" tap 201 718.5 >/dev/null
+sleep 0.5
+for c in t i n t; do
+    "$ROOT/tools/iosimctl" ui "$UDID" key "$c" >/dev/null
+done
+sleep 0.7
+"$ROOT/tools/iosimctl" ui "$UDID" tap 200 270 >/dev/null
+if wait_log "[tint] ready"; then
+    echo "ok   the tint fixture launches"
+else
+    echo "FAIL tint launch"; fails=$((fails+1))
+fi
+sleep 0.4
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/tint.png" >/dev/null
+if out="$(python3 - "$ROOT/tools" "$T" "$SBLOG" <<'TINTPNG'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+root = sys.argv[2]
+text = open(sys.argv[3], errors="replace").read()
+if "[tint] inherited 1 1" not in text:
+    raise SystemExit("button tint did not inherit from its container")
+w, h, bpp, rows = pngpixel.load(root + "/tint.png")
+def counts(y0, y1):
+    red = green = blue = 0
+    for y in range(y0 * 3, y1 * 3, 2):
+        for x in range(40 * 3, 360 * 3, 2):
+            c = pngpixel.px(rows, bpp, x, y)
+            r = (c >> 16) & 255
+            g = (c >> 8) & 255
+            b = c & 255
+            if r > 150 and g < 100 and b < 100:
+                red += 1
+            if g > 120 and r < 120 and b < 120:
+                green += 1
+            if b > 150 and r < 100 and g > 40:
+                blue += 1
+    return red, green, blue
+red = counts(180, 300)
+green = counts(380, 500)
+blue = counts(580, 700)
+if not (red[0] > 500 and green[1] > 500 and blue[2] > 500):
+    raise SystemExit("tinted titles are missing: %r %r %r" %
+                     (red, green, blue))
+if red[1] + red[2] > 200 or green[0] + green[2] > 200:
+    raise SystemExit("tinted titles leaked another color: %r %r" %
+                     (red, green))
+print("ok   button titles follow inherited tint colors")
+TINTPNG
+)"; then
+    echo "$out"
+else
+    echo "FAIL tint pixels"; echo "$out"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
+
+# ---------- image renderer and PNG output ----------
+rm -f /tmp/iosim-image-renderer.png
+"$ROOT/tools/build_app.sh" "$ROOT/tests/image_renderer_test.m" \
+    "$T/RendererApp" >/dev/null
+mkdir -p "$T/RendererApp.app"
+cp "$T/RendererApp" "$T/RendererApp.app/RendererApp"
+python3 - "$T/RendererApp.app/Info.plist" <<'PY'
+import plistlib, sys
+with open(sys.argv[1], "wb") as f:
+    plistlib.dump({
+        "CFBundleIdentifier": "com.iosim.renderer",
+        "CFBundleExecutable": "RendererApp",
+        "CFBundleName": "Renderer",
+        "CFBundlePackageType": "APPL",
+        "CFBundleVersion": "1",
+        "CFBundleShortVersionString": "1.0",
+    }, f)
+PY
+: > "$SBLOG"
+"$ROOT/tools/iosimctl" install "$UDID" "$T/RendererApp.app" >/dev/null
+sleep 0.4
+"$ROOT/tools/iosimctl" ui "$UDID" tap 201 718.5 >/dev/null
+sleep 0.5
+for c in r e n d e r e r; do
+    "$ROOT/tools/iosimctl" ui "$UDID" key "$c" >/dev/null
+done
+sleep 0.7
+"$ROOT/tools/iosimctl" ui "$UDID" tap 200 270 >/dev/null
+if wait_log "[renderer] ready"; then
+    echo "ok   the image renderer fixture launches"
+else
+    echo "FAIL renderer launch"; fails=$((fails+1))
+fi
+sleep 0.4
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/renderer.png" >/dev/null
+if out="$(python3 - "$ROOT/tools" "$T" "$SBLOG" <<'RENDERPNG'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+root = sys.argv[2]
+text = open(sys.argv[3], errors="replace").read()
+if "written 1" not in text:
+    raise SystemExit("the PNG data was not written")
+w, h, bpp, rows = pngpixel.load(root + "/renderer.png")
+def rgb(x, y):
+    c = pngpixel.px(rows, bpp, int(x * 3), int(y * 3))
+    return ((c >> 16) & 255, (c >> 8) & 255, c & 255)
+if rgb(190, 340) != (0, 0, 255):
+    raise SystemExit("image view background is %r" % (rgb(190, 340),))
+if rgb(120, 320) != (255, 0, 0):
+    raise SystemExit("image view square is %r" % (rgb(120, 320),))
+w, h, bpp, rows = pngpixel.load("/tmp/iosim-image-renderer.png")
+if (w, h) != (40, 40):
+    raise SystemExit("PNG size is %dx%d" % (w, h))
+c = pngpixel.px(rows, bpp, 20, 20)
+if ((c >> 16) & 255, (c >> 8) & 255, c & 255) != (0, 255, 0):
+    raise SystemExit("PNG center is not green")
+print("ok   image renderer draws and encodes a PNG")
+RENDERPNG
+)"; then
+    echo "$out"
+else
+    echo "FAIL renderer pixels"; echo "$out"; fails=$((fails+1))
+fi
+rm -f /tmp/iosim-image-renderer.png
+"$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
+
+# ---------- layer contents and small UIKit APIs ----------
+"$ROOT/tools/build_app.sh" "$ROOT/tests/contents_test.m" \
+    "$T/ContentsApp" >/dev/null
+mkdir -p "$T/ContentsApp.app"
+cp "$T/ContentsApp" "$T/ContentsApp.app/ContentsApp"
+python3 - "$T/ContentsApp.app/Info.plist" <<'PY'
+import plistlib, sys
+with open(sys.argv[1], "wb") as f:
+    plistlib.dump({
+        "CFBundleIdentifier": "com.iosim.contents",
+        "CFBundleExecutable": "ContentsApp",
+        "CFBundleName": "Contents",
+        "CFBundlePackageType": "APPL",
+        "CFBundleVersion": "1",
+        "CFBundleShortVersionString": "1.0",
+    }, f)
+PY
+: > "$SBLOG"
+"$ROOT/tools/iosimctl" install "$UDID" "$T/ContentsApp.app" >/dev/null
+sleep 0.4
+"$ROOT/tools/iosimctl" ui "$UDID" tap 201 718.5 >/dev/null
+sleep 0.5
+for c in c o n t e n t s; do
+    "$ROOT/tools/iosimctl" ui "$UDID" key "$c" >/dev/null
+done
+sleep 0.7
+"$ROOT/tools/iosimctl" ui "$UDID" tap 200 270 >/dev/null
+if wait_log "[contents] ready"; then
+    echo "ok   the layer contents fixture launches"
+else
+    echo "FAIL contents launch"; fails=$((fails+1))
+fi
+sleep 0.4
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/contents.png" >/dev/null
+if out="$(python3 - "$ROOT/tools" "$T" "$SBLOG" <<'CONTENTSPNG'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+root = sys.argv[2]
+text = open(sys.argv[3], errors="replace").read()
+for line in ("[contents] safe 62 34", "[contents] haptics ok",
+             "[contents] screen 1206 2622 3 1", "[contents] idle 1",
+             "[contents] canopen 1", "[contents] open 0"):
+    if line not in text:
+        raise SystemExit("missing %r" % line)
+w, h, bpp, rows = pngpixel.load(root + "/contents.png")
+def rgb(x, y):
+    c = pngpixel.px(rows, bpp, int(x * 3), int(y * 3))
+    return ((c >> 16) & 255, (c >> 8) & 255, c & 255)
+if rgb(120, 350) != (255, 0, 0) or rgb(180, 350) != (0, 0, 255):
+    raise SystemExit("aspect fit did not letterbox the image")
+if rgb(150, 310) != (0, 0, 0):
+    raise SystemExit("aspect fit filled the letterbox")
+if rgb(120, 470) != (0, 0, 255) or rgb(180, 470) != (0, 0, 255):
+    raise SystemExit("contentsRect did not crop to the blue half")
+if rgb(150, 430) != (0, 0, 0):
+    raise SystemExit("contents crop escaped its layer")
+print("ok   layer contents gravity, safe areas and small UIKit APIs")
+CONTENTSPNG
+)"; then
+    echo "$out"
+else
+    echo "FAIL contents pixels"; echo "$out"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
 
 if [ "$fails" -ne 0 ]; then
     echo "$fails test(s) failed" >&2

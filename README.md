@@ -33,7 +33,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | `UITouch`/`UIEvent` responder delivery, continuous control tracking | ✅ |
 | Drag scrolling with rubber-band clamp, tap/pan/swipe/pinch/rotation/screen-edge gesture recognizers with pan velocity | ✅ |
 | Auto Layout: NSLayoutConstraint, anchors, guides, intrinsic sizing, priorities | ✅ (subset) |
-| Appearance: `UITraitCollection`, `overrideUserInterfaceStyle`, `traitCollectionDidChange:`, dynamic system colors resolved at draw time, status bar styles, appearance-aware system material blur, and device-wide light/dark switching that also darkens SpringBoard's glass | ✅ |
+| Appearance: `UITraitCollection`, `overrideUserInterfaceStyle`, `traitCollectionDidChange:`, dynamic system colors resolved at draw time, tint-color inheritance and `tintColorDidChange`, status bar styles and hiding (including Info.plist), appearance-aware system material blur, and device-wide light/dark switching that also darkens SpringBoard's glass | ✅ |
 | Multiline UILabel wrapping, UITextField/UITextView editing and delegates, UITextView drag selection, long press, draggable handles and a Copy/Paste edit menu, software keyboard | ✅ |
 | UISwitch, UISlider, UISegmentedControl, UIPageControl, UIActivityIndicatorView, UIProgressView | ✅ |
 | UIAlertController alerts and actions, UIActivityViewController share sheet with Copy and application activities, animated page-sheet modal presentation and dismissal | ✅ |
@@ -42,10 +42,14 @@ runners**, combined with the public Darling and Apple dyld sources.
 | `CADisplayLink`, presentation layers, multiple concurrent layer animations | ✅ |
 | `CAAnimationGroup`: grouped opacity/corner animations, group removal clears children | ✅ |
 | `CASpringAnimation`: mass/stiffness/damping/initial velocity, settling duration | ✅ |
+| CAAnimation timing (`beginTime`, `speed`, `timeOffset`, `autoreverses`, `fillMode`), `CACurrentMediaTime`, `CATransaction` completion, `performWithoutAnimation:` | ✅ |
+| UIView keyframe animations: relative start/duration segments and a completion block | ✅ |
 | `NSString` `sizeWithAttributes:`, `boundingRectWithSize:`, `drawAtPoint:`/`drawInRect:` wrapping through CGContext | ✅ (subset) |
 | ObjC categories from `__objc_catlist`, resolved by category symbol name | ✅ |
-| CoreAnimation paths, multi-stop gradients, layer geometry/contents, CALayer masks, 2D CATransform3D layer transforms, shape stroke trimming and round caps, sublayers (z-ordered), PNG images | ✅ |
+| CoreAnimation paths, multi-stop gradients, layer geometry/contents (`contentsGravity` aspect fit/fill/center, `contentsRect` cropping), CALayer masks, 2D CATransform3D layer transforms, shape stroke trimming and round caps, sublayers (z-ordered), PNG images, `CAReplicatorLayer` copies with instance transforms/colors, `CAEmitterLayer` steady particle fields with emission/velocity/scale/color ranges | ✅ |
 | CoreGraphics `CGContext` fills, strokes, ellipses, paths, adaptively flattened quadratic/cubic curves, mutable `CGPath` (bounding box/contains/copies), `CGColor`, device RGB/gray `CGColorSpace`, multi-stop `CGGradient` linear fills with alpha stops, `CGImage`, rect and polygon clipping, push/pop contexts, state stack, UIView `drawRect:` and `UIGraphics` image contexts | ✅ (subset) |
+| `UIGraphicsImageRenderer` with format scale/opaque, `imageWithActions:`, `PNGDataWithActions:`, and `UIImagePNGRepresentation` using stored-deflate PNG output | ✅ |
+| `safeAreaInsets`, `UIScreen` native bounds/scale/brightness, `idleTimerDisabled`, UIFeedbackGenerator family (no-op haptics), `UIApplication` `canOpenURL:`/`openURL:options:completionHandler:` | ✅ |
 | Foundation collections, sorting, NSPredicate filtering, NSRegularExpression, NSScanner, notifications, timers | ✅ |
 | Foundation fast enumeration (`for-in`) and indexed/keyed collection subscripting | ✅ |
 | `NSURLSession` data tasks with headers, bodies, status and response headers over a host HTTP/1.0 client, including HTTPS via OpenSSL | ✅ |

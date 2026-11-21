@@ -1400,6 +1400,78 @@ at (201, 500) pt and its white title pixels, and tapping it logs
 `[SpringBoard] unlocked`, `[SpringBoard] notification opened Locked` and
 `[notifyapp] didReceive locked Locked`.
 
+### CoreAnimation: replicator layer
+
+`tests/replicator_test.m` adds one white 20 pt dot to a `CAReplicatorLayer`
+with `instanceCount = 8`, a 45-degree `instanceTransform` and an orange
+`instanceColor`. A second replicator translates four copies 60 pt apart and
+adds 0.15 to the blue channel per copy. The suite screenshots the frame and
+samples the eight 45-degree positions at radius 90 pt around (201, 437):
+every sample must be orange, and the center must stay black. It also samples
+the translated row at (70, 620), (130, 620), (190, 620) and (250, 620): all
+red, with blue rising roughly 0, 38, 76 and 114.
+
+### CoreAnimation: emitter layer
+
+`tests/emitter_test.m` centers a `CAEmitterLayer` on a black screen with one
+orange cell (`birthRate 30`, `lifetime 2`, `velocity 120` plus range,
+`emissionRange` 2 pi, scale/range and `alphaSpeed`). The suite waits for
+`[emitter] ready`, screenshots, and counts orange samples on a 2-pixel grid:
+more than 1000 overall and at least 100 in each screen quadrant, proving the
+particles are spread around the emitter rather than stacked at its origin.
+
+### CoreAnimation: animation timing and transactions
+
+`tests/animation_timing_test.m` drives four opacity animations and samples
+`presentationLayer.opacity` from timers. A fade with `beginTime` 0.5 s in the
+future and `fillMode = @"backwards"` samples 1.0 before its start, about 0.75
+midway and 0.0 after it ends. An `autoreverses` fade samples about 0.5 at
+quarter and three-quarter time and 1.0 after completion. A `speed = 2` fade
+samples about 0.4 at 0.3 s, and a `timeOffset = 0.5` fade samples the same.
+The fixture also requires `[CATransaction animationDuration]` to be 0.50, its
+completion block to run, `performWithoutAnimation:` to complete its inner
+animation block immediately, and `areAnimationsEnabled` to stay true.
+
+### UIView keyframes
+
+`tests/keyframe_test.m` moves a white box with three keyframes over one
+second: hold at x=100, slide to x=200, then slide down to y=500. Timers log
+`[keyframe] move <x> <y>` at 0.35 s (x between 120 and 190, y still 300),
+`[keyframe] turn <x> <y>` at 0.6 s (x 200, y between 320 and 480) and
+`[keyframe] end <x> <y>` at 1.2 s (200, 500). The completion block must log
+`[keyframe] done 1`.
+
+### Image renderer and PNG output
+
+`tests/image_renderer_test.m` uses `UIGraphicsImageRenderer` at scale 1 to
+draw a blue 100x60 field with a red square, shows it in a `UIImageView`, and
+uses `PNGDataWithActions:` to write a 40x40 green PNG to
+`/tmp/iosim-image-renderer.png`. The suite waits for `[renderer] ready`,
+checks the log's `written 1`, samples the image view for blue and red pixels,
+then loads the PNG file with Python and requires its center pixel to be green.
+
+### Layer contents, safe areas and small APIs
+
+`tests/contents_test.m` renders a 40x20 red/blue image and puts it in two
+square layers: one with `contentsGravity = resizeAspect` (letterboxed to
+100x50) and one with `contentsRect` covering the right half (stretched blue).
+The suite screenshots and requires red at (120, 350), blue at (180, 350),
+black at (150, 310), blue across the cropped layer, and black outside it. The
+fixture also logs `[contents] safe 62 34` from `safeAreaInsets`,
+`[contents] screen 1206 2622 3 1` from the screen's native bounds/scale and
+brightness, `[contents] idle 1` after setting `idleTimerDisabled`, exercises
+every feedback generator, and requires `canOpenURL:` true plus an `openURL:`
+completion reporting false.
+
+### Tint colors
+
+`tests/tint_test.m` puts three 320x120 buttons on a white screen. The first
+two sit in containers with explicit red and green tints and no custom title
+colors; the third inherits the window's default blue. The fixture logs
+`[tint] inherited 1 1` when each button's `tintColor` is the same object as
+its container's, and the suite screenshots the three button rectangles:
+mostly red samples in the first, green in the second and blue in the third.
+
 ### Appearance
 
 `tests/appearance_test.m` draws its background with `systemBackgroundColor`
@@ -1422,7 +1494,13 @@ screenshots after each SpringBoard switch sample the search glass at
 gray field and logs `[blur-material] style <style>` from
 `traitCollectionDidChange:`; the suite samples the card at (60, 420) pt:
 above 140 in light appearance and below 110 after the dark switch, while the
-backdrop outside stays near 128.
+backdrop outside stays near 128. `tests/statusbar_test.m` has a button that
+toggles `prefersStatusBarHidden` and calls
+`setNeedsStatusBarAppearanceUpdate`; the suite counts dark time glyphs before
+the tap, after hiding, and after showing again. `tests/statusbar_plist_test.m`
+sets `UIViewControllerBasedStatusBarAppearance=NO` and
+`UIStatusBarStyle=UIStatusBarStyleLightContent` in its Info.plist over a gray
+background, and the suite checks for white time glyphs.
 
 ### UIKit: pull-to-refresh
 
