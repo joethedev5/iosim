@@ -8,6 +8,7 @@
 extern int printf(const char *fmt, ...);
 extern int fflush(void *stream);
 extern int iosim_fb_present(const char *path);
+extern void iosim_fb_capture(int x, int y, int w, int h, unsigned *out);
 extern char *getenv(const char *name);
 extern void exit(int status);
 extern int open(const char *path, int flags, ...);
@@ -50,6 +51,34 @@ static void capture(const char *variable)
     if (path)
         iosim_fb_present(path);
     fflush(0);
+}
+
+static int after_attempts;
+
+static int backdrop_green(void)
+{
+    unsigned pixel = 0;
+    iosim_fb_capture(201 * 3, 300 * 3, 1, 1, &pixel);
+    unsigned r = (pixel >> 16) & 255, g = (pixel >> 8) & 255,
+             b = pixel & 255;
+    return r < 80 && g > 170 && b < 130;
+}
+
+/* The tap and the screenshot timer can be drained in the same event-loop
+ * iteration, before the dismissal is redrawn. Poll the framebuffer until
+ * the backdrop is revealed again, then capture. */
+static void capture_after_restore(const char *variable)
+{
+    if (!backdrop_green() && after_attempts < 4)
+    {
+        after_attempts++;
+        dispatch_after(dispatch_time(0, 50 * 1000000LL),
+                       dispatch_get_main_queue(), ^{
+            capture_after_restore(variable);
+        });
+        return;
+    }
+    capture(variable);
 }
 
 static int g_last_row;
@@ -159,7 +188,7 @@ static int g_last_row;
     });
     dispatch_after(dispatch_time(0, 1300 * 1000000LL),
                    dispatch_get_main_queue(), ^{
-        capture("IOSIM_TEST_PNG_AFTER");
+        capture_after_restore("IOSIM_TEST_PNG_AFTER");
     });
 
     dispatch_after(dispatch_time(0, 1450 * 1000000LL),
