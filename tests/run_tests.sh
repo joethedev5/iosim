@@ -3231,8 +3231,22 @@ check "[cg] rect ff0000" "$out" \
     "CGContextFillRect paints a rectangle"
 check "[cg] ellipse 00ff00" "$out" \
     "CGContextFillEllipseInRect paints an ellipse"
-check "[cg] stroke 0000f4" "$out" \
+check "[cg] stroke 0000ff" "$out" \
     "CGContextStrokeRect strokes with the stroke color"
+check "[cg] lineprops 0 2" "$out" \
+    "CGContext reports the current cap and join styles"
+check "[cg] dash on ffffff" "$out" \
+    "a dash pattern paints the on interval"
+check "[cg] dash off 000000" "$out" \
+    "a dash pattern leaves the off interval blank"
+check "[cg] cap square ff0000" "$out" \
+    "a square cap extends past the line endpoint"
+check "[cg] cap butt 000000" "$out" \
+    "a butt cap ends at the line endpoint"
+check "[cg] join miter ffffff" "$out" \
+    "a miter join fills the outer corner"
+check "[cg] join bevel 000000" "$out" \
+    "a bevel join clips the outer corner"
 check "[cg] path ffff00" "$out" \
     "a move/line path fills as a polygon"
 check "[cg] translate 0000ff" "$out" \
@@ -3481,6 +3495,8 @@ out="$(IOSIM_TEST_PNG="$T/shape_stroke.png" \
     DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/shape_stroke_test" 2>&1)"
 check "[stroke] props 1" "$out" \
     "CAShapeLayer stores strokeStart, strokeEnd and lineCap"
+check "[stroke] dashprops 2 0" "$out" \
+    "CAShapeLayer stores a dash pattern and join style"
 check "[stroke] png written" "$out" \
     "the stroke trimming fixture captures a frame"
 if out="$(python3 - "$ROOT/tools" "$T/shape_stroke.png" <<'PY'
@@ -3532,6 +3548,12 @@ if not (r > 200 and 60 < g < 180 and b < 60):
 r, g, b = rgb(44, 496)
 if not (r < 40 and g < 40 and b < 60):
     raise SystemExit("rounded rect kept its bottom-left corner: %02x%02x%02x" % (r, g, b))
+r, g, b = rgb(45, 560)
+if not (r > 200 and g > 170 and b < 80):
+    raise SystemExit("dashed layer on interval missing: %02x%02x%02x" % (r, g, b))
+r, g, b = rgb(58, 560)
+if not (r < 40 and g < 40 and b < 60):
+    raise SystemExit("dashed layer off interval painted: %02x%02x%02x" % (r, g, b))
 print("ok   CAShapeLayer trims strokes by arc length and rounds caps")
 PY
 )"; then

@@ -55,6 +55,13 @@ void CGContextSetRGBStrokeColor(CGContextRef context, double r, double g,
 void CGContextSetFillColorWithColor(CGContextRef context, CGColorRef color);
 void CGContextSetStrokeColorWithColor(CGContextRef context, CGColorRef color);
 void CGContextSetLineWidth(CGContextRef context, double width);
+void CGContextSetLineCap(CGContextRef context, int cap);
+int CGContextGetLineCap(CGContextRef context);
+void CGContextSetLineJoin(CGContextRef context, int join);
+int CGContextGetLineJoin(CGContextRef context);
+void CGContextSetMiterLimit(CGContextRef context, double limit);
+void CGContextSetLineDash(CGContextRef context, double phase,
+                          const double *lengths, unsigned long count);
 void CGContextSetAlpha(CGContextRef context, double alpha);
 void CGContextFillRect(CGContextRef context, CGRect rect);
 void CGContextStrokeRect(CGContextRef context, CGRect rect);

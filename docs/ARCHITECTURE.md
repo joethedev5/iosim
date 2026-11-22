@@ -408,9 +408,12 @@ with a trailing key path applied to every element. `NSDictionary` overrides
 `valueForKey:` to return `objectForKey:` for ordinary keys.
 
 `CoreGraphics.framework` ships a direct-framebuffer `CGContext`: fill and
-stroke colors, alpha, line width, rect/ellipse fills and strokes, a point
-path with fill/stroke/close, transform/scale and a saved graphics-state
-stack. `iosim_cg_begin_view` maps points through the view origin and device
+stroke colors, alpha, line width, line cap/join style, miter limit, dash
+pattern and phase, rect/ellipse fills and strokes, a point path with
+fill/stroke/close, transform/scale and a saved graphics-state stack. Strokes
+are rasterized by a shared framebuffer polyline stroker: segment quads are
+filled with 4x vertical supersampling, caps and joins are filled separately,
+and dashed strokes are split by walking the pattern along the arc length. `iosim_cg_begin_view` maps points through the view origin and device
 scale and draws through the loader's framebuffer primitives, so clipping and
 view alpha apply. The renderer calls `drawRect:` for every view after its
 background and before its sublayers; plain `UIView` implements a no-op and
@@ -614,16 +617,16 @@ composite back, so corner radii and layer alpha stay antialiased. A layer
 `transform` (CATransform3D) uses the 2D submatrix m11/m12/m21/m22 plus the
 m41/m42 translation: the layer is rendered into an offscreen pass and
 composited with `blit_affine` around its center, so rotation, scale and
-translation match the view-transform path. Perspective terms and 3D rotation
-out of plane are not rendered. `CAShapeLayer` strokes honor
-`strokeStart`/`strokeEnd` as fractions of the outline's arc length: rectangles,
-rounded rectangles, ovals and arbitrary paths are flattened to polylines,
-trimmed from the start distance to the end distance, and drawn segment by
-segment; `lineCap` 1 adds round caps at the trimmed endpoints, closed paths
-include their closing segment, and both trim values read through
-`layer_key_value` so they can be animated. Path
-clipping is supported through
-even-odd masks; color management remains future work.
+translation match the view-transform path. Perspective terms render through a
+homography. `CAShapeLayer` strokes honor `strokeStart`/`strokeEnd` as
+fractions of the outline's arc length: rectangles, rounded rectangles, ovals
+and arbitrary paths are flattened to polylines and stroked by the shared
+polyline helper, with `lineCap` selecting butt/round/square ends and
+`lineJoin` selecting miter/round/bevel corners. `lineDashPattern` and
+`lineDashPhase` (in points, scaled to device pixels) split the outline into
+dashes; closed paths include their closing segment, and the trim values read
+through `layer_key_value` so they can be animated. Path clipping is supported
+through even-odd masks; P3 colors are converted to sRGB for rendering.
 
 UIScrollView tracks recent pointer velocity while dragging instead of
 averaging the whole gesture. A release above 50 pt/s records the deceleration

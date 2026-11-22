@@ -14,6 +14,12 @@ extern void iosim_fb_fill_ellipse(int cx, int cy, int rx, int ry,
                                   unsigned color);
 extern void iosim_fb_draw_line(int x0, int y0, int x1, int y1, int thickness,
                                unsigned color);
+extern void iosim_fb_stroke_polyline(const double *xs, const double *ys,
+                                     int count, int closed, double start,
+                                     double end, double width,
+                                     unsigned color, int cap, int join,
+                                     double miter_limit, const double *dash,
+                                     int dash_count, double dash_phase);
 extern void iosim_fb_fill_polygon(const double *xs, const double *ys,
                                   int count, unsigned color);
 extern void iosim_fb_set_opacity(double opacity);
@@ -112,6 +118,12 @@ struct cg_state {
     struct CGColor fill;
     struct CGColor stroke;
     double line_width;
+    int line_cap;
+    int line_join;
+    double miter_limit;
+    double dash[16];
+    int dash_count;
+    double dash_phase;
     int clips;
     int masks;
 };
@@ -169,12 +181,6 @@ static void cg_transform(CGContextRef context, double x, double y,
           (y * context->state.sy + context->state.ty) * context->scale;
 }
 
-static int cg_thickness(CGContextRef context)
-{
-    int thickness = (int)(context->state.line_width * context->scale + 0.5);
-    return thickness < 1 ? 1 : thickness;
-}
-
 CGContextRef iosim_cg_begin_view(int x, int y, int w, int h, double scale,
                                  double alpha)
 {
@@ -199,6 +205,7 @@ CGContextRef iosim_cg_begin_view(int x, int y, int w, int h, double scale,
     context->state.stroke.b = 0;
     context->state.stroke.a = 1;
     context->state.line_width = 1.0;
+    context->state.miter_limit = 10.0;
     context->previous = g_current_context;
     g_current_context = context;
     return context;
@@ -271,6 +278,7 @@ CGContextRef iosim_cg_begin_image(int w, int h, double scale)
     context->state.fill.a = 1;
     context->state.stroke.a = 1;
     context->state.line_width = 1.0;
+    context->state.miter_limit = 10.0;
     context->previous = g_current_context;
     g_current_context = context;
     return context;
@@ -435,6 +443,64 @@ void CGContextSetLineWidth(CGContextRef context, double width)
         context->state.line_width = width > 0 ? width : 1.0;
 }
 
+void CGContextSetLineCap(CGContextRef context, int cap)
+{
+    if (!context)
+        context = g_current_context;
+    if (context)
+        context->state.line_cap = cap;
+}
+
+int CGContextGetLineCap(CGContextRef context)
+{
+    if (!context)
+        context = g_current_context;
+    return context ? context->state.line_cap : 0;
+}
+
+void CGContextSetLineJoin(CGContextRef context, int join)
+{
+    if (!context)
+        context = g_current_context;
+    if (context)
+        context->state.line_join = join;
+}
+
+int CGContextGetLineJoin(CGContextRef context)
+{
+    if (!context)
+        context = g_current_context;
+    return context ? context->state.line_join : 0;
+}
+
+void CGContextSetMiterLimit(CGContextRef context, double limit)
+{
+    if (!context)
+        context = g_current_context;
+    if (context)
+        context->state.miter_limit = limit > 1.0 ? limit : 1.0;
+}
+
+void CGContextSetLineDash(CGContextRef context, double phase,
+                          const double *lengths, unsigned long count)
+{
+    if (!context)
+        context = g_current_context;
+    if (!context)
+        return;
+    if (!lengths || count == 0)
+    {
+        context->state.dash_count = 0;
+        return;
+    }
+    if (count > 16)
+        count = 16;
+    for (unsigned long i = 0; i < count; i++)
+        context->state.dash[i] = lengths[i];
+    context->state.dash_count = (int)count;
+    context->state.dash_phase = phase;
+}
+
 void CGContextSetAlpha(CGContextRef context, double alpha)
 {
     if (!context)
@@ -461,6 +527,25 @@ void CGContextFillRect(CGContextRef context, CGRect rect)
     iosim_fb_fill_rect(px, py, pw, ph, cg_rgb(context->state.fill));
 }
 
+/* Stroke already-transformed device-space points with the context's
+ * current line width, cap, join, miter limit and dash pattern. */
+static void cg_stroke_points(CGContextRef context, const double *xs,
+                             const double *ys, int count, int closed)
+{
+    if (!context || !xs || !ys || count < 2)
+        return;
+    cg_apply_opacity(context, context->state.stroke);
+    double width = context->state.line_width * context->scale;
+    if (width < 1.0)
+        width = 1.0;
+    iosim_fb_stroke_polyline(
+        xs, ys, count, closed, 0.0, 1.0, width,
+        cg_rgb(context->state.stroke), context->state.line_cap,
+        context->state.line_join, context->state.miter_limit,
+        context->state.dash_count > 0 ? context->state.dash : 0,
+        context->state.dash_count, context->state.dash_phase);
+}
+
 void CGContextStrokeRect(CGContextRef context, CGRect rect)
 {
     if (!context)
@@ -471,13 +556,9 @@ void CGContextStrokeRect(CGContextRef context, CGRect rect)
     cg_transform(context, rect.origin.x, rect.origin.y, &x0, &y0);
     cg_transform(context, rect.origin.x + rect.size.width,
                  rect.origin.y + rect.size.height, &x1, &y1);
-    cg_apply_opacity(context, context->state.stroke);
-    int thickness = cg_thickness(context);
-    unsigned color = cg_rgb(context->state.stroke);
-    iosim_fb_draw_line((int)x0, (int)y0, (int)x1, (int)y0, thickness, color);
-    iosim_fb_draw_line((int)x1, (int)y0, (int)x1, (int)y1, thickness, color);
-    iosim_fb_draw_line((int)x1, (int)y1, (int)x0, (int)y1, thickness, color);
-    iosim_fb_draw_line((int)x0, (int)y1, (int)x0, (int)y0, thickness, color);
+    double xs[5] = { x0, x1, x1, x0, x0 };
+    double ys[5] = { y0, y0, y1, y1, y0 };
+    cg_stroke_points(context, xs, ys, 5, 1);
 }
 
 void CGContextFillEllipseInRect(CGContextRef context, CGRect rect)
@@ -508,25 +589,17 @@ void CGContextStrokeEllipseInRect(CGContextRef context, CGRect rect)
         return;
     if (rect.size.width <= 0 || rect.size.height <= 0)
         return;
-    double cx, cy;
-    cg_transform(context, rect.origin.x + rect.size.width / 2,
-                 rect.origin.y + rect.size.height / 2, &cx, &cy);
-    double rx = rect.size.width / 2 * context->state.sx * context->scale;
-    double ry = rect.size.height / 2 * context->state.sy * context->scale;
-    cg_apply_opacity(context, context->state.stroke);
-    int thickness = cg_thickness(context);
-    unsigned color = cg_rgb(context->state.stroke);
-    double px = cx + rx, py = cy;
-    for (int i = 1; i <= 64; i++)
+    double cx = rect.origin.x + rect.size.width / 2;
+    double cy = rect.origin.y + rect.size.height / 2;
+    double rx = rect.size.width / 2, ry = rect.size.height / 2;
+    double xs[64], ys[64];
+    for (int i = 0; i < 64; i++)
     {
         double angle = 2.0 * 3.14159265358979323846 * i / 64.0;
-        double nx = cx + rx * __builtin_cos(angle);
-        double ny = cy + ry * __builtin_sin(angle);
-        iosim_fb_draw_line((int)px, (int)py, (int)nx, (int)ny, thickness,
-                           color);
-        px = nx;
-        py = ny;
+        cg_transform(context, cx + rx * __builtin_cos(angle),
+                     cy + ry * __builtin_sin(angle), &xs[i], &ys[i]);
     }
+    cg_stroke_points(context, xs, ys, 64, 1);
 }
 
 void CGContextClearRect(CGContextRef context, CGRect rect)
@@ -738,27 +811,11 @@ void CGContextStrokePath(CGContextRef context)
         context = g_current_context;
     if (!context || context->count < 2)
         return;
-    cg_apply_opacity(context, context->state.stroke);
-    int thickness = cg_thickness(context);
-    unsigned color = cg_rgb(context->state.stroke);
-    for (int i = 0; i + 1 < context->count; i++)
-    {
-        double x0, y0, x1, y1;
-        cg_transform(context, context->xs[i], context->ys[i], &x0, &y0);
-        cg_transform(context, context->xs[i + 1], context->ys[i + 1], &x1,
-                     &y1);
-        iosim_fb_draw_line((int)x0, (int)y0, (int)x1, (int)y1, thickness,
-                           color);
-    }
-    if (context->closed)
-    {
-        double x0, y0, x1, y1;
-        cg_transform(context, context->xs[context->count - 1],
-                     context->ys[context->count - 1], &x0, &y0);
-        cg_transform(context, context->xs[0], context->ys[0], &x1, &y1);
-        iosim_fb_draw_line((int)x0, (int)y0, (int)x1, (int)y1, thickness,
-                           color);
-    }
+    double xs[CG_MAX_POINTS], ys[CG_MAX_POINTS];
+    for (int i = 0; i < context->count; i++)
+        cg_transform(context, context->xs[i], context->ys[i], &xs[i],
+                     &ys[i]);
+    cg_stroke_points(context, xs, ys, context->count, context->closed);
 }
 
 void CGContextSaveGState(CGContextRef context)

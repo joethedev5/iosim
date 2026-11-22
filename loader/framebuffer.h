@@ -34,6 +34,15 @@ int  iosim_fb_text_width(const char *text, int scale);
 int  iosim_fb_present(const char *path);
 void iosim_fb_draw_line(int x0, int y0, int x1, int y1, int thickness,
                         uint32_t color);
+/* Stroke a polyline with butt/round/square caps (0/1/2), miter/round/bevel
+ * joins (0/1/2), optional fractional trim [start,end] and an optional
+ * repeating on/off dash pattern. */
+void iosim_fb_stroke_polyline(const double *xs, const double *ys, int count,
+                              int closed, double start, double end,
+                              double width, uint32_t color, int cap,
+                              int join, double miter_limit,
+                              const double *dash, int dash_count,
+                              double dash_phase);
 void iosim_fb_fill_ellipse(int cx, int cy, int rx, int ry, uint32_t color);
 void iosim_fb_fill_polygon(const double *xs, const double *ys, int count,
                            uint32_t color);

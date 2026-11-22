@@ -2006,6 +2006,361 @@ static void fb_blend_pixel(int x, int y, uint32_t color, double coverage)
     row[x] = fb_pack(dst, r, g, b, a);
 }
 
+/* ---------------------------------------------------- stroked polylines */
+
+#define IOSIM_STROKE_PI 3.14159265358979323846
+
+static void stroke_disc(double cx, double cy, double radius, uint32_t color)
+{
+    if (radius <= 0)
+        return;
+    double xs[24], ys[24];
+    int count = radius >= 4.0 ? 20 : (radius >= 1.5 ? 12 : 8);
+    for (int i = 0; i < count; i++)
+    {
+        double angle = 2.0 * IOSIM_STROKE_PI * i / count;
+        xs[i] = cx + radius * __builtin_cos(angle);
+        ys[i] = cy + radius * __builtin_sin(angle);
+    }
+    iosim_fb_fill_polygon(xs, ys, count, color);
+}
+
+static void stroke_segment(double ax, double ay, double bx, double by,
+                           double half, uint32_t color)
+{
+    double dx = bx - ax, dy = by - ay;
+    double len = __builtin_sqrt(dx * dx + dy * dy);
+    if (len < 1e-9)
+        return;
+    double nx = -dy / len * half, ny = dx / len * half;
+    double xs[4] = { ax + nx, bx + nx, bx - nx, ax - nx };
+    double ys[4] = { ay + ny, by + ny, by - ny, ay - ny };
+    iosim_fb_fill_polygon(xs, ys, 4, color);
+}
+
+/* Fill the wedge on the outside of a corner. join: 0 miter, 1 round,
+ * 2 bevel. */
+static void stroke_join(double ax, double ay, double bx, double by,
+                        double cx, double cy, double half, uint32_t color,
+                        int join, double miter_limit)
+{
+    double d1x = bx - ax, d1y = by - ay;
+    double d2x = cx - bx, d2y = cy - by;
+    double l1 = __builtin_sqrt(d1x * d1x + d1y * d1y);
+    double l2 = __builtin_sqrt(d2x * d2x + d2y * d2y);
+    if (l1 < 1e-9 || l2 < 1e-9)
+        return;
+    d1x /= l1; d1y /= l1;
+    d2x /= l2; d2y /= l2;
+    double cross = d1x * d2y - d1y * d2x;
+    if (__builtin_fabs(cross) < 1e-9)
+        return; /* collinear: the segment quads already cover the joint */
+    double n1x = -d1y, n1y = d1x;
+    double n2x = -d2y, n2y = d2x;
+    double o1x = cross > 0 ? -n1x : n1x;
+    double o1y = cross > 0 ? -n1y : n1y;
+    double o2x = cross > 0 ? -n2x : n2x;
+    double o2y = cross > 0 ? -n2y : n2y;
+    double p1x = bx + o1x * half, p1y = by + o1y * half;
+    double p2x = bx + o2x * half, p2y = by + o2y * half;
+    if (join == 1)
+    {
+        stroke_disc(bx, by, half, color);
+        return;
+    }
+    double mx = o1x + o2x, my = o1y + o2y;
+    double mlen = __builtin_sqrt(mx * mx + my * my);
+    double dot = o1x * o2x + o1y * o2y;
+    if (join == 0 && mlen > 1e-9 && dot > -1.0)
+    {
+        double cos_half = __builtin_sqrt((1.0 + dot) / 2.0);
+        double miter = half / cos_half;
+        if (miter <= miter_limit * half + 1e-6)
+        {
+            mx /= mlen;
+            my /= mlen;
+            double xs[4] = { p1x, p2x, bx + mx * miter, bx + mx * miter };
+            double ys[4] = { p1y, p2y, by + my * miter, by + my * miter };
+            iosim_fb_fill_polygon(xs, ys, 4, color);
+            return;
+        }
+    }
+    double xs[3] = { p1x, p2x, bx };
+    double ys[3] = { p1y, p2y, by };
+    iosim_fb_fill_polygon(xs, ys, 3, color);
+}
+
+/* Stroke an open polyline. Square caps lengthen the first and last
+ * segments; round caps add discs. */
+static void stroke_core(const double *px, const double *py, int count,
+                        int closed, double width, uint32_t color, int cap,
+                        int join, double miter_limit)
+{
+    if (count < 2 || width <= 0)
+        return;
+    double half = width / 2.0;
+    int segments = closed ? count : count - 1;
+    double head_dx = 0, head_dy = 0, tail_dx = 0, tail_dy = 0;
+    if (!closed && cap == 2)
+    {
+        double l0 = __builtin_sqrt((px[1] - px[0]) * (px[1] - px[0]) +
+                                   (py[1] - py[0]) * (py[1] - py[0]));
+        double ln = __builtin_sqrt((px[count - 1] - px[count - 2]) *
+                                       (px[count - 1] - px[count - 2]) +
+                                   (py[count - 1] - py[count - 2]) *
+                                       (py[count - 1] - py[count - 2]));
+        if (l0 > 1e-9)
+        {
+            head_dx = (px[1] - px[0]) / l0 * half;
+            head_dy = (py[1] - py[0]) / l0 * half;
+        }
+        if (ln > 1e-9)
+        {
+            tail_dx = (px[count - 1] - px[count - 2]) / ln * half;
+            tail_dy = (py[count - 1] - py[count - 2]) / ln * half;
+        }
+    }
+    for (int i = 0; i < segments; i++)
+    {
+        int j = (i + 1) % count;
+        double ax = px[i], ay = py[i], bx = px[j], by = py[j];
+        if (i == 0)
+        {
+            ax -= head_dx;
+            ay -= head_dy;
+        }
+        if (i == segments - 1)
+        {
+            bx += tail_dx;
+            by += tail_dy;
+        }
+        stroke_segment(ax, ay, bx, by, half, color);
+    }
+    if (closed)
+    {
+        for (int i = 0; i < count; i++)
+            stroke_join(px[(i + count - 1) % count],
+                        py[(i + count - 1) % count], px[i], py[i],
+                        px[(i + 1) % count], py[(i + 1) % count], half, color,
+                        join, miter_limit);
+    }
+    else
+    {
+        for (int i = 1; i + 1 < count; i++)
+            stroke_join(px[i - 1], py[i - 1], px[i], py[i], px[i + 1],
+                        py[i + 1], half, color, join, miter_limit);
+        if (cap == 1)
+        {
+            stroke_disc(px[0], py[0], half, color);
+            stroke_disc(px[count - 1], py[count - 1], half, color);
+        }
+    }
+}
+
+static void stroke_path_point(const double *xs, const double *ys, int count,
+                              int closed, double dist, double *out_x,
+                              double *out_y)
+{
+    int segments = closed ? count : count - 1;
+    double walked = 0;
+    for (int i = 0; i < segments; i++)
+    {
+        int j = (i + 1) % count;
+        double dx = xs[j] - xs[i], dy = ys[j] - ys[i];
+        double len = __builtin_sqrt(dx * dx + dy * dy);
+        if (len <= 1e-9)
+            continue;
+        if (dist <= walked + len)
+        {
+            double t = (dist - walked) / len;
+            if (t < 0) t = 0;
+            if (t > 1) t = 1;
+            *out_x = xs[i] + dx * t;
+            *out_y = ys[i] + dy * t;
+            return;
+        }
+        walked += len;
+    }
+    *out_x = xs[closed ? 0 : count - 1];
+    *out_y = ys[closed ? 0 : count - 1];
+}
+
+/* Gather the part of the polyline between distances a and b into an open
+ * point list and stroke it. */
+static void stroke_portion(const double *xs, const double *ys, int count,
+                           int closed, double a, double b, double width,
+                           uint32_t color, int cap, int join,
+                           double miter_limit)
+{
+    int segments = closed ? count : count - 1;
+    double *px = malloc(sizeof(double) * (count + 2));
+    double *py = malloc(sizeof(double) * (count + 2));
+    if (!px || !py)
+    {
+        free(px);
+        free(py);
+        return;
+    }
+    int n = 0;
+    double walked = 0;
+    for (int i = 0; i < segments; i++)
+    {
+        int j = (i + 1) % count;
+        double ax = xs[i], ay = ys[i], bx = xs[j], by = ys[j];
+        double len = __builtin_sqrt((bx - ax) * (bx - ax) +
+                                    (by - ay) * (by - ay));
+        if (len < 1e-9)
+            continue;
+        double seg_start = walked, seg_end = walked + len;
+        walked = seg_end;
+        if (seg_end <= a || seg_start >= b)
+            continue;
+        double t0 = (a - seg_start) / len, t1 = (b - seg_start) / len;
+        if (t0 < 0) t0 = 0;
+        if (t1 > 1) t1 = 1;
+        double p0x = ax + (bx - ax) * t0, p0y = ay + (by - ay) * t0;
+        double p1x = ax + (bx - ax) * t1, p1y = ay + (by - ay) * t1;
+        if (n == 0 || __builtin_fabs(px[n - 1] - p0x) > 1e-9 ||
+            __builtin_fabs(py[n - 1] - p0y) > 1e-9)
+        {
+            px[n] = p0x;
+            py[n] = p0y;
+            n++;
+        }
+        if (__builtin_fabs(px[n - 1] - p1x) > 1e-9 ||
+            __builtin_fabs(py[n - 1] - p1y) > 1e-9)
+        {
+            px[n] = p1x;
+            py[n] = p1y;
+            n++;
+        }
+    }
+    stroke_core(px, py, n, 0, width, color, cap, join, miter_limit);
+    free(px);
+    free(py);
+}
+
+void iosim_fb_stroke_polyline(const double *xs, const double *ys, int count,
+                              int closed, double start, double end,
+                              double width, uint32_t color, int cap,
+                              int join, double miter_limit,
+                              const double *dash, int dash_count,
+                              double dash_phase)
+{
+    if (!fb_pixels || !xs || !ys || count < 2 || width <= 0)
+        return;
+    int segments = closed ? count : count - 1;
+    double total = 0;
+    for (int i = 0; i < segments; i++)
+    {
+        int j = (i + 1) % count;
+        double dx = xs[j] - xs[i], dy = ys[j] - ys[i];
+        total += __builtin_sqrt(dx * dx + dy * dy);
+    }
+    if (total <= 1e-9)
+    {
+        if (cap == 1)
+            stroke_disc(xs[0], ys[0], width / 2.0, color);
+        return;
+    }
+    if (miter_limit < 1.0)
+        miter_limit = 1.0;
+    double s0 = start * total, s1 = end * total;
+    if (s0 < 0) s0 = 0;
+    if (s0 > total) s0 = total;
+    if (s1 < 0) s1 = 0;
+    if (s1 > total) s1 = total;
+    if (s1 <= s0)
+        return;
+
+    double pattern[32];
+    int pattern_count = 0;
+    if (dash && dash_count > 0)
+    {
+        if (dash_count > 16)
+            dash_count = 16;
+        int valid = 1;
+        for (int i = 0; i < dash_count; i++)
+        {
+            if (dash[i] < 0)
+                valid = 0;
+            pattern[i] = dash[i];
+        }
+        if (valid)
+        {
+            pattern_count = dash_count;
+            if (pattern_count & 1)
+            {
+                for (int i = 0; i < pattern_count &&
+                                pattern_count * 2 <= 32; i++)
+                    pattern[pattern_count + i] = pattern[i];
+                if (pattern_count * 2 <= 32)
+                    pattern_count *= 2;
+            }
+        }
+    }
+    double pattern_len = 0;
+    for (int i = 0; i < pattern_count; i++)
+        pattern_len += pattern[i];
+    if (pattern_len <= 1e-9)
+        pattern_count = 0;
+
+    if (pattern_count == 0)
+    {
+        if (closed && s0 <= 1e-9 && s1 >= total - 1e-9)
+            stroke_core(xs, ys, count, 1, width, color, cap, join,
+                        miter_limit);
+        else
+            stroke_portion(xs, ys, count, closed, s0, s1, width, color, cap,
+                           join, miter_limit);
+        return;
+    }
+
+    double phase = __builtin_fmod(dash_phase, pattern_len);
+    if (phase < 0)
+        phase += pattern_len;
+    /* Consume the phase offset, then walk the repeating on/off pattern
+     * along the path. */
+    int index = 0;
+    while (phase >= pattern[index] && phase > 0)
+    {
+        phase -= pattern[index];
+        index = (index + 1) % pattern_count;
+    }
+    double len = pattern[index] - phase;
+    int on = (index & 1) == 0;
+    double pos = 0;
+    while (pos < total)
+    {
+        double next = pos + len;
+        if (on)
+        {
+            if (len <= 1e-9)
+            {
+                if (cap == 1 && pos >= s0 - 1e-9 && pos <= s1 + 1e-9)
+                {
+                    double dot_x, dot_y;
+                    stroke_path_point(xs, ys, count, closed, pos, &dot_x,
+                                      &dot_y);
+                    stroke_disc(dot_x, dot_y, width / 2.0, color);
+                }
+            }
+            else
+            {
+                double a = pos > s0 ? pos : s0;
+                double b = next < s1 ? next : s1;
+                if (b > a)
+                    stroke_portion(xs, ys, count, closed, a, b, width, color,
+                                   cap, join, miter_limit);
+            }
+        }
+        pos = next;
+        index = (index + 1) % pattern_count;
+        on = !on;
+        len = pattern[index];
+    }
+}
+
 void iosim_fb_draw_line(int x0, int y0, int x1, int y1, int thickness,
                         uint32_t color)
 {

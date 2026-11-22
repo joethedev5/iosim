@@ -1011,6 +1011,7 @@ static const struct iosim_shim shims[] = {
     SHIM_DIRECT(iosim_fb_fill_squircle),
     SHIM_DIRECT(iosim_fb_fill_squircle_gradient),
     SHIM_DIRECT(iosim_fb_draw_line),
+    SHIM_DIRECT(iosim_fb_stroke_polyline),
     SHIM_DIRECT(iosim_fb_fill_ellipse),
     SHIM_DIRECT(iosim_fb_fill_polygon),
     SHIM_DIRECT(iosim_fb_fill_linear_gradient),

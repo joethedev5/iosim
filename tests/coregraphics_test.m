@@ -115,6 +115,53 @@ int main(void)
     CGContextSetRGBFillColor(context, 0, 1, 0, 1);
     CGContextFillRect(context, CGRectMake(0, 0, 300, 300));
     CGContextRestoreGState(context);
+
+    /* Dash pattern: 10 on, 10 off, width 6. */
+    CGContextSetRGBStrokeColor(context, 1, 1, 1, 1);
+    CGContextSetLineWidth(context, 6);
+    CGContextSetLineCap(context, 0);
+    CGContextSetLineJoin(context, 0);
+    double dash[2] = { 10, 10 };
+    CGContextSetLineDash(context, 0, dash, 2);
+    CGContextBeginPath(context);
+    CGContextMoveToPoint(context, 10, 225);
+    CGContextAddLineToPoint(context, 90, 225);
+    CGContextStrokePath(context);
+    CGContextSetLineDash(context, 0, 0, 0);
+
+    /* Square cap extends the line by half its width; butt does not. */
+    CGContextSetRGBStrokeColor(context, 1, 0, 0, 1);
+    CGContextSetLineWidth(context, 8);
+    CGContextSetLineCap(context, 2);
+    CGContextBeginPath(context);
+    CGContextMoveToPoint(context, 40, 205);
+    CGContextAddLineToPoint(context, 90, 205);
+    CGContextStrokePath(context);
+    CGContextSetRGBStrokeColor(context, 0, 1, 0, 1);
+    CGContextSetLineCap(context, 0);
+    CGContextBeginPath(context);
+    CGContextMoveToPoint(context, 40, 215);
+    CGContextAddLineToPoint(context, 90, 215);
+    CGContextStrokePath(context);
+
+    /* A miter join fills the outer corner square; bevel clips it. */
+    CGContextSetRGBStrokeColor(context, 1, 1, 1, 1);
+    CGContextSetLineWidth(context, 10);
+    CGContextSetLineJoin(context, 0);
+    CGContextBeginPath(context);
+    CGContextMoveToPoint(context, 60, 265);
+    CGContextAddLineToPoint(context, 90, 265);
+    CGContextAddLineToPoint(context, 90, 295);
+    CGContextStrokePath(context);
+    CGContextSetLineJoin(context, 2);
+    CGContextBeginPath(context);
+    CGContextMoveToPoint(context, 160, 265);
+    CGContextAddLineToPoint(context, 190, 265);
+    CGContextAddLineToPoint(context, 190, 295);
+    CGContextStrokePath(context);
+
+    printf("[cg] lineprops %d %d\n", CGContextGetLineCap(context),
+           CGContextGetLineJoin(context));
     iosim_cg_end_view(context);
 
     CGColorSpaceRef rgb_space = CGColorSpaceCreateDeviceRGB();
@@ -211,6 +258,12 @@ int main(void)
     printf("[cg] rect %06x\n", pixel(pixels, 50, 50));
     printf("[cg] ellipse %06x\n", pixel(pixels, 180, 30));
     printf("[cg] stroke %06x\n", pixel(pixels, 80, 100));
+    printf("[cg] dash on %06x\n", pixel(pixels, 15, 226));
+    printf("[cg] dash off %06x\n", pixel(pixels, 25, 226));
+    printf("[cg] cap square %06x\n", pixel(pixels, 37, 205));
+    printf("[cg] cap butt %06x\n", pixel(pixels, 37, 215));
+    printf("[cg] join miter %06x\n", pixel(pixels, 93, 262));
+    printf("[cg] join bevel %06x\n", pixel(pixels, 193, 262));
     printf("[cg] path %06x\n", pixel(pixels, 35, 170));
     printf("[cg] translate %06x\n", pixel(pixels, 15, 15));
     printf("[cg] cgpath %06x\n", pixel(pixels, 120, 240));

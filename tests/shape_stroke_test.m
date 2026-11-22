@@ -74,10 +74,29 @@ extern void exit(int status);
     round.strokeEnd = 0.5;
     [root.layer addSublayer:round];
 
+    CAShapeLayer *dashed = [[CAShapeLayer alloc] init];
+    dashed.frame = screen;
+    UIBezierPath *dash_path = [UIBezierPath bezierPath];
+    [dash_path moveToPoint:CGPointMake(40, 560)];
+    [dash_path addLineToPoint:CGPointMake(360, 560)];
+    dashed.path = dash_path;
+    dashed.strokeColor = [UIColor colorWithRed:1.0 green:0.9 blue:0.0
+                                         alpha:1.0];
+    dashed.lineWidth = 8.0;
+    dashed.lineCap = 0;
+    dashed.lineJoin = 0;
+    dashed.lineDashPattern =
+        [NSArray arrayWithObjects:[NSNumber numberWithInt:12],
+                                  [NSNumber numberWithInt:12], nil];
+    dashed.lineDashPhase = 0;
+    [root.layer addSublayer:dashed];
+
     printf("[stroke] props %d\n",
            line.strokeStart > 0.24 && line.strokeEnd < 0.76 &&
                line.lineCap == 1 && ring.strokeEnd < 0.51 &&
                round.lineWidth > 7.9);
+    printf("[stroke] dashprops %lu %d\n",
+           (unsigned long)[[dashed lineDashPattern] count], dashed.lineJoin);
 
     StrokeCaptureView *capture = [[StrokeCaptureView alloc]
         initWithFrame:screen];

@@ -116,6 +116,12 @@ extern void iosim_fb_draw_line(int x0, int y0, int x1, int y1, int thickness,
                                unsigned color);
 extern void iosim_fb_fill_polygon(const double *xs, const double *ys,
                                   int count, unsigned color);
+extern void iosim_fb_stroke_polyline(const double *xs, const double *ys,
+                                     int count, int closed, double start,
+                                     double end, double width,
+                                     unsigned color, int cap, int join,
+                                     double miter_limit, const double *dash,
+                                     int dash_count, double dash_phase);
 extern void iosim_fb_fill_linear_gradient(int x, int y, int w, int h,
                                           unsigned start_color,
                                           unsigned end_color,
@@ -17824,73 +17830,23 @@ static void iosim_layout_apply(UIView *root)
 static void stroke_polyline_trimmed(const double *px, const double *py,
                                     int count, int closed, double start,
                                     double end, int thickness,
-                                    unsigned color, int lineCap)
+                                    unsigned color, int lineCap,
+                                    int lineJoin, const double *dash,
+                                    int dashCount, double dashPhase)
 {
     if (count < 2)
         return;
-    int segments = closed ? count : count - 1;
-    double total = 0;
-    for (int i = 0; i < segments; i++)
-    {
-        int j = (i + 1) % count;
-        double dx = px[j] - px[i], dy = py[j] - py[i];
-        total += __builtin_sqrt(dx * dx + dy * dy);
-    }
-    if (total <= 1e-9)
-        return;
-    double s0 = start * total, s1 = end * total;
-    if (s0 < 0) s0 = 0;
-    if (s0 > total) s0 = total;
-    if (s1 < 0) s1 = 0;
-    if (s1 > total) s1 = total;
-    if (s1 <= s0)
-        return;
-    double walked = 0, first_x = 0, first_y = 0, last_x = 0, last_y = 0;
-    int have_ends = 0;
-    for (int i = 0; i < segments; i++)
-    {
-        int j = (i + 1) % count;
-        double ax = px[i], ay = py[i];
-        double bx = px[j], by = py[j];
-        double dx = bx - ax, dy = by - ay;
-        double len = __builtin_sqrt(dx * dx + dy * dy);
-        if (len <= 1e-9)
-            continue;
-        double seg_start = walked, seg_end = walked + len;
-        walked = seg_end;
-        if (seg_end <= s0 || seg_start >= s1)
-            continue;
-        double t0 = (s0 - seg_start) / len;
-        double t1 = (s1 - seg_start) / len;
-        if (t0 < 0) t0 = 0;
-        if (t1 > 1) t1 = 1;
-        double x0 = ax + dx * t0, y0 = ay + dy * t0;
-        double x1 = ax + dx * t1, y1 = ay + dy * t1;
-        if (!have_ends)
-        {
-            first_x = x0;
-            first_y = y0;
-            have_ends = 1;
-        }
-        last_x = x1;
-        last_y = y1;
-        iosim_fb_draw_line((int)x0, (int)y0, (int)x1, (int)y1, thickness,
-                           color);
-    }
-    if (have_ends && lineCap == 1)
-    {
-        int radius = thickness / 2;
-        if (radius < 1)
-            radius = 1;
-        iosim_fb_fill_circle((int)first_x, (int)first_y, radius, color);
-        iosim_fb_fill_circle((int)last_x, (int)last_y, radius, color);
-    }
+    iosim_fb_stroke_polyline(px, py, count, closed, start, end,
+                             (double)thickness, color, lineCap, lineJoin,
+                             10.0, dash, dashCount, dashPhase);
 }
 
 static void render_shape_path(UIBezierPath *path, int x, int y, int w, int h,
                               double scale, UIColor *fill, UIColor *stroke,
                               double lineWidth, double strokeStart,
-                              double strokeEnd, int lineCap)
+                              double strokeEnd, int lineCap, int lineJoin,
+                              const double *dash, int dashCount,
+                              double dashPhase)
 {
     if (!path)
         return;
@@ -17947,7 +17903,8 @@ static void render_shape_path(UIBezierPath *path, int x, int y, int w, int h,
                     }
                 stroke_polyline_trimmed(px, py, n, 1, strokeStart,
                                         strokeEnd, thickness, stroke_color,
-                                        lineCap);
+                                        lineCap, lineJoin, dash, dashCount,
+                                        dashPhase);
             }
             else
             {
@@ -17955,7 +17912,8 @@ static void render_shape_path(UIBezierPath *path, int x, int y, int w, int h,
                 double py[5] = {ry, ry, ry + rh, ry + rh, ry};
                 stroke_polyline_trimmed(px, py, 5, 1, strokeStart,
                                         strokeEnd, thickness, stroke_color,
-                                        lineCap);
+                                        lineCap, lineJoin, dash, dashCount,
+                                        dashPhase);
             }
         }
         return;
@@ -17981,7 +17939,8 @@ static void render_shape_path(UIBezierPath *path, int x, int y, int w, int h,
                 py[i] = cy + ay * __builtin_sin(t);
             }
             stroke_polyline_trimmed(px, py, 64, 1, strokeStart, strokeEnd,
-                                    thickness, stroke_color, lineCap);
+                                    thickness, stroke_color, lineCap,
+                                    lineJoin, dash, dashCount, dashPhase);
         }
         return;
     }
@@ -18009,7 +17968,8 @@ static void render_shape_path(UIBezierPath *path, int x, int y, int w, int h,
         }
         stroke_polyline_trimmed(px, py, count, path->_closed, strokeStart,
                                 strokeEnd, thickness, stroke_color,
-                                lineCap);
+                                lineCap, lineJoin, dash, dashCount,
+                                dashPhase);
     }
 }
 
@@ -18395,13 +18355,29 @@ static void render_layer(CALayer *layer, double parentX, double parentY,
     else if ([layer isKindOfClass:[CAShapeLayer class]])
     {
         CAShapeLayer *sl = (CAShapeLayer *)layer;
+        double dash_values[16];
+        int dash_count = 0;
+        NSArray *dash_pattern = (NSArray *)sl->_lineDashPattern;
+        if (dash_pattern)
+        {
+            unsigned long count = [dash_pattern count];
+            if (count > 16)
+                count = 16;
+            for (unsigned long i = 0; i < count; i++)
+                dash_values[i] =
+                    [[dash_pattern objectAtIndex:i] doubleValue] * scale;
+            dash_count = (int)count;
+        }
         render_shape_path((UIBezierPath *)sl->_path, x, y, w, h, scale,
                           (UIColor *)sl->_fillColor,
                           (UIColor *)sl->_strokeColor, sl->_lineWidth,
                           layer_key_value(sl, "strokeStart",
                                           sl->_strokeStart),
                           layer_key_value(sl, "strokeEnd", sl->_strokeEnd),
-                          sl->_lineCap);
+                          sl->_lineCap, sl->_lineJoin, dash_values,
+                          dash_count,
+                          layer_key_value(sl, "lineDashPhase",
+                                          sl->_lineDashPhase) * scale);
     }
     else if ([layer isKindOfClass:[CATextLayer class]])
     {

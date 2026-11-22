@@ -784,6 +784,13 @@ alpha falls from 1 to 0 is drawn over a white rectangle: the left pixel stays
 red because the first stop is opaque, while the right pixel is white again
 (`[cg] gradient fade 1 1`), proving alpha is interpolated per stop rather than
 ignored.
+Line styles are sampled from a fresh region: a white 6-pixel line with a
+`10,10` dash pattern is `ffffff` at `(15,226)` and background at `(25,226)`;
+an 8-pixel red line with a square cap covers `(37,205)`, while the butt-capped
+green line below it leaves `(37,215)` background; a 10-pixel miter L fills its
+outer corner at `(93,262)` while the bevel L leaves `(193,262)` background.
+`CGContextGetLineCap`/`CGContextGetLineJoin` report the last styles set
+(`[cg] lineprops 0 2`).
 A 2x2 yellow `CGImage` reports its dimensions and draws scaled into a 40x40
 rectangle whose center samples `ffff00`. `UIImage CGImage` and
 `imageWithCGImage:` round-trip the 20x20 red image without changing its
@@ -818,7 +825,10 @@ offscreen layer transform path.
 background at 70 and 230), an oval stroked only halfway (blue at the bottom
 200,340 and both right/left endpoints, background on top), and a rounded
 rectangle stroked halfway (top and right-upper orange, bottom and bottom-left
-corner background), proving arc-length trimming across all shape kinds.
+corner background), proving arc-length trimming across all shape kinds. A
+fourth layer with a 12-point on/off dash pattern is yellow at `(45,560)` and
+background at `(58,560)`, and reports the stored pattern count and join
+style (`[stroke] dashprops 2 0`).
 `tests/draw_rect_test.m` runs a real `UIApplicationMain` scene with a custom
 `DrawView`; its `drawRect:`paints four shapes, writes a PNG and exits. The suite samples the PNG at
 `(60,180)` red, `(250,190)` green, `(20,300)` blue stroke and `(90,455)`

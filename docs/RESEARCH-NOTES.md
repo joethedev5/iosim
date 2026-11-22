@@ -893,3 +893,30 @@ components.
   queue can run; the slot claim is an atomic compare-and-swap on `_running`,
   and `operationCount` scans for unfinished, uncancelled operations rather
   than only not-yet-started ones.
+
+## 2026-11-22: Stroke caps, joins and dashes
+
+- `iosim_fb_stroke_polyline` is the shared stroker. It builds one quad per
+  segment and fills it through `iosim_fb_fill_polygon` (4x supersampled), then
+  fills caps and joins separately: butt/round/square caps, and miter/round/
+  bevel joins with a miter-limit fallback to bevel. Round caps and joins are
+  polygon discs rather than integer-radius circles.
+- Trim is expressed as fractional arc-length endpoints on the polyline, so
+  CAShapeLayer's `strokeStart`/`strokeEnd` and CGContext's full-path stroke
+  share the same walker. A closed full-length stroke keeps its closing join;
+  trimmed pieces are open polylines with caps.
+- Dashes walk the on/off pattern from `dashPhase`; odd-length patterns are
+  doubled, zero-length on intervals draw a round dot, and each on interval is
+  stroked as its own open piece. CAShapeLayer dash lengths and phase are in
+  points and are multiplied by the device scale before stroking.
+- `CGContext` gained `SetLineCap`/`GetLineCap`, `SetLineJoin`/`GetLineJoin`,
+  `SetMiterLimit` and `SetLineDash`; context defaults are butt caps, miter
+  joins and a miter limit of 10 to match CoreGraphics. `CGContextStrokeRect`,
+  `CGContextStrokeEllipseInRect` and `CGContextStrokePath` now share the
+  stroker instead of drawing per-segment round-capped lines, which slightly
+  changes the sampled anti-aliased edge in the old `stroke` check (now a
+  fully covered `0000ff` pixel).
+- `tests/coregraphics_test.m` checks a dash-on and dash-off pixel, square cap
+  extension vs a butt cap, and a miter-filled vs bevel-clipped outer corner.
+  `tests/shape_stroke_test.m` adds a dashed CAShapeLayer (yellow on, background
+  in the gap) and asserts the stored pattern/join properties.
