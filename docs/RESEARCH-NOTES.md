@@ -888,3 +888,8 @@ components.
   `png_image_begin_read_from_memory`, keeping image decoding in the loader.
   Pasteboard images are PNG data under `public.png`, so `setImage:`/`image`
   and `setImages:`/`images` round-trip decoded pixels.
+- `NSOperationQueue` workers spin on suspension and on `isReady` before
+  claiming a concurrency slot, so a dependency still sitting in the same
+  queue can run; the slot claim is an atomic compare-and-swap on `_running`,
+  and `operationCount` scans for unfinished, uncancelled operations rather
+  than only not-yet-started ones.

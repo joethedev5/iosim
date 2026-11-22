@@ -1,5 +1,6 @@
 /* NSString trimming/number/percent helpers and NSCharacterSet. */
 #include "UIKitStub.h"
+extern int usleep(unsigned int usec);
 typedef void *dispatch_group_t;
 typedef void *dispatch_queue_t;
 extern dispatch_queue_t dispatch_get_global_queue(long identifier,
@@ -556,6 +557,42 @@ static int g_animatorRuns;
     [operationQueue waitUntilAllOperationsAreFinished];
     printf("[fnd] deps done %d %lu\n", operationOrder,
            [[secondOperation dependencies] count]);
+
+    /* Control: an unlimited queue really does run blocks concurrently. */
+    NSOperationQueue *freeQueue = [[NSOperationQueue alloc] init];
+    __block int freeActive = 0, freePeak = 0;
+    for (int i = 0; i < 3; i++)
+    {
+        NSBlockOperation *freeOperation =
+            [NSBlockOperation blockOperationWithBlock:^{
+                freeActive++;
+                if (freeActive > freePeak)
+                    freePeak = freeActive;
+                usleep(30000);
+                freeActive--;
+            }];
+        [freeQueue addOperation:freeOperation];
+    }
+    [freeQueue waitUntilAllOperationsAreFinished];
+    printf("[fnd] freepeak %d\n", freePeak > 1);
+
+    NSOperationQueue *limitedQueue = [[NSOperationQueue alloc] init];
+    limitedQueue.maxConcurrentOperationCount = 1;
+    __block int active = 0, peak = 0;
+    for (int i = 0; i < 3; i++)
+    {
+        NSBlockOperation *limited =
+            [NSBlockOperation blockOperationWithBlock:^{
+                active++;
+                if (active > peak)
+                    peak = active;
+                usleep(30000);
+                active--;
+            }];
+        [limitedQueue addOperation:limited];
+    }
+    [limitedQueue waitUntilAllOperationsAreFinished];
+    printf("[fnd] limit %d %ld\n", peak, [limitedQueue operationCount]);
 
     dispatch_group_t asyncGroup = dispatch_group_create();
     __block int asyncValue = 0;

@@ -1482,3 +1482,6 @@ keys and parse them back from the shared plist; `types` unions item keys and
 The loader exports both file and memory PNG decoders; UIKit's
 `UIImage imageWithData:` uses the memory entry point, and the pasteboard
 stores image items as `public.png` data.
+Operation queue workers gate on `_suspended`, wait for `isReady`, then claim a
+slot with an atomic compare-and-swap on `_running < _maxConcurrent`; the
+unfinished-operation scan keeps `operationCount` accurate after work starts.

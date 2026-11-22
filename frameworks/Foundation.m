@@ -8498,13 +8498,37 @@ extern long dispatch_group_wait(void *group, unsigned long long timeout);
     if (!operation || operation->_dispatched)
         return;
     operation->_dispatched = YES;
-    _pending++;
     void (^run)(void) = ^{
+        while (_suspended && !operation->_cancelled)
+            usleep(1000);
+        /* Readiness is checked before claiming a concurrency slot so a
+           dependency that is still queued can run and unblock us. */
         while (![operation isReady] && !operation->_cancelled)
             usleep(1000);
+        if (operation->_cancelled)
+            return;
+        if (_maxConcurrent > 0)
+        {
+            for (;;)
+            {
+                if (operation->_cancelled)
+                    return;
+                long running =
+                    __atomic_load_n(&_running, __ATOMIC_RELAXED);
+                if (running < _maxConcurrent &&
+                    __atomic_compare_exchange_n(&_running, &running,
+                                                running + 1, 0,
+                                                __ATOMIC_ACQ_REL,
+                                                __ATOMIC_RELAXED))
+                    break;
+                usleep(1000);
+            }
+        }
+        else
+            __atomic_add_fetch(&_running, 1, __ATOMIC_RELAXED);
         if (!operation->_cancelled)
             [operation start];
-        _pending--;
+        __atomic_sub_fetch(&_running, 1, __ATOMIC_RELAXED);
     };
     dispatch_group_async(_group, _queue, (void *)run);
 }
@@ -8524,7 +8548,18 @@ extern long dispatch_group_wait(void *group, unsigned long long timeout);
 {
     dispatch_group_wait(_group, ~0UL);
 }
-- (long)operationCount { return _pending; }
+- (long)operationCount
+{
+    long count = 0;
+    for (unsigned long i = 0; i < [(NSArray *)_operations count]; i++)
+    {
+        NSOperation *operation =
+            (NSOperation *)[(NSArray *)_operations objectAtIndex:i];
+        if (!operation->_finished && !operation->_cancelled)
+            count++;
+    }
+    return count;
+}
 - (void)setMaxConcurrentOperationCount:(long)count { _maxConcurrent = count; }
 - (long)maxConcurrentOperationCount { return _maxConcurrent; }
 - (void)setSuspended:(BOOL)suspended

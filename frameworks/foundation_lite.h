@@ -1000,7 +1000,7 @@ extern id NSDefaultRunLoopMode;
     id _group;
     id _queue;
     id _operations;
-    long _pending;
+    long _running;
     long _maxConcurrent;
     BOOL _suspended;
 }

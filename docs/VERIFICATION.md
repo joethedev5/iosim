@@ -1047,7 +1047,12 @@ with two execution blocks and a completion block. It then calls
 report is `blocks=3 pending=0 max=-1`, and the captured loop indexes are the
 real 0/1/2 (the blocks are copied when added, so a stack literal cannot
 observe the loop's final value). The group wait is a real join: the final
-line is printed only after every worker has returned.
+line is printed only after every worker has returned. An unlimited queue runs
+the same three 30 ms blocks and reports `[fnd] freepeak 1` (peak concurrency
+exceeded one, proving the blocks really overlap). A queue limited to one
+concurrent operation then reports `[fnd] limit 1 0`: the observed peak
+concurrency is one and the finished operations no longer count, so
+`maxConcurrentOperationCount` gates dispatch rather than being stored only.
 
 ### Foundation: notifications with userInfo and blocks
 
