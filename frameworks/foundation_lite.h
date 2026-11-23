@@ -824,6 +824,11 @@ typedef void *NSURLSessionCompletionHandler;
 - (id)allHTTPHeaderFields;
 - (void)setAllHTTPHeaderFields:(id)fields;
 - (id)valueForHTTPHeaderField:(id)field;
+- (void)setValue:(id)value forHTTPHeaderField:(id)field;
+- (void)addValue:(id)value forHTTPHeaderField:(id)field;
+@end
+
+@interface NSMutableURLRequest : NSURLRequest
 @end
 
 @interface NSURLResponse : NSObject {

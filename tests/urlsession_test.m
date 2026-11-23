@@ -66,6 +66,37 @@ int main(int argc, char **argv)
         printf("[https] done %d\n", finished);
     }
 
+    if (argc > 3)
+    {
+        int echo_port = 0;
+        const char *echo_p = argv[3];
+        while (*echo_p >= '0' && *echo_p <= '9')
+            echo_port = echo_port * 10 + (*echo_p++ - '0');
+        finished = 0;
+        NSString *echo_address = [NSString stringWithFormat:
+            @"http://127.0.0.1:%d/echo", echo_port];
+        NSMutableURLRequest *post = [NSMutableURLRequest
+            requestWithURL:[NSURL URLWithString:echo_address]];
+        [post setHTTPMethod:@"POST"];
+        [post setValue:@"yes" forHTTPHeaderField:@"X-Test"];
+        [post setHTTPBody:[@"ping" dataUsingEncoding:4]];
+        NSURLSessionDataTask *post_task =
+            [[NSURLSession sharedSession] dataTaskWithRequest:post
+                                  completionHandler:^(NSData *data,
+                                                      NSURLResponse *response,
+                                                      NSError *error) {
+            (void)error;
+            printf("[post] status %ld\n", [response statusCode]);
+            printf("[post] body %.*s\n", (int)[data length],
+                   (const char *)[data bytes]);
+            finished = 1;
+        }];
+        [post_task resume];
+        for (int i = 0; i < 500 && !finished; i++)
+            usleep(10000);
+        printf("[post] done %d\n", finished);
+    }
+
     finished = 0;
     NSURL *bad = [NSURL URLWithString:@"ftp://127.0.0.1/secret"];
     NSURLSessionDataTask *badTask =

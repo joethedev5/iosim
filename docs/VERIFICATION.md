@@ -1001,6 +1001,12 @@ certificate, so the fixture runs with `IOSIM_TLS_INSECURE=1`; normal requests
 verify certificates and hostnames against the system trust store. A third
 task with an `ftp://` URL completes with `NSError` code -1004 (request failed
 / unsupported scheme).
+A fourth request uses `NSMutableURLRequest` against a Python POST echo server:
+the method is `POST`, the body is `ping`, and the header `X-Test: yes` is set
+with `setValue:forHTTPHeaderField:`. The server answers
+`POST ping yes`; the fixture prints `[post] status 200`,
+`[post] body POST ping yes` and `[post] done 1`, proving the mutable request,
+custom headers, request body and `dataTaskWithRequest:` path.
 
 ### Foundation: KVC collection operators
 

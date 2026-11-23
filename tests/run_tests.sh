@@ -3145,7 +3145,17 @@ while [ "$i" -lt 100 ]; do
     i=$((i + 1))
     sleep 0.05
 done
-if [ -z "$HTTP_PORT" ] || [ -z "$TLS_PORT" ]; then
+python3 -u "$ROOT/tests/echo_http_server.py" > "$T/echo.log" 2>&1 &
+ECHO_PID=$!
+ECHO_PORT=""
+i=0
+while [ "$i" -lt 100 ]; do
+    ECHO_PORT=$(sed -n 's/.*port \([0-9][0-9]*\).*/\1/p' "$T/echo.log" | head -1)
+    [ -n "$ECHO_PORT" ] && break
+    i=$((i + 1))
+    sleep 0.05
+done
+if [ -z "$HTTP_PORT" ] || [ -z "$TLS_PORT" ] || [ -z "$ECHO_PORT" ]; then
     echo "FAIL loopback HTTP/TLS servers did not start"
     fails=$((fails + 1))
 else
@@ -3158,7 +3168,7 @@ else
         -undefined dynamic_lookup
     out="$(IOSIM_TLS_INSECURE=1 DYLD_ROOT_PATH="$ROOT/runtime" \
         "$RUN" "$T/urlsession_test" \
-        "$HTTP_PORT" "$TLS_PORT" 2>&1)"
+        "$HTTP_PORT" "$TLS_PORT" "$ECHO_PORT" 2>&1)"
     check "[http] status 200" "$out" \
         "NSURLSessionDataTask completes with the HTTP status"
     check "[http] body hello over http" "$out" \
@@ -3175,9 +3185,15 @@ else
         "an unsupported scheme completes with an NSError"
     check "[http] done 1" "$out" \
         "the completion handler runs on a background queue"
+    check "[post] status 200" "$out" \
+        "NSMutableURLRequest sends a POST and receives the status"
+    check "[post] body POST ping yes" "$out" \
+        "the request method, body and custom header reach the server"
+    check "[post] done 1" "$out" \
+        "the POST completion handler runs"
 fi
-kill "$HTTP_PID" "$TLS_PID" 2>/dev/null || true
-wait "$HTTP_PID" "$TLS_PID" 2>/dev/null || true
+kill "$HTTP_PID" "$TLS_PID" "$ECHO_PID" 2>/dev/null || true
+wait "$HTTP_PID" "$TLS_PID" "$ECHO_PID" 2>/dev/null || true
 
 # ---------- 29. UIScrollView momentum and animated offsets ----------
 "$ROOT/tools/build_app.sh" "$ROOT/tests/scroll_deceleration_test.m" \

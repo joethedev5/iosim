@@ -340,8 +340,12 @@ and `NSNull`. Compact output is deterministic (dictionary insertion order on
 this runtime) and the parser rejects truncated or malformed input.
 
 `NSURLSession` implements data tasks: `NSURLRequest` carries the URL, method,
-body and headers; `NSURLSessionDataTask` copies the completion block and
-returns immediately, dispatching the transfer to a global queue. The loader
+body and headers, `NSMutableURLRequest` subclasses it, and
+`setValue:forHTTPHeaderField:`/`addValue:forHTTPHeaderField:` build the header
+dictionary lazily (adding to an existing field appends a comma-separated
+value). `dataTaskWithURL:` and `dataTaskWithRequest:` share the same task;
+`NSURLSessionDataTask` copies the completion block and returns immediately,
+dispatching the transfer to a global queue. The loader
 owns a small host HTTP/1.0 client (`iosim_http_request`) that parses the URL,
 resolves and connects to the host, streams the request body, reads until the
 peer closes and splits status line, headers and body. The task builds

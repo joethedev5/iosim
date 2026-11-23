@@ -1020,3 +1020,20 @@ components.
   fixture's boundary sample on the path's butt cap. Pass double literals for
   floating parameters even when the compiler accepts an implicit method, and
   sample at least one pixel inside a cap.
+
+## 2026-11-23: Mutable URL requests and POST
+
+- `NSMutableURLRequest` is an empty subclass of `NSURLRequest`; the base
+  class's setters are already public and its `requestWithURL:` uses
+  `[[self alloc] init]`, so the subclass factory returns the right type.
+  The new `setValue:forHTTPHeaderField:` creates the header dictionary on
+  first use, and `addValue:forHTTPHeaderField:` appends `", "` plus the new
+  value when the field already exists.
+- The loader's HTTP client adds `Content-Length` for the body it streams and
+  emits every header from `allHTTPHeaderFields`, so a mutable request's
+  method, body and custom fields reach the server without further plumbing.
+- The suite's POST echo server is a small `socketserver.TCPServer` bound to
+  port 0 that prints its port and replies with
+  `"<method> <body> <X-Test header>"`. Header lookup in the runtime is exact
+  (case-sensitive), unlike real HTTP, so the fixture uses the same spelling
+  on both sides.

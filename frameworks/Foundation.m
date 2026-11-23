@@ -5909,6 +5909,32 @@ static NSMutableDictionary *url_headers_from_raw(const char *raw)
 {
     return _allHTTPHeaderFields ? [_allHTTPHeaderFields objectForKey:field] : nil;
 }
+- (void)setValue:(id)value forHTTPHeaderField:(id)field
+{
+    if (!value || !field)
+        return;
+    if (!_allHTTPHeaderFields)
+        _allHTTPHeaderFields = [[NSMutableDictionary alloc] init];
+    [(NSMutableDictionary *)_allHTTPHeaderFields setObject:value forKey:field];
+}
+- (void)addValue:(id)value forHTTPHeaderField:(id)field
+{
+    if (!value || !field)
+        return;
+    if (!_allHTTPHeaderFields)
+        _allHTTPHeaderFields = [[NSMutableDictionary alloc] init];
+    id old = [(NSDictionary *)_allHTTPHeaderFields objectForKey:field];
+    if (old)
+        [(NSMutableDictionary *)_allHTTPHeaderFields
+            setObject:[NSString stringWithFormat:@"%@, %@", old, value]
+               forKey:field];
+    else
+        [(NSMutableDictionary *)_allHTTPHeaderFields setObject:value
+                                                        forKey:field];
+}
+@end
+
+@implementation NSMutableURLRequest
 @end
 
 @implementation NSURLResponse
