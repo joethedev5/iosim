@@ -994,3 +994,29 @@ components.
   directly. When the shell owns the stream the records still create touches
   on its window, but its icon taps are handled in the event loop rather than
   by view touch callbacks, so they have no shell effect.
+
+## 2026-11-23: CoreGraphics arcs
+
+- Arc angles use the view coordinate system: x right, y down, so increasing
+  angles turn clockwise on screen. A clockwise arc normalizes its delta into
+  (0, 2*pi]; a counterclockwise arc into [-2*pi, 0). Both endpoints are
+  included, and the step count grows with the swept arc length
+  (`|delta| * radius / 2`, clamped to 4..256) so small radii stay cheap and
+  large ones stay smooth.
+- `CGContextAddArc`/`CGPathAddArc` connect from the current point with a line
+  before laying down the arc. `CGContextAddArcToPoint`/`CGPathAddArcToPoint`
+  derive the tangent distance `r / tan(theta/2)` and the center along the
+  angle bisector at `r / sin(theta/2)`. A negative cross product of the two
+  rays is a screen-clockwise turn, so it maps to increasing angles.
+- UIBezierPath's arc method previously ignored `clockwise` and always walked
+  the same direction with 64 fixed steps. It now shares the delta
+  normalization and adaptive step count, and connects the arc from the
+  current point.
+- An undeclared class method compiles with C default argument promotions.
+  `shape_stroke_test.m` called `bezierPathWithRoundedRect:cornerRadius:24`
+  while the stub omitted that factory, so the integer 24 went to the callee
+  in an integer register and the double parameter read whatever XMM0 held.
+  Adding the declaration to the stub made the call pass 24.0 and exposed the
+  fixture's boundary sample on the path's butt cap. Pass double literals for
+  floating parameters even when the compiler accepts an implicit method, and
+  sample at least one pixel inside a cap.

@@ -11,6 +11,13 @@ static unsigned pixel(unsigned *pixels, int x, int y)
     return pixels[y * 300 + x] & 0xffffff;
 }
 
+static int image_pixel(unsigned char *rgba, int width, int x, int y,
+                       int r, int g, int b)
+{
+    unsigned char *p = rgba + (y * width + x) * 4;
+    return p[0] == r && p[1] == g && p[2] == b;
+}
+
 static int g_element_count;
 
 static double g_points[256][2];
@@ -319,5 +326,83 @@ int main(void)
     iosim_cg_end_image(fade_context);
     CGGradientRelease(fade);
     CGColorSpaceRelease(gradient_space);
+
+    /* A right half-disc from the top of the circle to the bottom through
+     * +x; the left half and the top edge stay unpainted. */
+    CGContextRef arc_context = iosim_cg_begin_image(120, 120, 1.0);
+    CGContextSetRGBFillColor(arc_context, 1, 0, 0, 1);
+    CGContextBeginPath(arc_context);
+    CGContextMoveToPoint(arc_context, 60, 60);
+    CGContextAddArc(arc_context, 60, 60, 40, -1.5707963267948966,
+                    1.5707963267948966, 1);
+    CGContextClosePath(arc_context);
+    CGContextFillPath(arc_context);
+    unsigned char *arc_rgba = 0;
+    int arc_w = 0, arc_h = 0;
+    iosim_cg_image_data(arc_context, &arc_rgba, &arc_w, &arc_h);
+    printf("[cg] arc fill %d %d %d\n",
+           image_pixel(arc_rgba, arc_w, 90, 60, 255, 0, 0),
+           image_pixel(arc_rgba, arc_w, 20, 60, 255, 0, 0),
+           image_pixel(arc_rgba, arc_w, 60, 15, 255, 0, 0));
+    iosim_cg_end_image(arc_context);
+
+    /* A 10 pt rounded corner at (100,20): the sharp corner is cut while
+     * the arc-side interior remains filled. */
+    CGContextRef corner_context = iosim_cg_begin_image(120, 120, 1.0);
+    CGContextSetRGBFillColor(corner_context, 0, 0, 1, 1);
+    CGContextBeginPath(corner_context);
+    CGContextMoveToPoint(corner_context, 20, 20);
+    CGContextAddLineToPoint(corner_context, 80, 20);
+    CGContextAddArcToPoint(corner_context, 100, 20, 100, 40, 10);
+    CGContextAddLineToPoint(corner_context, 100, 80);
+    CGContextAddLineToPoint(corner_context, 20, 80);
+    CGContextClosePath(corner_context);
+    CGContextFillPath(corner_context);
+    unsigned char *corner_rgba = 0;
+    int corner_w = 0, corner_h = 0;
+    iosim_cg_image_data(corner_context, &corner_rgba, &corner_w, &corner_h);
+    printf("[cg] arcto fill %d %d %d\n",
+           image_pixel(corner_rgba, corner_w, 50, 50, 0, 0, 255),
+           image_pixel(corner_rgba, corner_w, 85, 25, 0, 0, 255),
+           image_pixel(corner_rgba, corner_w, 98, 22, 0, 0, 255));
+    iosim_cg_end_image(corner_context);
+
+    /* CGPathAddArc uses the same angles and fill rule as the context. */
+    CGPathRef bottom_arc = CGPathCreateMutable();
+    CGPathAddArc(bottom_arc, 0, 50, 50, 30, 0, 3.1415926535897932, 1);
+    CGRect arc_box = CGPathGetBoundingBox(bottom_arc);
+    printf("[cg] path arc %d %d bbox %.0f %.0f %.0f %.0f\n",
+           CGPathContainsPoint(bottom_arc, 0, CGPointMake(50, 70), 0),
+           CGPathContainsPoint(bottom_arc, 0, CGPointMake(50, 30), 0),
+           arc_box.origin.x, arc_box.origin.y,
+           arc_box.size.width, arc_box.size.height);
+    CGPathRelease(bottom_arc);
+
+    CGPathRef rounded_path = CGPathCreateMutable();
+    CGPathMoveToPoint(rounded_path, 0, 20, 20);
+    CGPathAddLineToPoint(rounded_path, 0, 80, 20);
+    CGPathAddArcToPoint(rounded_path, 0, 100, 20, 100, 40, 10);
+    CGPathAddLineToPoint(rounded_path, 0, 100, 80);
+    CGPathAddLineToPoint(rounded_path, 0, 20, 80);
+    CGPathCloseSubpath(rounded_path);
+    printf("[cg] path arcto %d %d\n",
+           CGPathContainsPoint(rounded_path, 0, CGPointMake(50, 50), 0),
+           CGPathContainsPoint(rounded_path, 0, CGPointMake(98, 22), 0));
+    CGPathRelease(rounded_path);
+
+    /* UIBezierPath honors clockwise: YES for the short bottom-right
+     * quadrant and NO for the long way around it. */
+    UIBezierPath *arc_cw = [UIBezierPath bezierPath];
+    [arc_cw addArcWithCenter:CGPointMake(50, 50) radius:30 startAngle:0
+                    endAngle:1.5707963267948966 clockwise:YES];
+    UIBezierPath *arc_ccw = [UIBezierPath bezierPath];
+    [arc_ccw addArcWithCenter:CGPointMake(50, 50) radius:30 startAngle:0
+                     endAngle:1.5707963267948966 clockwise:NO];
+    printf("[cg] ui arc cw %d %d\n",
+           CGPathContainsPoint([arc_cw CGPath], 0, CGPointMake(65, 72), 0),
+           CGPathContainsPoint([arc_cw CGPath], 0, CGPointMake(72, 55), 0));
+    printf("[cg] ui arc ccw %d %d\n",
+           CGPathContainsPoint([arc_ccw CGPath], 0, CGPointMake(55, 55), 0),
+           CGPathContainsPoint([arc_ccw CGPath], 0, CGPointMake(70, 70), 0));
     return 0;
 }

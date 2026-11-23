@@ -10117,15 +10117,37 @@ static long datepicker_rows_for(UIDatePicker *picker, long component)
                startAngle:(double)start endAngle:(double)end
                 clockwise:(BOOL)clockwise
 {
-    int steps = 64;
+    const double two_pi = 6.28318530717958647692;
+    double delta = end - start;
+    if (clockwise)
+    {
+        while (delta < 0.0)
+            delta += two_pi;
+        while (delta >= two_pi)
+            delta -= two_pi;
+    }
+    else
+    {
+        while (delta > 0.0)
+            delta -= two_pi;
+        while (delta <= -two_pi)
+            delta += two_pi;
+    }
+    int steps = (int)(__builtin_fabs(delta) * radius / 2.0) + 1;
+    if (steps < 4)
+        steps = 4;
+    if (steps > 256)
+        steps = 256;
     for (int i = 0; i <= steps; i++)
     {
-        double t = (double)i / steps;
-        double a = start + (end - start) * t;
-        if (!clockwise)
-            a = start + (end - start) * t;
-        [self addLineToPoint:CGPointMake(center.x + radius * __builtin_cos(a),
-                                         center.y + radius * __builtin_sin(a))];
+        double angle = start + delta * ((double)i / steps);
+        CGPoint point =
+            CGPointMake(center.x + radius * __builtin_cos(angle),
+                        center.y + radius * __builtin_sin(angle));
+        if (i == 0 && _count == 0)
+            [self moveToPoint:point];
+        else
+            [self addLineToPoint:point];
     }
 }
 - (void)addQuadCurveToPoint:(CGPoint)point controlPoint:(CGPoint)control

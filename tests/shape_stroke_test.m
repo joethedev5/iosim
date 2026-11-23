@@ -66,7 +66,7 @@ extern void exit(int status);
     CAShapeLayer *round = [[CAShapeLayer alloc] init];
     round.frame = screen;
     round.path = [UIBezierPath bezierPathWithRoundedRect:
-                      CGRectMake(40, 400, 160, 100) cornerRadius:24];
+                      CGRectMake(40, 400, 160, 100) cornerRadius:24.0];
     round.strokeColor = [UIColor colorWithRed:1.0 green:0.5 blue:0.0
                                         alpha:1.0];
     round.lineWidth = 8.0;

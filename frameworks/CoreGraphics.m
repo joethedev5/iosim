@@ -643,6 +643,143 @@ void CGContextAddLineToPoint(CGContextRef context, double x, double y)
     CGContextMoveToPoint(context, x, y);
 }
 
+#define CG_ARC_MAX_STEPS 256
+
+/* Angles use the view coordinate system: x to the right, y down, so a
+ * positive sweep is clockwise on screen. The endpoint is normalized into
+ * [0, 2*pi) for a clockwise arc and (-2*pi, 0] otherwise. */
+static int cg_arc_points(double cx, double cy, double radius,
+                         double start, double end, int clockwise,
+                         double *xs, double *ys, int capacity)
+{
+    const double two_pi = 6.28318530717958647692;
+    if (radius <= 0.0 || capacity < 2)
+        return 0;
+    double delta = end - start;
+    if (clockwise)
+    {
+        while (delta < 0.0)
+            delta += two_pi;
+        while (delta >= two_pi)
+            delta -= two_pi;
+    }
+    else
+    {
+        while (delta > 0.0)
+            delta -= two_pi;
+        while (delta <= -two_pi)
+            delta += two_pi;
+    }
+    int steps = (int)(__builtin_fabs(delta) * radius / 2.0) + 1;
+    if (steps < 4)
+        steps = 4;
+    if (steps > CG_ARC_MAX_STEPS)
+        steps = CG_ARC_MAX_STEPS;
+    if (steps + 1 > capacity)
+        steps = capacity - 1;
+    for (int i = 0; i <= steps; i++)
+    {
+        double angle = start + delta * ((double)i / steps);
+        xs[i] = cx + radius * __builtin_cos(angle);
+        ys[i] = cy + radius * __builtin_sin(angle);
+    }
+    return steps + 1;
+}
+
+/* Tangent points and center of the rounded corner between p0->p1->p2.
+ * Returns 0 for a degenerate corner; the caller then just draws to p1. */
+static int cg_arc_to_params(double x0, double y0, double x1, double y1,
+                            double x2, double y2, double radius,
+                            double *tx1, double *ty1, double *tx2,
+                            double *ty2, double *cx, double *cy,
+                            int *clockwise)
+{
+    if (radius <= 0.0)
+        return 0;
+    double v1x = x0 - x1, v1y = y0 - y1;
+    double v2x = x2 - x1, v2y = y2 - y1;
+    double l1 = __builtin_sqrt(v1x * v1x + v1y * v1y);
+    double l2 = __builtin_sqrt(v2x * v2x + v2y * v2y);
+    if (l1 < 1e-9 || l2 < 1e-9)
+        return 0;
+    v1x /= l1; v1y /= l1;
+    v2x /= l2; v2y /= l2;
+    double dot = v1x * v2x + v1y * v2y;
+    if (dot < -1.0)
+        dot = -1.0;
+    if (dot > 1.0)
+        dot = 1.0;
+    double theta = __builtin_acos(dot);
+    if (theta < 1e-6 || __builtin_fabs(theta - 3.14159265358979323846) < 1e-6)
+        return 0;
+    double tangent = radius / __builtin_tan(theta / 2.0);
+    *tx1 = x1 + v1x * tangent;
+    *ty1 = y1 + v1y * tangent;
+    *tx2 = x1 + v2x * tangent;
+    *ty2 = y1 + v2y * tangent;
+    double bx = v1x + v2x, by = v1y + v2y;
+    double bl = __builtin_sqrt(bx * bx + by * by);
+    if (bl < 1e-9)
+        return 0;
+    double distance = radius / __builtin_sin(theta / 2.0);
+    *cx = x1 + bx / bl * distance;
+    *cy = y1 + by / bl * distance;
+    /* In the y-down view space a negative cross product is a screen-
+     * clockwise turn, which cg_arc_points expresses as increasing angles. */
+    *clockwise = (v1x * v2y - v1y * v2x) < 0.0;
+    return 1;
+}
+
+void CGContextAddArc(CGContextRef context, double cx, double cy,
+                     double radius, double startAngle, double endAngle,
+                     int clockwise)
+{
+    if (!context)
+        context = g_current_context;
+    if (!context)
+        return;
+    double xs[CG_ARC_MAX_STEPS + 1];
+    double ys[CG_ARC_MAX_STEPS + 1];
+    int count = cg_arc_points(cx, cy, radius, startAngle, endAngle, clockwise,
+                              xs, ys, CG_ARC_MAX_STEPS + 1);
+    if (count <= 0)
+        return;
+    if (context->count == 0)
+        CGContextMoveToPoint(context, xs[0], ys[0]);
+    else
+        CGContextAddLineToPoint(context, xs[0], ys[0]);
+    for (int i = 1; i < count; i++)
+        CGContextAddLineToPoint(context, xs[i], ys[i]);
+}
+
+void CGContextAddArcToPoint(CGContextRef context, double x1, double y1,
+                            double x2, double y2, double radiusOfCorner)
+{
+    if (!context)
+        context = g_current_context;
+    if (!context)
+        return;
+    double x0 = context->count ? context->xs[context->count - 1] : 0.0;
+    double y0 = context->count ? context->ys[context->count - 1] : 0.0;
+    double tx1, ty1, tx2, ty2, cx, cy;
+    int clockwise = 0;
+    if (!cg_arc_to_params(x0, y0, x1, y1, x2, y2, radiusOfCorner,
+                          &tx1, &ty1, &tx2, &ty2, &cx, &cy, &clockwise))
+    {
+        CGContextAddLineToPoint(context, x1, y1);
+        return;
+    }
+    CGContextAddLineToPoint(context, tx1, ty1);
+    double xs[CG_ARC_MAX_STEPS + 1];
+    double ys[CG_ARC_MAX_STEPS + 1];
+    double start = __builtin_atan2(ty1 - cy, tx1 - cx);
+    double end = __builtin_atan2(ty2 - cy, tx2 - cx);
+    int count = cg_arc_points(cx, cy, radiusOfCorner, start, end, clockwise,
+                              xs, ys, CG_ARC_MAX_STEPS + 1);
+    for (int i = 1; i < count; i++)
+        CGContextAddLineToPoint(context, xs[i], ys[i]);
+}
+
 void CGContextAddQuadCurveToPoint(CGContextRef context, double cpx,
                                   double cpy, double x, double y)
 {
@@ -1355,6 +1492,54 @@ void CGPathAddCurveToPoint(CGPathRef pathRef, const void *transform,
                     3 * u * t * t * cp2y + t * t * t * y;
         cg_path_append(path, 1, px, py);
     }
+}
+
+void CGPathAddArc(CGPathRef pathRef, const void *transform, double cx,
+                  double cy, double radius, double startAngle,
+                  double endAngle, int clockwise)
+{
+    (void)transform;
+    struct CGPath *path = (struct CGPath *)pathRef;
+    if (!path)
+        return;
+    double xs[CG_ARC_MAX_STEPS + 1];
+    double ys[CG_ARC_MAX_STEPS + 1];
+    int count = cg_arc_points(cx, cy, radius, startAngle, endAngle, clockwise,
+                              xs, ys, CG_ARC_MAX_STEPS + 1);
+    if (count <= 0)
+        return;
+    cg_path_append(path, path->count == 0 ? 0 : 1, xs[0], ys[0]);
+    for (int i = 1; i < count; i++)
+        cg_path_append(path, 1, xs[i], ys[i]);
+}
+
+void CGPathAddArcToPoint(CGPathRef pathRef, const void *transform, double x1,
+                         double y1, double x2, double y2,
+                         double radiusOfCorner)
+{
+    (void)transform;
+    struct CGPath *path = (struct CGPath *)pathRef;
+    if (!path)
+        return;
+    double x0, y0;
+    cg_path_current_point(path, &x0, &y0);
+    double tx1, ty1, tx2, ty2, cx, cy;
+    int clockwise = 0;
+    if (!cg_arc_to_params(x0, y0, x1, y1, x2, y2, radiusOfCorner,
+                          &tx1, &ty1, &tx2, &ty2, &cx, &cy, &clockwise))
+    {
+        cg_path_append(path, 1, x1, y1);
+        return;
+    }
+    cg_path_append(path, 1, tx1, ty1);
+    double xs[CG_ARC_MAX_STEPS + 1];
+    double ys[CG_ARC_MAX_STEPS + 1];
+    double start = __builtin_atan2(ty1 - cy, tx1 - cx);
+    double end = __builtin_atan2(ty2 - cy, tx2 - cx);
+    int count = cg_arc_points(cx, cy, radiusOfCorner, start, end, clockwise,
+                              xs, ys, CG_ARC_MAX_STEPS + 1);
+    for (int i = 1; i < count; i++)
+        cg_path_append(path, 1, xs[i], ys[i]);
 }
 
 void CGPathAddRect(CGPathRef pathRef, const void *transform, CGRect rect)

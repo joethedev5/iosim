@@ -985,6 +985,15 @@ decoded with libpng in `loader/image.c`.
 - `CAShapeLayer` stores a `UIBezierPath` (via `CGPath`) and draws its fill and
   stroke; `CAGradientLayer` interpolates up to two color stops; `UIImageView`
   blits a decoded image with aspect-fit or centered content modes.
+- `CGContextAddArc`, `CGContextAddArcToPoint`, `CGPathAddArc` and
+  `CGPathAddArcToPoint` tessellate arcs into line segments with a step count
+  derived from the swept angle and radius. Angles follow the view coordinate
+  system (x right, y down), so a clockwise arc sweeps through increasing
+  angles; an arc connects a line from the current point to its start. The
+  arc-to variant computes the two tangent points and the corner center from
+  the incoming and outgoing rays, then sweeps the interior arc. UIBezierPath
+  routes its arc method through the same normalization, so its `clockwise`
+  flag now selects the short or long sweep instead of being ignored.
 - Touch events from `IOSIM_EVENT_FIFO` are converted from device pixels to
   points and delivered as `UITouch`/`UIEvent` objects through the responder
   chain. `UIControl` implements begin/continue/end tracking with highlighting,

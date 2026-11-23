@@ -3355,6 +3355,18 @@ check "[cg] gradient 1 1" "$out" \
     "CGContextDrawLinearGradient interpolates color stops across a context"
 check "[cg] gradient fade 1 1" "$out" \
     "gradient alpha stops fade from opaque red to reveal the white backdrop"
+check "[cg] arc fill 1 0 0" "$out" \
+    "CGContextAddArc fills a half-disc and leaves the other half clear"
+check "[cg] arcto fill 1 1 0" "$out" \
+    "CGContextAddArcToPoint rounds a corner around its tangent arc"
+check "[cg] path arc 1 0 bbox 20 50 60 30" "$out" \
+    "CGPathAddArc fills its arc and reports the arc bounding box"
+check "[cg] path arcto 1 0" "$out" \
+    "CGPathAddArcToPoint cuts the sharp corner from the path"
+check "[cg] ui arc cw 1 0" "$out" \
+    "UIBezierPath clockwise arcs sweep the short way"
+check "[cg] ui arc ccw 1 0" "$out" \
+    "UIBezierPath counterclockwise arcs sweep the long way"
 
 "$ROOT/tools/build_app.sh" "$ROOT/tests/cgimage_layer_test.m" \
     "$T/cgimage_layer_test" >/dev/null
@@ -3604,7 +3616,7 @@ if not (r > 200 and 60 < g < 180 and b < 60):
 r, g, b = rgb(120, 500)
 if not (r < 40 and g < 40 and b < 60):
     raise SystemExit("rounded rect bottom segment was not trimmed: %02x%02x%02x" % (r, g, b))
-r, g, b = rgb(40, 424)
+r, g, b = rgb(40, 423)
 if not (r > 200 and 60 < g < 180 and b < 60):
     raise SystemExit("rounded rect start point is missing: %02x%02x%02x" % (r, g, b))
 r, g, b = rgb(44, 496)

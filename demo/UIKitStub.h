@@ -2058,13 +2058,23 @@ extern int UIApplicationMain(int argc, char **argv, id principal,
 
 @interface UIBezierPath : NSObject
 + (instancetype)bezierPath;
++ (instancetype)bezierPathWithRect:(CGRect)rect;
++ (instancetype)bezierPathWithRoundedRect:(CGRect)rect
+                             cornerRadius:(double)radius;
 + (instancetype)bezierPathWithOvalInRect:(CGRect)rect;
 - (void)moveToPoint:(CGPoint)point;
 - (void)addLineToPoint:(CGPoint)point;
+- (void)addArcWithCenter:(CGPoint)center radius:(double)radius
+              startAngle:(double)startAngle endAngle:(double)endAngle
+               clockwise:(BOOL)clockwise;
 - (void)addOvalInRect:(CGRect)rect;
+- (void)addRect:(CGRect)rect;
+- (void)addRoundedRect:(CGRect)rect cornerRadius:(double)radius;
 - (void)addQuadCurveToPoint:(CGPoint)point controlPoint:(CGPoint)control;
 - (void)addCurveToPoint:(CGPoint)point controlPoint1:(CGPoint)control1
            controlPoint2:(CGPoint)control2;
+- (void)closePath;
+- (void)appendPath:(UIBezierPath *)path;
 @property(readonly) id CGPath;
 @end
 

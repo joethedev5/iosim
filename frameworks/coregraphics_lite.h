@@ -75,6 +75,11 @@ void CGContextAddQuadCurveToPoint(CGContextRef context, double cpx,
                                   double cpy, double x, double y);
 void CGContextAddCurveToPoint(CGContextRef context, double cp1x, double cp1y,
                               double cp2x, double cp2y, double x, double y);
+void CGContextAddArc(CGContextRef context, double cx, double cy,
+                     double radius, double startAngle, double endAngle,
+                     int clockwise);
+void CGContextAddArcToPoint(CGContextRef context, double x1, double y1,
+                            double x2, double y2, double radius);
 void CGContextAddRect(CGContextRef context, CGRect rect);
 void CGContextAddEllipseInRect(CGContextRef context, CGRect rect);
 void CGContextAddPath(CGContextRef context, CGPathRef path);
@@ -123,6 +128,11 @@ void CGPathAddQuadCurveToPoint(CGPathRef path, const void *transform,
 void CGPathAddCurveToPoint(CGPathRef path, const void *transform,
                            double cp1x, double cp1y, double cp2x,
                            double cp2y, double x, double y);
+void CGPathAddArc(CGPathRef path, const void *transform, double cx, double cy,
+                  double radius, double startAngle, double endAngle,
+                  int clockwise);
+void CGPathAddArcToPoint(CGPathRef path, const void *transform, double x1,
+                         double y1, double x2, double y2, double radius);
 void CGPathAddRect(CGPathRef path, const void *transform, CGRect rect);
 void CGPathAddEllipseInRect(CGPathRef path, const void *transform, CGRect rect);
 void CGPathCloseSubpath(CGPathRef path);

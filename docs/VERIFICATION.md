@@ -819,7 +819,14 @@ interpolation runs through the offscreen context. A second gradient whose
 alpha falls from 1 to 0 is drawn over a white rectangle: the left pixel stays
 red because the first stop is opaque, while the right pixel is white again
 (`[cg] gradient fade 1 1`), proving alpha is interpolated per stop rather than
-ignored.
+ignored. Arc coverage draws a right half-disc with `CGContextAddArc` and
+checks that (90,60) is red while (20,60) and (60,15) stay clear
+(`[cg] arc fill 1 0 0`); an `AddArcToPoint` rounded rectangle fills its
+arc-side interior but not the cut sharp corner (`[cg] arcto fill 1 1 0`);
+`CGPathAddArc` reports `[cg] path arc 1 0 bbox 20 50 60 30`;
+`CGPathAddArcToPoint` reports `[cg] path arcto 1 0`; and UIBezierPath's
+clockwise and counterclockwise quarter arcs select the short and long sweeps
+(`[cg] ui arc cw 1 0`, `[cg] ui arc ccw 1 0`).
 Line styles are sampled from a fresh region: a white 6-pixel line with a
 `10,10` dash pattern is `ffffff` at `(15,226)` and background at `(25,226)`;
 an 8-pixel red line with a square cap covers `(37,205)`, while the butt-capped
