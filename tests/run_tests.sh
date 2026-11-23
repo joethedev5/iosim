@@ -4413,6 +4413,62 @@ else
     echo "FAIL context menus"; echo "$out"; fails=$((fails+1))
 fi
 
+# ---------- UIAlertController action sheets ----------
+rm -f "$T/alert.fifo"
+mkfifo "$T/alert.fifo"
+"$ROOT/tools/build_app.sh" "$ROOT/tests/alert_sheet_test.m" \
+    "$T/alert_sheet_test" >/dev/null
+out="$(IOSIM_EVENT_FIFO="$T/alert.fifo" \
+    IOSIM_TEST_PNG_SHEET="$T/alert_sheet.png" \
+    IOSIM_TEST_PNG_RESTORED="$T/alert_restored.png" \
+    DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/alert_sheet_test" 2>&1)"
+check "[sheet] delete 1" "$out" \
+    "an action sheet runs its destructive row"
+check "[alert] three" "$out" \
+    "the third stacked alert row runs its action"
+check "[alert] done" "$out" \
+    "the alert sheet fixture completes its phases"
+if out="$(python3 - "$ROOT/tools" "$T" <<'SHEETPNG'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+root = sys.argv[2]
+
+def loader(path):
+    w, h, bpp, rows = pngpixel.load(path)
+    def read(x, y):
+        return pngpixel.px(rows, bpp, x * 3, y * 3)
+    return read
+
+def rgb(read, x, y):
+    c = read(x, y)
+    return ((c >> 16) & 255, (c >> 8) & 255, c & 255)
+
+sheet = loader(root + "/alert_sheet.png")
+restored = loader(root + "/alert_restored.png")
+r, g, b = rgb(sheet, 380, 640)
+if not (r < 60 and g < 60 and b > 25 and b < 85):
+    raise SystemExit("the action sheet group card is missing: %02x%02x%02x" % (r, g, b))
+r, g, b = rgb(sheet, 60, 720)
+if not (45 < r < 85 and 45 < g < 85 and 45 < b < 95):
+    raise SystemExit("the share row is missing: %02x%02x%02x" % (r, g, b))
+r, g, b = rgb(sheet, 201, 813)
+if not (r < 60 and 70 < g < 150 and b < 95):
+    raise SystemExit("the cancel card is not separated: %02x%02x%02x" % (r, g, b))
+r, g, b = rgb(sheet, 60, 840)
+if not (45 < r < 85 and 45 < g < 85 and 45 < b < 95):
+    raise SystemExit("the cancel action card is missing: %02x%02x%02x" % (r, g, b))
+r, g, b = rgb(restored, 201, 300)
+if not (r < 80 and g > 170 and b < 130):
+    raise SystemExit("the sheet did not dismiss: %02x%02x%02x" % (r, g, b))
+print("ok   action sheets anchor at the bottom and separate cancel")
+SHEETPNG
+)"; then
+    echo "$out"
+else
+    echo "FAIL UIAlertController action sheets"; echo "$out"; fails=$((fails+1))
+fi
+
 # ---------- system notifications: banners and Notification Center ----------
 # The device sections above shut their phone down; notifications need a live
 # SpringBoard, so boot a fresh phone for this block.

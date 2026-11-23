@@ -920,3 +920,21 @@ components.
   extension vs a butt cap, and a miter-filled vs bevel-clipped outer corner.
   `tests/shape_stroke_test.m` adds a dashed CAShapeLayer (yellow on, background
   in the gap) and asserts the stored pattern/join properties.
+
+## 2026-11-22: Action sheet layout and stacked alert hit testing
+
+- `alert_compute_layout` builds the card, the title/message heights and one
+  row rectangle per action; `draw_alert` and `alert_handle_tap` consume the
+  same struct. The old hit test only matched a single row at the bottom, so
+  three-plus-action alerts always ran action 0 regardless of the tapped row.
+- Action sheets use a width of screen minus 16 pt (capped at 500), a group
+  card padded 16/14 around the text block and 8 pt around its rows, and a
+  `Cancel` action drawn as its own 47 pt card 8 pt below the group. The sheet
+  sits 10 pt above the bottom edge.
+- Alert rows keep the measured form: two actions side by side with an 8.3 pt
+  gap, otherwise 47 pt rows with 8 pt gaps stacked bottom-up.
+- Fixture `tests/alert_sheet_test.m` presents a Share/Delete/Cancel sheet,
+  taps Delete, captures the group card, gap and cancel card, then presents a
+  three-action alert and taps its third row. Both handlers run and the sheet
+  dismissal restores the green background.
+

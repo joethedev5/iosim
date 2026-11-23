@@ -1146,7 +1146,13 @@ corners, left-aligned title and message, and side-by-side pill actions. The
 dimming view is painted at the measured 0.47 black and the status bar is
 redrawn above it, matching the reference. Action blocks are copied to the heap
 with `_Block_copy`, run on tap, then the modal dismisses through the same
-presentation stack as any other controller. Non-alert controllers present as
+presentation stack as any other controller. A shared layout pass computes the
+card and one rectangle per action for both drawing and hit testing: alerts
+keep the side-by-side pair or stack every row bottom-aligned, so three or
+more actions are all tappable, while
+`UIAlertControllerStyleActionSheet` anchors a full-width card above the home
+indicator, uses stacked rows and renders the `Cancel`-style action as a
+separate card 8 pt below the group; a tap outside the sheet dismisses it. Non-alert controllers present as
 page sheets: `presentViewController:animated:` records a 0.35 s start time and
 the renderer slides the controller up from the bottom over a 0.47 black dim
 while `iosim_modal_tick` keeps the loop redrawing; `dismiss...Animated:` keeps

@@ -447,6 +447,18 @@ the view at (90,440). A collection item at (70,670) renders its cyan cell
 item and the collection background (`#0d0d14`). The suite checks all six
 captures against those colors.
 
+### Action sheets
+
+`tests/alert_sheet_test.m` presents a `UIAlertControllerStyleActionSheet`
+titled `Choose` with Share, Delete and Cancel actions. The capture is the
+group card colour `#23242d` at (380,640), the Share pill `#404149` at
+(60,720), the dimmed background `#0e6c29` in the 8 pt gap at (201,813), and
+the separate Cancel pill at (60,840). Tapping the destructive row at
+(201,777) prints `[sheet] delete 1` and the next capture is the restored
+green background. A three-action alert is then presented and a tap on the
+third stacked row runs `Three` (`[alert] three`), proving every stacked row
+is hit-tested rather than only the bottom one.
+
 ### Numeric keypad
 
 `demo/NumberPadApp.m` is the text-input fixture with the number-pad trait

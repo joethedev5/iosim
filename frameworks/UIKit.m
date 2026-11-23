@@ -24793,50 +24793,160 @@ static UIViewController *top_presented(UIViewController *root)
     return top;
 }
 
-static void alert_metrics(UIAlertController *alert, int fbW, double scale,
-                          double *outW, double *outH, double *titleH,
-                          double *messageH)
+#define ALERT_MAX_ACTIONS 8
+
+struct alert_layout {
+    int sheet;
+    double width;
+    double group_x, group_y, group_h;
+    double title_h, message_h;
+    int row_count;
+    int row_action[ALERT_MAX_ACTIONS];
+    double row_x[ALERT_MAX_ACTIONS], row_y[ALERT_MAX_ACTIONS];
+    double row_w[ALERT_MAX_ACTIONS], row_h;
+    int cancel_action;
+    double cancel_x, cancel_y, cancel_w, cancel_h;
+};
+
+static double alert_text_height(id text, int bold, double size, int maxLines,
+                                double textW, double scale)
 {
-    double W = fbW / scale;
-    double width = W - 82;
-    if (width > 320)
+    if (!text)
+        return 0;
+    const char *t = iosim_string_cstr(text);
+    char lines[IOSIM_MAX_WRAP_LINES][256];
+    int n = wrap_text_lines(t, bold ? IOSIM_FONT_BOLD : IOSIM_FONT_REGULAR,
+                            size, scale, (int)(textW * scale), lines,
+                            maxLines);
+    int asc = 0, desc = 0, lh = 0;
+    iosim_fb_font_metrics(bold ? IOSIM_FONT_BOLD : IOSIM_FONT_REGULAR, size,
+                          scale, &asc, &desc, &lh);
+    return (n > 0 ? n : 1) * lh / scale;
+}
+
+/* Lay out an alert or action sheet once; both drawing and hit testing use
+ * the resulting row rectangles. */
+static void alert_compute_layout(UIAlertController *alert, int fbW, int fbH,
+                                 double scale, struct alert_layout *out)
+{
+    memset(out, 0, sizeof(*out));
+    out->cancel_action = -1;
+    double W = fbW / scale, H = fbH / scale;
+    int sheet = alert->_preferredStyle == UIAlertControllerStyleActionSheet;
+    out->sheet = sheet;
+    double width = sheet ? W - 16 : W - 82;
+    if (sheet)
+    {
+        if (width > 500)
+            width = 500;
+    }
+    else if (width > 320)
         width = 320;
     if (width < 200)
         width = 200;
-    double textW = width - 64;
-    double th = 0, mh = 0;
-    if (alert->_title)
+    out->width = width;
+    double textW = width - (sheet ? 48 : 64);
+    double th = alert_text_height(alert->_title, 1, 17, 4, textW, scale);
+    double mh = alert_text_height(alert->_message, 0, 15, 8, textW, scale);
+    out->title_h = th;
+    out->message_h = mh;
+    int count = alert->_actionCount;
+    if (count > ALERT_MAX_ACTIONS)
+        count = ALERT_MAX_ACTIONS;
+    int cancel = -1;
+    for (int i = 0; i < count; i++)
     {
-        const char *t = iosim_string_cstr(alert->_title);
-        char lines[IOSIM_MAX_WRAP_LINES][256];
-        int n = wrap_text_lines(t, IOSIM_FONT_BOLD, 17, scale,
-                                (int)(textW * scale), lines, 4);
-        int asc = 0, desc = 0, lh = 0;
-        iosim_fb_font_metrics(IOSIM_FONT_BOLD, 17, scale, &asc, &desc, &lh);
-        th = (n > 0 ? n : 1) * lh / scale;
+        UIAlertAction *action = (UIAlertAction *)alert->_actions[i];
+        if (action && action->_style == UIAlertActionStyleCancel)
+            cancel = i;
     }
-    if (alert->_message)
+
+    if (sheet)
     {
-        const char *m = iosim_string_cstr(alert->_message);
-        char lines[IOSIM_MAX_WRAP_LINES][256];
-        int n = wrap_text_lines(m, IOSIM_FONT_REGULAR, 15, scale,
-                                (int)(textW * scale), lines, 8);
-        int asc = 0, desc = 0, lh = 0;
-        iosim_fb_font_metrics(IOSIM_FONT_REGULAR, 15, scale, &asc, &desc,
-                              &lh);
-        mh = (n > 0 ? n : 1) * lh / scale;
+        double row_h = 47, gap = 8;
+        int group_rows = count - (cancel >= 0 ? 1 : 0);
+        double text_block = th + (mh > 0 ? 7 + mh : 0);
+        double top = text_block > 0 ? 16 + text_block + 14 : 8;
+        double group_h = top +
+                         (group_rows > 0
+                              ? group_rows * row_h + (group_rows - 1) * gap
+                              : 0) +
+                         8;
+        double bottom = H - 10;
+        double cancel_y = 0, cancel_h = 0;
+        if (cancel >= 0)
+        {
+            cancel_h = 47;
+            cancel_y = bottom - cancel_h;
+            bottom = cancel_y - gap;
+        }
+        double group_y = bottom - group_h;
+        out->group_x = (W - width) / 2;
+        out->group_y = group_y;
+        out->group_h = group_h;
+        out->row_h = row_h;
+        int r = 0;
+        for (int i = 0; i < count; i++)
+        {
+            if (i == cancel)
+                continue;
+            out->row_action[r] = i;
+            out->row_x[r] = out->group_x + 8;
+            out->row_y[r] = group_y + top + r * (row_h + gap);
+            out->row_w[r] = width - 16;
+            r++;
+        }
+        out->row_count = r;
+        if (cancel >= 0)
+        {
+            out->cancel_action = cancel;
+            out->cancel_x = out->group_x;
+            out->cancel_y = cancel_y;
+            out->cancel_w = width;
+            out->cancel_h = cancel_h;
+        }
+        return;
     }
+
     double buttons;
-    if (alert->_actionCount == 2)
+    if (count == 2)
         buttons = 47;
     else
-        buttons = alert->_actionCount * 47 +
-                  (alert->_actionCount > 1 ? (alert->_actionCount - 1) * 8 : 0);
+        buttons =
+            count * 47 + (count > 1 ? (count - 1) * 8 : 0);
     double h = 22 + th + (mh > 0 ? 7 + mh : 0) + 20.5 + buttons + 17;
-    *outW = width;
-    *outH = h;
-    *titleH = th;
-    *messageH = mh;
+    double x = (W - width) / 2, y = (H - h) / 2 + 14;
+    out->group_x = x;
+    out->group_y = y;
+    out->group_h = h;
+    out->row_h = 47;
+    if (count == 2)
+    {
+        double gap = 8.3;
+        double bw = (width - 32 - gap) / 2;
+        double by = y + h - 17 - 47;
+        for (int i = 0; i < 2; i++)
+        {
+            out->row_action[i] = i;
+            out->row_x[i] = x + 16 + i * (bw + gap);
+            out->row_y[i] = by;
+            out->row_w[i] = bw;
+        }
+        out->row_count = 2;
+    }
+    else if (count > 0)
+    {
+        double by = y + h - 17 - 47;
+        double start = by - (count - 1) * (47 + 8);
+        for (int i = 0; i < count; i++)
+        {
+            out->row_action[i] = i;
+            out->row_x[i] = x + 16;
+            out->row_y[i] = start + i * (47 + 8);
+            out->row_w[i] = width - 32;
+        }
+        out->row_count = count;
+    }
 }
 
 static void alert_draw_wrapped(id text, double width, double scale, int x,
@@ -24861,94 +24971,78 @@ static void alert_draw_wrapped(id text, double width, double scale, int x,
     }
 }
 
+static void alert_draw_button(UIAlertAction *action, double x, double y,
+                              double w, double h, double scale)
+{
+    if (!action)
+        return;
+    int bx = (int)(x * scale + 0.5);
+    int by = (int)(y * scale + 0.5);
+    int bw = (int)(w * scale + 0.5);
+    int bh = (int)(h * scale + 0.5);
+    iosim_fb_fill_round_rect(bx, by, bw, bh, bh / 2, 0x404149);
+    const char *title = iosim_string_cstr(action->_title);
+    if (!title)
+        return;
+    unsigned color = action->_style == UIAlertActionStyleDestructive
+                         ? 0xff6b6f : 0xffffff;
+    int tw = iosim_fb_font_text_width(title, IOSIM_FONT_SEMIBOLD, 17, scale);
+    int asc = 0, desc = 0, lh = 0;
+    iosim_fb_font_metrics(IOSIM_FONT_SEMIBOLD, 17, scale, &asc, &desc, &lh);
+    iosim_fb_font_text(bx + (bw - tw) / 2,
+                       by + bh / 2 - lh / 2 + asc +
+                           (int)(0.7 * scale + 0.5),
+                       title, IOSIM_FONT_SEMIBOLD, 17, scale, color);
+}
+
 static void draw_alert(UIAlertController *alert, int fbW, int fbH,
                        double scale)
 {
-    double W = fbW / scale, H = fbH / scale;
     iosim_fb_set_opacity(0.47);
     iosim_fb_fill_rect(0, 0, fbW, fbH, 0x000000);
     iosim_fb_set_opacity(1.0);
     /* The system status bar lives above the alert's dimming view. */
     draw_device_chrome(fbW, scale);
-    double width, height, titleH, messageH;
-    alert_metrics(alert, fbW, scale, &width, &height, &titleH, &messageH);
-    double x = (W - width) / 2;
-    double y = (H - height) / 2 + 14.0;
-    int ix = (int)(x * scale + 0.5);
-    int iy = (int)(y * scale + 0.5);
-    int iw = (int)(width * scale + 0.5);
-    int ih = (int)(height * scale + 0.5);
-    iosim_fb_fill_round_rect(ix, iy, iw, ih, (int)(33.7 * scale), 0x23242d);
-    int cursor = iy + (int)(22 * scale);
-    int textX = ix + (int)(30 * scale);
+    struct alert_layout layout;
+    alert_compute_layout(alert, fbW, fbH, scale, &layout);
+    int gx = (int)(layout.group_x * scale + 0.5);
+    int gy = (int)(layout.group_y * scale + 0.5);
+    int gw = (int)(layout.width * scale + 0.5);
+    int gh = (int)(layout.group_h * scale + 0.5);
+    iosim_fb_fill_round_rect(gx, gy, gw, gh,
+                             (int)((layout.sheet ? 28 : 33.7) * scale),
+                             0x23242d);
+    if (layout.cancel_action >= 0)
+        iosim_fb_fill_round_rect(
+            (int)(layout.cancel_x * scale + 0.5),
+            (int)(layout.cancel_y * scale + 0.5),
+            (int)(layout.cancel_w * scale + 0.5),
+            (int)(layout.cancel_h * scale + 0.5), (int)(23.5 * scale),
+            0x404149);
+
+    double textW = layout.width - (layout.sheet ? 48 : 64);
+    int cursor = gy + (int)((layout.sheet ? 16 : 22) * scale);
+    int textX = gx + (int)((layout.sheet ? 24 : 30) * scale);
     if (alert->_title)
     {
-        alert_draw_wrapped(alert->_title, width - 64, scale, textX, cursor,
+        alert_draw_wrapped(alert->_title, textW, scale, textX, cursor,
                            0xffffff, 1, 17, 4);
-        cursor += (int)(titleH * scale) + (int)(7 * scale);
+        cursor += (int)(layout.title_h * scale) + (int)(7 * scale);
     }
     if (alert->_message)
     {
-        alert_draw_wrapped(alert->_message, width - 64, scale, textX, cursor,
+        alert_draw_wrapped(alert->_message, textW, scale, textX, cursor,
                            0x71727a, 0, 15, 8);
-        cursor += (int)(messageH * scale) + (int)(20.5 * scale);
+        cursor += (int)(layout.message_h * scale) + (int)(20.5 * scale);
     }
-    int by = iy + ih - (int)(17 * scale) - (int)(47 * scale);
-    int bh = (int)(47 * scale);
-    if (alert->_actionCount == 2)
-    {
-        int gap = (int)(8.3 * scale);
-        int bw = (iw - (int)(16 * scale) * 2 - gap) / 2;
-        for (int i = 0; i < 2; i++)
-        {
-            int bx = ix + (int)(16 * scale) + i * (bw + gap);
-            iosim_fb_fill_round_rect(bx, by, bw, bh, bh / 2, 0x404149);
-            UIAlertAction *action = alert->_actions[i];
-            const char *title = iosim_string_cstr(action->_title);
-            if (!title)
-                continue;
-            unsigned color = action->_style == UIAlertActionStyleDestructive
-                                 ? 0xff6b6f : 0xffffff;
-            int tw = iosim_fb_font_text_width(title, IOSIM_FONT_SEMIBOLD, 17,
-                                              scale);
-            int asc = 0, desc = 0, lh = 0;
-            iosim_fb_font_metrics(IOSIM_FONT_SEMIBOLD, 17, scale, &asc, &desc,
-                                  &lh);
-            iosim_fb_font_text(bx + (bw - tw) / 2,
-                               by + bh / 2 - lh / 2 + asc +
-                                   (int)(0.7 * scale + 0.5),
-                               title, IOSIM_FONT_SEMIBOLD, 17, scale, color);
-        }
-    }
-    else
-    {
-        int rowY = by - (alert->_actionCount - 1) * (bh + (int)(8 * scale));
-        for (int i = 0; i < alert->_actionCount; i++)
-        {
-            int bx = ix + (int)(16 * scale);
-            int bw = iw - (int)(32 * scale);
-            iosim_fb_fill_round_rect(bx, rowY, bw, bh, bh / 2, 0x404149);
-            UIAlertAction *action = alert->_actions[i];
-            const char *title = iosim_string_cstr(action->_title);
-            if (title)
-            {
-                unsigned color =
-                    action->_style == UIAlertActionStyleDestructive
-                        ? 0xff6b6f : 0xffffff;
-                int tw = iosim_fb_font_text_width(title, IOSIM_FONT_SEMIBOLD,
-                                                  17, scale);
-                int asc = 0, desc = 0, lh = 0;
-                iosim_fb_font_metrics(IOSIM_FONT_SEMIBOLD, 17, scale, &asc,
-                                      &desc, &lh);
-                iosim_fb_font_text(bx + (bw - tw) / 2,
-                                   rowY + bh / 2 - lh / 2 + asc +
-                                       (int)(0.7 * scale + 0.5),
-                                   title, IOSIM_FONT_SEMIBOLD, 17, scale,
-                                   color);
-            }
-            rowY += bh + (int)(8 * scale);
-        }
-    }
+    for (int r = 0; r < layout.row_count; r++)
+        alert_draw_button(alert->_actions[layout.row_action[r]],
+                          layout.row_x[r], layout.row_y[r], layout.row_w[r],
+                          layout.row_h, scale);
+    if (layout.cancel_action >= 0)
+        alert_draw_button(alert->_actions[layout.cancel_action],
+                          layout.cancel_x, layout.cancel_y, layout.cancel_w,
+                          layout.cancel_h, scale);
 }
 
 /* Edit menu drawing and hit testing. The menu is laid out at draw time in
@@ -25582,49 +25676,47 @@ static void draw_modals(UIViewController *root, int fbW, int fbH,
 static int alert_handle_tap(UIViewController *root, int px, int py, int fbW,
                             int fbH, double scale)
 {
-    (void)fbH;
     if (!root || !root->_presentedController)
         return 0;
     UIViewController *top = top_presented(root);
     if (!top || ![top isKindOfClass:[UIAlertController class]])
         return 0;
     UIAlertController *alert = (UIAlertController *)top;
-    double width, height, titleH, messageH;
-    alert_metrics(alert, fbW, scale, &width, &height, &titleH, &messageH);
-    double W = fbW / scale;
-    double x = (W - width) / 2;
-    double H = fbH / scale;
-    double topY = (H - height) / 2 + 14.0;
+    struct alert_layout layout;
+    alert_compute_layout(alert, fbW, fbH, scale, &layout);
     double tapX = px / scale, tapY = py / scale;
-    if (tapX < x || tapX > x + width || tapY < topY || tapY > topY + height)
-        return 1;
-    double by = topY + height - 17 - 47;
     int action = -1;
-    if (alert->_actionCount == 2)
+    for (int r = 0; r < layout.row_count; r++)
     {
-        double gap = 8.3;
-        double bw = (width - 32 - gap) / 2;
-        if (tapY >= by && tapY <= by + 47)
-        {
-            if (tapX >= x + 16 && tapX <= x + 16 + bw)
-                action = 0;
-            else if (tapX >= x + 16 + bw + gap &&
-                     tapX <= x + 16 + bw + gap + bw)
-                action = 1;
-        }
+        if (tapX >= layout.row_x[r] &&
+            tapX <= layout.row_x[r] + layout.row_w[r] &&
+            tapY >= layout.row_y[r] &&
+            tapY <= layout.row_y[r] + layout.row_h)
+            action = layout.row_action[r];
     }
-    else if (tapY >= by && tapY <= by + 47)
-    {
-        if (tapX >= x + 16 && tapX <= x + width - 16)
-            action = 0;
-    }
+    if (action < 0 && layout.cancel_action >= 0 &&
+        tapX >= layout.cancel_x &&
+        tapX <= layout.cancel_x + layout.cancel_w &&
+        tapY >= layout.cancel_y &&
+        tapY <= layout.cancel_y + layout.cancel_h)
+        action = layout.cancel_action;
     if (action >= 0 && action < alert->_actionCount)
     {
         UIAlertAction *a = alert->_actions[action];
         if (a && a->_handler)
             a->_handler(a);
         [root dismissViewControllerAnimated:NO completion:nil];
+        return 1;
     }
+    int inside_group =
+        tapX >= layout.group_x && tapX <= layout.group_x + layout.width &&
+        tapY >= layout.group_y && tapY <= layout.group_y + layout.group_h;
+    int inside_cancel =
+        layout.cancel_action >= 0 && tapX >= layout.cancel_x &&
+        tapX <= layout.cancel_x + layout.cancel_w &&
+        tapY >= layout.cancel_y && tapY <= layout.cancel_y + layout.cancel_h;
+    if (layout.sheet && !inside_group && !inside_cancel)
+        [root dismissViewControllerAnimated:NO completion:nil];
     return 1;
 }
 
