@@ -89,6 +89,19 @@ extern int fflush(void *stream);
     printf("[collection] selected %ld\n", [indexPath row]);
     fflush(0);
 }
+- (void)scrollViewDidEndDragging:(UIScrollView *)scrollView
+                  willDecelerate:(BOOL)decelerate
+{
+    if (decelerate)
+        return;
+    printf("[collection] scrolled %.0f\n", scrollView.contentOffset.y);
+    fflush(0);
+}
+- (void)scrollViewDidEndDecelerating:(UIScrollView *)scrollView
+{
+    printf("[collection] scrolled %.0f\n", scrollView.contentOffset.y);
+    fflush(0);
+}
 @end
 
 @interface SceneDelegate : UIResponder <UIWindowSceneDelegate>

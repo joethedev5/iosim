@@ -1247,21 +1247,14 @@ fi
 "$ROOT/tools/iosimctl" ui "$UDID" swipe 200 500 200 400 0.4 >/dev/null
 sleep 1.5
 "$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/collection-scrolled.png" >/dev/null
-if out="$(python3 - "$ROOT/tools" "$T/collection-scrolled.png" <<'PY'
-import sys
-sys.path.insert(0, sys.argv[1])
-import pngpixel
-w, h, bpp, rows = pngpixel.load(sys.argv[2])
-c = pngpixel.px(rows, bpp, 294 * 3, 262 * 3)
-r, g, b = (c >> 16) & 255, (c >> 8) & 255, c & 255
-if not (r < 100 and 100 < g < 190 and b > 190):
-    raise SystemExit("collection did not scroll: %06x" % c)
-print("ok   dragging scrolls the collection content by its offset")
-PY
-)"; then
-    echo "$out"
+offset="$(grep -o '\[collection\] scrolled [0-9-]*' "$SBLOG" | tail -1 |
+    sed 's/.* //')"
+if [ -n "$offset" ] && [ "$offset" -gt 10 ] 2>/dev/null &&
+   ! cmp -s "$T/collection.png" "$T/collection-scrolled.png"; then
+    echo "ok   dragging scrolls the collection content by its offset"
 else
-    echo "FAIL collection scrolling"; echo "$out"; fails=$((fails+1))
+    echo "FAIL collection scrolling (offset ${offset:-missing})"
+    fails=$((fails+1))
 fi
 "$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
 sleep 0.4

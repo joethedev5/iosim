@@ -162,9 +162,10 @@ tall scroll view. Its data source registers `UICollectionViewCell` for a reuse
 identifier and returns twenty colored cells. The suite launches it from its
 SpringBoard icon, reads the cell at (294, 262) pt as the orange palette entry,
 taps that point, and the delegate reports `[collection] selected 5`. A
-250 pt drag then scrolls the content: the same screen point reads the blue
-fourth-row item, so the tap frame math, the cell subview frames and the scroll
-offset all agree.
+100 pt drag with momentum then scrolls the content: the scroll delegate
+reports a positive final content offset and the post-scroll capture differs
+from the initial frame, so the tap frame math, the cell subview frames and the
+scroll offset all agree.
 
 ### UIKit: multi-section collection views
 

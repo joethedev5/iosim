@@ -938,3 +938,13 @@ components.
   three-action alert and taps its third row. Both handlers run and the sheet
   dismissal restores the green background.
 
+## 2026-11-23: Collection scroll asserted by offset
+
+- The collection scroll check sampled (294,262) and expected the blue item
+  after a 100 pt drag plus momentum. Depending on the fling distance that
+  point can land in the 12 pt gap between rows, so the check failed while
+  scrolling had worked (seen locally once and in CI once; reruns passed).
+- `demo/CollectionApp.m` now implements `scrollViewDidEndDragging:...` and
+  `scrollViewDidEndDecelerating:` and prints `[collection] scrolled <y>`.
+  The suite takes the last value and requires y > 10, plus a post-scroll
+  capture that differs from the initial frame.
