@@ -698,6 +698,15 @@ components.
   `NSFontAttributeName` and `NSForegroundColorAttributeName` from it and
   render the plain string. Attribute-name symbols live in UIKit, not as
   macros, because UIKit already defines them as globals.
+- Multi-touch needs identity in the event protocol. Today `down`/`move`/`up`
+  carry one point and UIWindow keeps a single `_touch`; pinch and rotate
+  records only deliver a second point as a derived two-finger gesture. A
+  minimal extension is `touch <id> down|move|up <x> <y>` records, a UIWindow
+  table of active touches, and a UIEvent carrying the changed set plus all
+  active touches. Single-touch consumers can keep reading
+  `[touches anyObject]`; controls and recognizers keep tracking their primary
+  touch. `iosimctl ui` would grow `touch <id> <action> x y` and a two-finger
+  tap convenience.
 - Empty Objective-C collection literals do not send a factory message:
   clang emits a load of the `__NSArray0__`/`__NSDictionary0__` globals and
   dereferences the object pointer stored there. Foundation must export those
@@ -948,3 +957,19 @@ components.
   `scrollViewDidEndDecelerating:` and prints `[collection] scrolled <y>`.
   The suite takes the last value and requires y > 10, plus a post-scroll
   capture that differs from the initial frame.
+
+## 2026-11-23: Host pasteboard writes and change notifications
+
+- `iosimctl pbcopy` and `pbpaste` read and write the device pasteboard
+  property list from the host side. `pbcopy` replaces the items with a single
+  `public.utf8-plain-text` entry and increments `changeCount`; `pbpaste`
+  prints the first plain-text item without a trailing newline.
+- The general pasteboard primes a change sentinel when it first loads.
+  `iosim_pasteboard_tick` compares the reloaded count against that sentinel on
+  each main-loop pass and posts `UIPasteboardChangedNotification` with the
+  board as the object when it moves. Same-process writes update the sentinel
+  directly so the app does not notify itself.
+- `UIApplicationMain` only enters its ticking loop when `IOSIM_EVENT_FIFO`
+  names an existing FIFO. A test that expects dispatch timers or pasteboard
+  notifications from a plain app must create the FIFO and pass the variable,
+  even if it never writes an event.

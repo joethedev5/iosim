@@ -865,7 +865,11 @@ transport and the bootstrap namespace are shared across the device.
   access reloads it so any guest process sees another app's latest write.
   Items are dictionaries keyed by pasteboard type; `string`/`setString:` use
   `public.utf8-plain-text` and `dataForPasteboardType:`/`setData:` handle any
-  other type. Every write bumps a persisted `changeCount`.
+  other type. Every write bumps a persisted `changeCount`. `iosimctl
+  pbcopy`/`pbpaste` read and write the same file from the host side. A
+  running app polls the count on every main-loop tick and posts
+  `UIPasteboardChangedNotification` when it moves, so a write from another
+  process reaches live observers.
 
 `tools/iosim-launchd` is the per-device boot anchor, state owner and bootstrap
 namespace server.

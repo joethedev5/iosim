@@ -72,7 +72,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | XPC peer connections, async/sync request-reply and serialized dictionaries across processes | ✅ |
 | launchd_sim LaunchDaemon plists: RunAtLoad, on-demand MachServices jobs, KeepAlive | ✅ |
 | launchd socket activation: `Sockets` listeners, `launch_activate_socket`, on-demand restart | ✅ |
-| UIPasteboard general pasteboard shared across processes, with changeCount and multi-item strings/URLs/colors/images with type queries | ✅ |
+| UIPasteboard general pasteboard shared across processes, with changeCount, change notifications, `iosimctl pbcopy`/`pbpaste`, and multi-item strings/URLs/colors/images with type queries | ✅ |
 | SpringBoard system UI: measured iOS 26 home screen, installed apps, real app launching | ✅ |
 | Real app suspension: home stops the process, the icon resumes it in place | ✅ |
 | Application/scene lifecycle callbacks, notifications, UIApplication state and a background execution window for `beginBackgroundTaskWithExpirationHandler:` | ✅ |
@@ -151,6 +151,8 @@ tools/iosimctl ui $UDID home                     # scene backgrounds, home retur
 tools/iosimctl ui $UDID lock                     # lock screen; apps suspend
 tools/iosimctl ui $UDID unlock                   # resume the foreground app
 tools/iosimctl launchd-load $UDID MyJob.plist    # install + load a LaunchDaemon job
+tools/iosimctl pbcopy $UDID "text"              # write the device pasteboard
+tools/iosimctl pbpaste $UDID                   # print the device pasteboard text
 tools/iosimctl shutdown $UDID
 
 # The same SpringBoard binary can be run directly for UI work:

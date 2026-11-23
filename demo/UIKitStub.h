@@ -2013,6 +2013,9 @@ extern id UIPasteboardTypeListImage;
 extern id UIPasteboardTypeListURL;
 extern id UIPasteboardTypeListColor;
 
+extern id UIPasteboardChangedNotification;
+extern id UIPasteboardRemovedNotification;
+
 @interface UIPasteboard : NSObject
 + (UIPasteboard *)generalPasteboard;
 @property(nonatomic, retain) id string;

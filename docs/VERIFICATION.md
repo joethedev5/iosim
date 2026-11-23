@@ -1130,7 +1130,14 @@ values, and color components survive as a 32-byte data value in the plist.
 decodes it with `UIImage imageWithData:` (in-memory libpng) and reports
 `[pbimg] decode 1 132 132`; a `setImage:`/`image` round trip reports
 `[pbimg] image 1 132 132 1`, and `setImages:` with two images reports
-`[pbimg] images 2 1` with `public.png` present.
+`[pbimg] images 2 1` with `public.png` present. `tests/pasteboard_watch_test.m`
+runs a UIKit app against a device, arms the general pasteboard, and waits
+for `UIPasteboardChangedNotification`. While it runs, `iosimctl pbcopy
+<device> "from the cli"` rewrites the device plist; the app receives the
+notification, reads the new string and prints `[pastewatch] changed from
+the cli`, and `iosimctl pbpaste` returns the same text. The watcher is
+given an `IOSIM_EVENT_FIFO` FIFO so `UIApplicationMain` stays in its
+ticking loop.
 
 ### Services: dispatch, Mach, bootstrap and XPC
 
@@ -1853,8 +1860,8 @@ can clip. Core Animation keeps four
 explicit animation slots per layer, and `CADisplayLink` ignores preferred
 frame-rate ranges. XPC carries dictionaries
 and value objects between processes but not connections, file descriptors or
-reply ports. The pasteboard shares strings and data items but has no rich
-pasteboard types, item providers or change notifications. Metal and video
+reply ports. The pasteboard shares strings, URLs, colors and PNG images but has no
+item providers or removal notifications. Metal and video
 remain unimplemented. The kernel symbolication tool handles one Mach-O image
 and its dSYM; kext dSYMs are not merged into one address space because their
 load addresses are only known from a kernel collection. Running macOS

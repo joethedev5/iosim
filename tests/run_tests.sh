@@ -341,6 +341,55 @@ check "[pbimg] image 1 132 132 1" "$out" \
 check "[pbimg] images 2 1" "$out" \
     "setImages stores multiple images under public.png"
 
+# ---------- 4f2. Device pasteboard CLI and change notifications ----------
+PB_HOME="$T/pasteboard-cli-home"
+rm -rf "$PB_HOME"
+mkdir -p "$PB_HOME"
+IOSIM_HOME="$PB_HOME"
+export IOSIM_HOME
+UDID="$("$ROOT/tools/iosimctl" create "Pasteboard iPhone" \
+    com.iosim.SimDeviceType.iPhone-18-Pro)"
+PB_DEVICE_DATA="$IOSIM_HOME/Devices/$UDID/data"
+"$ROOT/tools/build_app.sh" "$ROOT/tests/pasteboard_watch_test.m" \
+    "$T/pasteboard_watch" >/dev/null
+rm -f "$T/pastewatch.log" "$T/pastewatch.fifo"
+mkfifo "$T/pastewatch.fifo"
+SIMULATOR_SHARED_RESOURCES_DIRECTORY="$PB_DEVICE_DATA" \
+    IOSIM_EVENT_FIFO="$T/pastewatch.fifo" \
+    DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/pasteboard_watch" \
+    > "$T/pastewatch.log" 2>&1 &
+WATCH_PID=$!
+i=0
+while [ "$i" -lt 50 ]; do
+    grep -Fq "[pastewatch] ready" "$T/pastewatch.log" 2>/dev/null && break
+    sleep 0.1
+    i=$((i+1))
+done
+"$ROOT/tools/iosimctl" pbcopy "$UDID" "from the cli"
+i=0
+while [ "$i" -lt 50 ]; do
+    grep -Fq "[pastewatch] changed from the cli" \
+        "$T/pastewatch.log" 2>/dev/null && break
+    sleep 0.1
+    i=$((i+1))
+done
+if grep -Fq "[pastewatch] changed from the cli" "$T/pastewatch.log"; then
+    echo "ok   iosimctl pbcopy reaches a running app's pasteboard notification"
+else
+    echo "FAIL pasteboard notification"
+    cat "$T/pastewatch.log"
+    fails=$((fails+1))
+fi
+kill "$WATCH_PID" 2>/dev/null || true
+wait "$WATCH_PID" 2>/dev/null || true
+rm -f "$T/pastewatch.fifo"
+if [ "$("$ROOT/tools/iosimctl" pbpaste "$UDID")" = "from the cli" ]; then
+    echo "ok   iosimctl pbpaste prints the device pasteboard text"
+else
+    echo "FAIL pasteboard pbpaste"
+    fails=$((fails+1))
+fi
+
 # ---------- 4g. NSCalendar components ----------
 "$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
     -ffreestanding -O1 -I "$ROOT/frameworks" \

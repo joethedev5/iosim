@@ -658,6 +658,55 @@ def cmd_get_app_container(args):
     return 0
 
 
+def pasteboard_file(udid):
+    return device_dir(udid) / "data" / "var" / "run" / "pasteboard.plist"
+
+
+def cmd_pbcopy(args):
+    state = load_state()
+    udid, dev = find_device(state, args.device)
+    text = args.text if args.text is not None else sys.stdin.read()
+    path = pasteboard_file(udid)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    change = 0
+    if path.exists():
+        try:
+            with open(path, "rb") as f:
+                change = int(plistlib.load(f).get("changeCount", 0))
+        except Exception:
+            change = 0
+    with open(path, "wb") as f:
+        plistlib.dump(
+            {
+                "items": [{"public.utf8-plain-text": text}],
+                "changeCount": change + 1,
+            },
+            f,
+        )
+    return 0
+
+
+def cmd_pbpaste(args):
+    state = load_state()
+    udid, dev = find_device(state, args.device)
+    path = pasteboard_file(udid)
+    if not path.exists():
+        return 0
+    try:
+        with open(path, "rb") as f:
+            data = plistlib.load(f)
+    except Exception:
+        return 0
+    for item in data.get("items", []):
+        if isinstance(item, dict) and "public.utf8-plain-text" in item:
+            value = item["public.utf8-plain-text"]
+            if isinstance(value, str):
+                sys.stdout.write(value)
+                sys.stdout.flush()
+                return 0
+    return 0
+
+
 def cmd_io(args):
     state = load_state()
     udid, dev = find_device(state, args.device)
@@ -886,6 +935,15 @@ def main():
     p.add_argument("bundle_id")
     p.add_argument("container", nargs="?", default="data", choices=["data", "bundle"])
     p.set_defaults(func=cmd_get_app_container)
+
+    p = sub.add_parser("pbcopy", help="set the device pasteboard text")
+    p.add_argument("device")
+    p.add_argument("text", nargs="?", default=None)
+    p.set_defaults(func=cmd_pbcopy)
+
+    p = sub.add_parser("pbpaste", help="print the device pasteboard text")
+    p.add_argument("device")
+    p.set_defaults(func=cmd_pbpaste)
 
     p = sub.add_parser("io")
     p.add_argument("device")

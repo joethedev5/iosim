@@ -16465,6 +16465,8 @@ id UIPasteboardTypeListString;
 id UIPasteboardTypeListImage;
 id UIPasteboardTypeListURL;
 id UIPasteboardTypeListColor;
+id UIPasteboardChangedNotification;
+id UIPasteboardRemovedNotification;
 
 __attribute__((constructor)) static void iosim_pasteboard_types(void)
 {
@@ -16477,6 +16479,10 @@ __attribute__((constructor)) static void iosim_pasteboard_types(void)
         @"public.url", @"public.file-url", nil];
     UIPasteboardTypeListColor =
         [NSArray arrayWithObject:@"com.apple.uikit.color"];
+    UIPasteboardChangedNotification =
+        @"UIPasteboardChangedNotification";
+    UIPasteboardRemovedNotification =
+        @"UIPasteboardRemovedNotification";
 }
 
 static id pasteboard_color_data(id color)
@@ -16512,12 +16518,20 @@ static void pasteboard_path(char *out, unsigned long cap)
              home && *home ? home : ".");
 }
 
+/* Last changeCount this process saw or wrote; the UI loop polls the shared
+ * file and posts UIPasteboardChangedNotification on an external change. */
+static long g_pasteboard_notified = -1;
+
 @implementation UIPasteboard
 + (UIPasteboard *)generalPasteboard
 {
     static UIPasteboard *board;
     if (!board)
+    {
         board = [[self alloc] init];
+        [board reload];
+        g_pasteboard_notified = board->_changeCount;
+    }
     return board;
 }
 - (void)reload
@@ -16567,8 +16581,11 @@ static void pasteboard_path(char *out, unsigned long cap)
         dataWithPropertyList:plist format:NSPropertyListXMLFormat_v1_0
         options:0 error:0];
     if (data)
+    {
         [data writeToFile:[NSString stringWithUTF8String:path]
                atomically:YES];
+        g_pasteboard_notified = _changeCount;
+    }
 }
 - (id)items
 {
@@ -16911,6 +16928,23 @@ static void pasteboard_path(char *out, unsigned long cap)
     return (long)[[self items] count];
 }
 @end
+
+void iosim_pasteboard_tick(void)
+{
+    UIPasteboard *board = [UIPasteboard generalPasteboard];
+    long change = [board changeCount];
+    if (g_pasteboard_notified < 0)
+    {
+        g_pasteboard_notified = change;
+        return;
+    }
+    if (change == g_pasteboard_notified)
+        return;
+    g_pasteboard_notified = change;
+    [[NSNotificationCenter defaultCenter]
+        postNotificationName:UIPasteboardChangedNotification
+                      object:board];
+}
 
 @implementation UIMenuItem
 - (id)initWithTitle:(id)title action:(SEL)action
@@ -26156,6 +26190,7 @@ int UIApplicationMain(int argc, char **argv, id principal, id delegateName)
                 redraw = 1;
             if (iosim_foundation_tick())
                 redraw = 1;
+            iosim_pasteboard_tick();
             if (iosim_dispatch_drain_main())
                 redraw = 1;
             if (iosim_display_link_tick())
