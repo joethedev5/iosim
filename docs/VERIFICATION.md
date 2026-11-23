@@ -1097,6 +1097,17 @@ expected Thursday and the seconds match Python's `calendar.timegm` for that
 timestamp. The current calendar also reports its
 `NSCalendarIdentifierGregorian` identifier.
 
+### Foundation: locales and time zones
+
+`tests/locale_test.m` prints the current locale as
+`[locale] current en_US en US`, splits `fr_FR` into `fr`/`FR`, reads the three
+language, country and identifier keys with `objectForKey:`
+(`[locale] keys fr FR fr_FR`), and accepts a dashed `pt-BR` identifier
+(`[locale] dash pt BR`). With `TZ=UTC` it reports
+`[tz] system UTC 0 0`, a named `America/Los_Angeles` zone at `-28800`, nil
+for `Mars/Olympus`, `[tz] fixed GMT+1 5400` for a fixed offset, and eight
+entries from `knownTimeZoneNames`.
+
 ### Foundation: operation queues
 
 `tests/operation_test.m` adds three `addOperationWithBlock:` closures that

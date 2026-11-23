@@ -1235,6 +1235,37 @@ extern id NSCalendarIdentifierGregorian;
 - (void)finishDecoding;
 @end
 
+@interface NSTimeZone : NSObject {
+@public
+    id _name;
+    long _secondsFromGMT;
+}
++ (id)systemTimeZone;
++ (id)localTimeZone;
++ (id)timeZoneWithName:(id)name;
++ (id)timeZoneForSecondsFromGMT:(long)seconds;
++ (id)knownTimeZoneNames;
+- (id)name;
+- (long)secondsFromGMT;
+- (BOOL)isDaylightSavingTime;
+@end
+
+@interface NSLocale : NSObject {
+@public
+    id _identifier;
+}
++ (id)currentLocale;
++ (id)localeWithLocaleIdentifier:(id)identifier;
+- (id)localeIdentifier;
+- (id)languageCode;
+- (id)countryCode;
+- (id)objectForKey:(id)key;
+@end
+
+extern id NSLocaleIdentifier;
+extern id NSLocaleLanguageCode;
+extern id NSLocaleCountryCode;
+
 void NSLog(id format, ...);
 
 const char *iosim_string_cstr(id string);

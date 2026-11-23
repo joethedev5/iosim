@@ -9,11 +9,17 @@
  * of sending a factory message. Foundation exports them on Apple platforms. */
 id __NSArray0__;
 id __NSDictionary0__;
+id NSLocaleIdentifier;
+id NSLocaleLanguageCode;
+id NSLocaleCountryCode;
 
 __attribute__((constructor)) static void iosim_foundation_literal_globals(void)
 {
     __NSArray0__ = [NSArray array];
     __NSDictionary0__ = [NSDictionary dictionary];
+    NSLocaleIdentifier = @"NSLocaleIdentifier";
+    NSLocaleLanguageCode = @"NSLocaleLanguageCode";
+    NSLocaleCountryCode = @"NSLocaleCountryCode";
 }
 
 extern void *iosim_objc_alloc(void *cls);
@@ -8312,6 +8318,135 @@ id NSCalendarIdentifierGregorian = @"NSCalendarIdentifierGregorian";
 - (void)setWeekday:(long)value { _weekday = value; }
 - (long)weekOfYear { return _weekOfYear; }
 - (void)setWeekOfYear:(long)value { _weekOfYear = value; }
+@end
+
+struct iosim_time_zone {
+    const char *name;
+    long offset;
+};
+
+static const struct iosim_time_zone g_time_zones[] = {
+    { "UTC", 0 },
+    { "GMT", 0 },
+    { "America/Los_Angeles", -8 * 3600 },
+    { "America/New_York", -5 * 3600 },
+    { "Europe/London", 0 },
+    { "Europe/Berlin", 3600 },
+    { "Asia/Tokyo", 9 * 3600 },
+    { "Australia/Sydney", 10 * 3600 }
+};
+
+static NSArray *g_known_time_zone_names;
+
+@implementation NSTimeZone
++ (id)knownTimeZoneNames
+{
+    if (!g_known_time_zone_names)
+        g_known_time_zone_names = [NSArray arrayWithObjects:
+            @"UTC", @"GMT", @"America/Los_Angeles", @"America/New_York",
+            @"Europe/London", @"Europe/Berlin", @"Asia/Tokyo",
+            @"Australia/Sydney", nil];
+    return g_known_time_zone_names;
+}
++ (id)timeZoneWithName:(id)name
+{
+    const char *wanted = name ? [name UTF8String] : 0;
+    if (!wanted)
+        return nil;
+    unsigned long count = sizeof(g_time_zones) / sizeof(g_time_zones[0]);
+    for (unsigned long i = 0; i < count; i++)
+    {
+        if (strcmp(wanted, g_time_zones[i].name) == 0)
+        {
+            NSTimeZone *zone = [[self alloc] init];
+            zone->_name = name;
+            zone->_secondsFromGMT = g_time_zones[i].offset;
+            return zone;
+        }
+    }
+    return nil;
+}
++ (id)systemTimeZone
+{
+    const char *name = getenv("TZ");
+    if (name && *name)
+    {
+        if (*name == ':')
+            name++;
+        NSTimeZone *zone =
+            [self timeZoneWithName:[NSString stringWithUTF8String:name]];
+        if (zone)
+            return zone;
+    }
+    return [self timeZoneWithName:@"GMT"];
+}
++ (id)localTimeZone
+{
+    return [self systemTimeZone];
+}
++ (id)timeZoneForSecondsFromGMT:(long)seconds
+{
+    NSTimeZone *zone = [[self alloc] init];
+    zone->_secondsFromGMT = seconds;
+    zone->_name = [NSString stringWithFormat:@"GMT%+ld", seconds / 3600];
+    return zone;
+}
+- (id)name { return _name; }
+- (long)secondsFromGMT { return _secondsFromGMT; }
+- (BOOL)isDaylightSavingTime { return 0; }
+@end
+
+@implementation NSLocale
++ (id)currentLocale
+{
+    static NSLocale *locale;
+    if (!locale)
+        locale = [self localeWithLocaleIdentifier:@"en_US"];
+    return locale;
+}
++ (id)localeWithLocaleIdentifier:(id)identifier
+{
+    NSLocale *locale = [[self alloc] init];
+    locale->_identifier = identifier ? identifier : @"en_US";
+    return locale;
+}
+- (id)localeIdentifier { return _identifier; }
+- (id)languageCode
+{
+    const char *s = [_identifier UTF8String];
+    if (!s)
+        return nil;
+    unsigned long len = 0;
+    while (s[len] && s[len] != '_' && s[len] != '-' && len < 31)
+        len++;
+    char buffer[32];
+    for (unsigned long i = 0; i < len; i++)
+        buffer[i] = s[i];
+    buffer[len] = 0;
+    return [NSString stringWithUTF8String:buffer];
+}
+- (id)countryCode
+{
+    const char *s = [_identifier UTF8String];
+    if (!s)
+        return nil;
+    const char *separator = strchr(s, '_');
+    if (!separator)
+        separator = strchr(s, '-');
+    if (!separator || !separator[1])
+        return nil;
+    return [NSString stringWithUTF8String:separator + 1];
+}
+- (id)objectForKey:(id)key
+{
+    if ([key isEqual:NSLocaleIdentifier])
+        return _identifier;
+    if ([key isEqual:NSLocaleLanguageCode])
+        return [self languageCode];
+    if ([key isEqual:NSLocaleCountryCode])
+        return [self countryCode];
+    return nil;
+}
 @end
 
 @implementation NSCalendar

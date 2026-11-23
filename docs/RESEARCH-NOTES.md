@@ -1037,3 +1037,16 @@ components.
   `"<method> <body> <X-Test header>"`. Header lookup in the runtime is exact
   (case-sensitive), unlike real HTTP, so the fixture uses the same spelling
   on both sides.
+
+## 2026-11-23: Locales and time zones
+
+- `NSLocale` keeps one identifier string. Language and country split at the
+  first `_` or `-`, and `objectForKey:` compares against three exported
+  string constants (`NSLocaleIdentifier`, `NSLocaleLanguageCode`,
+  `NSLocaleCountryCode`), which the Foundation constructor initializes like
+  the empty collection literal globals.
+- `NSTimeZone` is a name plus a standard offset. The named table covers UTC,
+  GMT, Los Angeles, New York, London, Berlin, Tokyo and Sydney with fixed
+  offsets; `timeZoneForSecondsFromGMT:` builds a name from the offset in
+  hours (`%+ld`), and `systemTimeZone` reads `TZ` (stripping a leading colon)
+  before falling back to GMT. Daylight saving is always off.

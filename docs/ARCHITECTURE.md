@@ -705,6 +705,14 @@ Sunday-based weekday (plus ISO week and nanoseconds), and
 follow Foundation for an unset year/month/day, and
 `NSCalendarIdentifierGregorian` names the calendar.
 
+`NSLocale` stores its identifier and derives the language and country by
+splitting at `_` or `-`; `objectForKey:` answers the identifier, language and
+country constants, and `currentLocale` is `en_US`. `NSTimeZone` supports a
+fixed table of eight zone names with their standard offsets plus
+`timeZoneForSecondsFromGMT:` (named `GMT+1`, `GMT-8`, and so on).
+`systemTimeZone` and `localTimeZone` read `TZ` and fall back to `GMT`;
+daylight saving always reports off.
+
 `NSOperationQueue` dispatches each `NSOperation` through a libdispatch
 global queue and counts it in a dispatch group, so
 `waitUntilAllOperationsAreFinished` is a real group wait; suspension defers

@@ -426,6 +426,34 @@ check "[cal] back 2024-02-29 12:34:56 wd=5 epoch=1709210096" "$out" \
 check "[cal] id=NSCalendarIdentifierGregorian" "$out" \
     "the current calendar reports its identifier"
 
+# ---------- 4g2. NSLocale and NSTimeZone ----------
+"$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
+    -ffreestanding -O1 -I "$ROOT/frameworks" \
+    -c "$ROOT/tests/locale_test.m" -o "$T/locale.o"
+"$LD64" -arch x86_64 -platform_version $PLATFORM -e _main -o "$T/locale_test" \
+    "$T/locale.o" \
+    "$ROOT/runtime/System/Library/Frameworks/Foundation.framework/Foundation" \
+    -undefined dynamic_lookup
+out="$(TZ=UTC DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/locale_test" 2>&1)"
+check "[locale] current en_US en US" "$out" \
+    "the current locale reports en_US, en and US"
+check "[locale] french fr_FR fr FR" "$out" \
+    "a locale identifier round-trips and splits into language and country"
+check "[locale] keys fr FR fr_FR" "$out" \
+    "NSLocale objectForKey reads the language, country and identifier"
+check "[locale] dash pt BR" "$out" \
+    "a dashed locale identifier splits at the dash"
+check "[tz] system UTC 0 0" "$out" \
+    "the system time zone follows TZ and reports no daylight saving"
+check "[tz] la America/Los_Angeles -28800" "$out" \
+    "a named time zone reports its standard offset"
+check "[tz] unknown 1" "$out" \
+    "an unknown time zone name returns nil"
+check "[tz] fixed GMT+1 5400" "$out" \
+    "a seconds-from-GMT zone keeps its offset and GMT name"
+check "[tz] known 8" "$out" \
+    "knownTimeZoneNames lists the supported zones"
+
 # ---------- 4h. NSOperationQueue block operations ----------
 "$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc -fblocks \
     -ffreestanding -O1 -I "$ROOT/frameworks" \
@@ -562,6 +590,11 @@ check "UIApplicationMain argc=1" "$out" "UIKit.framework substitution"
 # ---------- 6. Device lifecycle / simctl surface ----------
 export IOSIM_HOME="$ROOT/build/test-home"
 export IOSIM_RUNTIME_ROOT="$ROOT/runtime"
+# An interrupted run can leave guests recreating device directories; stop
+# them before wiping the home (anchored on the loader and this home only).
+for stale in $(pgrep -f "^$RUN .*$IOSIM_HOME" 2>/dev/null); do
+    kill -9 "$stale" 2>/dev/null || true
+done
 rm -rf "$IOSIM_HOME"
 UDID="$("$ROOT/tools/iosimctl" create "Test iPhone" com.iosim.SimDeviceType.iPhone-18-Pro)"
 "$ROOT/tools/iosimctl" boot "$UDID" >/dev/null
