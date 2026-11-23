@@ -548,6 +548,29 @@ The same synthetic tap path focuses a `UITextField` and the runtime keyboard
 accepts the next tap, verified by the text-input fixture. `ui swipe` emits a
 whole down/moves/up gesture in one command.
 
+### Touch: multiple fingers
+
+`tests/multitouch_test.m` is a standalone app with two `TouchView`s at
+opposite corners. It injects per-finger records into its own event FIFO:
+`touch 0 down 90 90`, `touch 1 down 300 300`, `touch 0 move 120 100`, then
+`touch 0 up` and `touch 1 up`. Each view logs the changed and all-touch
+counts, and the output is
+
+```
+[mt] a began changed=1 all=1 fv=1/0
+[mt] b began changed=1 all=2 fv=1/1
+[mt] a moved changed=1 all=2 at 120.0 100.0 prev 90.0 90.0
+[mt] a ended changed=1 all=2
+[mt] b ended changed=1 all=1
+[mt] done
+```
+
+so the second finger begins on its own hit view with one changed touch while
+`allTouches` holds both; `touchesForView:` partitions them; a move carries the
+view-local point and previous point; and lifting a finger removes only that
+touch. `iosimctl ui <device> touch <id> <phase> <x> <y>` emits the same records
+to a booted device's foreground app.
+
 ### Animation timeline and display link
 
 `demo/AnimationApp.m` runs a `CADisplayLink` that moves a green dot every
@@ -1828,8 +1851,11 @@ writes binary property lists. JSON covers
 Foundation objects without comments, streaming or fragments unless enabled.
 Text input is `UITextField` and an append-only `UITextView` with a QWERTY
 keyboard; text selection, multitap gestures and selection handles are not
-implemented. Touch input is
-single-finger: there is no multitouch, touch prediction or pressure. Mach
+implemented. Touch input delivers per-finger
+down/move/up records with their own hit view and `allTouches`, but fingers
+landing together arrive as separate events; there is no touch prediction or
+pressure. Controls, scroll views and gesture recognizers still track the
+primary touch, and SpringBoard's own UI remains single-touch. Mach
 messages, the bootstrap namespace and serialized XPC dictionaries are shared
 across guest processes. SpringBoard pages in groups of 16 without a sliding
 page animation, and the switcher shows at most three cards with no scrolling

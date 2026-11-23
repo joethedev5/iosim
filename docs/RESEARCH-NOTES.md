@@ -973,3 +973,24 @@ components.
   names an existing FIFO. A test that expects dispatch timers or pasteboard
   notifications from a plain app must create the FIFO and pass the variable,
   even if it never writes an event.
+
+## 2026-11-23: Per-finger touch records
+
+- `touch <id> down|move|up|cancel <x> <y>` event records set types 20-23 and
+  store the finger id, exposed through `iosim_event_touch_id`. The existing
+  `iosim_event_next` signature is unchanged, so older guests and the
+  single-touch path keep working.
+- `UIEvent` now owns an array of touches plus a changed set. `allTouches`
+  returns the array as a set and `touchesForView:`/`touchesForWindow:` filter
+  it. `initWithTouch:` seeds the array with the one touch, so every existing
+  single-touch consumer sees the same sets as before.
+- `UIWindow` keeps per-finger touches in a dictionary and hit-tests each down
+  separately; only the changed touch is passed to `touchesBegan:`/`Moved:`/
+  `Ended:`. Fingers landing together arrive as separate records, so they
+  produce separate callbacks rather than one batched event. Controls, scroll
+  views and gesture recognizers still follow the primary path.
+- `iosimctl ui touch` writes the same records to the device FIFO. SpringBoard
+  closes its event fd while an app runs, so the foreground app reads them
+  directly. When the shell owns the stream the records still create touches
+  on its window, but its icon taps are handled in the event loop rather than
+  by view touch callbacks, so they have no shell effect.

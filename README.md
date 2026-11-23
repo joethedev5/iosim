@@ -30,7 +30,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | Scene lifecycle (`UIWindowScene`, `UISceneDelegate`) required by iOS 27 | ✅ |
 | Software framebuffer, SF font rendering, UIKit view rendering | ✅ |
 | Touch hit-testing, target/action, table selection, event FIFO run loop | ✅ |
-| `UITouch`/`UIEvent` responder delivery, continuous control tracking | ✅ |
+| `UITouch`/`UIEvent` responder delivery with per-finger multitouch and `allTouches`, continuous control tracking | ✅ |
 | Drag scrolling with rubber-band clamp, tap/pan/swipe/pinch/rotation/screen-edge gesture recognizers with pan velocity | ✅ |
 | Auto Layout: NSLayoutConstraint, anchors, guides, intrinsic sizing, priorities, `layoutMargins`/`layoutMarginsGuide` with inset guide frames | ✅ (subset) |
 | Appearance: `UITraitCollection`, `overrideUserInterfaceStyle`, `traitCollectionDidChange:`, dynamic system colors resolved at draw time, the fixed UIColor palette plus `getRed:green:blue:alpha:`/`getWhite:alpha:`, tint-color inheritance and `tintColorDidChange`, status bar styles and hiding (including Info.plist), appearance-aware system material blur, and device-wide light/dark switching that also darkens SpringBoard's glass | ✅ |
@@ -116,7 +116,9 @@ accessories and selection; an Auto Layout app using anchors, guides and a
 multiline label; a text-input app with a software keyboard; a controls app
 covering switch, slider, segmented control, progress, page control and
 activity indicator; a touch fixture that drives `UITouch` through a custom
-view, slider, switch and button from injected gestures; an animation fixture
+view, slider, switch and button from injected gestures; a two-finger
+fixture that checks per-finger hit views, view-local moves and `allTouches`;
+an animation fixture
 whose `CADisplayLink` moves a view while a delayed UIView animation runs and
 a keyframe animation pulses a layer; and a services test that round-trips Mach
 messages, registers a bootstrap service, uses libdispatch
@@ -143,6 +145,9 @@ tools/iosimctl io $UDID screenshot app.png       # the app's own frame
 tools/iosimctl ui $UDID down 40 525              # finger down, in points
 tools/iosimctl ui $UDID move 360 525             # moves track the finger
 tools/iosimctl ui $UDID up 360 525               # up completes the touch
+tools/iosimctl ui $UDID touch 0 down 90 90        # per-finger records
+tools/iosimctl ui $UDID touch 1 down 300 300
+tools/iosimctl ui $UDID touch 0 up 90 90
 tools/iosimctl ui $UDID key a                    # hardware key, appends to the text view
 tools/iosimctl ui $UDID backspace                # deletes backward
 tools/iosimctl ui $UDID swipe 300 700 60 200 0.25  # down/moves/up in one call

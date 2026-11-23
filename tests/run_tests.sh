@@ -390,6 +390,26 @@ else
     fails=$((fails+1))
 fi
 
+# ---------- 4f3. Multi-touch delivery ----------
+rm -f "$T/multi.fifo"
+mkfifo "$T/multi.fifo"
+"$ROOT/tools/build_app.sh" "$ROOT/tests/multitouch_test.m" \
+    "$T/multitouch_test" >/dev/null
+out="$(IOSIM_EVENT_FIFO="$T/multi.fifo" DYLD_ROOT_PATH="$ROOT/runtime" \
+    "$RUN" "$T/multitouch_test" 2>&1)"
+check "[mt] a began changed=1 all=1 fv=1/0" "$out" \
+    "the first finger begins on its own hit view"
+check "[mt] b began changed=1 all=2 fv=1/1" "$out" \
+    "a second finger adds a touch while each view sees one"
+check "[mt] a moved changed=1 all=2 at 120.0 100.0 prev 90.0 90.0" "$out" \
+    "per-finger moves carry that view's coordinates"
+check "[mt] a ended changed=1 all=2" "$out" \
+    "lifting one finger leaves the other touch live"
+check "[mt] b ended changed=1 all=1" "$out" \
+    "the last finger ends with only its own touch"
+check "[mt] done" "$out" \
+    "both fingers end cleanly"
+
 # ---------- 4g. NSCalendar components ----------
 "$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
     -ffreestanding -O1 -I "$ROOT/frameworks" \

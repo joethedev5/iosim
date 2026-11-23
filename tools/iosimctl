@@ -753,6 +753,20 @@ def cmd_ui(args):
                 f"{int(round(y * scale))}")
         send(line)
         print(f"sent {line}")
+    elif args.action == "touch":
+        if len(params) != 4 or params[1] not in (
+                "down", "move", "up", "cancel"):
+            die("usage: iosimctl ui <device> touch <id> "
+                "<down|move|up|cancel> <x> <y>")
+        try:
+            ident = int(params[0])
+        except ValueError:
+            die("touch id must be an integer")
+        x, y = float(params[2]), float(params[3])
+        line = (f"touch {ident} {params[1]} "
+                f"{int(round(x * scale))} {int(round(y * scale))}")
+        send(line)
+        print(f"sent {line}")
     elif args.action == "appearance":
         if len(params) != 1 or params[0] not in ("light", "dark"):
             die(f"usage: iosimctl ui <device> appearance <light|dark>")
@@ -958,8 +972,9 @@ def main():
     p = sub.add_parser("ui", help="inject a system UI event")
     p.add_argument("device")
     p.add_argument("action",
-                   choices=["tap", "down", "move", "up", "swipe", "drag",
-                            "pinch", "rotate", "key", "backspace", "home",
+                   choices=["tap", "down", "move", "up", "touch", "swipe",
+                            "drag", "pinch", "rotate", "key", "backspace",
+                            "home",
                             "apps", "switcher", "lock", "unlock",
                             "appearance"])
     p.add_argument("params", nargs="*")

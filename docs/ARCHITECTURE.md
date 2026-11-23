@@ -1053,6 +1053,14 @@ offsets. `hitTest:` performs the same transform inversion on the point it
 receives, so a rotated or scaled view is touchable over the area it paints
 rather than its untransformed frame.
 
+Records of the form `touch <id> down|move|up|cancel <x> <y>` carry a finger
+identity. `UIWindow` keeps those touches in a dictionary, hit-tests each
+finger separately and delivers a `UIEvent` whose `allTouches` contains every
+live touch while the changed set holds only that finger.
+`touchesForView:`/`touchesForWindow:` partition the live set. The single-touch
+`down`/`move`/`up` records continue to drive gesture recognizers, controls and
+scrolling through the primary-touch path.
+
 `UIControl` tracks the touch: it highlights on down, sends `TouchDown`,
 reports `TouchDragInside`/`TouchDragOutside` (and enter/exit transitions) as
 the finger moves, then sends `TouchUpInside` or `TouchUpOutside` on release.

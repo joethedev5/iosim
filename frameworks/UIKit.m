@@ -72,6 +72,7 @@ extern int  iosim_fb_width(void);
 extern int  iosim_fb_height(void);
 extern int  iosim_event_next(int *type, int *x, int *y);
 extern void iosim_event_second_point(int *x, int *y);
+extern int  iosim_event_touch_id(void);
 extern int  iosim_event_open(void);
 extern void iosim_fb_set_opacity(double opacity);
 extern int iosim_fb_push_clip(int x, int y, int w, int h);
@@ -972,8 +973,11 @@ typedef enum {
 @interface UIEvent : NSObject {
 @public
     UITouch *_touch;
+    NSMutableArray *_touches;
+    NSSet *_changedTouches;
 }
 - (id)initWithTouch:(UITouch *)touch;
+- (id)initWithTouches:(NSArray *)touches changed:(NSSet *)changed;
 - (NSSet *)allTouches;
 - (NSSet *)touchesForView:(UIView *)view;
 - (NSSet *)touchesForWindow:(UIWindow *)window;
@@ -3740,6 +3744,7 @@ enum {
     double _pinchLastTime;
     BOOL _pinchRotationOnly;
     UIScrollView *_pinchScroll;
+    NSMutableDictionary *_multiTouches;
     UIView *_contextHit;
     CGPoint _contextStartPoint;
     double _contextStartTime;
@@ -3760,6 +3765,9 @@ enum {
            rotationOnly:(BOOL)rotationOnly;
 - (void)moveTwoFingerX1:(double)x1 y1:(double)y1 x2:(double)x2 y2:(double)y2;
 - (void)endTwoFingerX1:(double)x1 y1:(double)y1 x2:(double)x2 y2:(double)y2;
+- (void)beginMultiTouch:(int)ident atPoint:(CGPoint)point;
+- (void)moveMultiTouch:(int)ident toPoint:(CGPoint)point;
+- (void)endMultiTouch:(int)ident atPoint:(CGPoint)point cancelled:(BOOL)cancelled;
 - (void)makeKeyAndVisible;
 - (void)makeKeyWindow;
 - (BOOL)isKeyWindow;
@@ -5949,26 +5957,61 @@ static CGPoint touch_point_in_view(UIView *view, CGPoint point)
 {
     self = [super init];
     if (self)
+    {
         _touch = touch;
+        _touches = [[NSMutableArray alloc] init];
+        if (touch)
+        {
+            [_touches addObject:touch];
+            _changedTouches = [NSSet setWithObject:touch];
+        }
+    }
+    return self;
+}
+- (id)initWithTouches:(NSArray *)touches changed:(NSSet *)changed
+{
+    self = [super init];
+    if (self)
+    {
+        _touches = [[NSMutableArray alloc] init];
+        for (unsigned long i = 0; i < [touches count]; i++)
+            [_touches addObject:[touches objectAtIndex:i]];
+        _touch = [touches count] ? [touches objectAtIndex:0] : nil;
+        _changedTouches = changed;
+    }
     return self;
 }
 - (NSSet *)allTouches
 {
-    if (!_touch)
+    if (!_touches)
         return [NSSet set];
-    return [NSSet setWithObject:_touch];
+    return [NSSet setWithArray:_touches];
 }
 - (NSSet *)touchesForView:(UIView *)view
 {
-    if (_touch && (id)_touch->_view == (id)view)
-        return [NSSet setWithObject:_touch];
-    return [NSSet set];
+    NSMutableSet *set = [[NSMutableSet alloc] init];
+    if (!_touches)
+        return set;
+    for (unsigned long i = 0; i < [_touches count]; i++)
+    {
+        UITouch *touch = [_touches objectAtIndex:i];
+        if ((id)touch->_view == (id)view)
+            [set addObject:touch];
+    }
+    return set;
 }
 - (NSSet *)touchesForWindow:(UIWindow *)window
 {
-    if (_touch && (id)_touch->_window == (id)window)
-        return [NSSet setWithObject:_touch];
-    return [NSSet set];
+    NSMutableSet *set = [[NSMutableSet alloc] init];
+    if (!_touches)
+        return set;
+    for (unsigned long i = 0; i < [_touches count]; i++)
+    {
+        UITouch *touch = [_touches objectAtIndex:i];
+        if ((id)touch->_window == (id)window)
+            [set addObject:touch];
+    }
+    return set;
 }
 @end
 
@@ -15600,6 +15643,67 @@ static int context_menu_handle_tap(int px, int py)
             [_touchHit touchesEnded:set withEvent:event];
     }
     _touch = nil;
+}
+- (void)beginMultiTouch:(int)ident atPoint:(CGPoint)point
+{
+    if (!_multiTouches)
+        _multiTouches = [[NSMutableDictionary alloc] init];
+    UIView *hit = [self hitTest:point];
+    UITouch *touch = [[UITouch alloc] init];
+    touch->_location = point;
+    touch->_previousLocation = point;
+    touch->_phase = UITouchPhaseBegan;
+    touch->_timestamp = iosim_now();
+    touch->_view = hit;
+    touch->_window = self;
+    touch->_tapCount = 1;
+    [_multiTouches setObject:touch forKey:[NSNumber numberWithInt:ident]];
+    if (hit)
+    {
+        UIEvent *event = [[UIEvent alloc]
+            initWithTouches:[_multiTouches allValues]
+                    changed:[NSSet setWithObject:touch]];
+        [hit touchesBegan:[NSSet setWithObject:touch] withEvent:event];
+    }
+}
+- (void)moveMultiTouch:(int)ident toPoint:(CGPoint)point
+{
+    UITouch *touch = [_multiTouches objectForKey:[NSNumber numberWithInt:ident]];
+    if (!touch)
+        return;
+    touch->_previousLocation = touch->_location;
+    touch->_location = point;
+    touch->_phase = UITouchPhaseMoved;
+    touch->_timestamp = iosim_now();
+    if (touch->_view)
+    {
+        UIEvent *event = [[UIEvent alloc]
+            initWithTouches:[_multiTouches allValues]
+                    changed:[NSSet setWithObject:touch]];
+        [touch->_view touchesMoved:[NSSet setWithObject:touch] withEvent:event];
+    }
+}
+- (void)endMultiTouch:(int)ident atPoint:(CGPoint)point cancelled:(BOOL)cancelled
+{
+    UITouch *touch = [_multiTouches objectForKey:[NSNumber numberWithInt:ident]];
+    if (!touch)
+        return;
+    touch->_previousLocation = touch->_location;
+    touch->_location = point;
+    touch->_phase = cancelled ? UITouchPhaseCancelled : UITouchPhaseEnded;
+    touch->_timestamp = iosim_now();
+    NSSet *changed = [NSSet setWithObject:touch];
+    if (touch->_view)
+    {
+        UIEvent *event = [[UIEvent alloc]
+            initWithTouches:[_multiTouches allValues]
+                    changed:changed];
+        if (cancelled)
+            [touch->_view touchesCancelled:changed withEvent:event];
+        else
+            [touch->_view touchesEnded:changed withEvent:event];
+    }
+    [_multiTouches removeObjectForKey:[NSNumber numberWithInt:ident]];
 }
 - (void)dispatchTouchDownX:(int)x y:(int)y
 {
@@ -26086,6 +26190,19 @@ int UIApplicationMain(int argc, char **argv, id principal, id delegateName)
                 int dark = x != 0;
                 ui_appearance_write_file(dark);
                 ui_apply_style(dark);
+                redraw = 1;
+            }
+            else if (r == 1 && type >= 20 && type <= 23)
+            {
+                int ident = iosim_event_touch_id();
+                CGPoint point = CGPointMake(x / scale, y / scale);
+                if (type == 20)
+                    [window beginMultiTouch:ident atPoint:point];
+                else if (type == 21)
+                    [window moveMultiTouch:ident toPoint:point];
+                else
+                    [window endMultiTouch:ident atPoint:point
+                                 cancelled:type == 23];
                 redraw = 1;
             }
             else if (r == 1 && type >= 12 && type <= 17)

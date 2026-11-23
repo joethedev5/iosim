@@ -13,6 +13,13 @@
 static int event_fd = -1;
 static int second_x;
 static int second_y;
+static int last_touch_id;
+
+/* The finger id of the most recent per-touch record. */
+int iosim_event_touch_id(void)
+{
+    return last_touch_id;
+}
 
 /* The second finger of the last pinch/rotate record, in device pixels. */
 void iosim_event_second_point(int *x, int *y)
@@ -182,6 +189,30 @@ int iosim_event_next(int *type, int *x, int *y)
         *x = px;
         *y = 0;
         return 1;
+    }
+    {
+        int tid, tx, ty;
+        char action[16];
+        if (sscanf(line, "touch %d %15s %d %d", &tid, action, &tx, &ty) == 4)
+        {
+            int touch_type = 0;
+            if (strcmp(action, "down") == 0)
+                touch_type = 20;
+            else if (strcmp(action, "move") == 0)
+                touch_type = 21;
+            else if (strcmp(action, "up") == 0)
+                touch_type = 22;
+            else if (strcmp(action, "cancel") == 0)
+                touch_type = 23;
+            if (touch_type)
+            {
+                last_touch_id = tid;
+                *type = touch_type;
+                *x = tx;
+                *y = ty;
+                return 1;
+            }
+        }
     }
     {
         int x1, y1, x2, y2;
