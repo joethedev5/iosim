@@ -817,6 +817,116 @@ else
     echo "FAIL flip transitions"; echo "$out"; fails=$((fails+1))
 fi
 
+# ---------- 4f10c. Legacy UIView animation blocks ----------
+rm -f "$T/legacy.fifo"
+mkfifo "$T/legacy.fifo"
+"$ROOT/tools/build_app.sh" "$ROOT/tests/legacy_animation_test.m" \
+    "$T/legacy_animation_test" >/dev/null
+out="$(IOSIM_EVENT_FIFO="$T/legacy.fifo" \
+    IOSIM_TEST_PNG_MID="$T/legacy_mid.png" \
+    IOSIM_TEST_PNG_END="$T/legacy_end.png" \
+    IOSIM_TEST_PNG_REP1="$T/legacy_rep1.png" \
+    IOSIM_TEST_PNG_REP2="$T/legacy_rep2.png" \
+    DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" \
+    "$T/legacy_animation_test" 2>&1)"
+rm -f "$T/legacy.fifo"
+check "[legacy] ready" "$out" "the legacy animation fixture starts"
+check "[legacy] will 7" "$out" \
+    "beginAnimations runs the will-start delegate"
+check "[legacy] start" "$out" \
+    "commitAnimations captures the frame, alpha and transform changes"
+check "[legacy] mid 1 0" "$out" \
+    "hit-testing follows the interpolated legacy frame"
+check "[legacy] end 1 1" "$out" \
+    "the legacy frame settles at its committed value"
+check "[legacy] model 140 100 120" "$out" \
+    "the settled model frame and transform match the changes"
+check "[legacy] fade 40" "$out" \
+    "the untransformed view settles at its committed alpha"
+check "[legacy] stop 7 1" "$out" \
+    "the did-stop delegate reports a finished animation"
+check "[legacy] did7 1" "$out" "the first legacy animation stops once"
+check "[legacy] rep1" "$out" \
+    "the first repeat pass reaches a mid-cycle frame"
+check "[legacy] rep2" "$out" \
+    "the second repeat pass reaches a mid-cycle frame"
+check "[legacy] box model 200" "$out" \
+    "the repeated frame settles at the committed value"
+check "[legacy] stop 8 1" "$out" \
+    "the repeated animation reports one finished stop"
+check "[legacy] did8 1" "$out" "the repeat count adds exactly one pass"
+check "[legacy] will 9" "$out" \
+    "the transition block runs its will-start delegate"
+check "[legacy] stage 4" "$out" \
+    "setAnimationTransition stages the backdrop and both snapshots"
+check "[legacy] stop 9 1" "$out" \
+    "the transition completion reaches the did-stop delegate"
+check "[legacy] transition end 1 1" "$out" \
+    "the transition removes every staged view"
+check "[legacy] done" "$out" "the legacy animation fixture finishes"
+fixture_out="$out"
+if out="$(python3 - "$ROOT/tools" "$T/legacy_mid.png" "$T/legacy_end.png" \
+    "$T/legacy_rep1.png" "$T/legacy_rep2.png" <<'LEGACYPNG'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+
+def load(path):
+    w, h, bpp, rows = pngpixel.load(path)
+    def rgb(x, y):
+        c = pngpixel.px(rows, bpp, x * 3, y * 3)
+        return ((c >> 16) & 255, (c >> 8) & 255, c & 255)
+    return rgb
+
+def near(got, want, tol=25):
+    return all(abs(a - b) <= tol for a, b in zip(got, want))
+
+mid = load(sys.argv[2])
+end = load(sys.argv[3])
+rep1 = load(sys.argv[4])
+rep2 = load(sys.argv[5])
+
+def red_between(c, lo, hi):
+    r, g, b = c
+    return lo <= r <= hi and g < 50 and b < 60
+
+def blue_between(c, lo, hi):
+    r, g, b = c
+    return r < 70 and 40 <= g <= 115 and lo <= b <= hi
+
+def box_run(f, y):
+    xs = [x for x in range(0, 330) if blue_between(f(x, y), 180, 255)]
+    if not xs:
+        return None
+    return min(xs), max(xs)
+
+def mid_cycle(run):
+    return run is not None and 60 < run[0] < 170 and \
+        20 <= run[1] - run[0] <= 80
+
+checks = [
+    ("mid face", red_between(mid(215, 360), 200, 255)),
+    ("mid transform edge", near(mid(375, 360), (13, 15, 23))),
+    ("mid fade", blue_between(mid(330, 110), 130, 210)),
+    ("rep1 mid cycle", mid_cycle(box_run(rep1, 590))),
+    ("rep2 mid cycle", mid_cycle(box_run(rep2, 590))),
+    ("end face", red_between(end(270, 370), 200, 255)),
+    ("end transform edge", red_between(end(375, 360), 200, 255)),
+    ("end fade", blue_between(end(330, 110), 80, 145)),
+    ("end box settled", box_run(end, 590) is not None and
+     185 < box_run(end, 590)[0] < 215),
+]
+bad = [name for name, ok in checks if not ok]
+if bad:
+    raise SystemExit("legacy animation pixels failed: " + ", ".join(bad))
+print("ok   legacy animations move the transformed frame, repeat and fade")
+LEGACYPNG
+)"; then
+    echo "$out"
+else
+    echo "FAIL legacy animation pixels"; echo "$out"; fails=$((fails+1))
+fi
+
 # ---------- 4f11. CAAnimation completion and fill modes ----------
 rm -f "$T/arem.fifo"
 mkfifo "$T/arem.fifo"

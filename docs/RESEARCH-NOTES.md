@@ -1795,3 +1795,21 @@ components.
 - The known-limitations list no longer claims that socket activation, job
   throttling or binary property-list parsing are absent; all three are
   implemented and tested.
+
+## 2026-11-24: Legacy UIView animation blocks
+
+- `beginAnimations:context:`/`commitAnimations` capture the first pre-change
+  frame, alpha and transform of every view touched between them and turn
+  those captures into the existing per-view animation slots at commit.
+  `setAnimationDuration:`, `setAnimationDelay:`, `setAnimationCurve:`,
+  `setAnimationRepeatCount:` (with autoreverse) and the will-start/did-stop
+  delegate selectors drive the group; a repeat count adds finite cycles to
+  `view_animation_progress` through the new `_animRepeatCycles` field.
+- `setAnimationTransition:forView:cache:` snapshots the view when called and
+  stages a flip at commit for the FlipFromLeft/FlipFromRight types; the curl
+  types fade, matching the block-based transition subset.
+- Discovered while testing: a view that carries both a non-identity transform
+  and alpha below one composites its alpha more than once (the offscreen
+  transform pass stores an alpha-attenuated image and the affine blit applies
+  the composed alpha again). The fixture therefore fades an untransformed
+  view; fixing transformed-alpha compositing is queued as its own batch.

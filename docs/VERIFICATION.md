@@ -1979,6 +1979,25 @@ the panel for a yellow one: mid-flip the yellow snapshot occupies part of the
 panel's column and the backdrop the rest, and the root ends with the
 destination view only.
 
+### UIKit: legacy animation blocks
+
+`tests/legacy_animation_test.m` wraps a frame/transform change on a red
+panel and an alpha change on a separate blue view in
+`beginAnimations:context:` and `commitAnimations` with a linear 0.6 s curve
+and a delegate. At 0.4 s one hit test falls inside the interpolated
+transform but outside its committed extent, and the screenshot shows the red
+panel at the interpolated position, a point outside its animated extent still
+dark, and the blue view halfway to its committed alpha. At 0.8 s both hit
+tests hit, the model reports origin 140, alpha 1.00 and scale 1.20, and the
+fade view's model alpha is 0.40; the capture shows the panel's final extent
+and the darker blue view. The will-start and did-stop delegate callbacks fire
+once with context 7. A second block with `setAnimationRepeatCount:1` over
+1.0 s puts the moving box back at a mid-cycle position on both passes and
+settles it at 200, firing one stop. A third block sets
+`setAnimationTransition:FlipFromLeft` on a card: mid-flip the stage holds the
+card plus backdrop and both snapshots, the did-stop callback fires, and the
+stage ends with only the card.
+
 ### CoreAnimation: completion and fill modes
 
 `tests/animation_removal_test.m` starts three 0.5 s opacity animations from

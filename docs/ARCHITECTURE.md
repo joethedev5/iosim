@@ -1207,6 +1207,14 @@ decoded with libpng in `loader/image.c`.
   the first opaque superview background shows while they are edge-on.
   `transitionFromView:toView:` swaps the views and stages the same way in
   their parent. The curl styles fall back to the cross-dissolve fade.
+  The legacy `beginAnimations:context:`/`commitAnimations` block records the
+  first pre-change frame, alpha and transform of every view the setters
+  touch and turns those captures into the same per-view animation slots at
+  commit, so `setAnimationDuration:`, `setAnimationDelay:`,
+  `setAnimationCurve:`, repeat count/autoreverse and the will-start/did-stop
+  delegate callbacks apply to a whole statement group.
+  `setAnimationTransition:forView:cache:` snapshots the view when it is
+  called and stages a flip (or a fade for the curl styles) at commit.
   `CAAnimation` key paths drive
   layer opacity and corner radius, either from/to (`CABasicAnimation`) or
   through keyframes (`CAKeyframeAnimation` with values and keyTimes), using

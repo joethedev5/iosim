@@ -967,6 +967,21 @@ enum {
     UIViewAutoresizingFlexibleBottomMargin = 1 << 5
 };
 
+typedef enum {
+    UIViewAnimationTransitionNone = 0,
+    UIViewAnimationTransitionFlipFromLeft = 1,
+    UIViewAnimationTransitionFlipFromRight = 2,
+    UIViewAnimationTransitionCurlUp = 3,
+    UIViewAnimationTransitionCurlDown = 4
+} UIViewAnimationTransition;
+
+typedef enum {
+    UIViewAnimationCurveEaseInOut = 0,
+    UIViewAnimationCurveEaseIn = 1,
+    UIViewAnimationCurveEaseOut = 2,
+    UIViewAnimationCurveLinear = 3
+} UIViewAnimationCurve;
+
 @interface UIView : UIResponder
 - (id)initWithFrame:(CGRect)frame;
 - (CGRect)bounds;
@@ -1075,6 +1090,21 @@ enum {
                   duration:(double)duration
                    options:(unsigned long)options
                 completion:(void (^)(BOOL finished))completion;
++ (void)beginAnimations:(NSString *)animationID context:(void *)context;
++ (void)commitAnimations;
++ (void)setAnimationDuration:(double)duration;
++ (void)setAnimationDelay:(double)delay;
++ (void)setAnimationCurve:(UIViewAnimationCurve)curve;
++ (void)setAnimationRepeatCount:(float)count;
++ (void)setAnimationRepeatAutoreverses:(BOOL)autoreverses;
++ (void)setAnimationBeginsFromCurrentState:(BOOL)fromCurrentState;
++ (void)setAnimationTransition:(UIViewAnimationTransition)transition
+                       forView:(UIView *)view
+                         cache:(BOOL)cache;
++ (void)setAnimationDelegate:(id)delegate;
++ (void)setAnimationWillStartSelector:(SEL)selector;
++ (void)setAnimationDidStopSelector:(SEL)selector;
+- (UIView *)hitTest:(CGPoint)point;
 @property(nonatomic, retain) UIColor *tintColor;
 - (void)tintColorDidChange;
 @property long tintAdjustmentMode;
@@ -1092,13 +1122,6 @@ enum {
     UIViewAnimatingPositionEnd = 0,
     UIViewAnimatingPositionStart = 1,
     UIViewAnimatingPositionCurrent = 2
-};
-
-enum {
-    UIViewAnimationCurveEaseInOut = 0,
-    UIViewAnimationCurveEaseIn = 1,
-    UIViewAnimationCurveEaseOut = 2,
-    UIViewAnimationCurveLinear = 3
 };
 
 @interface UICubicTimingParameters : NSObject

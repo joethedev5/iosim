@@ -1316,6 +1316,21 @@ typedef enum {
     UIViewAutoresizingFlexibleBottomMargin = 1 << 5
 } UIViewAutoresizing;
 
+typedef enum {
+    UIViewAnimationTransitionNone = 0,
+    UIViewAnimationTransitionFlipFromLeft = 1,
+    UIViewAnimationTransitionFlipFromRight = 2,
+    UIViewAnimationTransitionCurlUp = 3,
+    UIViewAnimationTransitionCurlDown = 4
+} UIViewAnimationTransition;
+
+typedef enum {
+    UIViewAnimationCurveEaseInOut = 0,
+    UIViewAnimationCurveEaseIn = 1,
+    UIViewAnimationCurveEaseOut = 2,
+    UIViewAnimationCurveLinear = 3
+} UIViewAnimationCurve;
+
 @interface UIView : UIResponder {
 @public
     CGRect _frame;
@@ -1347,6 +1362,7 @@ typedef enum {
     BOOL _animInfinite;
     BOOL _animAutoreverse;
     int _animCurve;
+    int _animRepeatCycles;
     BOOL _animSpring;
     double _animDamping;
     double _animVelocity;
@@ -1553,6 +1569,20 @@ typedef enum {
                   duration:(double)duration
                    options:(unsigned long)options
                 completion:(void (^)(BOOL finished))completion;
++ (void)beginAnimations:(NSString *)animationID context:(void *)context;
++ (void)commitAnimations;
++ (void)setAnimationDuration:(double)duration;
++ (void)setAnimationDelay:(double)delay;
++ (void)setAnimationCurve:(UIViewAnimationCurve)curve;
++ (void)setAnimationRepeatCount:(float)count;
++ (void)setAnimationRepeatAutoreverses:(BOOL)autoreverses;
++ (void)setAnimationBeginsFromCurrentState:(BOOL)fromCurrentState;
++ (void)setAnimationTransition:(UIViewAnimationTransition)transition
+                       forView:(UIView *)view
+                         cache:(BOOL)cache;
++ (void)setAnimationDelegate:(id)delegate;
++ (void)setAnimationWillStartSelector:(SEL)selector;
++ (void)setAnimationDidStopSelector:(SEL)selector;
 @end
 
 typedef enum {
@@ -1566,13 +1596,6 @@ typedef enum {
     UIViewAnimatingPositionStart = 1,
     UIViewAnimatingPositionCurrent = 2
 } UIViewAnimatingPosition;
-
-typedef enum {
-    UIViewAnimationCurveEaseInOut = 0,
-    UIViewAnimationCurveEaseIn = 1,
-    UIViewAnimationCurveEaseOut = 2,
-    UIViewAnimationCurveLinear = 3
-} UIViewAnimationCurve;
 
 @interface UICubicTimingParameters : NSObject {
 @public
@@ -6164,6 +6187,86 @@ static double g_animateC1x, g_animateC1y, g_animateC2x, g_animateC2y;
 static double g_animActiveUntil;
 static int g_animInfiniteCount;
 
+/* Legacy UIView animations. beginAnimations:context: opens a change block;
+ * the frame/alpha/transform setters record each view's first pre-change
+ * value, and commitAnimations turns those captures into the same per-view
+ * animation slots the block API uses. */
+#define MAX_LEGACY_CHANGES 64
+struct legacy_change {
+    UIView *view;
+    BOOL frameChanged, alphaChanged, transformChanged;
+    CGRect frameFrom;
+    double alphaFrom;
+    CGAffineTransform transformFrom;
+};
+static struct legacy_change g_legacyChanges[MAX_LEGACY_CHANGES];
+static int g_legacyChangeCount;
+static int g_legacyDepth;
+static double g_legacyDuration = 0.2;
+static double g_legacyDelay;
+static int g_legacyCurve = UIViewAnimationCurveEaseInOut;
+static int g_legacyRepeatCycles;
+static BOOL g_legacyInfinite;
+static BOOL g_legacyAutoreverse;
+static BOOL g_legacyFromCurrent;
+static id g_legacyDelegate;
+static SEL g_legacyWillStart;
+static SEL g_legacyDidStop;
+static id g_legacyAnimationID;
+static void *g_legacyContext;
+static UIView *g_legacyTransitionView;
+static long g_legacyTransitionType;
+static UIView *g_legacyTransitionBefore;
+
+static struct legacy_change *legacy_change_for(UIView *view)
+{
+    for (int i = 0; i < g_legacyChangeCount; i++)
+        if (g_legacyChanges[i].view == view)
+            return &g_legacyChanges[i];
+    if (g_legacyChangeCount >= MAX_LEGACY_CHANGES)
+        return 0;
+    struct legacy_change *entry = &g_legacyChanges[g_legacyChangeCount++];
+    memset(entry, 0, sizeof(*entry));
+    entry->view = view;
+    return entry;
+}
+
+static void legacy_capture_frame(UIView *view)
+{
+    if (g_legacyDepth <= 0 || g_animating)
+        return;
+    struct legacy_change *change = legacy_change_for(view);
+    if (change && !change->frameChanged)
+    {
+        change->frameChanged = YES;
+        change->frameFrom = view->_frame;
+    }
+}
+
+static void legacy_capture_alpha(UIView *view)
+{
+    if (g_legacyDepth <= 0 || g_animating)
+        return;
+    struct legacy_change *change = legacy_change_for(view);
+    if (change && !change->alphaChanged)
+    {
+        change->alphaChanged = YES;
+        change->alphaFrom = view->_alpha;
+    }
+}
+
+static void legacy_capture_transform(UIView *view)
+{
+    if (g_legacyDepth <= 0 || g_animating)
+        return;
+    struct legacy_change *change = legacy_change_for(view);
+    if (change && !change->transformChanged)
+    {
+        change->transformChanged = YES;
+        change->transformFrom = view->_transform;
+    }
+}
+
 #define MAX_ANIMATION_COMPLETIONS 32
 static void (^g_completionBlocks[MAX_ANIMATION_COMPLETIONS])(BOOL);
 static double g_completionDue[MAX_ANIMATION_COMPLETIONS];
@@ -7053,6 +7156,7 @@ static void ui_trait_children(UIView *view, int oldParent, int newParent)
 - (CGRect)frame { return _frame; }
 - (void)setFrame:(CGRect)frame
 {
+    legacy_capture_frame(self);
     if (g_animating && _frame.size.width >= 0)
     {
         _animFrameFrom = _frame;
@@ -7071,6 +7175,7 @@ static void ui_trait_children(UIView *view, int oldParent, int newParent)
         _animC1y = g_animateC1y;
         _animC2x = g_animateC2x;
         _animC2y = g_animateC2y;
+        _animRepeatCycles = 0;
         _animatingFrame = YES;
         animation_mark_active(g_animDuration + g_animateDelay,
                               g_animateInfinite ? -1 : 0);
@@ -7451,6 +7556,7 @@ static CGPoint window_point_for_view(UIView *view, CGPoint point)
 }
 - (void)setAlpha:(double)alpha
 {
+    legacy_capture_alpha(self);
     if (g_animating && alpha != _alpha)
     {
         _animAlphaFrom = _alpha;
@@ -7469,6 +7575,7 @@ static CGPoint window_point_for_view(UIView *view, CGPoint point)
         _animC1y = g_animateC1y;
         _animC2x = g_animateC2x;
         _animC2y = g_animateC2y;
+        _animRepeatCycles = 0;
         _animatingAlpha = YES;
         animation_mark_active(g_animDuration + g_animateDelay,
                               g_animateInfinite ? -1 : 0);
@@ -7492,6 +7599,7 @@ static CGPoint window_point_for_view(UIView *view, CGPoint point)
 - (CGAffineTransform)transform { return _transform; }
 - (void)setTransform:(CGAffineTransform)transform
 {
+    legacy_capture_transform(self);
     if (g_animating)
     {
         _animTransformFrom = current_transform(self);
@@ -7510,6 +7618,7 @@ static CGPoint window_point_for_view(UIView *view, CGPoint point)
         _animC1y = g_animateC1y;
         _animC2x = g_animateC2x;
         _animC2y = g_animateC2y;
+        _animRepeatCycles = 0;
         _animatingTransform = YES;
         animation_mark_active(g_animDuration + g_animateDelay,
                               g_animateInfinite ? -1 : 0);
@@ -8008,6 +8117,301 @@ static void transition_animate_flip(UIView *host, CGRect area,
         if (completion)
             completion(finished);
     }];
+}
+static void legacy_will_notify(id delegate, SEL selector, id animationID,
+                               void *context)
+{
+    if (delegate && selector && [delegate respondsToSelector:selector])
+        ((void (*)(id, SEL, id, void *))objc_msgSend)(
+            delegate, selector, animationID, context);
+}
+
+static void legacy_stop_notify(id delegate, SEL selector, id animationID,
+                               void *context)
+{
+    if (delegate && selector && [delegate respondsToSelector:selector])
+    {
+        id finished = [NSNumber numberWithBool:YES];
+        ((void (*)(id, SEL, id, id, void *))objc_msgSend)(
+            delegate, selector, animationID, finished, context);
+    }
+}
+
+static BOOL legacy_rect_changed(CGRect a, CGRect b)
+{
+    return a.origin.x != b.origin.x || a.origin.y != b.origin.y ||
+           a.size.width != b.size.width || a.size.height != b.size.height;
+}
+
+static BOOL legacy_transform_changed(CGAffineTransform a, CGAffineTransform b)
+{
+    return a.a != b.a || a.b != b.b || a.c != b.c || a.d != b.d ||
+           a.tx != b.tx || a.ty != b.ty;
+}
+
+static void legacy_apply_anim(UIView *view)
+{
+    view->_animStart = iosim_now();
+    view->_animDuration = g_legacyDuration;
+    view->_animDelay = g_legacyDelay;
+    view->_animInfinite = g_legacyInfinite;
+    view->_animAutoreverse = g_legacyAutoreverse;
+    view->_animCurve = g_legacyCurve;
+    view->_animSpring = NO;
+    view->_animCubic = NO;
+    view->_animRepeatCycles = g_legacyInfinite ? 0 : g_legacyRepeatCycles;
+}
+
+static double legacy_total_duration(void)
+{
+    double total = g_legacyDuration * (g_legacyRepeatCycles + 1);
+    if (g_legacyAutoreverse)
+        total *= 2.0;
+    return total;
+}
+
+static void legacy_commit_animations(void)
+{
+    id delegate = g_legacyDelegate;
+    SEL willSelector = g_legacyWillStart;
+    SEL stopSelector = g_legacyDidStop;
+    id animationID = g_legacyAnimationID;
+    void *context = g_legacyContext;
+    BOOL animated = g_animationsEnabled && g_legacyDuration > 0.0;
+    BOOL staged = NO;
+    BOOL any = NO;
+
+    legacy_will_notify(delegate, willSelector, animationID, context);
+
+    if (animated && g_legacyTransitionView && g_legacyTransitionBefore &&
+        g_legacyTransitionType != UIViewAnimationTransitionNone)
+    {
+        UIView *view = g_legacyTransitionView;
+        UIView *host = [view superview];
+        if (host)
+        {
+            UIView *before = g_legacyTransitionBefore;
+            UIView *after = [view snapshotViewAfterScreenUpdates:YES];
+            if (after)
+            {
+                CGRect area = [view frame];
+                unsigned long options =
+                    ((unsigned long)g_legacyCurve) << 16;
+                BOOL flip =
+                    g_legacyTransitionType ==
+                        UIViewAnimationTransitionFlipFromLeft ||
+                    g_legacyTransitionType ==
+                        UIViewAnimationTransitionFlipFromRight;
+                if (flip)
+                {
+                    transition_animate_flip(
+                        host, area, before, after, options,
+                        g_legacyDuration, 1, transition_backdrop(view),
+                        ^(BOOL finished) {
+                            (void)finished;
+                            legacy_stop_notify(delegate, stopSelector,
+                                               animationID, context);
+                        });
+                }
+                else
+                {
+                    /* Curl styles fade, matching the block-based API. */
+                    before.frame = area;
+                    before.userInteractionEnabled = NO;
+                    [host addSubview:before];
+                    [UIView animateWithDuration:g_legacyDuration
+                                         delay:0.0 options:options
+                                      animations:^{
+                        before.alpha = 0.0;
+                    } completion:^(BOOL finished) {
+                        (void)finished;
+                        [before removeFromSuperview];
+                        legacy_stop_notify(delegate, stopSelector,
+                                           animationID, context);
+                    }];
+                }
+                staged = YES;
+            }
+        }
+    }
+
+    if (!staged)
+    {
+        if (animated)
+        {
+            for (int i = 0; i < g_legacyChangeCount; i++)
+            {
+                struct legacy_change *change = &g_legacyChanges[i];
+                UIView *view = change->view;
+                BOOL moved = NO;
+                if (change->frameChanged)
+                {
+                    CGRect from = change->frameFrom;
+                    if (g_legacyFromCurrent && view->_animatingFrame)
+                        from = current_frame(view);
+                    if (legacy_rect_changed(from, view->_frame))
+                    {
+                        view->_animFrameFrom = from;
+                        view->_animFrameTo = view->_frame;
+                        view->_animatingFrame = YES;
+                        moved = YES;
+                    }
+                }
+                if (change->alphaChanged)
+                {
+                    double from = change->alphaFrom;
+                    if (g_legacyFromCurrent && view->_animatingAlpha)
+                        from = current_alpha(view);
+                    if (from != view->_alpha)
+                    {
+                        view->_animAlphaFrom = from;
+                        view->_animAlphaTo = view->_alpha;
+                        view->_animatingAlpha = YES;
+                        moved = YES;
+                    }
+                }
+                if (change->transformChanged)
+                {
+                    CGAffineTransform from = change->transformFrom;
+                    if (g_legacyFromCurrent && view->_animatingTransform)
+                        from = current_transform(view);
+                    if (legacy_transform_changed(from, view->_transform))
+                    {
+                        view->_animTransformFrom = from;
+                        view->_animTransformTo = view->_transform;
+                        view->_animatingTransform = YES;
+                        moved = YES;
+                    }
+                }
+                if (moved)
+                {
+                    legacy_apply_anim(view);
+                    if (g_legacyInfinite)
+                        animation_mark_active(
+                            g_legacyDuration + g_legacyDelay, -1);
+                    else
+                        animation_mark_active(
+                            g_legacyDelay + legacy_total_duration(), 0);
+                    any = YES;
+                }
+            }
+        }
+        if (any && !g_legacyInfinite)
+            animation_add_completion(
+                g_legacyDelay + legacy_total_duration(),
+                ^(BOOL finished) {
+                    (void)finished;
+                    legacy_stop_notify(delegate, stopSelector,
+                                       animationID, context);
+                });
+        else if (!any)
+            legacy_stop_notify(delegate, stopSelector, animationID, context);
+    }
+
+    g_legacyChangeCount = 0;
+    g_legacyTransitionView = nil;
+    g_legacyTransitionBefore = nil;
+    g_legacyTransitionType = UIViewAnimationTransitionNone;
+    g_legacyDelegate = nil;
+    g_legacyWillStart = 0;
+    g_legacyDidStop = 0;
+    g_legacyAnimationID = nil;
+    g_legacyContext = 0;
+}
+
++ (void)beginAnimations:(NSString *)animationID context:(void *)context
+{
+    if (g_legacyDepth == 0)
+    {
+        g_legacyChangeCount = 0;
+        g_legacyDuration = 0.2;
+        g_legacyDelay = 0.0;
+        g_legacyCurve = UIViewAnimationCurveEaseInOut;
+        g_legacyRepeatCycles = 0;
+        g_legacyInfinite = NO;
+        g_legacyAutoreverse = NO;
+        g_legacyFromCurrent = NO;
+        g_legacyDelegate = nil;
+        g_legacyWillStart = 0;
+        g_legacyDidStop = 0;
+        g_legacyTransitionView = nil;
+        g_legacyTransitionBefore = nil;
+        g_legacyTransitionType = UIViewAnimationTransitionNone;
+    }
+    g_legacyAnimationID = animationID;
+    g_legacyContext = context;
+    g_legacyDepth++;
+}
+
++ (void)commitAnimations
+{
+    if (g_legacyDepth <= 0)
+        return;
+    g_legacyDepth--;
+    if (g_legacyDepth > 0)
+        return;
+    legacy_commit_animations();
+}
+
++ (void)setAnimationDuration:(double)duration
+{
+    if (duration >= 0.0)
+        g_legacyDuration = duration;
+}
+
++ (void)setAnimationDelay:(double)delay { g_legacyDelay = delay; }
+
++ (void)setAnimationCurve:(UIViewAnimationCurve)curve
+{
+    g_legacyCurve = (int)curve;
+}
+
++ (void)setAnimationRepeatCount:(float)count
+{
+    if (!(count == count))
+        return;
+    if (count < 0.0f || count > 1000000.0f)
+    {
+        g_legacyInfinite = YES;
+        g_legacyRepeatCycles = 0;
+    }
+    else
+    {
+        g_legacyInfinite = NO;
+        g_legacyRepeatCycles = (int)(count + 0.5f);
+    }
+}
+
++ (void)setAnimationRepeatAutoreverses:(BOOL)autoreverses
+{
+    g_legacyAutoreverse = autoreverses;
+}
+
++ (void)setAnimationBeginsFromCurrentState:(BOOL)fromCurrentState
+{
+    g_legacyFromCurrent = fromCurrentState;
+}
+
++ (void)setAnimationTransition:(UIViewAnimationTransition)transition
+                       forView:(UIView *)view
+                         cache:(BOOL)cache
+{
+    (void)cache;
+    if (g_legacyDepth <= 0 || !view)
+        return;
+    g_legacyTransitionView = view;
+    g_legacyTransitionType = (long)transition;
+    g_legacyTransitionBefore = [view snapshotViewAfterScreenUpdates:NO];
+}
+
++ (void)setAnimationDelegate:(id)delegate { g_legacyDelegate = delegate; }
++ (void)setAnimationWillStartSelector:(SEL)selector
+{
+    g_legacyWillStart = selector;
+}
++ (void)setAnimationDidStopSelector:(SEL)selector
+{
+    g_legacyDidStop = selector;
 }
 + (void)animateWithDuration:(double)duration animations:(void (^)(void))animations
 {
@@ -19719,6 +20123,22 @@ static double view_animation_progress(UIView *view, int *finished)
         if (finished)
             *finished = 1;
         return 1.0;
+    }
+    if (!view->_animInfinite && view->_animRepeatCycles > 0)
+    {
+        double cycle = duration * (view->_animAutoreverse ? 2.0 : 1.0);
+        double total = cycle * (view->_animRepeatCycles + 1);
+        if (elapsed >= total)
+        {
+            if (finished)
+                *finished = 1;
+            return 1.0;
+        }
+        double local = elapsed / cycle;
+        local -= (double)(long)local;
+        if (view->_animAutoreverse)
+            local = local < 0.5 ? local * 2.0 : (1.0 - local) * 2.0;
+        return view_animation_ease(view, local);
     }
     double p = elapsed / duration;
     if (!view->_animInfinite)
