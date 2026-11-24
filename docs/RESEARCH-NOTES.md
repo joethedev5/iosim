@@ -1176,3 +1176,26 @@ components.
   function array alongside values and keyTimes, so presentation layers
   evaluate the same policy as the renderer.
 
+## 2026-11-24: Byte and date component formatters
+
+- `NSByteCountFormatter` uses 1000 for the file and decimal styles and 1024
+  for memory and binary. The exponent grows while the count reaches the base,
+  up to EB. `allowedUnits` is checked with one bit per exponent; when the
+  natural unit is excluded the formatter promotes to the next allowed larger
+  unit (and falls back to the next smaller one when none is larger).
+- Counts above the byte unit print one fraction digit below ten and round to
+  integers otherwise. `zeroPadsFractionDigits` keeps the `.0`;
+  `includesUnit`/`includesCount` select the parts, and
+  `includesActualByteCount` appends `(N bytes)` for scaled units.
+- `NSDateComponentsFormatter` first decomposes an interval into clock fields;
+  when second, minute or hour units are excluded their values fold into the
+  next smaller unit or are dropped, and when day-or-larger units are absent a
+  day's worth of hours folds into the hour field. Years use 365 days, months
+  30 days and weeks 7 days, with remainders dropped below a disallowed day.
+- Unit styles emit positional colons with zero padding down to the smallest
+  allowed unit, abbreviated suffixes, short labels, full singular/plural
+  words or spelled-out numbers. `maximumUnitCount` keeps the largest nonzero
+  fields, and the approximation/time-remaining phrases wrap the result.
+  `NSDate timeIntervalSinceDate:` supplies the signed interval for date-pair
+  formatting.
+

@@ -60,6 +60,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | `NSURLSession` data tasks and `NSMutableURLRequest` POSTs with custom headers, status and response headers over a host HTTP/1.0 client, including HTTPS via OpenSSL | ✅ |
 | Key-value coding (accessors, boxing, key paths, collection operators) and automatic KVO | ✅ |
 | NSDateFormatter parse/print round trip, NSNumberFormatter decimal/currency/percent | ✅ |
+| NSByteCountFormatter file/memory/decimal/binary styles with unit masks and actual byte counts; NSDateComponentsFormatter positional/abbreviated/short/full units, maximumUnitCount and phrases; NSDate timeIntervalSinceDate: | ✅ |
 | KDK kernel symbolication: full local+global maps, Mach trap and BSD syscall tables | ✅ |
 | `NSFileManager`, `NSData` file I/O, `NSFileHandle` read/write/seek/truncate, `NSURL`, `NSJSONSerialization` | ✅ |
 | `NSPropertyListSerialization` (XML and binary formats) and persistent `NSUserDefaults` domains | ✅ |

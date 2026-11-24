@@ -685,6 +685,15 @@ equivalents) and rebuilds the epoch with `days_from_civil`. `NSNumberFormatter`
 formats decimals with grouping and minimum/maximum fraction digits, adds a
 currency symbol or a percent suffix and scales for the style, and parses
 formatted text (sign, group separators, `$`, `%`) back to an `NSNumber`.
+`NSByteCountFormatter` scales by 1000 for the file and decimal styles and by
+1024 for the memory and binary styles, rounds values below ten to one
+fraction digit, honors `allowedUnits` masks by promoting to the next allowed
+unit, and can print counts, units or the exact byte count. The date
+components formatter splits an interval into day-or-larger calendar fields
+and clock fields, folds a missing unit into the next one below it, and prints
+positional, abbreviated, short, full or spelled-out units with
+`maximumUnitCount`, approximation and time-remaining phrases; dates are
+differenced with `timeIntervalSinceDate:`.
 
 `NSKeyedArchiver` builds the same keyed-archive structure Foundation uses: an
 XML plist with `$archiver`, `$version`, `$top` and a `$objects` table, where

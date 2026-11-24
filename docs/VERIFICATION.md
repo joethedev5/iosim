@@ -1218,6 +1218,26 @@ number formatters print `decimal 1,234.5` (grouping, max two fraction digits
 with the trailing zero trimmed), `parsed number 1234.5` for
 `numberFromString:@"1,234.50"`, `currency $99.50` and `percent 25.6%`.
 
+### Foundation: byte and time formatters
+
+`tests/formatter_test.m` prints byte counts under both count styles and
+restricted unit masks. 999 file-style bytes stay `999 bytes`, 1000 becomes
+`1 KB`, 1536 reads `1.5 KB`, 1500000 reads `1.5 MB`, and 1048576 memory-style
+bytes read `1 MB`. Restricting allowedUnits to KB turns 1500000 into
+`1500 KB`; turning off includesUnit reads `1.5`, turning off includesCount
+reads `KB`, and includesActualByteCount reads `1.5 KB (1536 bytes)`.
+zeroPadsFractionDigits turns 2048 into `2.0 KB`, and zero prints `0 bytes`.
+
+The same fixture formats 3661 seconds as `1:01:01`, 61 as `1:01` and 3600 as
+`1:00:00` in positional style; abbreviated reads `1h 1m 1s`; 90061 in short
+style reads `1 day, 1 hr, 1 min, 1 sec`, in full style
+`1 day, 1 hour, 1 minute, 1 second`, and with maximumUnitCount 2
+`1 day, 1 hour`. Restricting units to hour/minute/second folds the day into
+`25 hr, 1 min, 1 sec`. The phrase options produce
+`1 hr, 1 min remaining` and `About 1 hr, 1 min`; date components format as
+`2 hr, 5 min`; `stringFromDate:toDate:` reads `1:01:01`; and
+`timeIntervalSinceDate:` reports 3661.
+
 ### UIKit: app bundle resources
 
 `demo/ResourceApp.m` is installed as a real `.app` with a 4 x 4 red `dot.png`

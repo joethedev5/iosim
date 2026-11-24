@@ -5552,6 +5552,11 @@ static void iosim_civil_from_days(long long z, int *year, int *month, int *day)
 {
     return _timeIntervalSince1970 - iosim_wall_time();
 }
+- (double)timeIntervalSinceDate:(NSDate *)date
+{
+    return _timeIntervalSince1970 -
+           (date ? date->_timeIntervalSince1970 : 0.0);
+}
 @end
 
 static long long days_from_civil(long long y, int m, int d);
@@ -5924,6 +5929,493 @@ static double number_formatter_pow10(int digits)
         value = -value;
     return [NSNumber numberWithDouble:value];
 }
+@end
+
+/* --------------------------------------------------- byte count format */
+
+@implementation NSByteCountFormatter
+- (id)init
+{
+    self = [super init];
+    if (self)
+    {
+        _countStyle = NSByteCountFormatterCountStyleFile;
+        _allowedUnits = NSByteCountFormatterUseDefault;
+        _includesUnit = YES;
+        _includesCount = YES;
+    }
+    return self;
+}
++ (id)stringFromByteCount:(long long)byteCount countStyle:(long)countStyle
+{
+    NSByteCountFormatter *formatter = [[[self alloc] init] autorelease];
+    [formatter setCountStyle:countStyle];
+    return [formatter stringFromByteCount:byteCount];
+}
+- (id)stringFromByteCount:(long long)byteCount
+{
+    int binary = _countStyle == NSByteCountFormatterCountStyleMemory ||
+                 _countStyle == NSByteCountFormatterCountStyleBinary;
+    unsigned long long base = binary ? 1024ULL : 1000ULL;
+    int negative = byteCount < 0;
+    unsigned long long count =
+        negative ? (unsigned long long)(-(byteCount + 1)) + 1ULL
+                 : (unsigned long long)byteCount;
+    int exponent = 0;
+    unsigned long long scaled = count;
+    while (scaled >= base && exponent < 6)
+    {
+        scaled /= base;
+        exponent++;
+    }
+    unsigned long allowed = _allowedUnits;
+    if (allowed == NSByteCountFormatterUseDefault)
+        allowed = NSByteCountFormatterUseAll;
+    if (!(allowed & (1UL << exponent)))
+    {
+        int next = exponent + 1;
+        while (next <= 6 && !(allowed & (1UL << next)))
+            next++;
+        if (next <= 6)
+            exponent = next;
+        else
+        {
+            next = exponent - 1;
+            while (next >= 0 && !(allowed & (1UL << next)))
+                next--;
+            if (next < 0)
+                next = 0;
+            exponent = next;
+        }
+    }
+    static const char *unit_names[] = { "bytes", "KB", "MB", "GB", "TB",
+                                        "PB", "EB" };
+    char number[64];
+    if (exponent == 0)
+        snprintf(number, sizeof(number), "%llu", count);
+    else
+    {
+        double divisor = 1.0;
+        for (int i = 0; i < exponent; i++)
+            divisor *= (double)base;
+        double value = (double)count / divisor;
+        if (value < 9.95)
+        {
+            snprintf(number, sizeof(number), "%.1f", value);
+            unsigned long length = strlen(number);
+            if (!_zeroPadsFractionDigits && length > 2 &&
+                number[length - 2] == '.' && number[length - 1] == '0')
+                number[length - 2] = 0;
+        }
+        else
+            snprintf(number, sizeof(number), "%.0f", value);
+    }
+    char out[512];
+    unsigned long used = 0;
+    out[0] = 0;
+    if (negative)
+        used += (unsigned long)snprintf(out + used, sizeof(out) - used, "-");
+    if (_includesCount)
+        used += (unsigned long)snprintf(out + used, sizeof(out) - used, "%s",
+                                 number);
+    if (_includesUnit)
+    {
+        if (_includesCount && used)
+            used += (unsigned long)snprintf(out + used, sizeof(out) - used, " ");
+        if (exponent == 0)
+            used += (unsigned long)snprintf(out + used, sizeof(out) - used, "%s",
+                                     count == 1 ? "byte" : "bytes");
+        else
+            used += (unsigned long)snprintf(out + used, sizeof(out) - used, "%s",
+                                     unit_names[exponent]);
+    }
+    if (_includesActualByteCount && _includesCount && _includesUnit &&
+        exponent > 0)
+        snprintf(out + strlen(out), sizeof(out) - strlen(out),
+                 " (%llu bytes)", count);
+    return [NSString stringWithUTF8String:out];
+}
+- (long)countStyle { return _countStyle; }
+- (void)setCountStyle:(long)style { _countStyle = style; }
+- (unsigned long)allowedUnits { return _allowedUnits; }
+- (void)setAllowedUnits:(unsigned long)units { _allowedUnits = units; }
+- (BOOL)includesUnit { return _includesUnit; }
+- (void)setIncludesUnit:(BOOL)includes { _includesUnit = includes; }
+- (BOOL)includesCount { return _includesCount; }
+- (void)setIncludesCount:(BOOL)includes { _includesCount = includes; }
+- (BOOL)includesActualByteCount { return _includesActualByteCount; }
+- (void)setIncludesActualByteCount:(BOOL)includes
+{
+    _includesActualByteCount = includes;
+}
+- (BOOL)isAdaptive { return _adaptive; }
+- (void)setAdaptive:(BOOL)adaptive { _adaptive = adaptive; }
+- (BOOL)allowsNonnumericFormatting { return _allowsNonnumericFormatting; }
+- (void)setAllowsNonnumericFormatting:(BOOL)allows
+{
+    _allowsNonnumericFormatting = allows;
+}
+- (BOOL)zeroPadsFractionDigits { return _zeroPadsFractionDigits; }
+- (void)setZeroPadsFractionDigits:(BOOL)pads
+{
+    _zeroPadsFractionDigits = pads;
+}
+- (long)formattingContext { return _formattingContext; }
+- (void)setFormattingContext:(long)context { _formattingContext = context; }
+@end
+
+/* -------------------------------------------- date components format */
+
+struct date_parts {
+    long long year, month, week, day, hour, minute, second;
+};
+
+#define DATE_FORMATTER_DEFAULT_UNITS                                      \
+    (NSCalendarUnitYear | NSCalendarUnitMonth | NSCalendarUnitWeekOfYear | \
+     NSCalendarUnitDay | NSCalendarUnitHour | NSCalendarUnitMinute |      \
+     NSCalendarUnitSecond)
+
+static const unsigned long date_unit_bits[7] = {
+    NSCalendarUnitYear, NSCalendarUnitMonth, NSCalendarUnitWeekOfYear,
+    NSCalendarUnitDay, NSCalendarUnitHour, NSCalendarUnitMinute,
+    NSCalendarUnitSecond
+};
+
+static void date_parts_from_interval(double interval, unsigned long allowed,
+                                     struct date_parts *parts,
+                                     int *negative)
+{
+    memset(parts, 0, sizeof(*parts));
+    *negative = 0;
+    double work = interval;
+    if (work < 0)
+    {
+        *negative = 1;
+        work = -work;
+    }
+    long long total = (long long)work;
+    long long secs = total % 60;
+    total /= 60;
+    long long mins = total % 60;
+    total /= 60;
+    long long hours = total % 24;
+    total /= 24;
+    long long days = total;
+    int has_second = (allowed & NSCalendarUnitSecond) != 0;
+    int has_minute = (allowed & NSCalendarUnitMinute) != 0;
+    int has_hour = (allowed & NSCalendarUnitHour) != 0;
+    int has_day = (allowed & NSCalendarUnitDay) != 0;
+    int has_week = (allowed & NSCalendarUnitWeekOfYear) != 0;
+    int has_month = (allowed & NSCalendarUnitMonth) != 0;
+    int has_year = (allowed & NSCalendarUnitYear) != 0;
+    if (!has_second)
+        secs = 0;
+    if (!has_minute)
+    {
+        if (!has_hour && has_second)
+            secs += mins * 60;
+        mins = 0;
+    }
+    if (!has_hour)
+    {
+        if (has_minute)
+            mins += hours * 60;
+        else if (has_second)
+            secs += hours * 3600;
+        hours = 0;
+    }
+    else if (!(has_day || has_week || has_month || has_year))
+    {
+        hours += days * 24;
+        days = 0;
+    }
+    if (!has_day && !(has_week || has_month || has_year))
+    {
+        if (has_hour)
+        {
+            hours += days * 24;
+            days = 0;
+        }
+        else
+            days = 0;
+    }
+    if (has_year)
+    {
+        parts->year = days / 365;
+        days %= 365;
+    }
+    if (has_month)
+    {
+        parts->month = days / 30;
+        days %= 30;
+    }
+    if (has_week)
+    {
+        parts->week = days / 7;
+        days %= 7;
+    }
+    if (has_day)
+        parts->day = days;
+    parts->hour = hours;
+    parts->minute = mins;
+    parts->second = secs;
+}
+
+static void number_words(long long value, char *out, unsigned long outSize)
+{
+    static const char *small[] = {
+        "zero", "one", "two", "three", "four", "five", "six", "seven",
+        "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen",
+        "fifteen", "sixteen", "seventeen", "eighteen", "nineteen"
+    };
+    static const char *tens[] = {
+        "", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy",
+        "eighty", "ninety"
+    };
+    int negative = value < 0;
+    if (negative)
+        value = -value;
+    if (value < 20)
+        snprintf(out, outSize, "%s%s", negative ? "minus " : "",
+                 small[value]);
+    else if (value < 100)
+    {
+        if (value % 10)
+            snprintf(out, outSize, "%s%s-%s", negative ? "minus " : "",
+                     tens[value / 10], small[value % 10]);
+        else
+            snprintf(out, outSize, "%s%s", negative ? "minus " : "",
+                     tens[value / 10]);
+    }
+    else
+        snprintf(out, outSize, "%s%lld", negative ? "minus " : "", value);
+}
+
+static void format_date_parts(struct date_parts *parts,
+                              unsigned long allowed, long style,
+                              long maximumUnitCount, char *out,
+                              unsigned long outSize)
+{
+    long long values[7] = { parts->year,  parts->month, parts->week,
+                            parts->day,   parts->hour,  parts->minute,
+                            parts->second };
+    if (style == NSDateComponentsFormatterUnitsStylePositional)
+    {
+        int first = -1;
+        for (int i = 0; i < 7; i++)
+            if (values[i] != 0)
+            {
+                first = i;
+                break;
+            }
+        if (first < 0)
+        {
+            if ((allowed & NSCalendarUnitMinute) &&
+                (allowed & NSCalendarUnitSecond))
+                snprintf(out, outSize, "0:00");
+            else
+                snprintf(out, outSize, "0");
+            return;
+        }
+        int last = first;
+        for (int i = first; i < 7; i++)
+            if (allowed & date_unit_bits[i])
+                last = i;
+        unsigned long used = 0;
+        out[0] = 0;
+        for (int i = first; i <= last && i < 7; i++)
+        {
+            if (i == first)
+                used += (unsigned long)snprintf(out + used, outSize - used,
+                                         "%lld", values[i]);
+            else
+                used += (unsigned long)snprintf(out + used, outSize - used,
+                                         ":%02lld", values[i]);
+        }
+        return;
+    }
+    static const char *abbreviated[7] = { "y", "mo", "w", "d", "h", "m",
+                                          "s" };
+    static const char *short_units[7] = { "yr", "mo", "wk", "day", "hr",
+                                          "min", "sec" };
+    static const char *full_singular[7] = {
+        "year", "month", "week", "day", "hour", "minute", "second"
+    };
+    static const char *full_plural[7] = {
+        "years", "months", "weeks", "days", "hours", "minutes", "seconds"
+    };
+    long emitted = 0;
+    unsigned long used = 0;
+    out[0] = 0;
+    for (int i = 0; i < 7; i++)
+    {
+        if (values[i] == 0)
+            continue;
+        if (maximumUnitCount > 0 && emitted >= maximumUnitCount)
+            break;
+        if (emitted)
+            used += (unsigned long)snprintf(out + used, outSize - used, "%s",
+                                     style ==
+                                         NSDateComponentsFormatterUnitsStyleAbbreviated
+                                         ? " " : ", ");
+        if (style == NSDateComponentsFormatterUnitsStyleSpellOut)
+        {
+            char words[64];
+            number_words(values[i], words, sizeof(words));
+            used += (unsigned long)snprintf(out + used, outSize - used,
+                                     "%s %s", words,
+                                     values[i] == 1 ? full_singular[i]
+                                                    : full_plural[i]);
+        }
+        else if (style == NSDateComponentsFormatterUnitsStyleFull)
+            used += (unsigned long)snprintf(out + used, outSize - used,
+                                     "%lld %s", values[i],
+                                     values[i] == 1 ? full_singular[i]
+                                                    : full_plural[i]);
+        else if (style ==
+                 NSDateComponentsFormatterUnitsStyleAbbreviated)
+            used += (unsigned long)snprintf(out + used, outSize - used, "%lld%s",
+                                     values[i], abbreviated[i]);
+        else
+            used += (unsigned long)snprintf(out + used, outSize - used, "%lld %s",
+                                     values[i], short_units[i]);
+        emitted++;
+    }
+    if (!emitted)
+        snprintf(out, outSize, "%s",
+                 style == NSDateComponentsFormatterUnitsStyleAbbreviated
+                     ? "0s"
+                     : style == NSDateComponentsFormatterUnitsStyleShort
+                           ? "0 sec" : "0 seconds");
+}
+
+@implementation NSDateComponentsFormatter
+- (id)init
+{
+    self = [super init];
+    if (self)
+    {
+        _unitsStyle = NSDateComponentsFormatterUnitsStylePositional;
+        _allowedUnits = DATE_FORMATTER_DEFAULT_UNITS;
+        _zeroFormattingBehavior =
+            NSDateComponentsFormatterZeroFormattingBehaviorDefault;
+    }
+    return self;
+}
++ (id)stringFromTimeInterval:(double)interval
+{
+    NSDateComponentsFormatter *formatter =
+        [[[self alloc] init] autorelease];
+    return [formatter stringFromTimeInterval:interval];
+}
+- (id)stringFromTimeInterval:(double)interval
+{
+    unsigned long allowed =
+        _allowedUnits ? _allowedUnits : DATE_FORMATTER_DEFAULT_UNITS;
+    struct date_parts parts;
+    int negative = 0;
+    date_parts_from_interval(interval, allowed, &parts, &negative);
+    char body[512];
+    format_date_parts(&parts, allowed, _unitsStyle, _maximumUnitCount, body,
+                      sizeof(body));
+    char out[640];
+    unsigned long used = 0;
+    out[0] = 0;
+    if (negative && body[0])
+        used += (unsigned long)snprintf(out + used, sizeof(out) - used, "-");
+    if (_includesApproximationPhrase)
+        used += (unsigned long)snprintf(out + used, sizeof(out) - used, "About ");
+    used += (unsigned long)snprintf(out + used, sizeof(out) - used, "%s", body);
+    if (_includesTimeRemainingPhrase)
+        snprintf(out + used, sizeof(out) - used, " remaining");
+    return [NSString stringWithUTF8String:out];
+}
+- (id)stringFromDateComponents:(NSDateComponents *)components
+{
+    if (!components)
+        return @"";
+    unsigned long allowed =
+        _allowedUnits ? _allowedUnits : DATE_FORMATTER_DEFAULT_UNITS;
+    struct date_parts parts;
+    memset(&parts, 0, sizeof(parts));
+    int negative = 0;
+    long long values[7] = {
+        [components year], [components month], [components weekOfYear],
+        [components day], [components hour], [components minute],
+        [components second]
+    };
+    long long *targets[7] = {
+        &parts.year, &parts.month, &parts.week, &parts.day, &parts.hour,
+        &parts.minute, &parts.second
+    };
+    for (int i = 0; i < 7; i++)
+    {
+        if (!(allowed & date_unit_bits[i]))
+            continue;
+        long long value = values[i];
+        if (value < 0)
+        {
+            negative = 1;
+            value = -value;
+        }
+        *targets[i] = value;
+    }
+    char body[512];
+    format_date_parts(&parts, allowed, _unitsStyle, _maximumUnitCount, body,
+                      sizeof(body));
+    char out[640];
+    unsigned long used = 0;
+    out[0] = 0;
+    if (negative && body[0])
+        used += (unsigned long)snprintf(out + used, sizeof(out) - used, "-");
+    if (_includesApproximationPhrase)
+        used += (unsigned long)snprintf(out + used, sizeof(out) - used, "About ");
+    used += (unsigned long)snprintf(out + used, sizeof(out) - used, "%s", body);
+    if (_includesTimeRemainingPhrase)
+        snprintf(out + used, sizeof(out) - used, " remaining");
+    return [NSString stringWithUTF8String:out];
+}
+- (id)stringFromDate:(NSDate *)startDate toDate:(NSDate *)endDate
+{
+    double interval =
+        endDate && startDate ? [endDate timeIntervalSinceDate:startDate] : 0;
+    return [self stringFromTimeInterval:interval];
+}
+- (long)unitsStyle { return _unitsStyle; }
+- (void)setUnitsStyle:(long)style { _unitsStyle = style; }
+- (unsigned long)allowedUnits { return _allowedUnits; }
+- (void)setAllowedUnits:(unsigned long)units { _allowedUnits = units; }
+- (long)maximumUnitCount { return _maximumUnitCount; }
+- (void)setMaximumUnitCount:(long)count { _maximumUnitCount = count; }
+- (long)zeroFormattingBehavior { return _zeroFormattingBehavior; }
+- (void)setZeroFormattingBehavior:(long)behavior
+{
+    _zeroFormattingBehavior = behavior;
+}
+- (BOOL)includesApproximationPhrase { return _includesApproximationPhrase; }
+- (void)setIncludesApproximationPhrase:(BOOL)includes
+{
+    _includesApproximationPhrase = includes;
+}
+- (BOOL)includesTimeRemainingPhrase { return _includesTimeRemainingPhrase; }
+- (void)setIncludesTimeRemainingPhrase:(BOOL)includes
+{
+    _includesTimeRemainingPhrase = includes;
+}
+- (BOOL)allowsFractionalUnits { return _allowsFractionalUnits; }
+- (void)setAllowsFractionalUnits:(BOOL)allows
+{
+    _allowsFractionalUnits = allows;
+}
+- (BOOL)collapsesLargestUnit { return _collapsesLargestUnit; }
+- (void)setCollapsesLargestUnit:(BOOL)collapses
+{
+    _collapsesLargestUnit = collapses;
+}
+- (long)formattingContext { return _formattingContext; }
+- (void)setFormattingContext:(long)context { _formattingContext = context; }
+- (NSCalendar *)calendar { return (NSCalendar *)_calendar; }
+- (void)setCalendar:(NSCalendar *)calendar { _calendar = calendar; }
 @end
 
 @implementation NSError

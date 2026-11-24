@@ -557,6 +557,68 @@ check "[cache] name costs" "$out" \
 check "[cache] delegate 1" "$out" \
     "the eviction delegate observes a count-limit eviction"
 
+# ---------- 4g4. Byte and date component formatters ----------
+"$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
+    -ffreestanding -O1 -I "$ROOT/frameworks" \
+    -c "$ROOT/tests/formatter_test.m" -o "$T/formatter.o"
+"$LD64" -arch x86_64 -platform_version $PLATFORM -e _main -o "$T/formatter" \
+    "$T/formatter.o" \
+    "$ROOT/runtime/System/Library/Frameworks/Foundation.framework/Foundation" \
+    -undefined dynamic_lookup
+out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/formatter" 2>&1)"
+check "[bcf] file 999 bytes" "$out" \
+    "file-style byte counts keep values below one thousand in bytes"
+check "[bcf] kilo 1 KB" "$out" \
+    "one thousand bytes becomes one file-style kilobyte"
+check "[bcf] half 1.5 KB" "$out" \
+    "byte counts keep one fractional digit below ten units"
+check "[bcf] mega 1.5 MB" "$out" \
+    "file-style byte counts step up to megabytes"
+check "[bcf] memory 1 MB" "$out" \
+    "memory-style byte counts divide by 1024"
+check "[bcf] decimal 1.5 KB" "$out" \
+    "the decimal count style matches the file style"
+check "[bcf] binary 1.5 KB" "$out" \
+    "the binary count style matches the memory style"
+check "[bcf] mask 1500 KB" "$out" \
+    "allowedUnits restricts the byte count to kilobytes"
+check "[bcf] count 1.5" "$out" \
+    "includesUnit NO leaves only the formatted count"
+check "[bcf] unit KB" "$out" \
+    "includesCount NO leaves only the unit"
+check "[bcf] actual 1.5 KB (1536 bytes)" "$out" \
+    "includesActualByteCount appends the exact byte count"
+check "[bcf] pad 2.0 KB" "$out" \
+    "zeroPadsFractionDigits keeps a trailing zero"
+check "[bcf] zero 0 bytes" "$out" \
+    "a zero byte count keeps the byte unit"
+check "[dcf] pos 1:01:01" "$out" \
+    "positional time formatting pads minutes and seconds"
+check "[dcf] pos2 1:01" "$out" \
+    "positional formatting drops a leading zero hour"
+check "[dcf] hours 1:00:00" "$out" \
+    "positional formatting pads zero minutes and seconds"
+check "[dcf] abbr 1h 1m 1s" "$out" \
+    "abbreviated units use short suffixes"
+check "[dcf] short 1 day, 1 hr, 1 min, 1 sec" "$out" \
+    "short units label days and time fields"
+check "[dcf] full 1 day, 1 hour, 1 minute, 1 second" "$out" \
+    "full units pluralize and separate with commas"
+check "[dcf] max 1 day, 1 hour" "$out" \
+    "maximumUnitCount keeps only the largest units"
+check "[dcf] allhours 25 hr, 1 min, 1 sec" "$out" \
+    "a missing day unit folds days into hours"
+check "[dcf] remain 1 hr, 1 min remaining" "$out" \
+    "includesTimeRemainingPhrase appends the remaining phrase"
+check "[dcf] about About 1 hr, 1 min" "$out" \
+    "includesApproximationPhrase prefixes the approximate phrase"
+check "[dcf] comps 2 hr, 5 min" "$out" \
+    "date components format through the same unit styles"
+check "[dcf] dates 1:01:01" "$out" \
+    "stringFromDate:toDate: formats the date difference"
+check "[dcf] delta 3661" "$out" \
+    "NSDate timeIntervalSinceDate: reports the signed interval"
+
 # ---------- 4h. NSOperationQueue block operations ----------
 "$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc -fblocks \
     -ffreestanding -O1 -I "$ROOT/frameworks" \

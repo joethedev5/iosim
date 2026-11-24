@@ -1059,6 +1059,7 @@ extern id NSDefaultRunLoopMode;
 - (id)initWithTimeIntervalSince1970:(double)interval;
 - (double)timeIntervalSince1970;
 - (double)timeIntervalSinceNow;
+- (double)timeIntervalSinceDate:(NSDate *)date;
 @end
 
 @interface NSDateFormatter : NSObject {
@@ -1177,6 +1178,117 @@ extern id NSCalendarIdentifierGregorian;
 - (NSDateComponents *)components:(unsigned long)unitFlags
                         fromDate:(NSDate *)date;
 - (NSDate *)dateFromComponents:(NSDateComponents *)components;
+@end
+
+enum {
+    NSByteCountFormatterCountStyleFile = 0,
+    NSByteCountFormatterCountStyleMemory = 1,
+    NSByteCountFormatterCountStyleDecimal = 2,
+    NSByteCountFormatterCountStyleBinary = 3
+};
+
+enum {
+    NSByteCountFormatterUseDefault = 0,
+    NSByteCountFormatterUseBytes = 1UL << 0,
+    NSByteCountFormatterUseKB = 1UL << 1,
+    NSByteCountFormatterUseMB = 1UL << 2,
+    NSByteCountFormatterUseGB = 1UL << 3,
+    NSByteCountFormatterUseTB = 1UL << 4,
+    NSByteCountFormatterUsePB = 1UL << 5,
+    NSByteCountFormatterUseEB = 1UL << 6,
+    NSByteCountFormatterUseAll = 0xFFFFUL
+};
+
+@interface NSByteCountFormatter : NSObject {
+@public
+    long _countStyle;
+    unsigned long _allowedUnits;
+    BOOL _includesUnit;
+    BOOL _includesCount;
+    BOOL _includesActualByteCount;
+    BOOL _adaptive;
+    BOOL _allowsNonnumericFormatting;
+    BOOL _zeroPadsFractionDigits;
+    long _formattingContext;
+}
++ (id)stringFromByteCount:(long long)byteCount countStyle:(long)countStyle;
+- (id)stringFromByteCount:(long long)byteCount;
+- (long)countStyle;
+- (void)setCountStyle:(long)style;
+- (unsigned long)allowedUnits;
+- (void)setAllowedUnits:(unsigned long)units;
+- (BOOL)includesUnit;
+- (void)setIncludesUnit:(BOOL)includes;
+- (BOOL)includesCount;
+- (void)setIncludesCount:(BOOL)includes;
+- (BOOL)includesActualByteCount;
+- (void)setIncludesActualByteCount:(BOOL)includes;
+- (BOOL)isAdaptive;
+- (void)setAdaptive:(BOOL)adaptive;
+- (BOOL)allowsNonnumericFormatting;
+- (void)setAllowsNonnumericFormatting:(BOOL)allows;
+- (BOOL)zeroPadsFractionDigits;
+- (void)setZeroPadsFractionDigits:(BOOL)pads;
+- (long)formattingContext;
+- (void)setFormattingContext:(long)context;
+@end
+
+enum {
+    NSDateComponentsFormatterUnitsStylePositional = 0,
+    NSDateComponentsFormatterUnitsStyleAbbreviated = 1,
+    NSDateComponentsFormatterUnitsStyleShort = 2,
+    NSDateComponentsFormatterUnitsStyleFull = 3,
+    NSDateComponentsFormatterUnitsStyleSpellOut = 4
+};
+
+enum {
+    NSDateComponentsFormatterZeroFormattingBehaviorNone = 0,
+    NSDateComponentsFormatterZeroFormattingBehaviorDefault = 1 << 0,
+    NSDateComponentsFormatterZeroFormattingBehaviorDropLeading = 1 << 1,
+    NSDateComponentsFormatterZeroFormattingBehaviorDropMiddle = 1 << 2,
+    NSDateComponentsFormatterZeroFormattingBehaviorDropTrailing = 1 << 3,
+    NSDateComponentsFormatterZeroFormattingBehaviorDropAll =
+        (1 << 1) | (1 << 2) | (1 << 3),
+    NSDateComponentsFormatterZeroFormattingBehaviorPad = 1 << 16
+};
+
+@interface NSDateComponentsFormatter : NSObject {
+@public
+    long _unitsStyle;
+    unsigned long _allowedUnits;
+    long _maximumUnitCount;
+    long _zeroFormattingBehavior;
+    BOOL _includesApproximationPhrase;
+    BOOL _includesTimeRemainingPhrase;
+    BOOL _allowsFractionalUnits;
+    BOOL _collapsesLargestUnit;
+    long _formattingContext;
+    id _calendar;
+}
++ (id)stringFromTimeInterval:(double)interval;
+- (id)stringFromTimeInterval:(double)interval;
+- (id)stringFromDateComponents:(NSDateComponents *)components;
+- (id)stringFromDate:(NSDate *)startDate toDate:(NSDate *)endDate;
+- (long)unitsStyle;
+- (void)setUnitsStyle:(long)style;
+- (unsigned long)allowedUnits;
+- (void)setAllowedUnits:(unsigned long)units;
+- (long)maximumUnitCount;
+- (void)setMaximumUnitCount:(long)count;
+- (long)zeroFormattingBehavior;
+- (void)setZeroFormattingBehavior:(long)behavior;
+- (BOOL)includesApproximationPhrase;
+- (void)setIncludesApproximationPhrase:(BOOL)includes;
+- (BOOL)includesTimeRemainingPhrase;
+- (void)setIncludesTimeRemainingPhrase:(BOOL)includes;
+- (BOOL)allowsFractionalUnits;
+- (void)setAllowsFractionalUnits:(BOOL)allows;
+- (BOOL)collapsesLargestUnit;
+- (void)setCollapsesLargestUnit:(BOOL)collapses;
+- (long)formattingContext;
+- (void)setFormattingContext:(long)context;
+- (NSCalendar *)calendar;
+- (void)setCalendar:(NSCalendar *)calendar;
 @end
 
 @interface NSError : NSObject {
