@@ -1941,6 +1941,53 @@ else
 fi
 
 
+# ---------- 4f27. CGContext image shadows ----------
+rm -f "$T/cgimageshadow.fifo"
+mkfifo "$T/cgimageshadow.fifo"
+"$ROOT/tools/build_app.sh" "$ROOT/tests/cg_image_shadow_test.m" \
+    "$T/cg_image_shadow_test" >/dev/null
+out="$(IOSIM_EVENT_FIFO="$T/cgimageshadow.fifo" \
+    IOSIM_TEST_PNG="$T/cgimageshadow.png" \
+    DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/cg_image_shadow_test" 2>&1)"
+rm -f "$T/cgimageshadow.fifo"
+check "[cgimage] ready" "$out" "the CGContext image shadow fixture starts"
+check "[cgimage] done" "$out" "the fixture draws its shadowed images"
+if report="$(python3 - "$ROOT/tools" "$T/cgimageshadow.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+def px(x, y):
+    c = pngpixel.px(rows, bpp, x * 3, y * 3)
+    return ((c >> 16) & 255, (c >> 8) & 255, c & 255)
+
+red = px(100, 150)
+if not (red[0] > 200 and red[1] < 60 and red[2] < 60):
+    raise SystemExit('the red image did not cover its shadow: %r' % (red,))
+blue = px(123, 150)
+if not (blue[2] > 200 and blue[0] < 60 and blue[1] < 60):
+    raise SystemExit('the image hard shadow is not blue: %r' % (blue,))
+blue = px(100, 183)
+if not (blue[2] > 200 and blue[0] < 60 and blue[1] < 60):
+    raise SystemExit('the image shadow does not extend below: %r' % (blue,))
+green = px(270, 150)
+if not (green[1] > 200 and green[0] < 60 and green[2] < 60):
+    raise SystemExit('the green image did not cover its shadow: %r' % (green,))
+gray = px(270, 183)
+if not (gray[0] < 180 and max(gray) - min(gray) < 30):
+    raise SystemExit('the blurred image shadow is not gray: %r' % (gray,))
+white = px(270, 60)
+if min(white) < 230:
+    raise SystemExit('the background is not white: %r' % (white,))
+print("ok   images cast hard and blurred CGContext shadows")
+PY
+)"; then
+    echo "$report"
+else
+    echo "FAIL CGContext image shadow"; echo "$report"; fails=$((fails+1))
+fi
+
 # ---------- 4g. NSCalendar components ----------
 "$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
     -ffreestanding -O1 -I "$ROOT/frameworks" \

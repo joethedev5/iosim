@@ -486,6 +486,47 @@ void iosim_cg_end_image(CGContextRef context)
     free(context);
 }
 
+/* An image shadow is the image's alpha channel tinted with the shadow
+ * color, blitted at the offset and blur ring positions before the image
+ * itself. */
+static void cg_shadow_blit_image(CGContextRef context, int px, int py,
+                                 int pw, int ph, const unsigned char *rgba,
+                                 int w, int h)
+{
+    double dx, dy;
+    int spread, step;
+    double shape_alpha = context->base_alpha * context->state.alpha;
+    if (!cg_shadow_ready(context, shape_alpha, &dx, &dy, &spread, &step))
+        return;
+    unsigned char *tinted = malloc((unsigned long)w * h * 4);
+    if (!tinted)
+        return;
+    unsigned rgb = cg_rgb(context->state.shadow_color);
+    for (int i = 0; i < w * h; i++)
+    {
+        tinted[i * 4 + 0] = (unsigned char)((rgb >> 16) & 255);
+        tinted[i * 4 + 1] = (unsigned char)((rgb >> 8) & 255);
+        tinted[i * 4 + 2] = (unsigned char)(rgb & 255);
+        tinted[i * 4 + 3] = rgba[i * 4 + 3];
+    }
+    double saved = iosim_fb_get_opacity();
+    iosim_fb_set_opacity(saved * cg_clamp(context->state.shadow_color.a) *
+                         cg_clamp(shape_alpha) *
+                         (spread > 0 ? 0.55 : 1.0));
+    iosim_fb_set_blend_mode(0);
+    const double ox[4] = { -step, step, 0, 0 };
+    const double oy[4] = { 0, 0, -step, step };
+    for (int pass = 0; pass < (spread > 0 ? 5 : 1); pass++)
+    {
+        int sx = px + (int)(dx + (pass ? ox[pass - 1] : 0));
+        int sy = py + (int)(dy + (pass ? oy[pass - 1] : 0));
+        iosim_fb_blit_rgba_scaled(sx, sy, pw, ph, tinted, w, h, w * 4);
+    }
+    iosim_fb_set_opacity(saved);
+    iosim_fb_set_blend_mode(context->state.blend_mode);
+    free(tinted);
+}
+
 void iosim_cg_draw_image(CGContextRef context, const unsigned char *rgba,
                          int w, int h, CGRect rect)
 {
@@ -501,6 +542,7 @@ void iosim_cg_draw_image(CGContextRef context, const unsigned char *rgba,
     int pw = (int)(x1 - x0 + 0.5), ph = (int)(y1 - y0 + 0.5);
     if (pw <= 0 || ph <= 0)
         return;
+    cg_shadow_blit_image(context, px, py, pw, ph, rgba, w, h);
     iosim_fb_set_opacity(context->base_alpha * context->state.alpha);
     iosim_fb_set_blend_mode(context->state.blend_mode);
     iosim_fb_blit_rgba_scaled(px, py, pw, ph, rgba, w, h, w * 4);

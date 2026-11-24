@@ -478,7 +478,10 @@ rect's origin, clipped to the rect and the current clip stack.
 `CGContextSetShadowWithColor` stores an offset, blur radius and color in the
 graphics state; fills and strokes paint the shifted geometry — plus four blur
 ring positions at reduced opacity — in the shadow color behind the shape,
-scaled by both the shadow color alpha and the shape's own alpha. Mutable
+scaled by both the shadow color alpha and the shape's own alpha. Image blits
+build an alpha-only tint of the image in the shadow color, so a
+`CGContextDrawImage` casts the same offset and blurred shadow as a shape.
+Mutable
 `CGPath` objects record move/line/close elements, `CGPathAddRect`,
 `CGPathAddEllipseInRect` and `CGPathAddPath` append geometry, `CGPathApply`
 walks them, and `CGContextAddPath` flattens a path into the context point

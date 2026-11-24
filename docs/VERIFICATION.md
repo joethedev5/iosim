@@ -2022,6 +2022,15 @@ the ellipse window more than 500 blue pixels surround the white ellipse,
 extending 5–24 px to the left and below — the 12 px offset plus the 4 px blur
 spread.
 
+### CoreGraphics: image shadows
+
+`tests/cg_image_shadow_test.m` draws a red 16x16 image scaled to 60x60 pt at
+(60, 120) with a blue (6, 6) pt hard shadow and a green image at (240, 120)
+with a black (0, 6) pt shadow carrying a 4 pt blur, both over white. The
+red and green centers keep their colors; the pixels just past the red image's
+right and bottom edges are blue, and the band below the green image is a gray
+about 55% of the way from white to black.
+
 ### Page view controllers
 
 `tests/pageview_test.m` installs a scroll-style horizontal page controller as a

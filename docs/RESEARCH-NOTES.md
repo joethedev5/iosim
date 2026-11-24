@@ -1656,8 +1656,10 @@ components.
   the shape; a blur radius adds four ring positions at reduced opacity, and
   both the shadow color alpha and the shape alpha scale the framebuffer
   opacity, which is restored afterwards.
-- Image blits do not take shadows yet; view and text shadows are separate
-  passes (`CALayer.shadow*`, `UILabel.shadow*`, `NSShadow`).
+- Image blits take the same shadow pass: the image alpha is tinted with the
+  shadow color, then blitted at the offset and blur rings. View and text
+  shadows are separate passes (`CALayer.shadow*`, `UILabel.shadow*`,
+  `NSShadow`).
 
 ## 2026-11-24: folder rename
 
@@ -1677,3 +1679,9 @@ components.
   temp file and completion error to the session delegate; optional callbacks
   are probe-checked with `respondsToSelector:`, and the temp download file is
   removed after the delegate callback.
+
+## 2026-11-24: CGContext image shadows
+
+- `CGContextDrawImage` now casts the graphics state's shadow: the image's
+  alpha channel is tinted with the shadow color, then blitted at the offset
+  and four blur ring positions before the image itself.
