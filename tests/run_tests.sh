@@ -454,6 +454,32 @@ check "[tz] fixed GMT+1 5400" "$out" \
 check "[tz] known 8" "$out" \
     "knownTimeZoneNames lists the supported zones"
 
+# ---------- 4g3. NSCache limits and eviction ----------
+"$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
+    -ffreestanding -O1 -I "$ROOT/frameworks" \
+    -c "$ROOT/tests/cache_test.m" -o "$T/cache_test.o"
+"$LD64" -arch x86_64 -platform_version $PLATFORM -e _main -o "$T/cache_test" \
+    "$T/cache_test.o" \
+    "$ROOT/runtime/System/Library/Frameworks/Foundation.framework/Foundation" \
+    -undefined dynamic_lookup
+out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/cache_test" 2>&1)"
+check "[cache] two 1 1" "$out" \
+    "NSCache stores two objects under its count limit"
+check "[cache] evict 1 1 1" "$out" \
+    "inserting past countLimit evicts the oldest object"
+check "[cache] refresh 1 1 1" "$out" \
+    "replacing a key refreshes its insertion order"
+check "[cache] clear 1" "$out" \
+    "removeAllObjects empties the cache"
+check "[cache] cost 1 1" "$out" \
+    "totalCostLimit evicts until the cost fits"
+check "[cache] replace 1" "$out" \
+    "replacing a costed object updates its stored object"
+check "[cache] name costs" "$out" \
+    "NSCache keeps its name"
+check "[cache] delegate 1" "$out" \
+    "the eviction delegate observes a count-limit eviction"
+
 # ---------- 4h. NSOperationQueue block operations ----------
 "$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc -fblocks \
     -ffreestanding -O1 -I "$ROOT/frameworks" \

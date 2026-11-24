@@ -713,6 +713,13 @@ fixed table of eight zone names with their standard offsets plus
 `systemTimeZone` and `localTimeZone` read `TZ` and fall back to `GMT`;
 daylight saving always reports off.
 
+`NSCache` keeps objects, per-key costs and insertion order in dictionaries
+and an array. A write replaces the key, appends it to the order and adds its
+cost; eviction then removes the oldest keys until both `countLimit` and
+`totalCostLimit` hold, calling an optional
+`cache:willEvictObject:` delegate before each removal. A limit of zero
+disables that limit.
+
 `NSOperationQueue` dispatches each `NSOperation` through a libdispatch
 global queue and counts it in a dispatch group, so
 `waitUntilAllOperationsAreFinished` is a real group wait; suspension defers

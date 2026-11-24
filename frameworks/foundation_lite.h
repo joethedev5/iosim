@@ -512,6 +512,33 @@ enum {
 - (id)pathForResource:(id)name ofType:(id)type;
 @end
 
+@protocol NSCacheDelegate
+@optional
+- (void)cache:(id)cache willEvictObject:(id)obj;
+@end
+
+@interface NSCache : NSObject {
+@public
+    id _objects;
+    id _costs;
+    id _order;
+    unsigned long _countLimit;
+    unsigned long _totalCostLimit;
+    unsigned long _totalCost;
+    id _delegate;
+    id _name;
+}
+@property unsigned long countLimit;
+@property unsigned long totalCostLimit;
+@property(assign) id delegate;
+@property(retain) id name;
+- (id)objectForKey:(id)key;
+- (void)setObject:(id)object forKey:(id)key;
+- (void)setObject:(id)object forKey:(id)key cost:(unsigned long)cost;
+- (void)removeObjectForKey:(id)key;
+- (void)removeAllObjects;
+@end
+
 @interface NSUserDefaults : NSObject {
 @public
     id _store;

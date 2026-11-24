@@ -3778,6 +3778,104 @@ static void defaults_path(char *out, unsigned long cap)
     snprintf(out, cap, "%s/Library/Preferences/%s.plist", home, domain);
 }
 
+@interface NSCache (IOSIMCachePrivate)
+- (void)evictIfNeeded;
+@end
+
+@implementation NSCache
+- (id)init
+{
+    self = [super init];
+    if (self)
+    {
+        _objects = [[NSMutableDictionary alloc] init];
+        _costs = [[NSMutableDictionary alloc] init];
+        _order = [[NSMutableArray alloc] init];
+    }
+    return self;
+}
+- (unsigned long)countLimit { return _countLimit; }
+- (void)setCountLimit:(unsigned long)limit
+{
+    _countLimit = limit;
+    [self evictIfNeeded];
+}
+- (unsigned long)totalCostLimit { return _totalCostLimit; }
+- (void)setTotalCostLimit:(unsigned long)limit
+{
+    _totalCostLimit = limit;
+    [self evictIfNeeded];
+}
+- (id)delegate { return _delegate; }
+- (void)setDelegate:(id)delegate { _delegate = delegate; }
+- (id)name { return _name; }
+- (void)setName:(id)name { _name = name; }
+- (id)objectForKey:(id)key
+{
+    return key ? [(NSDictionary *)_objects objectForKey:key] : nil;
+}
+- (void)removeObjectForKey:(id)key
+{
+    if (!key)
+        return;
+    id cost = [(NSDictionary *)_costs objectForKey:key];
+    if (cost)
+    {
+        unsigned long value = (unsigned long)[cost integerValue];
+        if (value <= _totalCost)
+            _totalCost -= value;
+        else
+            _totalCost = 0;
+    }
+    [(NSMutableDictionary *)_objects removeObjectForKey:key];
+    [(NSMutableDictionary *)_costs removeObjectForKey:key];
+    [(NSMutableArray *)_order removeObject:key];
+}
+- (void)removeAllObjects
+{
+    [(NSMutableDictionary *)_objects removeAllObjects];
+    [(NSMutableDictionary *)_costs removeAllObjects];
+    [(NSMutableArray *)_order removeAllObjects];
+    _totalCost = 0;
+}
+- (void)setObject:(id)object forKey:(id)key
+{
+    [self setObject:object forKey:key cost:0];
+}
+- (void)setObject:(id)object forKey:(id)key cost:(unsigned long)cost
+{
+    if (!object || !key)
+    {
+        [self removeObjectForKey:key];
+        return;
+    }
+    [self removeObjectForKey:key];
+    [(NSMutableDictionary *)_objects setObject:object forKey:key];
+    [(NSMutableDictionary *)_costs
+        setObject:[NSNumber numberWithInteger:(long)cost] forKey:key];
+    [(NSMutableArray *)_order addObject:key];
+    _totalCost += cost;
+    [self evictIfNeeded];
+}
+- (void)evictIfNeeded
+{
+    while ([_order count] > 0)
+    {
+        int tooMany = _countLimit > 0 && [_order count] > _countLimit;
+        int tooCostly =
+            _totalCostLimit > 0 && _totalCost > _totalCostLimit;
+        if (!tooMany && !tooCostly)
+            break;
+        id key = [(NSArray *)_order objectAtIndex:0];
+        id object = [(NSDictionary *)_objects objectForKey:key];
+        if (_delegate &&
+            [_delegate respondsToSelector:@selector(cache:willEvictObject:)])
+            [_delegate cache:self willEvictObject:object];
+        [self removeObjectForKey:key];
+    }
+}
+@end
+
 @implementation NSUserDefaults
 + (NSUserDefaults *)standardUserDefaults
 {

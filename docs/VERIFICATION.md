@@ -1108,6 +1108,20 @@ language, country and identifier keys with `objectForKey:`
 for `Mars/Olympus`, `[tz] fixed GMT+1 5400` for a fixed offset, and eight
 entries from `knownTimeZoneNames`.
 
+### Foundation: NSCache
+
+`tests/cache_test.m` fills an `NSCache` with a `countLimit` of two:
+`[cache] two 1 1` shows both objects, adding a third reports
+`[cache] evict 1 1 1` (the oldest key is gone, the other two remain), and
+replacing `b` then adding `d` evicts `c` instead of `b` (`[cache] refresh
+1 1 1`). `removeAllObjects` yields `[cache] clear 1`. A second cache with a
+`totalCostLimit` of 5 and costs 3 and 4 evicts the first entry
+(`[cache] cost 1 1`); replacing the survivor with cost 1 reports
+`[cache] replace 1`, and the cache keeps its name (`[cache] name costs`).
+Setting countLimit to 1 and adding two objects reports
+`[cache] delegate 1` from a delegate implementing
+`cache:willEvictObject:`.
+
 ### Foundation: operation queues
 
 `tests/operation_test.m` adds three `addOperationWithBlock:` closures that

@@ -58,6 +58,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | KDK kernel symbolication: full local+global maps, Mach trap and BSD syscall tables | ✅ |
 | `NSFileManager`, `NSData` file I/O, `NSFileHandle` read/write/seek/truncate, `NSURL`, `NSJSONSerialization` | ✅ |
 | `NSPropertyListSerialization` (XML and binary formats) and persistent `NSUserDefaults` domains | ✅ |
+| NSCache count/cost limits with FIFO eviction and an eviction delegate | ✅ |
 | `NSKeyedArchiver`/`NSKeyedUnarchiver` keyed archives with custom `NSCoding` classes | ✅ |
 | NSRunLoop timers and delayed performs, NSThread main-thread check and sleep | ✅ |
 | NSCalendar/NSDateComponents Gregorian decomposition and construction | ✅ |

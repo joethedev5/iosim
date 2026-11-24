@@ -1050,3 +1050,16 @@ components.
   offsets; `timeZoneForSecondsFromGMT:` builds a name from the offset in
   hours (`%+ld`), and `systemTimeZone` reads `TZ` (stripping a leading colon)
   before falling back to GMT. Daylight saving is always off.
+
+## 2026-11-23: NSCache
+
+- `NSCache` is a dictionary of objects, a dictionary of per-key costs and an
+  array of insertion order. Writing an existing key first removes it, so the
+  key moves to the end of the order and its old cost is subtracted.
+- Eviction is deterministic FIFO: while the order count exceeds
+  `countLimit` or the summed cost exceeds `totalCostLimit`, the first key is
+  removed. A zero limit disables that limit. The optional
+  `cache:willEvictObject:` delegate fires before each removal, and explicit
+  removal does not call it.
+- There is no thread synchronization; real NSCache is thread-safe, but every
+  current caller uses it from the main thread.
