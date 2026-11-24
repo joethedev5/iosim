@@ -2724,6 +2724,55 @@ else
     fails=$((fails+1))
 fi
 
+# ---------- 4f10aq. arm64 __cxa_atexit handlers ----------
+# atexit and __cxa_atexit handlers share the guest queue, so reverse
+# registration order spans both APIs; a __cxa_atexit handler gets its
+# argument in x0.
+"$CC" -target arm64-apple-ios18.0-simulator -ffreestanding -O1 \
+    -c "$ROOT/tests/arm64_cxa_atexit.c" -o "$T/arm64_cxa_atexit.o"
+"$LD64" -arch arm64 -platform_version $PLATFORM -e _main \
+    -o "$T/arm64_cxa_atexit" "$T/arm64_cxa_atexit.o" -undefined dynamic_lookup
+if out="$(DYLD_ROOT_PATH="$ROOT/runtime" timeout 10 "$RUN" --arm64 \
+    $FW_ARGS "$T/arm64_cxa_atexit" 2>&1)"; then
+    rc=0
+else
+    rc=$?
+fi
+check "mix p2 1" "$out" "the last registered plain handler runs first"
+check "mix cxa 5 2" "$out" \
+    "a __cxa_atexit handler runs at its registration position with its argument"
+check "mix p1 3" "$out" "the first registered handler runs last"
+if [ "$rc" -eq 0 ]; then
+    echo "ok   the arm64 __cxa_atexit fixture exits zero"
+else
+    echo "FAIL arm64 __cxa_atexit (exit $rc)"; fails=$((fails+1))
+fi
+if out_nj="$(IOSIM_ARM64_NOJIT=1 DYLD_ROOT_PATH="$ROOT/runtime" \
+    timeout 10 "$RUN" --arm64 $FW_ARGS "$T/arm64_cxa_atexit" 2>&1)"; then
+    :
+fi
+if [ "$out" = "$out_nj" ]; then
+    echo "ok   the interpreter runs the same mixed handlers"
+else
+    echo "FAIL arm64 __cxa_atexit under interpretation"; fails=$((fails+1))
+fi
+"$CC" -target x86_64-apple-ios18.0-simulator -ffreestanding -O1 \
+    -c "$ROOT/tests/arm64_cxa_atexit.c" -o "$T/cxa_atexit_x64.o"
+"$LD64" -arch x86_64 -platform_version $PLATFORM -e _main \
+    -o "$T/cxa_atexit_x64" "$T/cxa_atexit_x64.o" -undefined dynamic_lookup
+if out_x="$(DYLD_ROOT_PATH="$ROOT/runtime" timeout 10 "$RUN" \
+    $FW_ARGS "$T/cxa_atexit_x64" 2>&1)"; then
+    rc_x=0
+else
+    rc_x=$?
+fi
+if [ "$rc_x" -eq 0 ] && [ "$out" = "$out_x" ]; then
+    echo "ok   the arm64 mixed handler log matches the x86_64 build"
+else
+    echo "FAIL dual-architecture __cxa_atexit"; echo "$out_x"
+    fails=$((fails+1))
+fi
+
 # ---------- 4f11. CAAnimation completion and fill modes ----------
 rm -f "$T/arem.fifo"
 mkfifo "$T/arem.fifo"

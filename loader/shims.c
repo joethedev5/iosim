@@ -613,36 +613,62 @@ static void shim_os_release(void *obj) { (void)obj; }
 /* ---------- Foundation / UIKit lite ---------- */
 
 /* An arm64 guest's atexit handler is guest code, which the host must not
- * jump to. Guest handlers are collected and run from one native handler
- * in reverse registration order; a native handler keeps the host path. */
+ * jump to. Guest handlers from atexit and __cxa_atexit share one queue
+ * (an atexit handler gets a null argument) and run from one native
+ * handler in reverse registration order; native handlers keep the host
+ * path. */
 #define IOSIM_ATEXIT_GUEST_MAX 64
-static void (*g_atexit_guest[IOSIM_ATEXIT_GUEST_MAX])(void);
+struct iosim_atexit_entry {
+    void *fn;
+    void *arg;
+};
+static struct iosim_atexit_entry g_atexit_guest[IOSIM_ATEXIT_GUEST_MAX];
 static int g_atexit_guest_count;
 
 static void run_guest_atexit(void)
 {
     while (g_atexit_guest_count > 0)
     {
-        void (*fn)(void) = g_atexit_guest[--g_atexit_guest_count];
-        uint64_t gp[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+        struct iosim_atexit_entry e =
+            g_atexit_guest[--g_atexit_guest_count];
+        uint64_t gp[8] = {(uint64_t)(uintptr_t)e.arg, 0, 0, 0, 0, 0, 0, 0};
         uint64_t fp[8] = {0, 0, 0, 0, 0, 0, 0, 0};
         uint64_t ret[2] = {0, 0};
-        iosim_arm64_call_guest_ret((void *)(uintptr_t)fn, gp, fp, ret);
+        iosim_arm64_call_guest_ret(e.fn, gp, fp, ret);
     }
+}
+
+/* Returns 1 when the handler was queued, 0 for a native handler and -1
+ * when the queue could not be set up. */
+static int queue_guest_atexit(void *fn, void *arg)
+{
+    if (!fn || !iosim_arm64_is_guest_code(fn))
+        return 0;
+    if (g_atexit_guest_count == 0 && atexit(run_guest_atexit) != 0)
+        return -1;
+    if (g_atexit_guest_count >= IOSIM_ATEXIT_GUEST_MAX)
+        return -1;
+    g_atexit_guest[g_atexit_guest_count].fn = fn;
+    g_atexit_guest[g_atexit_guest_count].arg = arg;
+    g_atexit_guest_count++;
+    return 1;
 }
 
 static int shim_atexit(void (*fn)(void))
 {
-    if (fn && iosim_arm64_is_guest_code((void *)(uintptr_t)fn))
-    {
-        if (g_atexit_guest_count == 0 && atexit(run_guest_atexit) != 0)
-            return -1;
-        if (g_atexit_guest_count >= IOSIM_ATEXIT_GUEST_MAX)
-            return -1;
-        g_atexit_guest[g_atexit_guest_count++] = fn;
-        return 0;
-    }
+    int r = queue_guest_atexit((void *)(uintptr_t)fn, NULL);
+    if (r != 0)
+        return r > 0 ? 0 : -1;
     return atexit(fn);
+}
+
+extern int __cxa_atexit(void (*fn)(void *), void *arg, void *dso);
+static int shim___cxa_atexit(void (*fn)(void *), void *arg, void *dso)
+{
+    int r = queue_guest_atexit((void *)(uintptr_t)fn, arg);
+    if (r != 0)
+        return r > 0 ? 0 : -1;
+    return __cxa_atexit(fn, arg, dso);
 }
 
 static void shim_iosim_nslog(const char *message)
@@ -1019,6 +1045,7 @@ static const struct iosim_shim shims[] = {
     SHIM_ALIAS("getprogname", getprogname),
     SHIM_ALIAS("setprogname", setprogname),
     SHIM(atexit),
+    SHIM(__cxa_atexit),
     SHIM_ALIAS("__error", __error),
     SHIM_ALIAS("malloc_size", malloc_size),
     SHIM_ALIAS("malloc_default_zone", malloc_default_zone),

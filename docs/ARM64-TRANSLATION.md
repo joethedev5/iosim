@@ -35,8 +35,9 @@ whose metadata now covers arm64 images. Guest pthread_create runs an
 arm64 start routine on a fresh guest cpu on the new host thread, so a
 joining guest sees its return value and each worker gets its own
 thread-local block; the block table and translator are locked while
-another guest thread translates. Guest atexit handlers are collected by
-the atexit gate and run from one native handler at exit. An app bundle whose executable is
+another guest thread translates. Guest atexit and __cxa_atexit
+handlers are collected by one gate and run in reverse registration
+order at exit. An app bundle whose executable is
 thin arm64 starts through the normal device-manager path too: a launch
 that names no frameworks gets Foundation, UIKit, QuartzCore and
 UserNotifications preloaded from the runtime root, and the scene renders
@@ -253,10 +254,9 @@ can still hit today.
 - A guest pthread_create ignores the attributes object and uses the
   host's default thread attributes. The start routine's x0 becomes the
   value a joining guest receives.
-- Guest atexit handlers run as a group from one native handler, in
-  reverse registration order. Their ordering relative to native atexit
-  handlers, and handlers registered through __cxa_atexit, are not
-  interleaved.
+- Guest atexit and __cxa_atexit handlers share one queue and run as a
+  group from one native handler, in reverse registration order. Their
+  ordering relative to native handlers is not interleaved.
 - arm64 entry points must be `_main`-style; the CRT entry points are not
   started.
 - The guest runs inside the loader's process with the loader's

@@ -2422,7 +2422,11 @@ order through the native-to-guest callback entry. Main prints
 and the reporter, which prints `atexit 2 1`. The suite checks both
 lines and the exit status, repeats the run with `IOSIM_ARM64_NOJIT=1`,
 and compares the log with the x86_64 build, whose handlers stay on the
-host's own atexit path.
+host's own atexit path. `tests/arm64_cxa_atexit.c` registers plain1,
+`__cxa_atexit(cxa, 5, 0)` and plain2 in that order; the shared queue
+runs plain2, cxa and plain1 and prints `mix p2 1`, `mix cxa 5 2`,
+`mix p1 3`. The suite checks those lines, the exit status, the
+interpreter run and the x86_64 build.
 
 ### arm64: AdvSIMD coverage
 

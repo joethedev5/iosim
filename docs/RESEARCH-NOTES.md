@@ -2628,3 +2628,15 @@ components.
   `atexit 2 1` for the translator, interpreter and x86_64 builds. The
   grouping means guest and native handlers are not interleaved, and
   __cxa_atexit is not bridged.
+
+## 2026-11-24: __cxa_atexit from an arm64 image
+
+- glibc does export __cxa_atexit to dlsym, so an arm64 __cxa_atexit call
+  previously registered an arm64 function pointer with the host and the
+  process segfaulted at exit. The loader shim now shares the atexit
+  queue: a __cxa_atexit registration stores the handler and its
+  argument, and the queue runs in reverse registration order across both
+  APIs, with the argument in x0 (zero for a plain atexit handler).
+- tests/arm64_cxa_atexit.c registers plain1, cxa(5) and plain2 in that
+  order and prints `mix main`, then `mix p2 1`, `mix cxa 5 2`,
+  `mix p1 3` for the translator, interpreter and x86_64 builds.
