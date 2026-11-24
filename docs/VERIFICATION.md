@@ -694,6 +694,20 @@ for the single line and 36674 for the wrapped paragraph, so measurement,
 word wrapping and drawing all reach the font rasterizer through the CGContext
 text bridge.
 
+### UIKit: Single-line label fitting
+
+`tests/label_fit_test.m` stacks three 40 pt labels of forty W characters in
+100 pt-wide frames. The first enables auto-shrink with a 0.5 minimum, the
+second leaves it off, and the third enables it with a 0.9 minimum. A fresh
+label reports `[lfit] default 0 4`, so auto-shrink starts off and the default
+line-break mode is truncating tail. `textRectForBounds:limitedToNumberOfLines:`
+returns within-bounds rects of 93.0x23.7, 72.3x47.0 and 65.0x42.3 pt: the first
+line height is 50.4% of the base and the third is exactly 90%. The capture
+scan measures 43, 87 and 78 device pixels of ink height for the three bands,
+matching those ratios, and no ink crosses the 140 pt frame edge even though
+the untruncated string is far wider. This covers the opt-in shrink gate, the
+minimum-scale floor, tail ellipsis truncation and text measurement.
+
 ### Graphics: UIVisualEffectView backdrop blur
 
 `demo/BlurApp.m` draws sixteen 25.125 pt black/white stripes and puts a dark

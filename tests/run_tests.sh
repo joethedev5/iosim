@@ -3870,6 +3870,64 @@ else
     echo "FAIL hierarchy draw"; echo "$out"; fails=$((fails+1))
 fi
 
+# ---------- 4h. UILabel single-line fitting ----------
+"$ROOT/tools/build_app.sh" "$ROOT/tests/label_fit_test.m" \
+    "$T/label_fit_test" >/dev/null
+out="$(IOSIM_TEST_PNG="$T/label_fit.png" DYLD_ROOT_PATH="$ROOT/runtime" \
+    "$RUN" "$T/label_fit_test" 2>&1)"
+check "[lfit] default 0 4" "$out" \
+    "a plain label leaves auto-shrink off and truncates its tail"
+check "[lfit] bounds 1 1" "$out" \
+    "textRectForBounds:limitedToNumberOfLines: fits within the bounds"
+check "[lfit] shrink 1 1" "$out" \
+    "auto-shrink and minimumScaleFactor bound the effective font size"
+check "[lfit] ratios 1 1" "$out" \
+    "the effective sizes sit at the half and nine-tenths scale floors"
+check "[lfit] png written" "$out" \
+    "the label fitting fixture captures a frame"
+if out="$(python3 - "$ROOT/tools" "$T/label_fit.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+
+def ink(y0, y1):
+    ys = []
+    xs = []
+    for y in range(y0 * 3, y1 * 3):
+        for x in range(38 * 3, 148 * 3):
+            c = pngpixel.px(rows, bpp, x, y)
+            if max((c >> 16) & 255, (c >> 8) & 255, c & 255) > 60:
+                ys.append(y)
+                xs.append(x)
+    if not ys:
+        return None
+    return (min(xs), max(xs), min(ys), max(ys))
+
+a = ink(80, 140)
+b = ink(180, 240)
+c = ink(280, 340)
+if not a or not b or not c:
+    raise SystemExit("label text ink missing (a=%r b=%r c=%r)" % (a, b, c))
+ha = a[3] - a[2]
+hb = b[3] - b[2]
+hc = c[3] - c[2]
+if not (ha < hb * 0.65 and ha > hb * 0.35):
+    raise SystemExit("minimum 0.5 scale not reached: %d vs %d" % (ha, hb))
+if not (hc > ha * 1.4 and hc < hb * 0.97):
+    raise SystemExit("minimum 0.9 scale not honored: %d vs %d" % (hc, hb))
+for name, ext in (("A", a), ("B", b), ("C", c)):
+    if ext[1] > 148 * 3:
+        raise SystemExit("%s text overflows its frame: %d" % (name, ext[1]))
+print("ok   UILabel shrinks to minimumScaleFactor and truncates the rest")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL label fitting"; echo "$out"; fails=$((fails+1))
+fi
+
 "$ROOT/tools/build_app.sh" "$ROOT/tests/draw_rect_test.m" \
     "$T/draw_rect_test" >/dev/null
 out="$(IOSIM_TEST_PNG="$T/draw_rect.png" DYLD_ROOT_PATH="$ROOT/runtime" \

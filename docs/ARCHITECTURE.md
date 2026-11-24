@@ -458,7 +458,14 @@ gradients sample the stop table per pixel from `startPoint` outward to the
 radius given by `endPoint`, then reuse the rounded-mask offscreen path.
 `NSAttributedString` keeps its string and one attribute dictionary;
 `UILabel` and `UIButton` read the font and foreground color from that
-dictionary and render the plain string. `UIViewController` keeps a small
+dictionary and render the plain string. A single-line label shrinks its font
+only when `adjustsFontSizeToFitWidth` is set, in half-point steps down to
+`minimumScaleFactor` (or 1 pt when it is zero), and otherwise truncates
+according to `lineBreakMode`: clipping keeps the string, while head, tail and
+middle modes fit an ellipsis with the framebuffer font's own advances.
+`textRectForBounds:limitedToNumberOfLines:` measures with the same fitting
+code, and a default label starts in truncating-tail mode as UIKit does.
+`UIViewController` keeps a small
 child list with parent links, and
 `UIPageViewController` installs the current page as a child view when its view
 loads and swaps pages by removing and adding subviews.

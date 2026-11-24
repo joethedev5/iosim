@@ -1136,3 +1136,24 @@ components.
   cubic x(t) to find the parameter for the requested progress, then evaluates
   y(t). For (0.42,0,0.58,1) this gives 0.13, 0.50 and 0.87 at 0.25, 0.5 and
   0.75.
+
+## 2026-11-24: Single-line label fitting
+
+- Auto-shrink is opt-in. `adjustsFontSizeToFitWidth` defaults to NO, so a
+  label that overflows now truncates instead of silently shrinking; the old
+  renderer shrank every single-line label down to 8 pt.
+- The shrink loop lowers the point size by 0.5 until the measured width fits
+  or `minimumScaleFactor * baseSize` is reached. A `minimumScaleFactor` of
+  zero means no explicit floor, so the loop stops at 1 pt; values above one
+  are clamped to one. The effective size is used for both the metrics and the
+  glyph draw, so line height scales with the text.
+- Truncation uses the FreeType advances at the effective point size.
+  Word/character wrapping on a single line and truncating tail keep a leading
+  prefix and append `...`; truncating head prepends `...` and keeps a suffix;
+  truncating middle keeps both ends around a middle `...`; clipping emits the
+  entire string. UTF-8 continuation bytes are never split.
+- `textRectForBounds:limitedToNumberOfLines:` returns the fitted text's
+  advance width and line height in points (or the wrapped size for multiple
+  lines), so callers see the same shrink/truncate decision as the renderer.
+  UILabel now defaults to `NSLineBreakByTruncatingTail` (4), matching UIKit.
+

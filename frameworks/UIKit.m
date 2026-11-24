@@ -7754,6 +7754,186 @@ static CGPoint window_point_for_view(UIView *view, CGPoint point)
 }
 @end
 
+/* Label text fitting helpers. A single-line label either shrinks when
+ * adjustsFontSizeToFitWidth is set or truncates according to its line
+ * break mode; clipping keeps the whole string. */
+
+static int label_next_byte(const char *text, int index)
+{
+    index++;
+    while (text[index] && ((unsigned char)text[index] & 0xC0) == 0x80)
+        index++;
+    return index;
+}
+
+static int label_prev_byte(const char *text, int index)
+{
+    if (index <= 0)
+        return 0;
+    index--;
+    while (index > 0 && ((unsigned char)text[index] & 0xC0) == 0x80)
+        index--;
+    return index;
+}
+
+/* Shrink a label's font to fit maxWidth pixels, bounded by
+ * minimumScaleFactor. Returns the effective point size and reports the
+ * measured width. */
+static double label_shrunk_points(UILabel *label, const char *text,
+                                  int style, double scale, int maxWidth,
+                                  int *outWidth)
+{
+    double basePoints = label->_font ? label->_font->_size : 17.0;
+    double points = basePoints;
+    int width = iosim_fb_font_text_width(text, style, points, scale);
+    if (label->_adjustsFontSizeToFitWidth && maxWidth > 0)
+    {
+        double minScale = label->_minimumScaleFactor;
+        if (minScale > 1.0)
+            minScale = 1.0;
+        if (minScale < 0.0)
+            minScale = 0.0;
+        double floorPoints =
+            minScale > 0.0 ? basePoints * minScale : 1.0;
+        while (width > maxWidth && points > floorPoints)
+        {
+            points -= 0.5;
+            if (points < floorPoints)
+                points = floorPoints;
+            width = iosim_fb_font_text_width(text, style, points, scale);
+        }
+    }
+    if (outWidth)
+        *outWidth = width;
+    return points;
+}
+
+/* Copy text into out, truncating for maxWidth pixels. Modes 3, 4 and 5
+ * insert an ellipsis at the head, tail and middle; mode 2 clips. */
+static void label_ellipsized(const char *text, int style, double points,
+                             double scale, int maxWidth, long mode,
+                             char *out, int outSize)
+{
+    if (outSize <= 0)
+        return;
+    int len = text ? (int)strlen(text) : 0;
+    int n = 0;
+    while (n < len && n < outSize - 1)
+    {
+        out[n] = text[n];
+        n++;
+    }
+    out[n] = 0;
+    if (!text || n == 0 || maxWidth <= 0 || mode == 2)
+        return;
+    if (iosim_fb_font_text_width(out, style, points, scale) <= maxWidth)
+        return;
+    const char *dots = "...";
+    if (iosim_fb_font_text_width(dots, style, points, scale) > maxWidth)
+    {
+        out[0] = 0;
+        return;
+    }
+    char cand[256];
+    if (mode == 3 || mode == 5)
+    {
+        int head = 0, tail = 0;
+        if (mode == 5)
+        {
+            head = len / 2;
+            tail = len / 2;
+        }
+        for (;;)
+        {
+            n = 0;
+            if (mode == 3)
+            {
+                cand[n++] = '.';
+                cand[n++] = '.';
+                cand[n++] = '.';
+            }
+            for (int i = 0; i < head && n < 255; i++)
+                cand[n++] = text[i];
+            if (mode == 5)
+            {
+                cand[n++] = '.';
+                cand[n++] = '.';
+                cand[n++] = '.';
+            }
+            for (int i = tail; i < len && n < 255; i++)
+                cand[n++] = text[i];
+            cand[n] = 0;
+            if (iosim_fb_font_text_width(cand, style, points, scale) <=
+                maxWidth)
+                break;
+            if (mode == 3)
+            {
+                if (tail >= len)
+                {
+                    cand[0] = 0;
+                    break;
+                }
+                tail = label_next_byte(text, tail);
+            }
+            else if (head >= len - tail)
+            {
+                if (head <= 0)
+                {
+                    cand[0] = 0;
+                    break;
+                }
+                head = label_prev_byte(text, head);
+            }
+            else if (tail < len)
+                tail = label_next_byte(text, tail);
+            else
+            {
+                cand[0] = 0;
+                break;
+            }
+        }
+        n = 0;
+        while (cand[n] && n < outSize - 1)
+        {
+            out[n] = cand[n];
+            n++;
+        }
+        out[n] = 0;
+        return;
+    }
+    /* Word wrapping, character wrapping and truncating tail keep the
+     * leading text and append an ellipsis. */
+    int keep = len;
+    for (;;)
+    {
+        n = 0;
+        for (int i = 0; i < keep && n < 255; i++)
+            cand[n++] = text[i];
+        cand[n++] = '.';
+        cand[n++] = '.';
+        cand[n++] = '.';
+        cand[n] = 0;
+        if (iosim_fb_font_text_width(cand, style, points, scale) <= maxWidth)
+            break;
+        if (keep <= 0)
+        {
+            cand[0] = '.';
+            cand[1] = '.';
+            cand[2] = '.';
+            cand[3] = 0;
+            break;
+        }
+        keep = label_prev_byte(text, keep);
+    }
+    n = 0;
+    while (cand[n] && n < outSize - 1)
+    {
+        out[n] = cand[n];
+        n++;
+    }
+    out[n] = 0;
+}
+
 @implementation UILabel
 - (id)init
 {
@@ -7761,6 +7941,7 @@ static CGPoint window_point_for_view(UIView *view, CGPoint point)
     if (self)
     {
         _numberOfLines = 1;
+        _lineBreakMode = 4;
         _accessibilityTraits = 64;
     }
     return self;
@@ -7771,6 +7952,7 @@ static CGPoint window_point_for_view(UIView *view, CGPoint point)
     if (self)
     {
         _numberOfLines = 1;
+        _lineBreakMode = 4;
         _accessibilityTraits = 64;
     }
     return self;
@@ -7859,6 +8041,59 @@ static CGPoint window_point_for_view(UIView *view, CGPoint point)
             maxWidth = w;
     }
     return CGSizeMake(maxWidth / scale, (double)n * lineHeight / scale);
+}
+- (CGRect)textRectForBounds:(CGRect)bounds
+     limitedToNumberOfLines:(int)numberOfLines
+{
+    const char *text = iosim_string_cstr(_text);
+    if (!text || !*text)
+        return CGRectMake(0, 0, 0, 0);
+    double scale = [[UIScreen mainScreen] scale];
+    int style = _font && _font->_bold ? IOSIM_FONT_BOLD : IOSIM_FONT_REGULAR;
+    int maxWidth = (int)(bounds.size.width * scale + 0.5);
+    if (maxWidth < 0)
+        maxWidth = 0;
+    if (numberOfLines == 1)
+    {
+        int width = 0;
+        double points =
+            label_shrunk_points(self, text, style, scale, maxWidth, &width);
+        char fitted[256];
+        if (maxWidth > 0 && width > maxWidth)
+        {
+            label_ellipsized(text, style, points, scale, maxWidth,
+                             _lineBreakMode, fitted, sizeof fitted);
+            text = fitted;
+            width = iosim_fb_font_text_width(text, style, points, scale);
+        }
+        int ascent = 0, descent = 0, lineHeight = 0;
+        iosim_fb_font_metrics(style, points, scale, &ascent, &descent,
+                              &lineHeight);
+        return CGRectMake(bounds.origin.x, bounds.origin.y, width / scale,
+                          lineHeight / scale);
+    }
+    double points = _font ? _font->_size : 17.0;
+    int ascent = 0, descent = 0, lineHeight = 0;
+    iosim_fb_font_metrics(style, points, scale, &ascent, &descent,
+                          &lineHeight);
+    if (maxWidth <= 0)
+        return CGRectMake(bounds.origin.x, bounds.origin.y,
+                          [self intrinsicContentSize].width,
+                          lineHeight / scale);
+    char lines[IOSIM_MAX_WRAP_LINES][256];
+    int maxLines = numberOfLines > 1 ? numberOfLines : IOSIM_MAX_WRAP_LINES;
+    int count = wrap_text_lines(text, style, points, scale, maxWidth, lines,
+                                maxLines);
+    int maxLineWidth = 0;
+    for (int i = 0; i < count; i++)
+    {
+        int lineWidth =
+            iosim_fb_font_text_width(lines[i], style, points, scale);
+        if (lineWidth > maxLineWidth)
+            maxLineWidth = lineWidth;
+    }
+    return CGRectMake(bounds.origin.x, bounds.origin.y, maxLineWidth / scale,
+                      (double)count * lineHeight / scale);
 }
 @end
 
@@ -19846,13 +20081,22 @@ static void render_view(UIView *view, double originX, double originY,
             }
             else
             {
-                int textWidth = iosim_fb_font_text_width(text, style, points,
-                                                         scale);
-                while (textWidth > w && points > 8 && w > 0)
+                char fitted[256];
+                int textWidth = 0;
+                double fittedPoints = label_shrunk_points(
+                    label, text, style, scale, w, &textWidth);
+                if (fittedPoints != points)
                 {
-                    points -= 0.5;
+                    points = fittedPoints;
                     iosim_fb_font_metrics(style, points, scale, &ascent,
                                           &descent, &lineHeight);
+                }
+                if (w > 0 && textWidth > w)
+                {
+                    label_ellipsized(text, style, points, scale, w,
+                                     label->_lineBreakMode, fitted,
+                                     sizeof fitted);
+                    text = fitted;
                     textWidth = iosim_fb_font_text_width(text, style, points,
                                                          scale);
                 }

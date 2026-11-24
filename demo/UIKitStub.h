@@ -1120,6 +1120,15 @@ enum {
 @property CGRect accessibilityFrame;
 @end
 
+enum {
+    NSLineBreakByWordWrapping = 0,
+    NSLineBreakByCharWrapping = 1,
+    NSLineBreakByClipping = 2,
+    NSLineBreakByTruncatingHead = 3,
+    NSLineBreakByTruncatingTail = 4,
+    NSLineBreakByTruncatingMiddle = 5
+};
+
 @interface UILabel : UIView
 @property(nonatomic, retain) id text;
 @property(nonatomic, retain) NSAttributedString *attributedText;
@@ -1131,6 +1140,8 @@ enum {
 @property double preferredMaxLayoutWidth;
 @property BOOL adjustsFontSizeToFitWidth;
 @property double minimumScaleFactor;
+- (CGRect)textRectForBounds:(CGRect)bounds
+     limitedToNumberOfLines:(int)numberOfLines;
 @end
 
 @class UINavigationItem;
