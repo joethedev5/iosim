@@ -5661,6 +5661,7 @@ static void displayp3_components_to_srgb(double *components)
 id NSFontAttributeName = @"NSFontAttributeName";
 id NSForegroundColorAttributeName = @"NSForegroundColorAttributeName";
 id NSBackgroundColorAttributeName = @"NSBackgroundColorAttributeName";
+id NSUnderlineStyleAttributeName = @"NSUnderlineStyleAttributeName";
 
 static unsigned text_color_rgb(UIColor *color)
 {
@@ -21405,6 +21406,132 @@ static void blur_box_xrgb(unsigned *pix, int w, int h, int radius, int passes)
     free(tmp);
 }
 
+/* Draw a single-line attributed label run by run. Runs supply their own
+ * font size and weight, foreground and background colors, and underline.
+ * Only ASCII strings whose runs fit inside the label take this path; the
+ * caller falls back to the plain-text label renderer otherwise. */
+static int label_draw_attributed_label(UILabel *label, int x, int y, int w,
+                                       int h, double scale)
+{
+    if (!label || label->_numberOfLines != 1)
+        return 0;
+    NSAttributedString *attributed = nil;
+    if ([label->_attributedText isKindOfClass:[NSAttributedString class]])
+        attributed = (NSAttributedString *)label->_attributedText;
+    if (!attributed || [attributed length] == 0)
+        return 0;
+    id string = [attributed string];
+    if (!string || ![string isKindOfClass:[NSString class]])
+        return 0;
+    const char *bytes = [string UTF8String];
+    unsigned long length = [attributed length];
+    if (!bytes || strlen(bytes) != length)
+        return 0;
+
+    double basePoints = label->_font ? label->_font->_size : 17.0;
+    int baseStyle = label->_font && label->_font->_bold
+                        ? IOSIM_FONT_BOLD : IOSIM_FONT_REGULAR;
+    unsigned baseColor = label->_textColor ? color_rgb(label->_textColor)
+                                           : 0xffffff;
+
+    double maxPoints = basePoints;
+    int maxStyle = baseStyle;
+    int totalWidth = 0;
+    for (unsigned long index = 0; index < length; )
+    {
+        NSRange range;
+        id attributes = [attributed attributesAtIndex:index
+                                       effectiveRange:&range];
+        if (range.length == 0 || range.length >= 1024 ||
+            range.location + range.length > length)
+            return 0;
+        id font = attributes ? [attributes objectForKey:NSFontAttributeName]
+                             : nil;
+        double points = basePoints;
+        int style = baseStyle;
+        if (font && [font isKindOfClass:[UIFont class]])
+        {
+            points = ((UIFont *)font)->_size;
+            style = ((UIFont *)font)->_bold ? IOSIM_FONT_BOLD
+                                            : IOSIM_FONT_REGULAR;
+        }
+        if (points > maxPoints)
+        {
+            maxPoints = points;
+            maxStyle = style;
+        }
+        char segment[1024];
+        for (unsigned long k = 0; k < range.length; k++)
+            segment[k] = bytes[range.location + k];
+        segment[range.length] = 0;
+        totalWidth += iosim_fb_font_text_width(segment, style, points, scale);
+        index = range.location + range.length;
+    }
+    if (w > 0 && totalWidth > w)
+        return 0;
+
+    int ascent = 0, descent = 0, lineHeight = 0;
+    iosim_fb_font_metrics(maxStyle, maxPoints, scale, &ascent, &descent,
+                          &lineHeight);
+    int tx = x;
+    if (label->_textAlignment == 1)
+        tx = x + (w - totalWidth) / 2;
+    else if (label->_textAlignment == 2)
+        tx = x + w - totalWidth;
+    int baseline = y + (h - lineHeight) / 2 + ascent;
+    int cursor = tx;
+    for (unsigned long index = 0; index < length; )
+    {
+        NSRange range;
+        id attributes = [attributed attributesAtIndex:index
+                                       effectiveRange:&range];
+        if (range.length == 0 || range.length >= 1024 ||
+            range.location + range.length > length)
+            break;
+        id font = attributes ? [attributes objectForKey:NSFontAttributeName]
+                             : nil;
+        double points = basePoints;
+        int style = baseStyle;
+        if (font && [font isKindOfClass:[UIFont class]])
+        {
+            points = ((UIFont *)font)->_size;
+            style = ((UIFont *)font)->_bold ? IOSIM_FONT_BOLD
+                                            : IOSIM_FONT_REGULAR;
+        }
+        unsigned color = baseColor;
+        UIColor *runColor = attributes
+            ? (UIColor *)[attributes
+                  objectForKey:NSForegroundColorAttributeName]
+            : nil;
+        if (runColor && [runColor isKindOfClass:[UIColor class]])
+            color = color_rgb(runColor);
+        char segment[1024];
+        for (unsigned long k = 0; k < range.length; k++)
+            segment[k] = bytes[range.location + k];
+        segment[range.length] = 0;
+        int runWidth = iosim_fb_font_text_width(segment, style, points, scale);
+        UIColor *background = attributes
+            ? (UIColor *)[attributes
+                  objectForKey:NSBackgroundColorAttributeName]
+            : nil;
+        if (background && [background isKindOfClass:[UIColor class]])
+            iosim_fb_fill_rect(cursor, y + (h - lineHeight) / 2, runWidth,
+                               lineHeight, color_rgb(background));
+        iosim_fb_font_text(cursor, baseline, segment, style, points, scale,
+                           color);
+        id underline = attributes
+            ? [attributes objectForKey:NSUnderlineStyleAttributeName]
+            : nil;
+        if (underline && [underline isKindOfClass:[NSNumber class]] &&
+            [underline integerValue] != 0)
+            iosim_fb_fill_rect(cursor, baseline + (int)(2 * scale + 0.5),
+                               runWidth, (int)(scale + 0.5), color);
+        cursor += runWidth;
+        index = range.location + range.length;
+    }
+    return 1;
+}
+
 static void render_view(UIView *view, double originX, double originY,
                         double scale, double parentAlpha)
 {
@@ -22234,6 +22361,8 @@ static void render_view(UIView *view, double originX, double originY,
     {
         UILabel *label = (UILabel *)view;
         const char *text = string_cstr(label->_text);
+        if (text && label_draw_attributed_label(label, x, y, w, h, scale))
+            text = 0;
         if (text && getenv("IOSIM_DEBUG_TEXT"))
             printf("[text] %s at %d,%d %dx%d\n", text, x, y, w, h);
         if (text)

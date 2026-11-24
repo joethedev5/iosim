@@ -2637,6 +2637,7 @@ NSData *UIImagePNGRepresentation(UIImage *image);
 extern id NSFontAttributeName;
 extern id NSForegroundColorAttributeName;
 extern id NSBackgroundColorAttributeName;
+extern id NSUnderlineStyleAttributeName;
 
 @interface NSString (UIKitDrawing)
 - (CGSize)sizeWithAttributes:(NSDictionary *)attributes;

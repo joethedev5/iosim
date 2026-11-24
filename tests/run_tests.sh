@@ -1297,6 +1297,129 @@ else
     echo "FAIL attributed run edits"; echo "$report"; fails=$((fails+1))
 fi
 
+# ---------- 4f19. Attributed label runs ----------
+rm -f "$T/alabel.fifo"
+mkfifo "$T/alabel.fifo"
+"$ROOT/tools/build_app.sh" "$ROOT/tests/attributed_label_test.m" \
+    "$T/attributed_label_test" >/dev/null
+out="$(IOSIM_EVENT_FIFO="$T/alabel.fifo" IOSIM_TEST_PNG="$T/alabel.png" \
+    DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/attributed_label_test" 2>&1)"
+rm -f "$T/alabel.fifo"
+check "[alabel] ready" "$out" \
+    "the attributed label fixture starts"
+check "[alabel] done" "$out" \
+    "the attributed label fixture draws its runs"
+if report="$(python3 - "$ROOT/tools" "$T/alabel.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+stats = {}
+for name in ('red', 'green', 'blue'):
+    stats[name] = {'n': 0, 'minx': 10 ** 9, 'maxx': -1,
+                   'miny': 10 ** 9, 'maxy': -1}
+for yy in range(560, 820):
+    for xx in range(40, 1160):
+        c = pngpixel.px(rows, bpp, xx, yy)
+        r, g, b = (c >> 16) & 255, (c >> 8) & 255, c & 255
+        if r > 180 and g < 80 and b < 80:
+            key = 'red'
+        elif g > 150 and r < 80 and b < 80:
+            key = 'green'
+        elif b > 180 and r < 80 and g < 80:
+            key = 'blue'
+        else:
+            continue
+        s = stats[key]
+        s['n'] += 1
+        s['minx'] = min(s['minx'], xx)
+        s['maxx'] = max(s['maxx'], xx)
+        s['miny'] = min(s['miny'], yy)
+        s['maxy'] = max(s['maxy'], yy)
+for name, want in (('red', 500), ('green', 500), ('blue', 500)):
+    if stats[name]['n'] < want:
+        raise SystemExit('%s run has only %d pixels' %
+                         (name, stats[name]['n']))
+red_h = stats['red']['maxy'] - stats['red']['miny']
+green_h = stats['green']['maxy'] - stats['green']['miny']
+if green_h < red_h + 8:
+    raise SystemExit('green run height %d is not taller than red %d' %
+                     (green_h, red_h))
+print("ok   attributed label runs use per-run fonts and colors")
+PY
+)"; then
+    echo "$report"
+else
+    echo "FAIL attributed label runs"; echo "$report"; fails=$((fails+1))
+fi
+if report="$(python3 - "$ROOT/tools" "$T/alabel.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+blue = {'n': 0, 'minx': 10 ** 9, 'maxx': -1, 'maxy': -1,
+        'maxrow': 0, 'redmaxy': -1}
+for yy in range(560, 820):
+    count = 0
+    for xx in range(40, 1160):
+        c = pngpixel.px(rows, bpp, xx, yy)
+        r, g, b = (c >> 16) & 255, (c >> 8) & 255, c & 255
+        if r > 180 and g < 80 and b < 80 and yy > blue['redmaxy']:
+            blue['redmaxy'] = yy
+        if b > 180 and r < 80 and g < 80:
+            blue['n'] += 1
+            count += 1
+            blue['minx'] = min(blue['minx'], xx)
+            blue['maxx'] = max(blue['maxx'], xx)
+            blue['maxy'] = max(blue['maxy'], yy)
+    blue['maxrow'] = max(blue['maxrow'], count)
+width = blue['maxx'] - blue['minx']
+if width < 100:
+    raise SystemExit('blue run is only %d pixels wide' % width)
+if blue['maxrow'] < width * 0.85:
+    raise SystemExit('no underline row: widest blue row %d of %d' %
+                     (blue['maxrow'], width))
+if blue['maxy'] < blue['redmaxy'] + 4:
+    raise SystemExit('underline does not sit below the glyph baseline')
+print("ok   attributed label runs draw their underline")
+PY
+)"; then
+    echo "$report"
+else
+    echo "FAIL attributed label underline"; echo "$report"; fails=$((fails+1))
+fi
+if report="$(python3 - "$ROOT/tools" "$T/alabel.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+minx = 10 ** 9
+maxx = -1
+for yy in range(560, 820):
+    for xx in range(40, 1160):
+        c = pngpixel.px(rows, bpp, xx, yy)
+        r, g, b = (c >> 16) & 255, (c >> 8) & 255, c & 255
+        if ((r > 180 and g < 80 and b < 80) or
+                (g > 150 and r < 80 and b < 80) or
+                (b > 180 and r < 80 and g < 80)):
+            minx = min(minx, xx)
+            maxx = max(maxx, xx)
+if maxx < 0:
+    raise SystemExit('no colored run pixels found')
+center = (minx + maxx) / 2.0
+if abs(center - 600.0) > 24.0:
+    raise SystemExit('run block center is %.1f, expected 600' % center)
+print("ok   attributed label alignment centers the run block")
+PY
+)"; then
+    echo "$report"
+else
+    echo "FAIL attributed label alignment"; echo "$report"; fails=$((fails+1))
+fi
+
 # ---------- 4g. NSCalendar components ----------
 "$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
     -ffreestanding -O1 -I "$ROOT/frameworks" \

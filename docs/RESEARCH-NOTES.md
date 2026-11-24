@@ -1430,3 +1430,18 @@ components.
   extends a single attribute dictionary across the appended text.
 - `UILabel` still renders the plain string with the first run's font and
   color; per-run drawing in the label renderer remains future work.
+
+## 2026-11-24: Attributed label runs
+
+- A single-line `UILabel` with attributed text now draws run by run. Each
+  run contributes its own `UIFont` (size and weight), foreground color,
+  background color rectangle and `NSUnderlineStyleAttributeName` line;
+  widths are summed and aligned by the label's `textAlignment`.
+- The path is ASCII-only and requires every run to fit the label width;
+  otherwise the renderer falls back to the plain-string fitting code, which
+  keeps the first run's font/color and its ellipsis behavior. Wrapping
+  labels remain on that plain path.
+- The fixture centers red 24 pt, green 32 pt and underlined blue 24 pt runs.
+  The PNG reads three colors, green glyphs are 71 px tall against red's
+  54 px, the blue underline row spans all 179 px of its run, and the block
+  centers at 200.8 pt in the 360 pt label.

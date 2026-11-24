@@ -1845,6 +1845,16 @@ font attributes, and shifts the later runs; appending a two-character blue
 attributed string extends the text to length 10 with a `(8,2)` blue tail, and
 an immutable copy reports the same runs.
 
+### UIKit: attributed label runs
+
+`tests/attributed_label_test.m` centers a `RedGreenBlue` attributed label
+with a red 24 pt run, a green 32 pt run and an underlined blue 24 pt run.
+The captured frame has all three colors; the green run's glyph height is
+71 px against the red run's 54 px, so the per-run font sizes reach the
+renderer. The blue run is 179 px wide and its widest row is 179 px, the
+underline spanning the run below the glyph baseline, and the overall run
+block centers at 200.8 pt in the 360 pt-wide, centered label.
+
 ### Page view controllers
 
 `tests/pageview_test.m` installs a scroll-style horizontal page controller as a

@@ -470,8 +470,12 @@ splits runs when a ranged `addAttribute`/`addAttributes`/`setAttributes`
 partly covers one, merges additions into the overlapped region, shifts runs
 across character replacement and appends another attributed string's runs
 with a new offset; `attributesAtIndex:effectiveRange:` returns the covering
-run and its range. `UILabel` and `UIButton` read the font and foreground
-color from the first attribute dictionary and render the plain string. A single-line label shrinks its font
+run and its range. A single-line `UILabel` walks its runs and draws each
+segment with that run's font size/weight, foreground color, background
+color and underline, aligning the summed run widths by `textAlignment`;
+labels that wrap or whose runs overflow the frame fall back to the plain
+string with the first run's font and color. `UIButton` reads the first
+attribute dictionary only. A single-line label shrinks its font
 only when `adjustsFontSizeToFitWidth` is set, in half-point steps down to
 `minimumScaleFactor` (or 1 pt when it is zero), and otherwise truncates
 according to `lineBreakMode`: clipping keeps the string, while head, tail and

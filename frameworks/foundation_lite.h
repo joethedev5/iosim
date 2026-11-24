@@ -124,6 +124,7 @@ typedef enum {
 extern id NSFontAttributeName;
 extern id NSForegroundColorAttributeName;
 extern id NSBackgroundColorAttributeName;
+extern id NSUnderlineStyleAttributeName;
 
 @interface NSString : NSObject {
 @public
