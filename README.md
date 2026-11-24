@@ -40,6 +40,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | UIAlertController alerts with stacked or side-by-side actions, action sheets with a bottom-anchored card and a separated cancel action, text fields and preferred actions, UIActivityViewController share sheet with Copy and application activities, animated page-sheet modal presentation and dismissal | ✅ |
 | UINavigationController push/pop and interactive edge-pan pop transition, UITabBarController, UIStackView, standalone UINavigationBar/UIToolbar with item targets/images/custom views, UIButton titles/images, `UIButtonConfiguration`, button content/title/image edge insets, UITextField border styles and left/right views, navigation large-title/bar-button array properties | ✅ |
 | UIView animations (frame, alpha, transform), delay/curve/repeat options, spring damping and initial velocity, completion blocks | ✅ |
+| UIView cross-dissolve transitions for `transitionWithView:` and `transitionFromView:toView:`; other transition styles fade rather than flip or curl | ✅ (subset) |
 | `CADisplayLink` with `preferredFramesPerSecond`, presentation layers, multiple concurrent layer animations | ✅ |
 | `CAMediaTimingFunction` named curves and custom cubic-Bezier control points with `getControlPointAtIndex:` | ✅ |
 | `CAKeyframeAnimation` calculation modes (linear, discrete, paced, cubic) and per-segment timing functions | ✅ |

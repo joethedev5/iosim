@@ -1666,6 +1666,18 @@ critically damped box is at 187.3, approaching from below. At 0.75 s the
 soft spring has returned to 235.0 and the critical one has reached 239.2, so
 the damping ratio changes both the overshoot and the settle path.
 
+### UIView cross-dissolve transitions
+
+`tests/transition_test.m` puts a red 200x120 view with a yellow chip at
+(40,280) and runs `transitionWithView:duration:options:animations:completion:`
+with `UIViewAnimationOptionTransitionCrossDissolve` for 0.6 s, changing the
+background to blue and the chip to green. At 0.3 s the captured background is
+(118,0,137), a roughly even blend of the old red snapshot and the new blue;
+the chip reads (118,255,0), the yellow snapshot over the new green. Outside
+the view stays black. At 0.9 s the frame is pure blue (0,0,255) with a green
+chip (0,255,0), and the transition logged `[trans] done 1`, so the snapshot
+overlay is removed after the fade.
+
 ### CoreAnimation: keyframe calculation modes
 
 `tests/keyframe_modes_test.m` starts five 2 s opacity keyframe animations at

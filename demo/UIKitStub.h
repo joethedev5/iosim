@@ -861,7 +861,15 @@ enum {
     UIViewAnimationOptionCurveEaseInOut = 0 << 16,
     UIViewAnimationOptionCurveEaseIn = 1 << 16,
     UIViewAnimationOptionCurveEaseOut = 2 << 16,
-    UIViewAnimationOptionCurveLinear = 3 << 16
+    UIViewAnimationOptionCurveLinear = 3 << 16,
+    UIViewAnimationOptionTransitionNone = 0 << 20,
+    UIViewAnimationOptionTransitionFlipFromLeft = 1 << 20,
+    UIViewAnimationOptionTransitionFlipFromRight = 2 << 20,
+    UIViewAnimationOptionTransitionCurlUp = 3 << 20,
+    UIViewAnimationOptionTransitionCurlDown = 4 << 20,
+    UIViewAnimationOptionTransitionCrossDissolve = 5 << 20,
+    UIViewAnimationOptionTransitionFlipFromTop = 6 << 20,
+    UIViewAnimationOptionTransitionFlipFromBottom = 7 << 20
 };
 
 enum {

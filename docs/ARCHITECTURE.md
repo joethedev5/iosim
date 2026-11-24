@@ -1063,6 +1063,12 @@ decoded with libpng in `loader/image.c`.
   `usingSpringWithDamping:initialSpringVelocity:` variant replaces the curve
   with a damped harmonic response over normalized time, so soft springs
   overshoot and critically damped ones approach the target from below.
+  `transitionWithView:duration:options:animations:completion:` snapshots the
+  view before running the animations, overlays that snapshot as a
+  non-interactive subview and fades it out over the duration;
+  `transitionFromView:toView:` swaps the views and fades a snapshot of the
+  outgoing view over the parent. Non-cross-dissolve transition styles use the
+  same cross-dissolve fade instead of flip or curl geometry.
   `CAAnimation` key paths drive
   layer opacity and corner radius, either from/to (`CABasicAnimation`) or
   through keyframes (`CAKeyframeAnimation` with values and keyTimes), using

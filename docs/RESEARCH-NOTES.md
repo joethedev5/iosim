@@ -1238,3 +1238,20 @@ components.
   interpolation; only the easing function changes, so delays, autoreverse,
   repeat and completion callbacks keep their existing behavior.
 
+## 2026-11-24: UIView cross-dissolve transitions
+
+- `transitionWithView:duration:options:animations:completion:` takes a
+  snapshot of the view with `snapshotViewAfterScreenUpdates:NO`, inserts it
+  as a non-interactive subview with the same bounds, runs the animations
+  block (the model state changes immediately), then fades the snapshot's
+  alpha to zero over the duration with the requested curve. Its completion
+  removes the overlay before calling the caller's completion.
+- `transitionFromView:toView:` snapshots the outgoing view, swaps the model
+  hierarchy and fades the snapshot over the parent in the same way.
+- Only the cross-dissolve style is modeled. Flip and curl option bits are
+  accepted but use the same fade, since the renderer has no 3D transition
+  geometry.
+- A transition with no transition option, disabled animations, zero duration
+  or empty bounds runs the animations block synchronously and completes
+  immediately, preserving the previous behavior.
+

@@ -672,6 +672,62 @@ else
     echo "FAIL UIView springs"; echo "$out"; fails=$((fails+1))
 fi
 
+# ---------- 4f10. UIView cross-dissolve transitions ----------
+rm -f "$T/trans.fifo"
+mkfifo "$T/trans.fifo"
+"$ROOT/tools/build_app.sh" "$ROOT/tests/transition_test.m" \
+    "$T/transition_test" >/dev/null
+out="$(IOSIM_EVENT_FIFO="$T/trans.fifo" \
+    IOSIM_TEST_PNG_MID="$T/transition_mid.png" \
+    IOSIM_TEST_PNG_END="$T/transition_end.png" \
+    DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/transition_test" 2>&1)"
+rm -f "$T/trans.fifo"
+check "[trans] ready" "$out" \
+    "the transition fixture starts"
+check "[trans] mid" "$out" \
+    "the transition fixture captures the fade midway"
+check "[trans] done 1" "$out" \
+    "the transition completion runs"
+check "[trans] end" "$out" \
+    "the transition fixture captures the settled frame"
+if out="$(python3 - "$ROOT/tools" "$T/transition_mid.png" \
+    "$T/transition_end.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+
+def load(path):
+    w, h, bpp, rows = pngpixel.load(path)
+    def rgb(x, y):
+        c = pngpixel.px(rows, bpp, x * 3, y * 3)
+        return ((c >> 16) & 255, (c >> 8) & 255, c & 255)
+    return rgb
+
+mid = load(sys.argv[2])
+end = load(sys.argv[3])
+checks = [
+    ("mid background", 90 <= mid(140, 340)[0] <= 160 and
+     mid(140, 340)[1] < 40 and 90 <= mid(140, 340)[2] <= 160),
+    ("mid chip", 90 <= mid(110, 310)[0] <= 160 and
+     mid(110, 310)[1] > 220 and mid(110, 310)[2] < 40),
+    ("mid outside", mid(20, 340) == (0, 0, 0)),
+    ("end background", end(140, 340)[0] < 40 and end(140, 340)[1] < 40 and
+     end(140, 340)[2] > 200),
+    ("end chip", end(110, 310)[0] < 40 and end(110, 310)[1] > 220 and
+     end(110, 310)[2] < 60),
+    ("end outside", end(20, 340) == (0, 0, 0)),
+]
+bad = [name for name, ok in checks if not ok]
+if bad:
+    raise SystemExit("transition pixels failed: " + ", ".join(bad))
+print("ok   a cross-dissolve blends old snapshot into new colors")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL transition pixels"; echo "$out"; fails=$((fails+1))
+fi
+
 # ---------- 4g. NSCalendar components ----------
 "$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
     -ffreestanding -O1 -I "$ROOT/frameworks" \

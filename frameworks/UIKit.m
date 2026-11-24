@@ -1273,7 +1273,15 @@ typedef enum {
     UIViewAnimationOptionCurveEaseInOut = 0 << 16,
     UIViewAnimationOptionCurveEaseIn = 1 << 16,
     UIViewAnimationOptionCurveEaseOut = 2 << 16,
-    UIViewAnimationOptionCurveLinear = 3 << 16
+    UIViewAnimationOptionCurveLinear = 3 << 16,
+    UIViewAnimationOptionTransitionNone = 0 << 20,
+    UIViewAnimationOptionTransitionFlipFromLeft = 1 << 20,
+    UIViewAnimationOptionTransitionFlipFromRight = 2 << 20,
+    UIViewAnimationOptionTransitionCurlUp = 3 << 20,
+    UIViewAnimationOptionTransitionCurlDown = 4 << 20,
+    UIViewAnimationOptionTransitionCrossDissolve = 5 << 20,
+    UIViewAnimationOptionTransitionFlipFromTop = 6 << 20,
+    UIViewAnimationOptionTransitionFlipFromBottom = 7 << 20
 } UIViewAnimationOptions;
 
 typedef enum {
@@ -7545,30 +7553,88 @@ static CGPoint window_point_for_view(UIView *view, CGPoint point)
                 animations:(void (^)(void))animations
                 completion:(void (^)(BOOL finished))completion
 {
-    (void)view;
-    (void)duration;
-    (void)options;
-    if (animations)
+    unsigned long transition = (options >> 20) & 7UL;
+    if (!view || !animations || !g_animationsEnabled || duration <= 0.0 ||
+        transition == UIViewAnimationOptionTransitionNone ||
+        view.bounds.size.width <= 0 || view.bounds.size.height <= 0)
+    {
+        if (animations)
+            animations();
+        if (completion)
+            completion(YES);
+        return;
+    }
+    UIView *before = [view snapshotViewAfterScreenUpdates:NO];
+    if (!before)
+    {
         animations();
-    if (completion)
-        completion(YES);
+        if (completion)
+            completion(YES);
+        return;
+    }
+    before.frame = [view bounds];
+    before.userInteractionEnabled = NO;
+    [view addSubview:before];
+    animations();
+    /* Cross-dissolve is the modeled transition; other transition styles
+     * use the same fade instead of flip or curl geometry. */
+    [UIView animateWithDuration:duration delay:0.0
+                         options:(options & 0x30000UL)
+                      animations:^{
+        before.alpha = 0.0;
+    } completion:^(BOOL finished) {
+        [before removeFromSuperview];
+        if (completion)
+            completion(finished);
+    }];
 }
 + (void)transitionFromView:(UIView *)fromView toView:(UIView *)toView
                   duration:(double)duration
                    options:(unsigned long)options
                 completion:(void (^)(BOOL finished))completion
 {
-    (void)duration;
-    (void)options;
+    unsigned long transition = (options >> 20) & 7UL;
     UIView *parent = [fromView superview];
-    if (parent && toView)
+    if (!parent || !toView)
     {
-        [toView setFrame:[fromView frame]];
+        if (completion)
+            completion(YES);
+        return;
+    }
+    CGRect frame = [fromView frame];
+    if (!g_animationsEnabled || duration <= 0.0 ||
+        transition == UIViewAnimationOptionTransitionNone ||
+        frame.size.width <= 0 || frame.size.height <= 0)
+    {
+        [toView setFrame:frame];
         [fromView removeFromSuperview];
         [parent addSubview:toView];
+        if (completion)
+            completion(YES);
+        return;
     }
-    if (completion)
-        completion(YES);
+    UIView *before = [fromView snapshotViewAfterScreenUpdates:NO];
+    [toView setFrame:frame];
+    [fromView removeFromSuperview];
+    [parent addSubview:toView];
+    if (!before)
+    {
+        if (completion)
+            completion(YES);
+        return;
+    }
+    before.frame = frame;
+    before.userInteractionEnabled = NO;
+    [parent addSubview:before];
+    [UIView animateWithDuration:duration delay:0.0
+                         options:(options & 0x30000UL)
+                      animations:^{
+        before.alpha = 0.0;
+    } completion:^(BOOL finished) {
+        [before removeFromSuperview];
+        if (completion)
+            completion(finished);
+    }];
 }
 + (void)animateWithDuration:(double)duration animations:(void (^)(void))animations
 {
