@@ -551,6 +551,19 @@ enum {
 
 @class NSArray;
 
+@interface CAMediaTimingFunction : NSObject
++ (instancetype)functionWithName:(id)name;
++ (instancetype)functionWithControlPoints:(float)c1x :(float)c1y
+                                         :(float)c2x :(float)c2y;
+- (void)getControlPointAtIndex:(unsigned long)index values:(float *)values;
+- (double)evaluate:(double)t;
+@end
+
+extern id kCAMediaTimingFunctionLinear;
+extern id kCAMediaTimingFunctionEaseIn;
+extern id kCAMediaTimingFunctionEaseOut;
+extern id kCAMediaTimingFunctionEaseInEaseOut;
+
 @class CAAnimation;
 @protocol CAAnimationDelegate
 @optional

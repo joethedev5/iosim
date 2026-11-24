@@ -443,8 +443,13 @@ struct layer_anim {
 @interface CAMediaTimingFunction : NSObject {
 @public
     int _kind;
+    int _custom;
+    double _cx1, _cy1, _cx2, _cy2;
 }
 + (id)functionWithName:(id)name;
++ (id)functionWithControlPoints:(float)c1x :(float)c1y :(float)c2x
+                                :(float)c2y;
+- (void)getControlPointAtIndex:(unsigned long)index values:(float *)values;
 - (double)evaluate:(double)t;
 @end
 
@@ -4538,16 +4543,89 @@ id kCAMediaTimingFunctionEaseInEaseOut = @"easeInEaseOut";
 {
     CAMediaTimingFunction *f = [[self alloc] init];
     const char *s = iosim_string_cstr(name);
-    if (strcmp(s, "linear") == 0) f->_kind = 0;
-    else if (strcmp(s, "easeIn") == 0) f->_kind = 1;
-    else if (strcmp(s, "easeOut") == 0) f->_kind = 2;
-    else f->_kind = 3;
+    if (strcmp(s, "linear") == 0)
+    {
+        f->_kind = 0;
+        f->_cx1 = 0.0; f->_cy1 = 0.0; f->_cx2 = 1.0; f->_cy2 = 1.0;
+    }
+    else if (strcmp(s, "easeIn") == 0)
+    {
+        f->_kind = 1;
+        f->_cx1 = 0.42; f->_cy1 = 0.0; f->_cx2 = 1.0; f->_cy2 = 1.0;
+    }
+    else if (strcmp(s, "easeOut") == 0)
+    {
+        f->_kind = 2;
+        f->_cx1 = 0.0; f->_cy1 = 0.0; f->_cx2 = 0.58; f->_cy2 = 1.0;
+    }
+    else
+    {
+        f->_kind = 3;
+        f->_cx1 = 0.42; f->_cy1 = 0.0; f->_cx2 = 0.58; f->_cy2 = 1.0;
+    }
     return f;
+}
++ (id)functionWithControlPoints:(float)c1x :(float)c1y :(float)c2x
+                                :(float)c2y
+{
+    CAMediaTimingFunction *f = [[self alloc] init];
+    f->_custom = 1;
+    f->_cx1 = c1x;
+    f->_cy1 = c1y;
+    f->_cx2 = c2x;
+    f->_cy2 = c2y;
+    return f;
+}
+- (void)getControlPointAtIndex:(unsigned long)index values:(float *)values
+{
+    if (!values)
+        return;
+    double x = 0.0, y = 0.0;
+    if (index == 1)
+    {
+        x = _cx1;
+        y = _cy1;
+    }
+    else if (index == 2)
+    {
+        x = _cx2;
+        y = _cy2;
+    }
+    else if (index == 3)
+    {
+        x = 1.0;
+        y = 1.0;
+    }
+    values[0] = (float)x;
+    values[1] = (float)y;
 }
 - (double)evaluate:(double)t
 {
     if (t < 0) t = 0;
     if (t > 1) t = 1;
+    if (_custom)
+    {
+        double cx1 = _cx1, cx2 = _cx2;
+        if (cx1 < 0) cx1 = 0;
+        if (cx1 > 1) cx1 = 1;
+        if (cx2 < 0) cx2 = 0;
+        if (cx2 > 1) cx2 = 1;
+        double low = 0.0, high = 1.0;
+        for (int i = 0; i < 30; i++)
+        {
+            double mid = (low + high) / 2.0;
+            double x = 3.0 * (1.0 - mid) * (1.0 - mid) * mid * cx1 +
+                       3.0 * (1.0 - mid) * mid * mid * cx2 +
+                       mid * mid * mid;
+            if (x < t)
+                low = mid;
+            else
+                high = mid;
+        }
+        double u = (low + high) / 2.0;
+        return 3.0 * (1.0 - u) * (1.0 - u) * u * _cy1 +
+               3.0 * (1.0 - u) * u * u * _cy2 + u * u * u;
+    }
     if (_kind == 1) return t * t;
     if (_kind == 2) return 1 - (1 - t) * (1 - t);
     if (_kind == 3) return t * t * (3 - 2 * t);

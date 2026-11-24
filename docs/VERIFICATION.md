@@ -603,6 +603,15 @@ view-local point and previous point; and lifting a finger removes only that
 touch. `iosimctl ui <device> touch <id> <phase> <x> <y>` emits the same records
 to a booted device's foreground app.
 
+### Animation: timing functions
+
+`tests/timing_function_test.m` reads the control points of the named
+ease-in-ease-out function (`[timing] points 0.42 0.00 0.58 1.00`), evaluates
+the named smoothstep curve (`[timing] ease 0.16 0.50 0.84`), evaluates a
+custom cubic-Bezier built with `functionWithControlPoints::::`
+(`[timing] custom 0.13 0.50 0.87`) and checks the linear function
+(`[timing] linear 0.50 0.25`).
+
 ### Animation timeline and display link
 
 `tests/display_link_rate_test.m` schedules one link at 10 fps and one at the

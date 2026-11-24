@@ -1047,6 +1047,10 @@ decoded with libpng in `loader/image.c`.
   layer opacity and corner radius, either from/to (`CABasicAnimation`) or
   through keyframes (`CAKeyframeAnimation` with values and keyTimes), using
   the animation's timing function or Core Animation's default linear pacing.
+  Named timing functions store their two control points and keep the fast
+  smoothstep-style evaluation; `functionWithControlPoints::::` marks a custom
+  function, whose `evaluate:` solves x(t) by bisection and returns y(t) for
+  the cubic Bezier through (0,0), the two control points and (1,1).
   A layer holds up to four explicit animations at once: adding with a key that
   is already present replaces that animation, adding without a key appends,
   and the most recently added animation for a property wins when it is

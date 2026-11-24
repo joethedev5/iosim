@@ -424,6 +424,25 @@ check "[dlink] rates 1 1" "$out" \
 check "[dlink] done" "$out" \
     "the display-link rate fixture ends on its own"
 
+# ---------- 4f5. CAMediaTimingFunction control points ----------
+"$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
+    -ffreestanding -O1 -I "$ROOT/demo" \
+    -c "$ROOT/tests/timing_function_test.m" -o "$T/timing_function.o"
+"$LD64" -arch x86_64 -platform_version $PLATFORM -e _main \
+    -o "$T/timing_function_test" "$T/timing_function.o" \
+    "$ROOT/runtime/System/Library/Frameworks/UIKit.framework/UIKit" \
+    "$ROOT/runtime/System/Library/Frameworks/Foundation.framework/Foundation" \
+    -undefined dynamic_lookup
+out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/timing_function_test" 2>&1)"
+check "[timing] points 0.42 0.00 0.58 1.00" "$out" \
+    "named timing functions expose their cubic control points"
+check "[timing] ease 0.16 0.50 0.84" "$out" \
+    "the named ease-in-ease-out curve evaluates its smoothstep values"
+check "[timing] custom 0.13 0.50 0.87" "$out" \
+    "a custom cubic-Bezier function solves for its output progress"
+check "[timing] linear 0.50 0.25" "$out" \
+    "the named linear function evaluates to its input"
+
 # ---------- 4g. NSCalendar components ----------
 "$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
     -ffreestanding -O1 -I "$ROOT/frameworks" \

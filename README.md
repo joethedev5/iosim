@@ -40,6 +40,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | UINavigationController push/pop and interactive edge-pan pop transition, UITabBarController, UIStackView, standalone UINavigationBar/UIToolbar with item targets/images/custom views, UIButton titles/images, `UIButtonConfiguration`, button content/title/image edge insets, UITextField border styles and left/right views, navigation large-title/bar-button array properties | ✅ |
 | UIView animations (frame, alpha, transform), delay/curve/repeat options, completion blocks | ✅ |
 | `CADisplayLink` with `preferredFramesPerSecond`, presentation layers, multiple concurrent layer animations | ✅ |
+| `CAMediaTimingFunction` named curves and custom cubic-Bezier control points with `getControlPointAtIndex:` | ✅ |
 | `CAAnimationGroup`: grouped opacity/corner animations, group removal clears children | ✅ |
 | `CASpringAnimation`: mass/stiffness/damping/initial velocity, settling duration | ✅ |
 | CAAnimation timing (`beginTime`, `speed`, `timeOffset`, `autoreverses`, `fillMode`) and value getters, `CAAnimationDelegate` start/stop callbacks, `animationKeys`/`animationForKey:`/`removeAllAnimations`, `CACurrentMediaTime`, `CATransaction` completion, `performWithoutAnimation:` | ✅ |

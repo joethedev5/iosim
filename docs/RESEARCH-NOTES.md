@@ -1122,3 +1122,17 @@ components.
   the destination context is intact when the image is drawn into it. The
   destination rectangle can be any size, letting CoreGraphics scale the
   captured hierarchy.
+
+## 2026-11-24: Custom timing functions
+
+- Named `CAMediaTimingFunction` objects now store the two control points
+  Apple documents (linear 0/0 and 1/1, ease-in 0.42/0 and 1/1, ease-out 0/0
+  and 0.58/1, ease-in-ease-out 0.42/0 and 0.58/1) so
+  `getControlPointAtIndex:values:` can return them. Evaluation for named
+  functions keeps the existing cheap formulas, so animation output does not
+  change.
+- `functionWithControlPoints::::` marks the function custom. `evaluate:`
+  clamps the control x values into 0..1 and runs 30 bisection steps on the
+  cubic x(t) to find the parameter for the requested progress, then evaluates
+  y(t). For (0.42,0,0.58,1) this gives 0.13, 0.50 and 0.87 at 0.25, 0.5 and
+  0.75.
