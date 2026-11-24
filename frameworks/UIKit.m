@@ -7804,6 +7804,97 @@ static CGPoint window_point_for_view(UIView *view, CGPoint point)
         return;
     keyframe_add(start, duration, animations);
 }
+
+/* The opaque color revealed around a flipping pane: the first opaque
+ * background above the transitioning view, or black at the window edge. */
+static UIColor *transition_backdrop(UIView *view)
+{
+    UIView *v = [view superview];
+    while (v)
+    {
+        UIColor *color = [v backgroundColor];
+        if (color)
+        {
+            double r = 0.0, g = 0.0, b = 0.0, a = 0.0;
+            if ([color getRed:&r green:&g blue:&b alpha:&a] && a >= 0.999)
+                return color;
+        }
+        v = [v superview];
+    }
+    return [UIColor blackColor];
+}
+
+/* FlipFromLeft/Right squash along x; FlipFromTop/Bottom along y. */
+static BOOL transition_flip_axis(unsigned long transition, int *horizontal)
+{
+    if (transition == (UIViewAnimationOptionTransitionFlipFromLeft >> 20) ||
+        transition == (UIViewAnimationOptionTransitionFlipFromRight >> 20))
+    {
+        *horizontal = 1;
+        return YES;
+    }
+    if (transition == (UIViewAnimationOptionTransitionFlipFromTop >> 20) ||
+        transition == (UIViewAnimationOptionTransitionFlipFromBottom >> 20))
+    {
+        *horizontal = 0;
+        return YES;
+    }
+    return NO;
+}
+
+/* Stage a two-sided flip over `area`: the old snapshot flattens along the
+ * axis during the first half and the new snapshot opens during the second.
+ * An opaque backdrop sits under both snapshots so the real content never
+ * leaks through while they are edge-on. */
+static void transition_animate_flip(UIView *host, CGRect area,
+                                    UIView *before, UIView *after,
+                                    unsigned long options, double duration,
+                                    int horizontal, UIColor *backdrop,
+                                    void (^completion)(BOOL))
+{
+    UIView *cover = [[UIView alloc] initWithFrame:area];
+    cover.backgroundColor = backdrop;
+    cover.userInteractionEnabled = NO;
+    [host addSubview:cover];
+    before.frame = area;
+    before.userInteractionEnabled = NO;
+    [host addSubview:before];
+    after.frame = area;
+    after.userInteractionEnabled = NO;
+    after.hidden = YES;
+    [host addSubview:after];
+
+    CGAffineTransform flat = horizontal
+        ? CGAffineTransformMakeScale(0.01, 1.0)
+        : CGAffineTransformMakeScale(1.0, 0.01);
+    after.transform = flat;
+
+    unsigned long curve = options & 0x30000UL;
+    void (^cleanup)(BOOL) = ^(BOOL finished) {
+        [cover removeFromSuperview];
+        [before removeFromSuperview];
+        [after removeFromSuperview];
+        if (completion)
+            completion(finished);
+    };
+    [UIView animateWithDuration:duration / 2.0 delay:0.0 options:curve
+                     animations:^{
+        before.transform = flat;
+    } completion:^(BOOL finished) {
+        if (!finished)
+        {
+            cleanup(finished);
+            return;
+        }
+        before.hidden = YES;
+        after.hidden = NO;
+        [UIView animateWithDuration:duration / 2.0 delay:0.0 options:curve
+                         animations:^{
+            after.transform = CGAffineTransformIdentityValue();
+        } completion:cleanup];
+    }];
+}
+
 + (void)transitionWithView:(UIView *)view duration:(double)duration
                    options:(unsigned long)options
                 animations:(void (^)(void))animations
@@ -7832,8 +7923,22 @@ static CGPoint window_point_for_view(UIView *view, CGPoint point)
     before.userInteractionEnabled = NO;
     [view addSubview:before];
     animations();
-    /* Cross-dissolve is the modeled transition; other transition styles
-     * use the same fade instead of flip or curl geometry. */
+    int horizontal = 0;
+    if (transition_flip_axis(transition, &horizontal))
+    {
+        [before removeFromSuperview];
+        UIView *after = [view snapshotViewAfterScreenUpdates:YES];
+        if (after)
+        {
+            transition_animate_flip(view, [view bounds], before, after,
+                                    options, duration, horizontal,
+                                    transition_backdrop(view), completion);
+            return;
+        }
+        [view addSubview:before];
+    }
+    /* Cross-dissolve and the curl styles fade the old snapshot out over the
+     * already-updated content instead of staging a flip. */
     [UIView animateWithDuration:duration delay:0.0
                          options:(options & 0x30000UL)
                       animations:^{
@@ -7878,6 +7983,18 @@ static CGPoint window_point_for_view(UIView *view, CGPoint point)
         if (completion)
             completion(YES);
         return;
+    }
+    int horizontal = 0;
+    if (transition_flip_axis(transition, &horizontal))
+    {
+        UIView *after = [toView snapshotViewAfterScreenUpdates:YES];
+        if (after)
+        {
+            transition_animate_flip(parent, frame, before, after, options,
+                                    duration, horizontal,
+                                    transition_backdrop(toView), completion);
+            return;
+        }
     }
     before.frame = frame;
     before.userInteractionEnabled = NO;

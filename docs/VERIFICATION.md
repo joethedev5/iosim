@@ -1956,6 +1956,23 @@ the view stays black. At 0.9 s the frame is pure blue (0,0,255) with a green
 chip (0,255,0), and the transition logged `[trans] done 1`, so the snapshot
 overlay is removed after the fade.
 
+### UIKit: flip transitions
+
+`tests/uiview_transition_test.m` flips a centred 240x300 blue panel to green
+with `transitionWithView:duration:0.8 options:FlipFromLeft`. The first capture
+shows the old blue snapshot squashed horizontally over the dark backdrop; the
+new green side stays hidden until the half-way mark. The second capture shows
+the old side gone and the green side opening over the backdrop, which fills
+the rest of the panel while the flip is still in flight. A capture reads the
+last rendered frame, so the exact squash width varies with the frame cadence;
+the suite counts colours along the flip axis rather than sampling fixed
+points.
+The completion reports success after 0.8 s and the panel keeps no staged
+subviews. A following `transitionFromView:toView:` with `FlipFromTop` swaps
+the panel for a yellow one: mid-flip the yellow snapshot occupies part of the
+panel's column and the backdrop the rest, and the root ends with the
+destination view only.
+
 ### CoreAnimation: completion and fill modes
 
 `tests/animation_removal_test.m` starts three 0.5 s opacity animations from

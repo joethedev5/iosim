@@ -728,6 +728,95 @@ else
     echo "FAIL transition pixels"; echo "$out"; fails=$((fails+1))
 fi
 
+# ---------- 4f10b. UIView flip transitions ----------
+rm -f "$T/flip.fifo"
+mkfifo "$T/flip.fifo"
+"$ROOT/tools/build_app.sh" "$ROOT/tests/uiview_transition_test.m" \
+    "$T/uiview_transition_test" >/dev/null
+out="$(IOSIM_EVENT_FIFO="$T/flip.fifo" \
+    IOSIM_TEST_PNG_FIRST="$T/flip_first.png" \
+    IOSIM_TEST_PNG_SECOND="$T/flip_second.png" \
+    IOSIM_TEST_PNG_SWAP="$T/flip_swap.png" \
+    DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" \
+    "$T/uiview_transition_test" 2>&1)"
+rm -f "$T/flip.fifo"
+check "[flip] ready" "$out" "the flip fixture starts"
+check "[flip] start" "$out" "transitionWithView starts a horizontal flip"
+check "[flip] first" "$out" "the old snapshot is captured mid-squash"
+check "[flip] stage 3" "$out" \
+    "the flip stages the backdrop and both snapshots"
+check "[flip] settle 1 0 1" "$out" \
+    "the horizontal flip completes and removes its snapshots"
+check "[swap] start" "$out" "transitionFromView starts a vertical flip"
+check "[swap] stage 4" "$out" \
+    "the vertical flip stages its snapshots in the parent"
+check "[swap] done 1" "$out" "the vertical flip completes"
+check "[swap] settle 1 1" "$out" \
+    "the swap leaves only the destination view"
+fixture_out="$out"
+check "[swap] end" "$out" "the flip fixture finishes"
+if out="$(python3 - "$ROOT/tools" "$T/flip_first.png" "$T/flip_second.png" \
+    "$T/flip_swap.png" "$fixture_out" <<'FLIPPNG'
+import re
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+
+def load(path):
+    w, h, bpp, rows = pngpixel.load(path)
+    def rgb(x, y):
+        c = pngpixel.px(rows, bpp, x * 3, y * 3)
+        return ((c >> 16) & 255, (c >> 8) & 255, c & 255)
+    return rgb
+
+def near(got, want, tol=30):
+    return all(abs(a - b) <= tol for a, b in zip(got, want))
+
+def row(f, y, x0, x1, color):
+    return sum(1 for x in range(x0, x1 + 1) if near(f(x, y), color))
+
+def column(f, x, y0, y1, color):
+    return sum(1 for y in range(y0, y1 + 1) if near(f(x, y), color))
+
+blue = (26, 64, 230)
+green = (26, 204, 77)
+yellow = (242, 217, 26)
+dark = (13, 15, 23)
+
+first = load(sys.argv[2])
+second = load(sys.argv[3])
+swap = load(sys.argv[4])
+text = sys.argv[5]
+
+# The framebuffer holds the last rendered frame, so a capture trails its
+# timer; count colors along the flip axis instead of sampling fixed points.
+checks = [
+    ("first old side", row(first, 437, 81, 321, blue) >= 40),
+    ("first new side hidden", row(first, 437, 81, 321, green) == 0),
+    ("second old side gone", row(second, 437, 81, 321, blue) == 0),
+    ("second new side", row(second, 437, 81, 321, green) >= 1),
+    ("second backdrop", row(second, 437, 81, 321, dark) >= 40),
+    ("swap new side", column(swap, 201, 287, 587, yellow) >= 4),
+    ("swap backdrop", column(swap, 201, 287, 587, dark) >= 4),
+]
+bad = [name for name, ok in checks if not ok]
+if bad:
+    raise SystemExit("flip pixels failed: " + ", ".join(bad))
+
+m = re.search(r'\[flip\] elapsed (\d+)$', text, re.M)
+if not m or not 740 <= int(m.group(1)) <= 1200:
+    raise SystemExit('horizontal flip timing: %r' % (m and m.group(1),))
+m = re.search(r'\[swap\] elapsed (\d+)$', text, re.M)
+if not m or not 540 <= int(m.group(1)) <= 950:
+    raise SystemExit('vertical flip timing: %r' % (m and m.group(1),))
+print("ok   flip transitions squash the old side and open the new side")
+FLIPPNG
+)"; then
+    echo "$out"
+else
+    echo "FAIL flip transitions"; echo "$out"; fails=$((fails+1))
+fi
+
 # ---------- 4f11. CAAnimation completion and fill modes ----------
 rm -f "$T/arem.fifo"
 mkfifo "$T/arem.fifo"

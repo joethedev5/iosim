@@ -1772,3 +1772,15 @@ components.
   with their type/subtype/progress/filter but do not stage old content, so
   they do not change the rendered frame.
 - The `kCATransition*` type and subtype constants are exported.
+
+## 2026-11-24: UIView flip transitions
+
+- `transitionWithView:` and `transitionFromView:toView:` now stage
+  `FlipFromLeft`/`FlipFromRight` as a horizontal squash and
+  `FlipFromTop`/`FlipFromBottom` as a vertical one: the old snapshot scales
+  along the axis from 1 to 0.01 over the first half of the duration, then the
+  new snapshot scales from 0.01 back to 1 over the second half.
+- An opaque cover sampled from the first opaque superview background sits
+  under the snapshots, so the real content does not leak through while a
+  snapshot is edge-on. Cross-dissolve keeps the single fade, and the curl
+  styles still fall back to it.

@@ -590,8 +590,9 @@ not shown as a popover.
 `CATextLayer` draws its string with the shared font renderer, honouring
 `fontSize`, an optional `UIFont`, `foregroundColor` and left/center/right
 alignment. `UIView.transitionFromView:toView:` swaps the two views in the
-common superview, and `transitionWithView:` runs its animation block and
-completion immediately. `NSValue` stores up to 64 bytes plus an Objective-C
+common superview and stages a snapshot transition, and `transitionWithView:`
+runs its animation block under a snapshot of the old content. `NSValue`
+stores up to 64 bytes plus an Objective-C
 type string and unpacks CGPoint/CGSize/CGRect/UIEdgeInsets/NSRange/pointer
 values; `NSIndexSet`/`NSMutableIndexSet` keep a sorted index list with block
 enumeration. `UIWindowScene.windows` tracks windows created with
@@ -1198,11 +1199,13 @@ decoded with libpng in `loader/image.c`.
   with a damped harmonic response over normalized time, so soft springs
   overshoot and critically damped ones approach the target from below.
   `transitionWithView:duration:options:animations:completion:` snapshots the
-  view before running the animations, overlays that snapshot as a
-  non-interactive subview and fades it out over the duration;
-  `transitionFromView:toView:` swaps the views and fades a snapshot of the
-  outgoing view over the parent. Non-cross-dissolve transition styles use the
-  same cross-dissolve fade instead of flip or curl geometry.
+  view before running the animations and stages the change either as a
+  cross-dissolve (the old snapshot fades out over the new content) or as a
+  flip: the old snapshot squashes along the axis during the first half, the
+  new snapshot opens during the second, and an opaque backdrop sampled from
+  the first opaque superview background shows while they are edge-on.
+  `transitionFromView:toView:` swaps the views and stages the same way in
+  their parent. The curl styles fall back to the cross-dissolve fade.
   `CAAnimation` key paths drive
   layer opacity and corner radius, either from/to (`CABasicAnimation`) or
   through keyframes (`CAKeyframeAnimation` with values and keyTimes), using
