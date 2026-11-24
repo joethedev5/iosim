@@ -20,6 +20,7 @@
 #include <math.h>
 #include <unistd.h>
 #include <dlfcn.h>
+#include <pthread.h>
 #include <sys/mman.h>
 
 #ifndef MAP_ANONYMOUS
@@ -1082,6 +1083,49 @@ static int a64_variadic_call(struct a64_cpu *c, int kind, uint64_t *ret)
     return 1;
 }
 
+/* An arm64 guest start routine cannot be handed to the host's
+ * pthread_create directly. The wrapper below runs it on a fresh guest cpu
+ * on the new host thread and returns its x0 as the thread result, so a
+ * joining guest sees the start routine's return value. */
+struct a64_thread_start {
+    void *fn;
+    void *arg;
+};
+
+static void *a64_thread_entry(void *p)
+{
+    struct a64_thread_start start = *(struct a64_thread_start *)p;
+    free(p);
+    uint64_t gp[8] = {(uint64_t)(uintptr_t)start.arg, 0, 0, 0, 0, 0, 0, 0};
+    uint64_t fp[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+    uint64_t result[2] = {0, 0};
+    iosim_arm64_call_guest_ret(start.fn, gp, fp, result);
+    return (void *)(uintptr_t)result[0];
+}
+
+static int a64_pthread_create(struct a64_cpu *c, uint64_t *ret)
+{
+    pthread_t *out = (pthread_t *)(uintptr_t)c->x[0];
+    struct a64_thread_start *start = malloc(sizeof *start);
+    if (!start)
+    {
+        c->x[0] = (uint64_t)(int64_t)12; /* ENOMEM */
+        *ret = c->x[0];
+        return 1;
+    }
+    start->fn = (void *)(uintptr_t)c->x[2];
+    start->arg = (void *)(uintptr_t)c->x[3];
+    pthread_t thread;
+    int rc = pthread_create(&thread, NULL, a64_thread_entry, start);
+    if (rc != 0)
+        free(start);
+    else if (out)
+        *out = thread;
+    c->x[0] = (uint64_t)(int64_t)rc;
+    *ret = c->x[0];
+    return 1;
+}
+
 static int a64_native_call(struct a64_cpu *c, uint64_t target, uint64_t *ret)
 {
     native_gates_init();
@@ -1206,6 +1250,9 @@ static int a64_native_call(struct a64_cpu *c, uint64_t target, uint64_t *ret)
         if (vk)
             return a64_variadic_call(c, vk, ret);
     }
+    if (known && base_name && strcmp(base_name, "pthread_create") == 0 &&
+        iosim_arm64_is_guest_code((void *)(uintptr_t)c->x[2]))
+        return a64_pthread_create(c, ret);
     if (known && base_name)
     {
         uint64_t gp_args[4] = {c->x[2], c->x[3], c->x[4], c->x[5]};

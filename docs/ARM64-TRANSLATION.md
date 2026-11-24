@@ -31,7 +31,11 @@ printf gates print the same log as the x86_64 build. Guest classes on a
 native superclass keep their ivar offsets in 32-bit slots, so sibling
 ivars do not clobber each other. Thread-local variables work too: the
 fixups bind each __thread_vars thunk to the native tlv_bootstrap gate,
-whose metadata now covers arm64 images. An app bundle whose executable is
+whose metadata now covers arm64 images. Guest pthread_create runs an
+arm64 start routine on a fresh guest cpu on the new host thread, so a
+joining guest sees its return value and each worker gets its own
+thread-local block; the block table and translator are locked while
+another guest thread translates. An app bundle whose executable is
 thin arm64 starts through the normal device-manager path too: a launch
 that names no frameworks gets Foundation, UIKit, QuartzCore and
 UserNotifications preloaded from the runtime root, and the scene renders
@@ -245,6 +249,9 @@ can still hit today.
   guest. Thread-local variables do work: each thunk's getter reaches the
   native tlv_bootstrap gate and the loader allocates the image's
   per-thread block from __thread_data and __thread_bss.
+- A guest pthread_create ignores the attributes object and uses the
+  host's default thread attributes. The start routine's x0 becomes the
+  value a joining guest receives.
 - arm64 entry points must be `_main`-style; the CRT entry points are not
   started.
 - The guest runs inside the loader's process with the loader's

@@ -11,6 +11,7 @@
 #include "macho.h"
 
 #include <fcntl.h>
+#include <pthread.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -36,6 +37,10 @@ static int g_capblocks;
 static uint8_t *g_arena;
 static size_t g_arena_used;
 static int g_disabled;
+/* Guest threads share the block table, the arena and the on-disk cache.
+ * Execution of a translated block touches only the cpu state, so the
+ * lock is held only while a lookup translates or edits the table. */
+static pthread_mutex_t g_jit_lock = PTHREAD_MUTEX_INITIALIZER;
 
 #define O_X(n) ((int32_t)offsetof(struct a64_cpu, x) + 8 * (int32_t)(n))
 #define O_SP ((int32_t)offsetof(struct a64_cpu, sp))
@@ -1528,7 +1533,7 @@ static a64_block_fn jit_translate(struct a64_cpu *c, uint64_t pc)
     return (a64_block_fn)(void *)dst;
 }
 
-a64_block_fn a64_jit_lookup(struct a64_cpu *c, uint64_t pc)
+static a64_block_fn a64_jit_lookup_locked(struct a64_cpu *c, uint64_t pc)
 {
     if (g_disabled)
         return NULL;
@@ -1559,14 +1564,25 @@ a64_block_fn a64_jit_lookup(struct a64_cpu *c, uint64_t pc)
     return fn;
 }
 
+a64_block_fn a64_jit_lookup(struct a64_cpu *c, uint64_t pc)
+{
+    pthread_mutex_lock(&g_jit_lock);
+    a64_block_fn fn = a64_jit_lookup_locked(c, pc);
+    pthread_mutex_unlock(&g_jit_lock);
+    return fn;
+}
+
 void a64_jit_invalidate(void)
 {
+    pthread_mutex_lock(&g_jit_lock);
     g_nblocks = 0;
     g_arena_used = 0;
+    pthread_mutex_unlock(&g_jit_lock);
 }
 
 void a64_jit_invalidate_range(uint64_t lo, uint64_t hi)
 {
+    pthread_mutex_lock(&g_jit_lock);
     int out = 0;
     for (int i = 0; i < g_nblocks; i++)
     {
@@ -1575,4 +1591,5 @@ void a64_jit_invalidate_range(uint64_t lo, uint64_t hi)
         g_blocks[out++] = g_blocks[i];
     }
     g_nblocks = out;
+    pthread_mutex_unlock(&g_jit_lock);
 }

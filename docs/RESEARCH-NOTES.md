@@ -2590,3 +2590,25 @@ components.
   preserves every guest register except x0.
 - tests/arm64_tlv.c covers initializers, a zero-filled array and a
   double; arm64, x86_64 and NOJIT runs print `tlv 42 Tlv 9 3.0`.
+
+## 2026-11-24: guest threads from an arm64 image
+
+- A guest pthread_create hands the host library an arm64 start address,
+  which the native thread cannot jump to. The arm64 call gate now
+  recognizes pthread_create and wraps a guest start routine in a native
+  trampoline: the new host thread constructs a fresh a64_cpu, calls the
+  routine through iosim_arm64_call_guest_ret, and returns its x0 as the
+  thread result, so pthread_join in guest code receives the pointer the
+  routine returned. The guest's pthread_t slot receives the host
+  pthread_t, and join/detach/self calls stay native.
+- The block table, arena and on-disk cache are shared by guest threads.
+  Execution of a translated block touches only its own cpu, so a mutex
+  around lookup/translation and invalidation makes concurrent guest
+  threads safe without serializing execution. The thread-local getter
+  already uses a host pthread key per image, so each worker lazily gets
+  its own block.
+- tests/arm64_thread.c starts two workers before joining either, has
+  each update a _Thread_local counter and return an index-derived
+  pointer, and prints `thread create=0,0 join=0,0 main=1 workers=41,42
+  ret=100,101` in the translator, the interpreter and the x86_64 build.
+  The pthread attributes argument is ignored (host defaults are used).

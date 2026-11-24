@@ -2395,6 +2395,22 @@ variable address. The fixture mutates every variable and prints
 the run with `IOSIM_ARM64_NOJIT=1`, and compares the log with the
 x86_64 build of the same source.
 
+### arm64: threads
+
+`tests/arm64_thread.c` creates two pthreads whose start routines return
+a pointer and touch a `_Thread_local` counter. The start address is
+guest code, so the `pthread_create` gate wraps it in a native
+trampoline: the new host thread builds a fresh guest cpu, runs the
+routine through the native-to-guest callback entry, and returns its x0.
+Both threads start before either join, and the loader's block table is
+locked around lookup/translation so the concurrent guest paths are
+safe. The fixture prints
+`thread create=0,0 join=0,0 main=1 workers=41,42 ret=100,101`, proving
+each worker saw its own thread-local initial value and its return value
+reached `pthread_join`. The suite checks the line and exit status,
+repeats the run with `IOSIM_ARM64_NOJIT=1`, and compares the log with
+the x86_64 build.
+
 ### arm64: AdvSIMD coverage
 
 `tests/arm64_neon.c` exercises float max/min/div/sqrt/abs, integer

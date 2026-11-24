@@ -2627,6 +2627,55 @@ else
     fails=$((fails+1))
 fi
 
+# ---------- 4f10ao. arm64 threads ----------
+# A guest start routine cannot be handed to the host pthread_create. The
+# loader's gate wraps it in a native trampoline that runs a fresh guest
+# cpu on the new host thread and returns its x0 to a joining thread. Two
+# workers start before either join, so the block table translates
+# concurrently; each gets its own thread-local block.
+"$CC" -target arm64-apple-ios18.0-simulator -ffreestanding -O1 \
+    -c "$ROOT/tests/arm64_thread.c" -o "$T/arm64_thread.o"
+"$LD64" -arch arm64 -platform_version $PLATFORM -e _main \
+    -o "$T/arm64_thread" "$T/arm64_thread.o" -undefined dynamic_lookup
+if out="$(DYLD_ROOT_PATH="$ROOT/runtime" timeout 10 "$RUN" --arm64 \
+    $FW_ARGS "$T/arm64_thread" 2>&1)"; then
+    rc=0
+else
+    rc=$?
+fi
+check "thread create=0,0 join=0,0 main=1 workers=41,42 ret=100,101" \
+    "$out" "arm64 start routines run on joinable host threads"
+if [ "$rc" -eq 0 ]; then
+    echo "ok   the arm64 thread fixture exits zero"
+else
+    echo "FAIL arm64 thread (exit $rc)"; fails=$((fails+1))
+fi
+if out_nj="$(IOSIM_ARM64_NOJIT=1 DYLD_ROOT_PATH="$ROOT/runtime" \
+    timeout 10 "$RUN" --arm64 $FW_ARGS "$T/arm64_thread" 2>&1)"; then
+    :
+fi
+if [ "$out" = "$out_nj" ]; then
+    echo "ok   the interpreter runs the same threaded start routines"
+else
+    echo "FAIL arm64 thread under interpretation"; fails=$((fails+1))
+fi
+"$CC" -target x86_64-apple-ios18.0-simulator -ffreestanding -O1 \
+    -c "$ROOT/tests/arm64_thread.c" -o "$T/thread_x64.o"
+"$LD64" -arch x86_64 -platform_version $PLATFORM -e _main \
+    -o "$T/thread_x64" "$T/thread_x64.o" -undefined dynamic_lookup
+if out_x="$(DYLD_ROOT_PATH="$ROOT/runtime" timeout 10 "$RUN" \
+    $FW_ARGS "$T/thread_x64" 2>&1)"; then
+    rc_x=0
+else
+    rc_x=$?
+fi
+if [ "$rc_x" -eq 0 ] && [ "$out" = "$out_x" ]; then
+    echo "ok   the arm64 threaded result matches the x86_64 build"
+else
+    echo "FAIL dual-architecture thread"; echo "$out_x"
+    fails=$((fails+1))
+fi
+
 # ---------- 4f11. CAAnimation completion and fill modes ----------
 rm -f "$T/arem.fifo"
 mkfifo "$T/arem.fifo"
