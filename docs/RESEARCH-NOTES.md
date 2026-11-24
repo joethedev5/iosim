@@ -1076,5 +1076,11 @@ components.
   guard pointer skips the wrapper on that recursive render, but child views
   with their own clipped corners still take the wrapper.
 - `clipsToBounds`, `layer.masksToBounds` and scroll views all trigger the
-  clipping path. All four corners are rounded; `maskedCorners` selection is
-  still only stored, not rendered.
+  clipping path. The loader's `iosim_fb_mask_round_rect_corners` applies the
+  signed-distance corner cutoff only in the bits selected by
+  `layer.maskedCorners` (1 top-left, 2 top-right, 4 bottom-left, 8
+  bottom-right); unselected corners keep square alpha. CALayer defaults
+  `maskedCorners` to all four corners, so a plain corner radius still rounds
+  every corner.
+- The top-only card in the fixture confirms that a selected top-left and
+  top-right corner are cut while the bottom corners remain green squares.

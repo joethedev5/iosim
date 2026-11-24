@@ -555,9 +555,11 @@ with a 20 pt corner radius and a red subview filling it: the center is red,
 the corner is black and a point inside the arc is red. The second sets
 `layer.masksToBounds` instead and behaves the same with a yellow subview. The
 third has a corner radius but does not clip, so its orange subview covers the
-corner and keeps the square silhouette. The fixture prints
-`ok   rounded clipping masks a subtree and respects clipsToBounds` after
-checking those eight pixels.
+corner and keeps the square silhouette. A fourth green card selects only
+`UIRectCornerTopLeft | UIRectCornerTopRight`: both top corners are cut while
+both bottom corners stay square. The fixture prints
+`ok   rounded clipping masks a subtree, clipsToBounds and maskedCorners`
+after checking those thirteen pixels.
 
 ### Touch: multiple fingers
 

@@ -1029,6 +1029,7 @@ static const struct iosim_shim shims[] = {
     SHIM_DIRECT(iosim_fb_restore_target),
     SHIM_DIRECT(iosim_fb_free_offscreen),
     SHIM_DIRECT(iosim_fb_mask_round_rect),
+    SHIM_DIRECT(iosim_fb_mask_round_rect_corners),
     SHIM_DIRECT(iosim_fb_blit_affine),
     SHIM_DIRECT(iosim_fb_blit_homography),
     SHIM_DIRECT(iosim_fb_fill_field),

@@ -145,6 +145,8 @@ extern unsigned *iosim_fb_end_offscreen(void *state, int *out_w, int *out_h);
 extern void iosim_fb_stroke_circle(int cx, int cy, int radius, int thickness,
                                    unsigned color);
 extern void iosim_fb_mask_round_rect(int x, int y, int w, int h, int radius);
+extern void iosim_fb_mask_round_rect_corners(int x, int y, int w, int h,
+                                             int radius, unsigned corners);
 extern void iosim_fb_blit_affine(const unsigned *src, int sw, int sh,
                                  double fa, double fb, double fc, double fd,
                                  double ftx, double fty, double opacity);
@@ -4083,6 +4085,7 @@ static int anim_delegates_pending(void)
         _contentsGravity = @"resize";
         _contentsScale = 1.0;
         _cornerCurve = @"circular";
+        _maskedCorners = 15u;
         _speed = 1.0;
     }
     return self;
@@ -18980,8 +18983,9 @@ static void render_view(UIView *view, double originX, double originY,
                         parentAlpha);
             g_render_offscreen--;
             g_no_round_clip_view = saved;
-            iosim_fb_mask_round_rect(0, 0, w, h,
-                                     (int)(clip_radius * scale + 0.5));
+            iosim_fb_mask_round_rect_corners(
+                0, 0, w, h, (int)(clip_radius * scale + 0.5),
+                view->_layer ? view->_layer->_maskedCorners : 15u);
             int bw = 0, bh = 0;
             unsigned *buf = iosim_fb_end_offscreen(state, &bw, &bh);
             if (buf)

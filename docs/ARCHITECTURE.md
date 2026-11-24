@@ -1010,7 +1010,11 @@ decoded with libpng in `loader/image.c`.
   the same view on the recursive render, so a transformed clipped view is
   first rounded and then transformed. Content that overflows the rounded
   edge is cut; a view with a corner radius but no clipping still lets its
-  subviews paint over the corners.
+  subviews paint over the corners. The corner mask takes the layer's
+  `maskedCorners` bits, so top-only or asymmetric rounding leaves the other
+  corners square. The loader's
+  `iosim_fb_mask_round_rect_corners` skips the signed-distance cutoff in any
+  corner that is not selected.
 - `CGContextAddArc`, `CGContextAddArcToPoint`, `CGPathAddArc` and
   `CGPathAddArcToPoint` tessellate arcs into line segments with a step count
   derived from the swept angle and radius. Angles follow the view coordinate

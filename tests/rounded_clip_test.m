@@ -68,6 +68,19 @@ extern void exit(int status);
     [orange addSubview:orangeFill];
     [root addSubview:orange];
 
+    UIView *green = [[UIView alloc] initWithFrame:CGRectMake(40, 700, 200, 120)];
+    green.backgroundColor =
+        [UIColor colorWithRed:0.0 green:0.0 blue:0.0 alpha:1];
+    green.layer.cornerRadius = 20;
+    green.clipsToBounds = YES;
+    green.layer.maskedCorners =
+        UIRectCornerTopLeft | UIRectCornerTopRight;
+    UIView *greenFill = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 200, 120)];
+    greenFill.backgroundColor =
+        [UIColor colorWithRed:0.0 green:1.0 blue:0.0 alpha:1];
+    [green addSubview:greenFill];
+    [root addSubview:green];
+
     RoundClipCapture *capture = [[RoundClipCapture alloc] initWithFrame:screen];
     capture.backgroundColor = [UIColor clearColor];
     [root addSubview:capture];

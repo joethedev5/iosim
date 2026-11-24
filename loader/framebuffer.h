@@ -106,6 +106,8 @@ void iosim_fb_blit_xrgb_scaled(const uint32_t *src, int sw, int sh,
                                int x, int y, int w, int h,
                                double opacity);
 void iosim_fb_mask_round_rect(int x, int y, int w, int h, int radius);
+void iosim_fb_mask_round_rect_corners(int x, int y, int w, int h,
+                                      int radius, unsigned corners);
 void iosim_fb_blit_affine(const uint32_t *src, int sw, int sh,
                           double fa, double fb, double fc, double fd,
                           double ftx, double fty, double opacity);

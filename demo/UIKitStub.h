@@ -454,6 +454,14 @@ typedef enum {
 @class UIImage;
 @class CAAnimation;
 
+enum {
+    UIRectCornerTopLeft = 1 << 0,
+    UIRectCornerTopRight = 1 << 1,
+    UIRectCornerBottomLeft = 1 << 2,
+    UIRectCornerBottomRight = 1 << 3,
+    UIRectCornerAllCorners = ~0UL
+};
+
 @interface CALayer : NSObject
 @property CGRect frame;
 @property CGRect bounds;

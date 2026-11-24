@@ -3741,11 +3741,15 @@ checks = [
     ((60, 320), near(rgb(60, 320), 255, 230, 0), "masks inside"),
     ((42, 502), near(rgb(42, 502), 255, 128, 0), "unclipped corner"),
     ((140, 560), near(rgb(140, 560), 255, 128, 0), "unclipped center"),
+    ((42, 702), near(rgb(42, 702), 0, 0, 0), "top-left cut"),
+    ((238, 702), near(rgb(238, 702), 0, 0, 0), "top-right cut"),
+    ((42, 818), near(rgb(42, 818), 0, 255, 0), "bottom-left square"),
+    ((238, 818), near(rgb(238, 818), 0, 255, 0), "bottom-right square"),
 ]
 bad = [name for _pt, ok, name in checks if not ok]
 if bad:
     raise SystemExit("rounded clipping failed: " + ", ".join(bad))
-print("ok   rounded clipping masks a subtree and respects clipsToBounds")
+print("ok   rounded clipping masks a subtree, clipsToBounds and maskedCorners")
 PY
 )"; then
     echo "$out"

@@ -671,7 +671,8 @@ void iosim_fb_blit_xrgb_scaled(const uint32_t *src, int sw, int sh,
 /* Multiply the alpha of an offscreen layer by a rounded-rect mask. The
  * colour channels are left untouched, so compositing the layer later
  * produces the same antialiased edge the shape would have drawn. */
-void iosim_fb_mask_round_rect(int x, int y, int w, int h, int radius)
+void iosim_fb_mask_round_rect_corners(int x, int y, int w, int h,
+                                      int radius, unsigned corners)
 {
     if (!fb_pixels || !fb_alpha || w <= 0 || h <= 0)
         return;
@@ -688,6 +689,13 @@ void iosim_fb_mask_round_rect(int x, int y, int w, int h, int radius)
         for (int xx = 0; xx < (int)fb_width; xx++)
         {
             double px = xx + 0.5 - cx;
+            /* Corner bits: 1 top-left, 2 top-right, 4 bottom-left,
+             * 8 bottom-right. Unselected corners keep square alpha. */
+            unsigned corner = py < 0
+                ? (px < 0 ? 1u : 2u)
+                : (px < 0 ? 4u : 8u);
+            if (!(corners & corner))
+                continue;
             double qx = __builtin_fabs(px) - exr;
             double axr = qx > 0 ? qx : 0, ayr = qy > 0 ? qy : 0;
             double outside = __builtin_sqrt(axr * axr + ayr * ayr);
@@ -707,6 +715,11 @@ void iosim_fb_mask_round_rect(int x, int y, int w, int h, int radius)
             row[xx] = (na << 24) | (row[xx] & 0x00FFFFFFu);
         }
     }
+}
+
+void iosim_fb_mask_round_rect(int x, int y, int w, int h, int radius)
+{
+    iosim_fb_mask_round_rect_corners(x, y, w, h, radius, 15u);
 }
 
 void iosim_fb_blit_affine(const uint32_t *src, int sw, int sh,
