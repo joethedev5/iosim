@@ -2489,6 +2489,32 @@ check "[condlock] past 0" "$out" \
 check "[condlock] future 1" "$out" \
     "lockBeforeDate: takes a free condition lock"
 
+# ---------- 4g12. NSThread start, detach and state ----------
+"$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
+    -ffreestanding -O1 -I "$ROOT/frameworks" \
+    -c "$ROOT/tests/thread_test.m" -o "$T/thread_test.o"
+"$LD64" -arch x86_64 -platform_version $PLATFORM -e _main \
+    -o "$T/thread_test" "$T/thread_test.o" \
+    "$ROOT/runtime/System/Library/Frameworks/Foundation.framework/Foundation" \
+    -undefined dynamic_lookup
+out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/thread_test" 2>&1)"
+check "[thread] main 1" "$out" "the main thread reports isMainThread"
+check "[thread] current 0" "$out" \
+    "a worker's currentThread is not the main thread"
+check "[thread] name Worker" "$out" "NSThread keeps its name"
+check "[thread] before 0 0" "$out" \
+    "a new thread is neither executing nor finished"
+check "[thread] started 1" "$out" "starting a thread marks it executing"
+check "[thread] worker done 1 main 0" "$out" \
+    "the worker runs its selector and signals the main thread"
+check "[thread] finished 1 0" "$out" \
+    "the trampoline marks the thread finished after main returns"
+check "[thread] priority 0.5" "$out" \
+    "a thread starts with the default 0.5 priority"
+check "[thread] detached 1" "$out" \
+    "detachNewThreadSelector: starts a real pthread"
+check "[thread] cancelled 1" "$out" "cancel marks an unstarted thread cancelled"
+
 # ---------- 4h. NSOperationQueue block operations ----------
 "$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc -fblocks \
     -ffreestanding -O1 -I "$ROOT/frameworks" \

@@ -1353,6 +1353,18 @@ accepts the matching try, moves to condition 2, locks on that condition,
 times out while held, and locks again once free (`init 0`, `wrong 0`,
 `right 1`, `now 2`, `locked 2`, `past 0`, `future 1`).
 
+### Foundation: NSThread start, detach and state
+
+`tests/thread_test.m` creates an `NSThread` with a target selector, names it
+`Worker`, and starts it. The worker reports that its current thread is not the
+main thread (`[thread] current 0`), signals a condition, and the main thread
+reports `[thread] worker done 1 main 0`. After a short poll the thread reports
+`[thread] finished 1 0`; its default priority is `0.5`
+(`[thread] priority 0.5`). `detachNewThreadSelector:toTarget:withObject:`
+starts a second worker that signals the same condition (`[thread] detached 1`),
+and a cancelled, unstarted thread reports `[thread] cancelled 1`. The main
+thread reports `[thread] main 1` before any of this.
+
 ### Foundation: notifications with userInfo and blocks
 
 `tests/notification_test.m` registers a selector observer and a block

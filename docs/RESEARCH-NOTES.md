@@ -1703,3 +1703,10 @@ components.
 - `NSCondition` pairs a mutex with a condition variable (`waitUntilDate:`
   uses `pthread_cond_timedwait`); `NSConditionLock` layers a condition value
   and waiting locks on top, including timed condition waits.
+
+## 2026-11-24: NSThread start, detach and state
+
+- `initWithTarget:selector:object:` and `detachNewThreadSelector:` start a
+  real pthread; the trampoline runs `main` and flips executing to finished.
+- `currentThread` is a per-pthread object from a pthread key, `mainThread` is
+  the shared first-thread object, and cancel/name/priority are recorded.

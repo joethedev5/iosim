@@ -47,6 +47,11 @@ extern int pthread_cond_wait(void *cond, void *mutex);
 extern int pthread_cond_timedwait(void *cond, void *mutex, const void *when);
 extern int pthread_cond_signal(void *cond);
 extern int pthread_cond_broadcast(void *cond);
+extern int pthread_create(unsigned long *thread, const void *attr,
+                          void *(*fn)(void *), void *arg);
+extern int pthread_key_create(unsigned int *key, void (*destructor)(void *));
+extern void *pthread_getspecific(unsigned int key);
+extern int pthread_setspecific(unsigned int key, const void *value);
 extern void *_Block_copy(void *block);
 extern void _Block_release(void *block);
 extern void *objc_msgSend(void *self, void *sel, ...);
@@ -5904,21 +5909,114 @@ id NSDefaultRunLoopMode = @"NSDefaultRunLoopMode";
 }
 @end
 
+struct iosim_thread_start {
+    NSThread *thread;
+};
+
+static void *iosim_thread_trampoline(void *raw)
+{
+    struct iosim_thread_start *start = raw;
+    NSThread *thread = start->thread;
+    free(start);
+    [thread main];
+    thread->_executing = 0;
+    thread->_finished = 1;
+    return 0;
+}
+
+static unsigned int g_thread_key;
+static int g_thread_key_ready;
+
+static NSThread *iosim_thread_current(void)
+{
+    if (!g_thread_key_ready)
+    {
+        pthread_key_create(&g_thread_key, 0);
+        g_thread_key_ready = 1;
+    }
+    NSThread *thread = pthread_getspecific(g_thread_key);
+    if (!thread)
+    {
+        thread = [[NSThread alloc] init];
+        thread->_isMain = pthread_main_np() ? 1 : 0;
+        pthread_setspecific(g_thread_key, thread);
+    }
+    return thread;
+}
+
 @implementation NSThread
-+ (NSThread *)currentThread
++ (NSThread *)mainThread
 {
     static NSThread *thread;
     if (!thread)
+    {
         thread = [[self alloc] init];
+        thread->_isMain = 1;
+    }
     return thread;
 }
-+ (NSThread *)mainThread { return [self currentThread]; }
++ (NSThread *)currentThread
+{
+    if (pthread_main_np())
+        return [self mainThread];
+    return iosim_thread_current();
+}
 + (BOOL)isMainThread { return pthread_main_np() ? YES : NO; }
 + (void)sleepForTimeInterval:(double)interval
 {
     if (interval > 0)
         usleep((unsigned int)(interval * 1000000.0));
 }
++ (void)detachNewThreadSelector:(SEL)selector
+                       toTarget:(id)target
+                     withObject:(id)argument
+{
+    NSThread *thread = [[self alloc] initWithTarget:target
+                                           selector:selector
+                                             object:argument];
+    [thread start];
+}
+- (id)initWithTarget:(id)target selector:(SEL)selector object:(id)argument
+{
+    self = [super init];
+    if (self)
+    {
+        _target = target;
+        _selector = selector;
+        _argument = argument;
+        _priority = 0.5;
+    }
+    return self;
+}
+- (void)start
+{
+    if (_started)
+        return;
+    _started = 1;
+    if (_cancelled)
+        return;
+    struct iosim_thread_start *start = malloc(sizeof(*start));
+    if (!start)
+        return;
+    start->thread = self;
+    _executing = 1;
+    pthread_create(&_thread, 0, iosim_thread_trampoline, start);
+}
+- (void)main
+{
+    if (_cancelled || !_target || !_selector)
+        return;
+    ((void (*)(id, SEL, id))objc_msgSend)(_target, _selector, _argument);
+}
+- (void)cancel { _cancelled = 1; }
+- (BOOL)isExecuting { return _executing ? YES : NO; }
+- (BOOL)isFinished { return _finished ? YES : NO; }
+- (BOOL)isCancelled { return _cancelled ? YES : NO; }
+- (BOOL)isMainThread { return pthread_main_np() ? YES : NO; }
+- (id)name { return _name; }
+- (void)setName:(id)name { _name = name; }
+- (double)threadPriority { return _priority; }
+- (void)setThreadPriority:(double)priority { _priority = priority; }
 @end
 
 /* ------------------------------------------------------------- locking */

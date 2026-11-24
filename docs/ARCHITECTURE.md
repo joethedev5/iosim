@@ -803,6 +803,11 @@ fire sends the argument instead of the timer, and the
 `cancelPreviousPerformRequests...` class methods invalidate matching entries.
 `NSThread` answers `isMainThread` through a `pthread_main_np` shim that
 records the loader's first thread, and sleeps with the same shim.
+`initWithTarget:selector:object:` and `detachNewThreadSelector:toTarget:
+withObject:` spawn a real pthread whose trampoline runs `main`, while
+`isExecuting`, `isFinished`, `cancel`, name and priority track the thread
+object. `currentThread` keeps one thread object per pthread key and returns
+the shared main-thread object on the process's first thread.
 `NSLock` and `NSRecursiveLock` wrap a normal or recursive host pthread
 mutex, so `tryLock` is `pthread_mutex_trylock` and the before-date variants
 poll it until their deadline. `NSCondition` pairs a mutex with a condition

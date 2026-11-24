@@ -1274,11 +1274,39 @@ extern id NSDefaultRunLoopMode;
 - (void)run;
 @end
 
-@interface NSThread : NSObject
+@interface NSThread : NSObject {
+@public
+    id _target;
+    SEL _selector;
+    id _argument;
+    unsigned long _thread;
+    int _started;
+    int _executing;
+    int _finished;
+    int _cancelled;
+    int _isMain;
+    id _name;
+    double _priority;
+}
 + (NSThread *)currentThread;
 + (NSThread *)mainThread;
 + (BOOL)isMainThread;
 + (void)sleepForTimeInterval:(double)interval;
++ (void)detachNewThreadSelector:(SEL)selector
+                       toTarget:(id)target
+                     withObject:(id)argument;
+- (id)initWithTarget:(id)target selector:(SEL)selector object:(id)argument;
+- (void)start;
+- (void)main;
+- (void)cancel;
+- (BOOL)isExecuting;
+- (BOOL)isFinished;
+- (BOOL)isCancelled;
+- (BOOL)isMainThread;
+- (id)name;
+- (void)setName:(id)name;
+- (double)threadPriority;
+- (void)setThreadPriority:(double)priority;
 @end
 
 @protocol NSLocking
