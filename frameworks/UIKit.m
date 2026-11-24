@@ -17176,8 +17176,10 @@ static void snapshot_insert_items(NSDiffableDataSourceSnapshot *snapshot,
 #define CTX_MAX_ENTRIES 24
 
 typedef struct {
-    UIAction *action; /* nil for a section header */
+    UIAction *action; /* nil for a header, back or submenu row */
     id header;
+    UIMenu *submenu;  /* a navigable submenu row */
+    int back;         /* the return row of a submenu page */
 } ctx_entry;
 
 typedef struct {
@@ -17196,6 +17198,8 @@ typedef struct {
     int snapshotW, snapshotH;
     ctx_entry entries[CTX_MAX_ENTRIES];
     int entryCount;
+    UIMenu *menuStack[4];
+    int menuDepth;
     CGRect previewFrame;    /* screen points */
     CGRect menuFrame;       /* screen points */
     int rowRects[CTX_MAX_ENTRIES][4]; /* device pixels */
@@ -17229,7 +17233,11 @@ static double ctx_menu_height(void)
 {
     double height = 16;
     for (int i = 0; i < g_ctx.entryCount; i++)
-        height += g_ctx.entries[i].action ? 46.0 : 28.0;
+    {
+        ctx_entry *entry = &g_ctx.entries[i];
+        height += (entry->action || entry->submenu || entry->back) ? 46.0
+                                                                  : 28.0;
+    }
     return height;
 }
 
@@ -17261,13 +17269,13 @@ static void ctx_compute_frames(double screenWidth, double screenHeight)
                                  top + previewH + 10, menuW, menuH);
 }
 
-static void ctx_add_entry(UIAction *action, id header)
+static ctx_entry *ctx_new_entry(void)
 {
     if (g_ctx.entryCount >= CTX_MAX_ENTRIES)
-        return;
+        return 0;
     ctx_entry *entry = &g_ctx.entries[g_ctx.entryCount++];
-    entry->action = action;
-    entry->header = header;
+    memset(entry, 0, sizeof(*entry));
+    return entry;
 }
 
 static void ctx_flatten_menu(UIMenu *menu, int depth, int inlined)
@@ -17278,7 +17286,12 @@ static void ctx_flatten_menu(UIMenu *menu, int depth, int inlined)
     if (!children)
         return;
     if (menu->_title && !inlined)
-        ctx_add_entry(nil, menu->_title);
+    {
+        ctx_entry *entry = ctx_new_entry();
+        if (!entry)
+            return;
+        entry->header = menu->_title;
+    }
     unsigned long count = [children count];
     for (unsigned long i = 0; i < count; i++)
     {
@@ -17288,16 +17301,47 @@ static void ctx_flatten_menu(UIMenu *menu, int depth, int inlined)
             UIAction *action = (UIAction *)child;
             if (action->_attributes & UIMenuElementAttributesHidden)
                 continue;
-            ctx_add_entry(action, nil);
+            ctx_entry *entry = ctx_new_entry();
+            if (!entry)
+                return;
+            entry->action = action;
         }
         else if ([child isKindOfClass:[UIMenu class]])
         {
             UIMenu *submenu = (UIMenu *)child;
-            int inlineChildren =
-                (submenu->_options & UIMenuOptionsDisplayInline) != 0;
-            ctx_flatten_menu(submenu, depth + 1, inlineChildren);
+            if (submenu->_options & UIMenuOptionsDisplayInline)
+            {
+                ctx_flatten_menu(submenu, depth + 1, 1);
+                continue;
+            }
+            ctx_entry *entry = ctx_new_entry();
+            if (!entry)
+                return;
+            entry->submenu = submenu;
+            entry->header = submenu->_title;
         }
     }
+}
+
+/* A submenu page starts with a return row that carries the page title,
+ * then the submenu's own rows. The root page flattens its menu directly. */
+static void ctx_build_entries(void)
+{
+    g_ctx.entryCount = 0;
+    g_ctx.rowCount = 0;
+    if (g_ctx.menuDepth > 0 && g_ctx.menuDepth < 4)
+    {
+        UIMenu *page = g_ctx.menuStack[g_ctx.menuDepth];
+        ctx_entry *entry = ctx_new_entry();
+        if (entry)
+        {
+            entry->header = page ? page->_title : nil;
+            entry->back = 1;
+        }
+        ctx_flatten_menu(page, 0, 1);
+        return;
+    }
+    ctx_flatten_menu(g_ctx.menuStack[0], 0, 0);
 }
 
 static long table_section_count(UITableView *table)
@@ -17556,7 +17600,11 @@ static int context_menu_begin_at(UIWindow *window, CGPoint point)
     {
         UIMenu *menu = configuration->_actionProvider(nil);
         if (menu)
-            ctx_flatten_menu(menu, 0, 0);
+        {
+            g_ctx.menuStack[0] = menu;
+            g_ctx.menuDepth = 0;
+            ctx_build_entries();
+        }
     }
     CGRect screen = [[UIScreen mainScreen] bounds];
     ctx_compute_frames(screen.size.width, screen.size.height);
@@ -17631,7 +17679,31 @@ static int context_menu_handle_tap(int px, int py)
         int index = g_ctx.rowEntries[i];
         if (index < 0 || index >= g_ctx.entryCount)
             return 1;
-        UIAction *action = g_ctx.entries[index].action;
+        ctx_entry *entry = &g_ctx.entries[index];
+        if (entry->submenu)
+        {
+            if (g_ctx.menuDepth < 3)
+            {
+                g_ctx.menuDepth++;
+                g_ctx.menuStack[g_ctx.menuDepth] = entry->submenu;
+                ctx_build_entries();
+                CGRect screen = [[UIScreen mainScreen] bounds];
+                ctx_compute_frames(screen.size.width, screen.size.height);
+            }
+            return 1;
+        }
+        if (entry->back)
+        {
+            if (g_ctx.menuDepth > 0)
+            {
+                g_ctx.menuDepth--;
+                ctx_build_entries();
+                CGRect screen = [[UIScreen mainScreen] bounds];
+                ctx_compute_frames(screen.size.width, screen.size.height);
+            }
+            return 1;
+        }
+        UIAction *action = entry->action;
         if (!action)
             return 1;
         if (action->_attributes & UIMenuElementAttributesDisabled)
@@ -28585,6 +28657,20 @@ static void ctx_clear_preview_corners(unsigned *bg, int fbW, int fbH,
     free(current);
 }
 
+static void ctx_draw_chevron(int cx, int cy, double scale, int pointsLeft,
+                             unsigned color)
+{
+    int arm = (int)(5 * scale + 0.5);
+    int thickness = (int)(1.6 * scale + 0.5);
+    if (arm < 2)
+        arm = 2;
+    if (thickness < 1)
+        thickness = 1;
+    int dx = pointsLeft ? arm : -arm;
+    iosim_fb_draw_line(cx + dx, cy - arm, cx, cy, thickness, color);
+    iosim_fb_draw_line(cx, cy, cx + dx, cy + arm, thickness, color);
+}
+
 static void draw_context_menu(int fbW, int fbH, double scale)
 {
     if (!g_ctx.active)
@@ -28672,7 +28758,7 @@ static void draw_context_menu(int fbW, int fbH, double scale)
     for (int i = 0; i < g_ctx.entryCount; i++)
     {
         ctx_entry *entry = &g_ctx.entries[i];
-        if (!entry->action)
+        if (!entry->action && !entry->submenu && !entry->back)
         {
             const char *header = iosim_string_cstr(entry->header);
             int asc = 0, desc = 0, lh = 0;
@@ -28683,6 +28769,50 @@ static void draw_context_menu(int fbW, int fbH, double scale)
                                0x9a9aa1);
             cursor += headerH;
             previousWasAction = 0;
+            continue;
+        }
+        if (!entry->action)
+        {
+            int rowY = cursor;
+            if (previousWasAction)
+                iosim_fb_fill_rect(textX, rowY, mw - 2 * (textX - mx),
+                                   (int)(scale + 0.5), 0x3a3b42);
+            const char *label = entry->header
+                ? iosim_string_cstr(entry->header)
+                : (entry->back ? "Back" : "");
+            int titleX = textX;
+            if (entry->back)
+            {
+                titleX = mx + (int)(36 * scale + 0.5);
+                ctx_draw_chevron(mx + (int)(20 * scale + 0.5),
+                                 rowY + rowH / 2, scale, 1, 0x8e8e93);
+            }
+            else
+            {
+                ctx_draw_chevron(mx + mw - (int)(18 * scale + 0.5),
+                                 rowY + rowH / 2, scale, 0, 0x8e8e93);
+            }
+            char title[192];
+            share_text_ellipsis(label, IOSIM_FONT_REGULAR, 17, scale,
+                                mx + mw - (int)(40 * scale + 0.5) - titleX,
+                                title, sizeof(title));
+            int asc = 0, desc = 0, lh = 0;
+            iosim_fb_font_metrics(IOSIM_FONT_REGULAR, 17, scale, &asc, &desc,
+                                  &lh);
+            iosim_fb_font_text(titleX, rowY + rowH / 2 - lh / 2 + asc,
+                               title, IOSIM_FONT_REGULAR, 17, scale,
+                               0xffffff);
+            if (g_ctx.rowCount < CTX_MAX_ENTRIES)
+            {
+                g_ctx.rowRects[g_ctx.rowCount][0] = mx;
+                g_ctx.rowRects[g_ctx.rowCount][1] = rowY;
+                g_ctx.rowRects[g_ctx.rowCount][2] = mx + mw;
+                g_ctx.rowRects[g_ctx.rowCount][3] = rowY + rowH;
+                g_ctx.rowEntries[g_ctx.rowCount] = i;
+                g_ctx.rowCount++;
+            }
+            cursor += rowH;
+            previousWasAction = 1;
             continue;
         }
         UIAction *action = entry->action;

@@ -110,7 +110,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | UICollectionView flow layout in vertical and horizontal directions (horizontal layouts wrap into columns and grow the content width), multiple sections, reusable cells and supplementary header/footer views, selection, drag scrolling, prefetch/drag/drop configuration, visible-cell queries; compositional layouts with fractional/absolute dimensions, items with content insets, horizontal/vertical groups (including repeating and nested groups), section insets/spacing, section providers and shared rendering/hit-testing geometry, and diffable data sources over `NSDiffableDataSourceSnapshot` for tables and collections | ✅ |
 | UITableView sections, headers, per-row heights, selection, swipe-to-delete and editing mode, separator/background/refresh configuration and estimated heights | ✅ |
 | UILongPressGestureRecognizer duration, movement tolerance and state changes | ✅ |
-| UIContextMenuInteraction context menus on table rows, collection items and views: blurred backdrop, lifted preview, action menus | ✅ |
+| UIContextMenuInteraction context menus on table rows, collection items and views: blurred backdrop, lifted preview, action menus, submenu pages with a back row | ✅ |
 | UIBarButtonItem/UINavigationItem, right bar buttons and automatic back button | ✅ |
 | UISearchBar with delegate edits, Return action, Cancel and keyboard focus; UISearchController with results updater, active state and scope properties | ✅ |
 | UIDevice model/system/orientation/battery surface, UIAccessibility element storage and query functions, gesture recognizer delegate/touch/delay properties | ✅ |

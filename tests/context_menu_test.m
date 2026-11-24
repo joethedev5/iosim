@@ -53,6 +53,63 @@ static void capture(const char *variable)
     fflush(0);
 }
 
+/* The run loop draws the blur-heavy menu in one pass, so several fixture
+ * timers can fire in one drain and a fixed-delay capture would photograph
+ * the framebuffer from before the tap. These helpers poll the framebuffer
+ * until the expected menu state has actually been drawn. */
+static int menu_page_pixel(int x, int y)
+{
+    unsigned pixel = 0;
+    iosim_fb_capture(x * 3, y * 3, 1, 1, &pixel);
+    unsigned r = (pixel >> 16) & 255, g = (pixel >> 8) & 255,
+             b = pixel & 255;
+    return r > 25 && r < 60 && g > 25 && g < 60 && b > 35 && b < 75;
+}
+
+static int region_has_light(int x0, int y0, int x1, int y1)
+{
+    unsigned pixels[40 * 40 * 9];
+    int w = x1 - x0, h = y1 - y0;
+    if (w <= 0 || h <= 0 || w > 40 || h > 40)
+        return 0;
+    iosim_fb_capture(x0 * 3, y0 * 3, w * 3, h * 3, pixels);
+    for (int i = 0; i < w * h * 9; i++)
+    {
+        unsigned p = pixels[i];
+        unsigned r = (p >> 16) & 255, g = (p >> 8) & 255, b = p & 255;
+        if (r > 110 && g > 110 && b > 110)
+            return 1;
+    }
+    return 0;
+}
+
+static int submenu_root_ready(void)
+{
+    return region_has_light(286, 552, 320, 582) && !menu_page_pixel(201, 620);
+}
+
+static int submenu_page_ready(void)
+{
+    return menu_page_pixel(201, 620);
+}
+
+static void capture_when(const char *variable, int (*ready)(void),
+                         int attempts, void (^then)(void))
+{
+    if (!ready() && attempts > 0)
+    {
+        dispatch_after(dispatch_time(0, 50 * 1000000LL),
+                       dispatch_get_main_queue(), ^{
+            capture_when(variable, ready, attempts - 1, then);
+        });
+        return;
+    }
+    if (variable)
+        capture(variable);
+    if (then)
+        then();
+}
+
 static int after_attempts;
 
 static int backdrop_green(void)
@@ -69,7 +126,7 @@ static int backdrop_green(void)
  * the backdrop is revealed again, then capture. */
 static void capture_after_restore(const char *variable)
 {
-    if (!backdrop_green() && after_attempts < 4)
+    if (!backdrop_green() && after_attempts < 40)
     {
         after_attempts++;
         dispatch_after(dispatch_time(0, 50 * 1000000LL),
@@ -79,6 +136,14 @@ static void capture_after_restore(const char *variable)
         return;
     }
     capture(variable);
+}
+
+/* Every dismissal capture needs its own retry budget: a menu render can take
+ * long enough that the tap is still queued when the capture timer fires. */
+static void capture_restored(const char *variable)
+{
+    after_attempts = 0;
+    capture_after_restore(variable);
 }
 
 static int g_last_row;
@@ -123,9 +188,32 @@ static int g_last_row;
         printf("[menu] ping\n");
         fflush(0);
     }];
-    id children[1] = { ping };
+    UIAction *copy = [UIAction actionWithTitle:@"Copy Link"
+                                        image:nil
+                                   identifier:nil
+                                      handler:^(UIAction *action) {
+        (void)action;
+        printf("[menu] copy link\n");
+        fflush(0);
+    }];
+    UIAction *email = [UIAction actionWithTitle:@"Email"
+                                          image:nil
+                                     identifier:nil
+                                        handler:^(UIAction *action) {
+        (void)action;
+        printf("[menu] email\n");
+        fflush(0);
+    }];
+    id shareChildren[2] = { copy, email };
+    UIMenu *share = [UIMenu
+        menuWithTitle:@"Share"
+                image:nil
+           identifier:nil
+              options:0
+             children:[NSArray arrayWithObjects:shareChildren count:2]];
+    id children[2] = { ping, share };
     return [UIMenu menuWithTitle:nil
-                        children:[NSArray arrayWithObjects:children count:1]];
+                        children:[NSArray arrayWithObjects:children count:2]];
 }
 
 - (void)loadView
@@ -188,7 +276,7 @@ static int g_last_row;
     });
     dispatch_after(dispatch_time(0, 1300 * 1000000LL),
                    dispatch_get_main_queue(), ^{
-        capture_after_restore("IOSIM_TEST_PNG_AFTER");
+        capture_restored("IOSIM_TEST_PNG_AFTER");
     });
 
     dispatch_after(dispatch_time(0, 1450 * 1000000LL),
@@ -209,7 +297,7 @@ static int g_last_row;
     });
     dispatch_after(dispatch_time(0, 2600 * 1000000LL),
                    dispatch_get_main_queue(), ^{
-        capture("IOSIM_TEST_PNG_END");
+        capture_restored("IOSIM_TEST_PNG_END");
     });
 
     dispatch_after(dispatch_time(0, 2750 * 1000000LL),
@@ -230,7 +318,7 @@ static int g_last_row;
     });
     dispatch_after(dispatch_time(0, 3900 * 1000000LL),
                    dispatch_get_main_queue(), ^{
-        capture("IOSIM_TEST_PNG_GENEND");
+        capture_restored("IOSIM_TEST_PNG_GENEND");
     });
 
     dispatch_after(dispatch_time(0, 4100 * 1000000LL),
@@ -251,13 +339,49 @@ static int g_last_row;
     });
     dispatch_after(dispatch_time(0, 5250 * 1000000LL),
                    dispatch_get_main_queue(), ^{
-        capture("IOSIM_TEST_PNG_COLEND");
+        capture_restored("IOSIM_TEST_PNG_COLEND");
     });
     dispatch_after(dispatch_time(0, 5400 * 1000000LL),
                    dispatch_get_main_queue(), ^{
-        printf("[menu] png written\n");
-        fflush(0);
-        exit(0);
+        send_touch("down", 90, 440);
+    });
+    dispatch_after(dispatch_time(0, 6050 * 1000000LL),
+                   dispatch_get_main_queue(), ^{
+        send_touch("up", 90, 440);
+        capture_when("IOSIM_TEST_PNG_SUB", submenu_root_ready, 80, ^{
+            dispatch_after(dispatch_time(0, 100 * 1000000LL),
+                           dispatch_get_main_queue(), ^{
+                send_event("tap 603 1701\n");
+                capture_when("IOSIM_TEST_PNG_SUB2", submenu_page_ready, 80, ^{
+                    dispatch_after(dispatch_time(0, 100 * 1000000LL),
+                                   dispatch_get_main_queue(), ^{
+                        send_event("tap 603 1560\n");
+                        capture_when("IOSIM_TEST_PNG_SUB3",
+                                     submenu_root_ready, 80, ^{
+                            dispatch_after(
+                                dispatch_time(0, 100 * 1000000LL),
+                                dispatch_get_main_queue(), ^{
+                                send_event("tap 603 1701\n");
+                                capture_when(0, submenu_page_ready, 80, ^{
+                                    dispatch_after(
+                                        dispatch_time(0, 100 * 1000000LL),
+                                        dispatch_get_main_queue(), ^{
+                                        send_event("tap 603 1839\n");
+                                        capture_when(
+                                            "IOSIM_TEST_PNG_SUBEND",
+                                            backdrop_green, 80, ^{
+                                            printf("[menu] png written\n");
+                                            fflush(0);
+                                            exit(0);
+                                        });
+                                    });
+                                });
+                            });
+                        });
+                    });
+                });
+            });
+        });
     });
 }
 

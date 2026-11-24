@@ -1519,3 +1519,18 @@ components.
   derives the expected opacity from each sample's measured elapsed time
   instead of fixed timer positions, then requires a fourth sample after the
   full two-second cycle at the start value.
+
+## 2026-11-24: context menu submenu pages
+
+- A `UIMenu` without `UIMenuOptionsDisplayInline` no longer flattens into
+  the parent card. It draws as one row with its title and a right chevron;
+  inline menus still flatten without their title.
+- Opening a submenu pushes it on a four-deep stack and rebuilds the entry
+  list as a return row (left chevron, the page title) followed by the
+  submenu's children, so the card grows and its geometry is recomputed.
+  The return row pops the stack and restores the parent rows. Tap routing
+  rebuilds row rectangles for submenu and return rows as it does for
+  actions.
+- The fixture's plain-view menu gained a Share submenu with Copy Link and
+  Email. The suite captures the root card, the opened page, the card after
+  the return row and the restored view after Email.

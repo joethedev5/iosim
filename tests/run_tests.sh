@@ -6110,6 +6110,10 @@ out="$(IOSIM_EVENT_FIFO="$T/ctx.fifo" \
     IOSIM_TEST_PNG_GENEND="$T/ctx_genend.png" \
     IOSIM_TEST_PNG_COL="$T/ctx_col.png" \
     IOSIM_TEST_PNG_COLEND="$T/ctx_colend.png" \
+    IOSIM_TEST_PNG_SUB="$T/ctx_sub.png" \
+    IOSIM_TEST_PNG_SUB2="$T/ctx_sub2.png" \
+    IOSIM_TEST_PNG_SUB3="$T/ctx_sub3.png" \
+    IOSIM_TEST_PNG_SUBEND="$T/ctx_subend.png" \
     DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" \
     "$T/context_menu_test" 2>&1)"
 check "[menu] config 1" "$out" \
@@ -6125,6 +6129,8 @@ check "[menu] ping" "$out" \
 check "[menu] config item 0" "$out" \
     "a collection item provides a context menu configuration"
 check "[menu] tag" "$out" "the collection menu action runs"
+check "[menu] email" "$out" \
+    "a submenu action runs after navigating into its menu"
 check "[menu] png written" "$out" "the context menu fixture captures every phase"
 if out="$(python3 - "$ROOT/tools" "$T" <<'CTXPNG'
 import sys
@@ -6162,6 +6168,16 @@ def card(c):
 def cyan(c):
     return abs(c[0] - 26) < 25 and abs(c[1] - 153) < 30 and abs(c[2] - 179) < 30
 
+def light(c):
+    return c[0] > 110 and c[1] > 110 and c[2] > 110
+
+def any_light(read, x0, y0, x1, y1):
+    for yy in range(y0, y1):
+        for xx in range(x0, x1):
+            if light(rgb(read, xx, yy)):
+                return True
+    return False
+
 root = sys.argv[2]
 menu = loader(root + "/ctx_menu.png")
 after = loader(root + "/ctx_after.png")
@@ -6171,6 +6187,10 @@ gen = loader(root + "/ctx_gen.png")
 genend = loader(root + "/ctx_genend.png")
 col = loader(root + "/ctx_col.png")
 colend = loader(root + "/ctx_colend.png")
+sub = loader(root + "/ctx_sub.png")
+sub2 = loader(root + "/ctx_sub2.png")
+sub3 = loader(root + "/ctx_sub3.png")
+subend = loader(root + "/ctx_subend.png")
 if not blue(rgb(menu, 201, 90)):
     raise SystemExit("the lifted row preview is missing")
 if not card(rgb(menu, 201, 150)):
@@ -6207,7 +6227,22 @@ if not cyan(rgb(colend, 70, 670)):
 if not (green(rgb(colend, 10, 550)) and
         rgb(colend, 201, 760)[0] < 25 and rgb(colend, 201, 760)[1] < 25):
     raise SystemExit("the collection menu did not dismiss")
+if not card(rgb(sub, 201, 567)):
+    raise SystemExit("the submenu row is missing from the root menu")
+if not any_light(sub, 286, 552, 320, 582):
+    raise SystemExit("the submenu row has no chevron")
+if not any_light(sub2, 90, 596, 280, 632):
+    raise SystemExit("the submenu page does not show its actions")
+if not any_light(sub2, 86, 506, 110, 534):
+    raise SystemExit("the submenu page has no back chevron")
+if any_light(sub, 90, 596, 280, 632):
+    raise SystemExit("the root menu grew into the submenu page layout")
+if not any_light(sub3, 286, 552, 320, 582):
+    raise SystemExit("going back did not restore the root menu")
+if not (green(rgb(subend, 10, 300)) and orange(rgb(subend, 90, 440))):
+    raise SystemExit("the submenu action did not dismiss the menu")
 print("ok   context menus lift rows, items and views, blur, run and dismiss")
+print("ok   submenu rows open a page and the back row returns")
 CTXPNG
 )"; then
     echo "$out"

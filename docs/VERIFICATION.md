@@ -480,7 +480,12 @@ preview at (201,440) and a one-action Ping card at (201,510); Ping restores
 the view at (90,440). A collection item at (70,670) renders its cyan cell
 (`#1a99b3`) as the preview and its Tag card at (201,760); Tag restores the
 item and the collection background (`#0d0d14`). The suite checks all six
-captures against those colors.
+captures against those colors. A final sequence reopens the plain view's
+menu, which now also holds a Share submenu: the Share row `#23242d` at
+(201,567) carries a right chevron, tapping it redraws the card with a return
+row (left chevron at about (96,521)) and Copy Link/Email actions below the
+root rows, tapping the return row restores the root card, and tapping Email
+prints `[menu] email` and restores the green background and orange view.
 
 ### Action sheets
 

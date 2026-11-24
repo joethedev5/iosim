@@ -1344,10 +1344,15 @@ a configuration. When one is returned the framebuffer behind is captured,
 box-blurred and dimmed 22 %, the source row, item or view is re-rendered or
 snapshotted as a lifted 14 pt-corner preview with a shadow, and the menu's
 actions (with section headers, destructive red and disabled gray) draw in a
-22 pt rounded card below it. Tap routing uses the draw-time row rectangles,
-runs the action handler and dismisses; a tap outside or a new touch dismisses
-without running anything. The lift that ends the opening long press keeps the
-menu open.
+22 pt rounded card below it. Inline menus flatten their children into the
+same card; any other submenu draws as a row with its title and a right
+chevron. Tapping that row pushes the submenu onto a four-deep stack and
+redraws the card with a leading return row (left chevron and the page title)
+above the submenu's actions, which lengthens the card; tapping the return row
+pops back and restores the previous rows. Tap routing uses the draw-time row
+rectangles, runs the action handler and dismisses; a tap outside or a new
+touch dismisses without running anything. The lift that ends the opening long
+press keeps the menu open.
 
 Standard controls render with the measured iOS 26 design. `UISwitch` paints
 a 63 x 28 pt capsule with a 36.3 x 23.3 pt white knob; `UISlider` uses a
