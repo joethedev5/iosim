@@ -10,6 +10,9 @@
 
 #include "foundation_lite.h"
 
+extern void iosim_block_call1(void *block, unsigned long arg);
+extern void iosim_block_call2(void *block, unsigned long a, unsigned long b);
+
 extern int printf(const char *fmt, ...);
 extern int snprintf(char *buf, unsigned long size, const char *fmt, ...);
 extern char *getenv(const char *name);
@@ -899,8 +902,11 @@ static void un_fire(UNNotificationRequest *request)
     _authorizationStatus = options ? UNAuthorizationStatusAuthorized
                                    : UNAuthorizationStatusDenied;
     if (completion)
-        completion(_authorizationStatus == UNAuthorizationStatusAuthorized,
-                   nil);
+        iosim_block_call2(completion,
+                          _authorizationStatus ==
+                                  UNAuthorizationStatusAuthorized
+                              ? 1 : 0,
+                          0);
 }
 - (void)getNotificationSettingsWithCompletionHandler:
     (void (^)(id settings))completion
@@ -917,7 +923,7 @@ static void un_fire(UNNotificationRequest *request)
     settings->_lockScreenSetting = setting;
     settings->_criticalAlertSetting = UNNotificationSettingNotSupported;
     if (completion)
-        completion(settings);
+        iosim_block_call1(completion, (unsigned long)(void *)settings);
 }
 - (void)addNotificationRequest:(UNNotificationRequest *)request
           withCompletionHandler:(void (^)(id error))completion
@@ -925,8 +931,11 @@ static void un_fire(UNNotificationRequest *request)
     if (!request)
     {
         if (completion)
-            completion([NSError errorWithDomain:@"UNErrorDomain" code:1
-                                        userInfo:nil]);
+        {
+            id error = [NSError errorWithDomain:@"UNErrorDomain" code:1
+                                          userInfo:nil];
+            iosim_block_call1(completion, (unsigned long)(void *)error);
+        }
         return;
     }
     for (unsigned long i = 0; i < [_pending count]; i++)
@@ -954,7 +963,7 @@ static void un_fire(UNNotificationRequest *request)
         un_fire(request);
     });
     if (completion)
-        completion(nil);
+        iosim_block_call1(completion, 0);
 }
 - (void)removePendingNotificationRequestsWithIdentifiers:(id)identifiers
 {
@@ -987,13 +996,17 @@ static void un_fire(UNNotificationRequest *request)
     (void (^)(id requests))completion
 {
     if (completion)
-        completion([NSArray arrayWithArray:_pending]);
+        iosim_block_call1(
+            completion,
+            (unsigned long)(void *)[NSArray arrayWithArray:_pending]);
 }
 - (void)getDeliveredNotificationsWithCompletionHandler:
     (void (^)(id notifications))completion
 {
     if (completion)
-        completion([NSArray arrayWithArray:_delivered]);
+        iosim_block_call1(
+            completion,
+            (unsigned long)(void *)[NSArray arrayWithArray:_delivered]);
 }
 - (void)removeDeliveredNotificationsWithIdentifiers:(id)identifiers
 {
@@ -1029,7 +1042,7 @@ static void un_fire(UNNotificationRequest *request)
     (void (^)(id categories))completion
 {
     if (completion)
-        completion(_categories);
+        iosim_block_call1(completion, (unsigned long)(void *)_categories);
 }
 @end
 

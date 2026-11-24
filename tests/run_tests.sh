@@ -2005,6 +2005,50 @@ else
     fails=$((fails+1))
 fi
 
+# ---------- 4f10af. arm64 blocks handed to native frameworks ----------
+# UIKit runs animation and completion blocks, Foundation runs an index
+# set enumerator and a URL session handler, and UserNotifications runs an
+# authorization completion. An arm64 block's invoke pointer is guest
+# code, so each framework calls it through the block bridge, which runs
+# it on the interpreter.
+"$CC" -target arm64-apple-ios18.0-simulator -ffreestanding \
+    -fobjc-runtime=ios-18.0 -fno-objc-arc -fblocks -O1 -I "$ROOT/demo" \
+    -c "$ROOT/tests/arm64_animation.m" -o "$T/arm64_animation.o"
+"$LD64" -arch arm64 -platform_version $PLATFORM -e _main \
+    -o "$T/arm64_animation" "$T/arm64_animation.o" -undefined dynamic_lookup
+rm -f "$T/arm64anim.fifo"
+mkfifo "$T/arm64anim.fifo"
+if out="$(IOSIM_EVENT_FIFO="$T/arm64anim.fifo" DYLD_ROOT_PATH="$ROOT/runtime" \
+    timeout 10 "$RUN" --arm64 $FW_ARGS --load-dylib \
+    "$ROOT/runtime/System/Library/Frameworks/UserNotifications.framework/UserNotifications" \
+    "$T/arm64_animation" 2>&1)"; then
+    rc=0
+else
+    rc=$?
+fi
+check "[arm64anim] indexes 4" "$out" \
+    "Foundation runs an arm64 enumeration block"
+check "[arm64anim] auth 1 0" "$out" \
+    "UserNotifications runs an arm64 authorization block"
+check "[arm64anim] start 100" "$out" \
+    "the arm64 animation fixture reaches its first frame"
+check "[arm64anim] completion 1 50" "$out" \
+    "UIKit runs the arm64 animation and completion blocks"
+if [ "$rc" -eq 0 ]; then
+    echo "ok   the arm64 block fixture exits zero"
+else
+    echo "FAIL arm64 blocks (exit $rc)"; fails=$((fails+1))
+fi
+if out_nj="$(IOSIM_ARM64_NOJIT=1 IOSIM_EVENT_FIFO="$T/arm64anim.fifo" \
+    DYLD_ROOT_PATH="$ROOT/runtime" timeout 10 "$RUN" --arm64 $FW_ARGS \
+    --load-dylib "$ROOT/runtime/System/Library/Frameworks/UserNotifications.framework/UserNotifications" \
+    "$T/arm64_animation" 2>&1)"; then
+    :
+fi
+check "[arm64anim] completion 1 50" "$out_nj" \
+    "the interpreter runs the same framework block calls"
+rm -f "$T/arm64anim.fifo"
+
 # ---------- 4f11. CAAnimation completion and fill modes ----------
 rm -f "$T/arem.fifo"
 mkfifo "$T/arem.fifo"

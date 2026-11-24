@@ -2322,6 +2322,21 @@ depends on the preload as well; the app's output appears in
 suspends it like any other app. The app is uninstalled and its device
 shut down, leaving the first device's app list and icon layout untouched.
 
+### arm64: blocks handed to native frameworks
+
+`tests/arm64_animation.m` hands arm64 blocks to three frameworks.
+Foundation's index-set enumerator visits indexes 1 and 3 and honors the
+stop pointer, UserNotifications runs the authorization completion with
+granted=1 and a nil error, and UIView runs the animations and completion
+blocks of a 0.2-second alpha animation; the completion observes the
+settled alpha and exits zero. Each framework reaches the block through
+`iosim_block_call` or one of its one-to-three-argument forms, which run
+an arm64 invoke pointer on the interpreter and leave an x86 block on the
+direct call path. The suite checks `[arm64anim] indexes 4`,
+`[arm64anim] auth 1 0`, `[arm64anim] start 100` and
+`[arm64anim] completion 1 50`, then runs the fixture again with
+`IOSIM_ARM64_NOJIT=1`.
+
 ### SpringBoard: folder pagination
 
 A folder is rewritten to hold thirteen members across two pages.

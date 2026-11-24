@@ -2391,3 +2391,22 @@ components.
   single and double precision was missing and broke float printf
   arguments compiled at -O0. `tests/arm64_neon.c` is the coverage
   fixture; the translator and the interpreter produce identical output.
+
+## 2026-11-24: framework code invoking app blocks
+
+- Native framework code that stores an app block cannot jump to an
+  arm64 block's invoke pointer: it is guest code. UIView animations and
+  completions, NSIndexSet enumeration, NSOperation, URLSession handlers
+  and UserNotifications completions now call the block through
+  `iosim_block_call` / `iosim_block_call1/2/3`, which read the block
+  layout and route an arm64 invoke pointer through
+  `iosim_arm64_call_guest_ret` with the block itself in x0 and up to
+  three arguments in x1-x3; an x86 block keeps the direct call path.
+- The call sites had called the invoke pointer directly before, which
+  crashed under arm64 but was correct for x86. Blocks that return a
+  value (view-controller completions with items, collection view data
+  source providers) are not bridged yet and still call the pointer
+  directly.
+- A fixture with all three frameworks running arm64 blocks produces the
+  same four lines with `IOSIM_ARM64_NOJIT=1`, and `exit(0)` from the
+  animation completion terminates the loader with status zero.

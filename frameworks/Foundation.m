@@ -5,6 +5,12 @@
 #include "foundation_lite.h"
 #include <stdarg.h>
 
+extern void iosim_block_call(void *block);
+extern void iosim_block_call1(void *block, unsigned long arg);
+extern void iosim_block_call2(void *block, unsigned long a, unsigned long b);
+extern void iosim_block_call3(void *block, unsigned long a, unsigned long b,
+                              unsigned long c);
+
 /* Empty collection literals (`@[]`, `@{}`) reference these globals instead
  * of sending a factory message. Foundation exports them on Apple platforms. */
 id __NSArray0__;
@@ -4513,7 +4519,8 @@ static void defaults_path(char *out, unsigned long cap)
         return;
     BOOL stop = NO;
     for (unsigned long i = 0; i < _count && !stop; i++)
-        block(_indexes[i], &stop);
+        iosim_block_call2(block, (unsigned long)_indexes[i],
+                          (unsigned long)(void *)&stop);
 }
 - (void)enumerateRangesUsingBlock:(void (^)(NSRange, BOOL *))block
 {
@@ -4529,7 +4536,10 @@ static void defaults_path(char *out, unsigned long cap)
         {
             end = _indexes[++i];
         }
-        block(NSMakeRange(start, end - start + 1), &stop);
+        NSRange range = NSMakeRange(start, end - start + 1);
+        iosim_block_call3(block, (unsigned long)range.location,
+                          (unsigned long)range.length,
+                          (unsigned long)(void *)&stop);
         i++;
     }
 }
@@ -8640,10 +8650,14 @@ static void url_task_main(void *raw)
     if (task->_download)
     {
         if (handler)
-            handler(location, response, error);
+            iosim_block_call3(handler, (unsigned long)(void *)location,
+                              (unsigned long)(void *)response,
+                              (unsigned long)(void *)error);
     }
     else if (handler)
-        handler(data, response, error);
+        iosim_block_call3(handler, (unsigned long)(void *)data,
+                          (unsigned long)(void *)response,
+                          (unsigned long)(void *)error);
     id session = task->_session;
     id delegate = session ? ((NSURLSession *)session)->_delegate : nil;
     if (!handler && delegate)
@@ -11525,7 +11539,7 @@ extern long dispatch_group_wait(void *group, unsigned long long timeout);
             return;
         void (^block)(void) =
             (void (^)(void))[(NSArray *)_blocks objectAtIndex:i];
-        block();
+        iosim_block_call(block);
     }
 }
 @end

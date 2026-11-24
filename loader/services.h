@@ -16,6 +16,14 @@ void *iosim_services_lookup(const char *name);
  * call. */
 int iosim_services_lookup_addr(void *addr, const char **name);
 
+/* Native framework code invoking a block directly (UIView animation steps
+ * and completions). An arm64 block runs through the native-to-guest bridge;
+ * an x86 block is called directly. */
+void iosim_block_call(void *block);
+void iosim_block_call1(void *block, uint64_t arg);
+void iosim_block_call2(void *block, uint64_t a, uint64_t b);
+void iosim_block_call3(void *block, uint64_t a, uint64_t b, uint64_t c);
+
 /* Exported data symbols (Mach-O binds these by address). */
 extern uint32_t bootstrap_port_value;
 extern uint32_t mach_task_self_value;

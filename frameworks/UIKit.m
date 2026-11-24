@@ -110,6 +110,8 @@ extern int  iosim_png_load_memory(const unsigned char *bytes,
                                   unsigned long length,
                                   unsigned char **out_rgba,
                            int *out_width, int *out_height);
+extern void iosim_block_call(void *block);
+extern void iosim_block_call1(void *block, unsigned long arg);
 extern void *_Block_copy(void *block);
 extern void _Block_release(void *block);
 extern void iosim_fb_fill_ellipse(int cx, int cy, int rx, int ry,
@@ -6370,7 +6372,7 @@ int iosim_animation_tick(void)
             g_completionDue[i] = g_completionDue[g_completionCount - 1];
             g_completionCount--;
             if (block)
-                block(YES);
+                iosim_block_call1(block, 1);
             fired = 1;
         }
         else
@@ -7879,7 +7881,7 @@ static CGPoint window_point_for_view(UIView *view, CGPoint point)
         return;
     BOOL previous = g_animationsEnabled;
     g_animationsEnabled = NO;
-    actionsWithoutAnimation();
+    iosim_block_call(actionsWithoutAnimation);
     g_animationsEnabled = previous;
 }
 + (void)animateKeyframesWithDuration:(double)duration delay:(double)delay
@@ -7892,15 +7894,15 @@ static CGPoint window_point_for_view(UIView *view, CGPoint point)
         return;
     if (!g_animationsEnabled)
     {
-        animations();
+        iosim_block_call(animations);
         if (completion)
-            completion(YES);
+            iosim_block_call1(completion, 1);
         return;
     }
     g_keyframeActive = 1;
     g_keyframeDuration = duration > 0 ? duration : 0.25;
     g_keyframeDelay = delay;
-    animations();
+    iosim_block_call(animations);
     g_keyframeActive = 0;
     if (completion)
         animation_add_completion(delay + g_keyframeDuration, completion);
@@ -7984,7 +7986,7 @@ static void transition_animate_flip(UIView *host, CGRect area,
         [before removeFromSuperview];
         [after removeFromSuperview];
         if (completion)
-            completion(finished);
+            iosim_block_call1(completion, finished);
     };
     [UIView animateWithDuration:duration / 2.0 delay:0.0 options:curve
                      animations:^{
@@ -8015,23 +8017,23 @@ static void transition_animate_flip(UIView *host, CGRect area,
         view.bounds.size.width <= 0 || view.bounds.size.height <= 0)
     {
         if (animations)
-            animations();
+            iosim_block_call(animations);
         if (completion)
-            completion(YES);
+            iosim_block_call1(completion, 1);
         return;
     }
     UIView *before = [view snapshotViewAfterScreenUpdates:NO];
     if (!before)
     {
-        animations();
+        iosim_block_call(animations);
         if (completion)
-            completion(YES);
+            iosim_block_call1(completion, 1);
         return;
     }
     before.frame = [view bounds];
     before.userInteractionEnabled = NO;
     [view addSubview:before];
-    animations();
+    iosim_block_call(animations);
     int horizontal = 0;
     if (transition_flip_axis(transition, &horizontal))
     {
@@ -8055,7 +8057,7 @@ static void transition_animate_flip(UIView *host, CGRect area,
     } completion:^(BOOL finished) {
         [before removeFromSuperview];
         if (completion)
-            completion(finished);
+            iosim_block_call1(completion, finished);
     }];
 }
 + (void)transitionFromView:(UIView *)fromView toView:(UIView *)toView
@@ -8068,7 +8070,7 @@ static void transition_animate_flip(UIView *host, CGRect area,
     if (!parent || !toView)
     {
         if (completion)
-            completion(YES);
+            iosim_block_call1(completion, 1);
         return;
     }
     CGRect frame = [fromView frame];
@@ -8080,7 +8082,7 @@ static void transition_animate_flip(UIView *host, CGRect area,
         [fromView removeFromSuperview];
         [parent addSubview:toView];
         if (completion)
-            completion(YES);
+            iosim_block_call1(completion, 1);
         return;
     }
     UIView *before = [fromView snapshotViewAfterScreenUpdates:NO];
@@ -8090,7 +8092,7 @@ static void transition_animate_flip(UIView *host, CGRect area,
     if (!before)
     {
         if (completion)
-            completion(YES);
+            iosim_block_call1(completion, 1);
         return;
     }
     int horizontal = 0;
@@ -8115,7 +8117,7 @@ static void transition_animate_flip(UIView *host, CGRect area,
     } completion:^(BOOL finished) {
         [before removeFromSuperview];
         if (completion)
-            completion(finished);
+            iosim_block_call1(completion, finished);
     }];
 }
 static void legacy_will_notify(id delegate, SEL selector, id animationID,
@@ -8434,9 +8436,9 @@ static void legacy_commit_animations(void)
     BOOL repeat = (options & UIViewAnimationOptionRepeat) != 0;
     if (!g_animationsEnabled)
     {
-        animations();
+        iosim_block_call(animations);
         if (!repeat && completion)
-            completion(YES);
+            iosim_block_call1(completion, 1);
         return;
     }
     g_animating = YES;
@@ -8446,7 +8448,7 @@ static void legacy_commit_animations(void)
     g_animateInfinite = repeat;
     g_animateAutoreverse = (options & UIViewAnimationOptionAutoreverse) != 0;
     g_animateCurve = (int)((options >> 16) & 3);
-    animations();
+    iosim_block_call(animations);
     g_animating = NO;
     g_animateDelay = 0.0;
     g_animateInfinite = NO;
@@ -8475,9 +8477,9 @@ static void legacy_commit_animations(void)
     BOOL repeat = (options & UIViewAnimationOptionRepeat) != 0;
     if (!g_animationsEnabled)
     {
-        animations();
+        iosim_block_call(animations);
         if (!repeat && completion)
-            completion(YES);
+            iosim_block_call1(completion, 1);
         return;
     }
     g_animating = YES;
@@ -8491,7 +8493,7 @@ static void legacy_commit_animations(void)
     g_animateSpring = YES;
     g_animateDamping = damping;
     g_animateVelocity = velocity;
-    animations();
+    iosim_block_call(animations);
     g_animating = NO;
     g_animateDelay = 0.0;
     g_animateInfinite = NO;
@@ -10410,7 +10412,7 @@ static int iosim_text_press_tick(void)
     _pageControllers = viewControllers;
     [self installCurrentPage];
     if (completion)
-        completion(YES);
+        iosim_block_call1(completion, 1);
 }
 - (NSArray *)viewControllers { return _pageControllers; }
 - (id)delegate { return _pageDelegate; }
@@ -12533,7 +12535,7 @@ NSString *const UITransitionContextToViewKey =
     void (^completion)(BOOL) = _completion;
     _completion = 0;
     if (completion)
-        completion(didComplete);
+        iosim_block_call1(completion, didComplete);
 }
 - (void)updateInteractiveTransition:(double)percentComplete
 {
@@ -12776,9 +12778,9 @@ NSString *const UITransitionContextToViewKey =
     (void (^)(id<UIViewControllerTransitionCoordinatorContext> context))completion
 {
     if (animation)
-        animation(self);
+        iosim_block_call1(animation, (unsigned long)(void *)self);
     if (completion)
-        completion(self);
+        iosim_block_call1(completion, (unsigned long)(void *)self);
     return YES;
 }
 - (BOOL)animateAlongsideTransitionInView:(UIView *)view
@@ -13084,12 +13086,12 @@ NSString *const UITransitionContextToViewKey =
     if (toView)
         [toView setFrame:[fromView frame]];
     if (animations)
-        animations();
+        iosim_block_call(animations);
     [fromView removeFromSuperview];
     if (toView)
         [[self view] addSubview:toView];
     if (completion)
-        completion(YES);
+        iosim_block_call1(completion, 1);
 }
 - (void)didMoveToParentViewController:(UIViewController *)parent
 {
@@ -13243,7 +13245,7 @@ NSString *const UITransitionContextToViewKey =
             if ([animator respondsToSelector:@selector(animationEnded:)])
                 [(id)animator animationEnded:completed];
             if (completion)
-                completion();
+                iosim_block_call(completion);
         }];
         _transitionContext = context;
         _transitionAnimator = animator;
@@ -13271,7 +13273,7 @@ NSString *const UITransitionContextToViewKey =
         g_modal_dismissing_controller = 0;
     }
     if (completion)
-        completion();
+        iosim_block_call(completion);
 }
 - (void)showViewController:(UIViewController *)controller sender:(id)sender
 {
@@ -13290,7 +13292,7 @@ NSString *const UITransitionContextToViewKey =
     if (!controller)
     {
         if (completion)
-            completion();
+            iosim_block_call(completion);
         return;
     }
     id<UIViewControllerTransitioningDelegate> delegate =
@@ -13334,7 +13336,7 @@ NSString *const UITransitionContextToViewKey =
             if ([animator respondsToSelector:@selector(animationEnded:)])
                 [(id)animator animationEnded:completed];
             if (completion)
-                completion();
+                iosim_block_call(completion);
         }];
         _transitionContext = context;
         _transitionAnimator = animator;
@@ -13361,7 +13363,7 @@ NSString *const UITransitionContextToViewKey =
         g_modal_dismissing_controller = controller;
     }
     if (completion)
-        completion();
+        iosim_block_call(completion);
 }
 - (UIViewController *)presentedViewController
 {
@@ -19322,7 +19324,7 @@ int iosim_ui_appearance_tick(void)
     (void)url;
     (void)options;
     if (completion)
-        completion(NO);
+        iosim_block_call1(completion, 0);
 }
 - (BOOL)isIdleTimerDisabled { return _idleTimerDisabled; }
 - (void)setIdleTimerDisabled:(BOOL)disabled { _idleTimerDisabled = disabled; }

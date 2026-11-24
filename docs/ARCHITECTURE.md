@@ -1787,7 +1787,11 @@ Python for iteration speed.
   image UUID; guest addresses and helper calls are recorded as fixups and
   rebound when the file is loaded.
   Native libdispatch timers and queues invoke arm64 blocks back through
-  the native-to-guest bridge, and the call gate recognizes the loader's
+  the native-to-guest bridge, and so do framework methods that call an
+  app block directly — UIView animations and completions, Foundation
+  index-set enumeration, NSOperation and URLSession handlers, and
+  UserNotifications completions — through `iosim_block_call` and its
+  one-to-three-argument forms. The call gate recognizes the loader's
   service symbols by address. Native `qsort`/`bsearch`
   shims call an arm64 comparator back through a general native-to-guest
   C call bridge. The message-send

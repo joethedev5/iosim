@@ -85,6 +85,51 @@ static void call_block_arg(void *block, void *arg)
         ((void (*)(void *, void *))b->invoke)(block, arg);
 }
 
+/* Native framework code invokes blocks directly (UIView animation steps
+ * and completions, view-controller transition handlers). An arm64 block's
+ * invoke pointer is guest code; run it through the bridge, and leave x86
+ * blocks on the direct call path. The framework images resolve these
+ * through the loader's shim table. */
+void iosim_block_call(void *block)
+{
+    if (!block)
+        return;
+    struct block_layout *b = block;
+    if (b->invoke && !call_guest_block(block, NULL, 0, NULL))
+        ((void (*)(void *))b->invoke)(block);
+}
+
+void iosim_block_call1(void *block, uint64_t arg)
+{
+    if (!block)
+        return;
+    struct block_layout *b = block;
+    uint64_t args[1] = {arg};
+    if (b->invoke && !call_guest_block(block, args, 1, NULL))
+        ((void (*)(void *, uint64_t))b->invoke)(block, arg);
+}
+
+void iosim_block_call2(void *block, uint64_t a, uint64_t b)
+{
+    if (!block)
+        return;
+    struct block_layout *blk = block;
+    uint64_t args[2] = {a, b};
+    if (blk->invoke && !call_guest_block(block, args, 2, NULL))
+        ((void (*)(void *, uint64_t, uint64_t))blk->invoke)(block, a, b);
+}
+
+void iosim_block_call3(void *block, uint64_t a, uint64_t b, uint64_t c)
+{
+    if (!block)
+        return;
+    struct block_layout *blk = block;
+    uint64_t args[3] = {a, b, c};
+    if (blk->invoke && !call_guest_block(block, args, 3, NULL))
+        ((void (*)(void *, uint64_t, uint64_t, uint64_t))blk->invoke)(
+            block, a, b, c);
+}
+
 static double now_seconds(void)
 {
     struct timespec ts;

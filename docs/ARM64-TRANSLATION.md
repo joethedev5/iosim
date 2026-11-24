@@ -33,7 +33,11 @@ into the device framebuffer. Translated image blocks can be
 persisted in a directory named by `IOSIM_ARM64_CACHE_DIR`, keyed by
 image UUID and image-relative pc, with guest addresses and helper calls
 recorded as fixups and rebound by slide when the file is loaded, so a
-second launch skips translation. The printf-family gates now cover
+second launch skips translation. Framework code that invokes an app
+block — UIView animations and completions, Foundation index-set
+enumeration, NSOperation and URLSession handlers, UserNotifications
+completions — calls it through the block-call bridge, which runs an
+arm64 invoke pointer on the interpreter. The printf-family gates now cover
 fprintf, sprintf, snprintf and NSLog, including %@ through the object's
 description, and AdvSIMD coverage includes shifts by immediate, integer
 add/sub/mul/mla in every lane size, signed and unsigned min/max,
