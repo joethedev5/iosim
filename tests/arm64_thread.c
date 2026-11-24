@@ -10,13 +10,26 @@ typedef unsigned long pthread_t;
 extern int pthread_create(pthread_t *thread, const void *attr,
                           void *(*start)(void *), void *arg);
 extern int pthread_join(pthread_t thread, void **retval);
+extern int atexit(void (*fn)(void));
 
 static _Thread_local int tls_value = 1;
 static int worker_tls[2];
+static int worker_exits;
+
+static void worker_exit(void)
+{
+    worker_exits++;
+}
+
+static void summary(void)
+{
+    printf("thread atexit=%d\n", worker_exits);
+}
 
 static void *worker(void *arg)
 {
     long index = (long)arg;
+    atexit(worker_exit);
     tls_value += 40 + (int)index;
     worker_tls[index] = tls_value;
     return (void *)(long)(100 + index);
@@ -28,6 +41,7 @@ int main(void)
     void *joined[2] = {0, 0};
     int created[2];
     int waited[2];
+    atexit(summary);
     for (int i = 0; i < 2; i++)
         created[i] = pthread_create(&thread[i], 0, worker,
                                     (void *)(long)i);

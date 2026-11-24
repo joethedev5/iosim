@@ -2645,6 +2645,8 @@ else
 fi
 check "thread create=0,0 join=0,0 main=1 workers=41,42 ret=100,101" \
     "$out" "arm64 start routines run on joinable host threads"
+check "thread atexit=2" "$out" \
+    "handlers registered from both guest workers run at exit"
 if [ "$rc" -eq 0 ]; then
     echo "ok   the arm64 thread fixture exits zero"
 else

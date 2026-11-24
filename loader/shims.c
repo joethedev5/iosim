@@ -624,13 +624,23 @@ struct iosim_atexit_entry {
 };
 static struct iosim_atexit_entry g_atexit_guest[IOSIM_ATEXIT_GUEST_MAX];
 static int g_atexit_guest_count;
+/* Guest threads may register handlers too; the queue is popped without
+ * the lock held so a handler can register another one. */
+static pthread_mutex_t g_atexit_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static void run_guest_atexit(void)
 {
-    while (g_atexit_guest_count > 0)
+    for (;;)
     {
+        pthread_mutex_lock(&g_atexit_lock);
+        if (g_atexit_guest_count == 0)
+        {
+            pthread_mutex_unlock(&g_atexit_lock);
+            break;
+        }
         struct iosim_atexit_entry e =
             g_atexit_guest[--g_atexit_guest_count];
+        pthread_mutex_unlock(&g_atexit_lock);
         uint64_t gp[8] = {(uint64_t)(uintptr_t)e.arg, 0, 0, 0, 0, 0, 0, 0};
         uint64_t fp[8] = {0, 0, 0, 0, 0, 0, 0, 0};
         uint64_t ret[2] = {0, 0};
@@ -644,14 +654,20 @@ static int queue_guest_atexit(void *fn, void *arg)
 {
     if (!fn || !iosim_arm64_is_guest_code(fn))
         return 0;
+    pthread_mutex_lock(&g_atexit_lock);
+    int rc = 1;
     if (g_atexit_guest_count == 0 && atexit(run_guest_atexit) != 0)
-        return -1;
-    if (g_atexit_guest_count >= IOSIM_ATEXIT_GUEST_MAX)
-        return -1;
-    g_atexit_guest[g_atexit_guest_count].fn = fn;
-    g_atexit_guest[g_atexit_guest_count].arg = arg;
-    g_atexit_guest_count++;
-    return 1;
+        rc = -1;
+    else if (g_atexit_guest_count >= IOSIM_ATEXIT_GUEST_MAX)
+        rc = -1;
+    else
+    {
+        g_atexit_guest[g_atexit_guest_count].fn = fn;
+        g_atexit_guest[g_atexit_guest_count].arg = arg;
+        g_atexit_guest_count++;
+    }
+    pthread_mutex_unlock(&g_atexit_lock);
+    return rc;
 }
 
 static int shim_atexit(void (*fn)(void))
