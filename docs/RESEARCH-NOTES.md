@@ -1813,3 +1813,15 @@ components.
   transform pass stores an alpha-attenuated image and the affine blit applies
   the composed alpha again). The fixture therefore fades an untransformed
   view; fixing transformed-alpha compositing is queued as its own batch.
+
+## 2026-11-24: Transformed-view alpha compositing
+
+- The UIView transform path and the CALayer transform path now render their
+  offscreen content at full opacity and let the affine (or homography) blit
+  apply the composed alpha exactly once. Previously the offscreen pass stored
+  alpha-attenuated pixels and the blit applied the composed alpha again, so a
+  transformed view or layer with opacity below one rendered at roughly alpha
+  cubed: a red view at alpha 0.5 read (42,11,17) instead of (134,7,11).
+- `tests/alpha_transform_test.m` compares a plain view, a transformed view, a
+  transformed view with layer opacity and a standalone transformed sublayer;
+  all four centres now match and the transformed extents remain scaled.

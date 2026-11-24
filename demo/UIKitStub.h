@@ -350,7 +350,10 @@ __attribute__((objc_root_class))
 @interface NSNumber : NSObject
 + (id)numberWithDouble:(double)value;
 + (id)numberWithInt:(int)value;
++ (id)numberWithBool:(BOOL)value;
 - (double)doubleValue;
+- (int)intValue;
+- (BOOL)boolValue;
 @end
 
 @interface NSDate : NSObject

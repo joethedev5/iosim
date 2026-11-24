@@ -21641,8 +21641,10 @@ static void render_emitter(CAEmitterLayer *emitter, int x, int y, int w,
                            int h, double scale, double alpha, CGRect frame);
 static int g_render_offscreen;
 static UIView *g_no_transform_view;
+static UIView *g_alpha_suppressed_view;
 static UIView *g_no_round_clip_view;
 static CALayer *g_no_transform_layer;
+static CALayer *g_alpha_suppressed_layer;
 static int g_mask_render_depth;
 
 /* Render a layer's mask into an offscreen pass and push its alpha channel
@@ -21690,6 +21692,8 @@ static void render_layer(CALayer *layer, double parentX, double parentY,
     if (!layer || layer->_hidden)
         return;
     double alpha = parentAlpha * layer_key_value(layer, "opacity", layer->_opacity);
+    if (layer == g_alpha_suppressed_layer)
+        alpha = 1.0;
     if (alpha <= 0.001)
         return;
     CGRect frame = layer->_frame;
@@ -21715,10 +21719,13 @@ static void render_layer(CALayer *layer, double parentX, double parentY,
         if (state)
         {
             CALayer *saved = g_no_transform_layer;
+            CALayer *savedAlpha = g_alpha_suppressed_layer;
             g_no_transform_layer = layer;
+            g_alpha_suppressed_layer = layer;
             g_render_offscreen++;
             render_layer(layer, -frame.origin.x, -frame.origin.y, scale, 1.0);
             g_render_offscreen--;
+            g_alpha_suppressed_layer = savedAlpha;
             g_no_transform_layer = saved;
             int bw = 0, bh = 0;
             unsigned *buf = iosim_fb_end_offscreen(state, &bw, &bh);
@@ -22629,6 +22636,8 @@ static void render_view(UIView *view, double originX, double originY,
         ? layer_key_value(view->_layer, "opacity", view->_layer->_opacity)
         : 1.0;
     double alpha = parentAlpha * current_alpha(view) * layerOpacity;
+    if (view == g_alpha_suppressed_view)
+        alpha = 1.0;
     if (alpha <= 0.001)
         return;
     iosim_fb_set_opacity(alpha);
@@ -22646,16 +22655,21 @@ static void render_view(UIView *view, double originX, double originY,
                        tf.d != 1.0 || tf.tx != 0.0 || tf.ty != 0.0);
     if (transformed && view != g_no_transform_view && w > 0 && h > 0)
     {
-        /* A transformed view is rendered into an offscreen pass and then
-         * composited with the affine transform around its center. */
+        /* A transformed view is rendered into an offscreen pass at full
+         * opacity and then composited with the affine transform around its
+         * center; the blit applies the view alpha, parent alpha and layer
+         * opacity exactly once. */
         void *state = iosim_fb_begin_offscreen((unsigned)w, (unsigned)h);
         if (state)
         {
             UIView *saved = g_no_transform_view;
+            UIView *savedAlpha = g_alpha_suppressed_view;
             g_no_transform_view = view;
+            g_alpha_suppressed_view = view;
             g_render_offscreen++;
             render_view(view, -frame.origin.x, -frame.origin.y, scale, 1.0);
             g_render_offscreen--;
+            g_alpha_suppressed_view = savedAlpha;
             g_no_transform_view = saved;
             int bw = 0, bh = 0;
             unsigned *buf = iosim_fb_end_offscreen(state, &bw, &bh);

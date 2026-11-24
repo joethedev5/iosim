@@ -719,9 +719,10 @@ the layer tree, not just as a visible fill. Rounded
 gradient layers render into an offscreen pass, mask their corners, and
 composite back, so corner radii and layer alpha stay antialiased. A layer
 `transform` (CATransform3D) uses the 2D submatrix m11/m12/m21/m22 plus the
-m41/m42 translation: the layer is rendered into an offscreen pass and
-composited with `blit_affine` around its center, so rotation, scale and
-translation match the view-transform path. Perspective terms render through a
+m41/m42 translation: the layer is rendered into an offscreen pass at full opacity and
+composited with `blit_affine` around its center, which applies the layer
+opacity once, so rotation, scale and translation match the view-transform
+path. Perspective terms render through a
 homography. `CAShapeLayer` strokes honor `strokeStart`/`strokeEnd` as
 fractions of the outline's arc length: rectangles, rounded rectangles, ovals
 and arbitrary paths are flattened to polylines and stroked by the shared
@@ -1268,7 +1269,8 @@ decoded with libpng in `loader/image.c`.
   so each segment interpolates from the previous segment's settled values and
   the keyframe completion block fires after the total duration. A 2D
   affine transform is applied around the view center through an offscreen
-  composite. UIView transform changes inside an animation block are captured
+  composite that renders the subtree at full opacity; the affine blit applies
+  the composed view alpha, parent alpha and layer opacity once. UIView transform changes inside an animation block are captured
   like frame and alpha and interpolated by decomposing both endpoints into
   rotation, x/y scale and translation, sweeping the angle along the shorter
   arc (CoreAnimation's behavior) instead of blending matrix coefficients.

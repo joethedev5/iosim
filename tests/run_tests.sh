@@ -927,6 +927,65 @@ else
     echo "FAIL legacy animation pixels"; echo "$out"; fails=$((fails+1))
 fi
 
+# ---------- 4f10d. Transformed and layered alpha compositing ----------
+rm -f "$T/alpha.fifo"
+mkfifo "$T/alpha.fifo"
+"$ROOT/tools/build_app.sh" "$ROOT/tests/alpha_transform_test.m" \
+    "$T/alpha_transform_test" >/dev/null
+out="$(IOSIM_EVENT_FIFO="$T/alpha.fifo" \
+    IOSIM_TEST_PNG="$T/alpha_transform.png" \
+    DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" \
+    "$T/alpha_transform_test" 2>&1)"
+rm -f "$T/alpha.fifo"
+check "[at] ready" "$out" "the alpha compositing fixture starts"
+check "[at] captured" "$out" "the fixture captures the composited frame"
+check "[at] done" "$out" "the alpha compositing fixture finishes"
+if out="$(python3 - "$ROOT/tools" "$T/alpha_transform.png" <<'ALPHAPNG'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+
+def rgb(x, y):
+    c = pngpixel.px(rows, bpp, x * 3, y * 3)
+    return ((c >> 16) & 255, (c >> 8) & 255, c & 255)
+
+def near(got, want, tol=25):
+    return all(abs(a - b) <= tol for a, b in zip(got, want))
+
+plain = rgb(90, 250)
+scaled = rgb(250, 250)
+layered = rgb(90, 450)
+sublayer = rgb(250, 450)
+
+def red_half(c):
+    r, g, b = c
+    return 100 <= r <= 170 and g < 40 and b < 50
+
+checks = [
+    ("plain", red_half(plain)),
+    ("scaled", red_half(scaled)),
+    ("scaled matches plain", abs(scaled[0] - plain[0]) <= 12),
+    ("scaled extent", red_half(rgb(310, 250))),
+    ("layered", red_half(layered)),
+    ("sublayer", red_half(sublayer)),
+    ("sublayer extent", red_half(rgb(310, 450))),
+    ("outside", near(rgb(340, 250), (13, 15, 23))),
+]
+bad = [name for name, ok in checks if not ok]
+if bad:
+    raise SystemExit("alpha pixels failed: " + ", ".join(bad) +
+                     " plain=%r scaled=%r layered=%r sublayer=%r" %
+                     (plain, scaled, layered, sublayer))
+print("ok   transformed and layered views composite alpha once")
+ALPHAPNG
+)"; then
+    echo "$out"
+else
+    echo "FAIL transformed alpha compositing"; echo "$out"; fails=$((fails+1))
+fi
+
 # ---------- 4f11. CAAnimation completion and fill modes ----------
 rm -f "$T/arem.fifo"
 mkfifo "$T/arem.fifo"

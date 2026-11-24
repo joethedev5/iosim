@@ -1120,6 +1120,18 @@ fingers from 0° to 90° ends `UIRotationGestureRecognizer` at 90°, and
 magenta marker pixels; after the pinch the marker is twice as wide and
 counts 13924.
 
+### UIKit: transformed-view alpha compositing
+
+`tests/alpha_transform_test.m` puts four red regions with effective alpha 0.5
+on one dark root: a plain untransformed view, a view with a 1.4x transform,
+a transformed view whose layer opacity is 0.5, and a standalone transformed
+`CALayer` with opacity 0.5. All four centres read (134,7,11), the same blend
+the plain view produces, so the offscreen transform pass and its affine
+composite apply alpha exactly once; before the fix the three transformed
+centres read (42,11,17), roughly alpha cubed. The transformed extents still
+read red at x=310 while (340,250) stays dark, so the fix did not change the
+transform geometry.
+
 ### UIKit: animated UIView transforms
 
 `tests/transform_animation_test.m` animates a 100×100 green square from
