@@ -333,7 +333,10 @@ updating handles on real host descriptors, so `readDataOfLength:`,
 `readDataToEndOfFile`, `writeData:`, the seek family, `offsetInFile`,
 `truncateFileAtOffset:` and `synchronizeFile` all share one descriptor
 offset — and the standard input/output/error/null handles are real
-descriptors too; `NSURL` carries file paths and path
+descriptors too; `NSInputStream` reads from memory data or a file loaded at
+open, advancing an offset to `NSStreamStatusAtEnd`; `NSOutputStream` collects
+memory output behind `NSStreamDataWrittenToMemoryStreamKey` and writes file
+output on close, in append mode when asked; `NSURL` carries file paths and path
 components; and `NSJSONSerialization` is a dependency-free recursive
 serializer and parser over `NSDictionary`, `NSArray`, `NSString`, `NSNumber`
 and `NSNull`. Compact output is deterministic (dictionary insertion order on

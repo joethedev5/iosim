@@ -1598,3 +1598,16 @@ components.
   `file://` URL rather than the data. Errors keep the location nil.
 - The fixture runs both against a loopback server that serves a file and
   echoes a POST body.
+
+## 2026-11-24: input and output streams
+
+- `NSStream` carries a status and a property dictionary. `NSInputStream`
+  reads from memory data (a file input stream loads its file at open),
+  advancing an offset and reporting `NSStreamStatusAtEnd` when exhausted;
+  reads before opening return -1.
+- `NSOutputStream` collects memory output and exposes it through
+  `NSStreamDataWrittenToMemoryStreamKey`; a file output stream truncates on
+  open unless appending, writes on close, and append mode prepends the
+  existing file contents.
+- The fixture covers chunked reads, status transitions, the memory property,
+  file writing and append.

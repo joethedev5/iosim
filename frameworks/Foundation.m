@@ -4744,6 +4744,159 @@ static const char iosim_base64_chars[] =
 }
 @end
 
+/* --------------------------------------------------------------- streams */
+
+id NSStreamDataWrittenToMemoryStreamKey =
+    @"NSStreamDataWrittenToMemoryStreamKey";
+
+@implementation NSStream
+- (id)init
+{
+    self = [super init];
+    if (self)
+        _status = NSStreamStatusNotOpen;
+    return self;
+}
+- (void)open { _status = NSStreamStatusOpen; }
+- (void)close { _status = NSStreamStatusClosed; }
+- (long)streamStatus { return _status; }
+- (id)streamError { return _streamError; }
+- (id)propertyForKey:(id)key
+{
+    return key && _properties ? [_properties objectForKey:key] : nil;
+}
+- (BOOL)setProperty:(id)property forKey:(id)key
+{
+    if (!key)
+        return NO;
+    if (!_properties)
+        _properties = [NSMutableDictionary dictionary];
+    if (property)
+        [(NSMutableDictionary *)_properties setObject:property forKey:key];
+    else
+        [(NSMutableDictionary *)_properties removeObjectForKey:key];
+    return YES;
+}
+@end
+
+@implementation NSInputStream
++ (id)inputStreamWithData:(id)data
+{
+    NSInputStream *stream = [[self alloc] init];
+    stream->_streamData = data;
+    return stream;
+}
++ (id)inputStreamWithFileAtPath:(id)path
+{
+    NSData *data = path ? [NSData dataWithContentsOfFile:path] : nil;
+    if (!data)
+        return nil;
+    return [self inputStreamWithData:data];
+}
+- (void)open
+{
+    [super open];
+    if (!_streamData)
+        _status = NSStreamStatusAtEnd;
+}
+- (long)read:(unsigned char *)buffer maxLength:(unsigned long)length
+{
+    if (_status != NSStreamStatusOpen &&
+        _status != NSStreamStatusReading &&
+        _status != NSStreamStatusAtEnd)
+        return -1;
+    unsigned long remaining = _streamData ? [_streamData length] : 0;
+    if (_streamOffset >= remaining)
+    {
+        _status = NSStreamStatusAtEnd;
+        return 0;
+    }
+    unsigned long take = remaining - _streamOffset;
+    if (take > length)
+        take = length;
+    if (buffer && take)
+        memcpy(buffer, (const char *)[_streamData bytes] + _streamOffset,
+               take);
+    _streamOffset += take;
+    _status = _streamOffset >= remaining ? NSStreamStatusAtEnd
+                                         : NSStreamStatusOpen;
+    return (long)take;
+}
+- (BOOL)hasBytesAvailable
+{
+    return (_status == NSStreamStatusOpen ||
+            _status == NSStreamStatusReading) &&
+           _streamData && _streamOffset < [_streamData length];
+}
+@end
+
+@implementation NSOutputStream
++ (id)outputStreamToMemory
+{
+    NSOutputStream *stream = [[self alloc] init];
+    stream->_streamMemory = YES;
+    stream->_streamData = [NSMutableData data];
+    return stream;
+}
++ (id)outputStreamToFileAtPath:(id)path append:(BOOL)append
+{
+    if (!path)
+        return nil;
+    NSOutputStream *stream = [[self alloc] init];
+    stream->_streamPath = path;
+    stream->_streamAppend = append;
+    stream->_streamData = [NSMutableData data];
+    return stream;
+}
+- (void)open
+{
+    [super open];
+    if (_streamPath && !_streamAppend)
+        iosim_fs_write(iosim_string_cstr(_streamPath), "", 0);
+}
+- (long)write:(const unsigned char *)buffer maxLength:(unsigned long)length
+{
+    if (_status != NSStreamStatusOpen &&
+        _status != NSStreamStatusWriting)
+        return -1;
+    if (buffer && length)
+        [_streamData appendBytes:buffer length:length];
+    return (long)length;
+}
+- (BOOL)hasSpaceAvailable
+{
+    return _status == NSStreamStatusOpen ||
+           _status == NSStreamStatusWriting;
+}
+- (id)propertyForKey:(id)key
+{
+    if (_streamMemory && key &&
+        [key isEqual:NSStreamDataWrittenToMemoryStreamKey])
+        return _streamData;
+    return [super propertyForKey:key];
+}
+- (void)close
+{
+    if (_streamPath && _streamData)
+    {
+        if (_streamAppend)
+        {
+            NSData *old = [NSData dataWithContentsOfFile:_streamPath];
+            NSMutableData *all = [NSMutableData
+                dataWithCapacity:(old ? [old length] : 0) +
+                                  [_streamData length]];
+            if (old)
+                [all appendData:old];
+            [all appendData:_streamData];
+            [all writeToFile:_streamPath atomically:NO];
+        }
+        else
+            [_streamData writeToFile:_streamPath atomically:NO];
+    }
+    [super close];
+}
+@end
+
 /* ---------------------------------------------------------- files & URLs */
 
 /* NSFileHandle sits on real host descriptors so reads, writes, seeks and

@@ -701,6 +701,57 @@ enum {
 - (void)setLength:(unsigned long)length;
 @end
 
+enum {
+    NSStreamStatusNotOpen = 0,
+    NSStreamStatusOpening = 1,
+    NSStreamStatusOpen = 2,
+    NSStreamStatusReading = 3,
+    NSStreamStatusWriting = 4,
+    NSStreamStatusAtEnd = 5,
+    NSStreamStatusClosed = 6,
+    NSStreamStatusError = 7
+};
+
+extern id NSStreamDataWrittenToMemoryStreamKey;
+
+@interface NSStream : NSObject {
+@public
+    long _status;
+    id _streamError;
+    id _properties;
+}
+- (void)open;
+- (void)close;
+- (long)streamStatus;
+- (id)streamError;
+- (id)propertyForKey:(id)key;
+- (BOOL)setProperty:(id)property forKey:(id)key;
+@end
+
+@interface NSInputStream : NSStream {
+@public
+    id _streamData;
+    unsigned long _streamOffset;
+}
++ (id)inputStreamWithData:(id)data;
++ (id)inputStreamWithFileAtPath:(id)path;
+- (long)read:(unsigned char *)buffer maxLength:(unsigned long)length;
+- (BOOL)hasBytesAvailable;
+@end
+
+@interface NSOutputStream : NSStream {
+@public
+    id _streamData;
+    id _streamPath;
+    BOOL _streamAppend;
+    BOOL _streamMemory;
+}
++ (id)outputStreamToMemory;
++ (id)outputStreamToFileAtPath:(id)path append:(BOOL)append;
+- (long)write:(const unsigned char *)buffer maxLength:(unsigned long)length;
+- (BOOL)hasSpaceAvailable;
+@end
+
 @interface NSFileHandle : NSObject {
 @public
     int _fd;

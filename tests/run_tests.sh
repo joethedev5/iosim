@@ -2133,6 +2133,28 @@ else
 fi
 kill "$TASKS_PID" 2>/dev/null || true
 
+# ---------- 4g9. NSInputStream and NSOutputStream ----------
+"$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
+    -fblocks -ffreestanding -O1 -I "$ROOT/frameworks" \
+    -c "$ROOT/tests/streams_test.m" -o "$T/streams_test.o"
+"$LD64" -arch x86_64 -platform_version $PLATFORM -e _main \
+    -o "$T/streams_test" "$T/streams_test.o" \
+    "$ROOT/runtime/System/Library/Frameworks/Foundation.framework/Foundation" \
+    -undefined dynamic_lookup
+out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/streams_test" 2>&1)"
+check "[stream] data 0 1 4 stre 9 amed text 5 0 0" "$out" \
+    "an input stream reads data in chunks and reaches the end"
+check "[stream] dataclose 6" "$out" \
+    "closing an input stream reports the closed status"
+check "[stream] file hello from a file" "$out" \
+    "a file input stream reads the file contents"
+check "[stream] memory 12 hello stream" "$out" \
+    "a memory output stream exposes its written data"
+check "[stream] fileout file output 1" "$out" \
+    "a file output stream writes the file"
+check "[stream] append file output! 1" "$out" \
+    "append mode adds to the existing file"
+
 # ---------- 4h. NSOperationQueue block operations ----------
 "$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc -fblocks \
     -ffreestanding -O1 -I "$ROOT/frameworks" \

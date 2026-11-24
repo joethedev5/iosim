@@ -904,6 +904,17 @@ lines are asserted individually, and the descriptor really is shared between
 the seek, read, truncate and write calls because each step observes the
 previous step's offset and length.
 
+### Foundation: input and output streams
+
+`tests/streams_test.m` reads `streamed text` through an input stream: the
+status starts at 0, `hasBytesAvailable` is 1 after opening, a 4-byte read
+returns `stre` and the rest comes back as `amed text`, after which the status
+is 5 (at end) and a further read returns 0; closing reports 6. A file input
+stream reads `hello from a file`. A memory output stream's
+`NSStreamDataWrittenToMemoryStreamKey` property returns the 12 bytes
+`hello stream`. A file output stream writes `file output`, and reopening it
+with `append:YES` and writing `!` leaves `file output!`.
+
 ### Foundation: fast enumeration and subscripting
 
 `tests/fastenum_test.m` joins an array with `for (NSString *s in array)`
