@@ -1490,3 +1490,18 @@ components.
   handler runs.
 - The fixture reads back two cookies set by the loopback server, and the next
   request carries both in insertion order.
+
+## 2026-11-24: NSURLCache response caching
+
+- `NSCachedURLResponse` holds a response, data, user info and storage
+  policy. `NSURLCache` keeps a shared in-memory dictionary keyed by the
+  absolute URL string of GET requests, with methods to look up, store,
+  remove one response and clear all of them.
+- `NSURLRequest` gained a cache policy; `URLSessionDataTask.resume` consults
+  the shared cache unless the policy is
+  `NSURLRequestReloadIgnoringLocalCacheData`, and the task context carries
+  the cached response into the same completion path. Successful network GET
+  responses are stored before the completion handler runs.
+- The fixture repeats a GET through the loopback counter server: the second
+  response repeats the first body, clearing the cache or asking for a reload
+  advances the server counter.

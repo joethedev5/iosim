@@ -62,6 +62,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | Foundation fast enumeration (`for-in`) and indexed/keyed collection subscripting | ✅ |
 | `NSURLSession` data tasks and `NSMutableURLRequest` POSTs with custom headers, status and response headers over a host HTTP/1.0 client, including HTTPS via OpenSSL | ✅ |
 | `NSHTTPCookie` properties and `NSHTTPCookieStorage`: URL-matched cookies, request `Cookie` headers and `Set-Cookie` response parsing | ✅ |
+| `NSURLCache`/`NSCachedURLResponse` with request cache policies: repeated GETs replay stored responses, removal and reload policies refetch | ✅ |
 | Key-value coding (accessors, boxing, key paths, collection operators) and automatic KVO | ✅ |
 | NSDateFormatter parse/print round trip, NSNumberFormatter decimal/currency/percent | ✅ |
 | NSByteCountFormatter file/memory/decimal/binary styles with unit masks and actual byte counts; NSDateComponentsFormatter positional/abbreviated/short/full units, maximumUnitCount and phrases; NSDate timeIntervalSinceDate: | ✅ |

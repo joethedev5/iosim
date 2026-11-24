@@ -1129,6 +1129,15 @@ headers; the guest then reads two URL-matched cookies from the shared
 storage, and a GET to `/echo` sends `Cookie: session=abc123; theme=dark`,
 which the server echoes back.
 
+`tests/urlcache_test.m` points the shared cache at
+`tests/cache_http_server.py`, whose `/count` response increments a counter.
+The first GET reads `count 1`; a second GET of the same URL reads `count 1`
+again from the cache. After `removeAllCachedResponses`, a third GET reads
+`count 2`, and a request with
+`NSURLRequestReloadIgnoringLocalCacheData` reads `count 3`, proving the
+policy bypass. A manually stored `NSCachedURLResponse` reads back with its
+`manual` data.
+
 ### Foundation: KVC collection operators
 
 `tests/kvc_operators_test.m` runs the operators over an array of boxed

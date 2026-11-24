@@ -1880,6 +1880,73 @@ PY
 fi
 kill "$COOKIE_PID" 2>/dev/null || true
 
+# ---------- 4g7. NSURLCache response caching ----------
+python3 -u "$ROOT/tests/cache_http_server.py" > "$T/cache.log" 2>&1 &
+CACHE_PID=$!
+CACHE_PORT=""
+i=0
+while [ "$i" -lt 100 ]; do
+    CACHE_PORT=$(sed -n 's/.*port \([0-9][0-9]*\).*/\1/p' "$T/cache.log" | head -1)
+    [ -n "$CACHE_PORT" ] && break
+    i=$((i + 1))
+    sleep 0.05
+done
+if [ -z "$CACHE_PORT" ]; then
+    echo "FAIL cache server did not start"
+    fails=$((fails + 1))
+    kill "$CACHE_PID" 2>/dev/null || true
+else
+    "$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
+        -fblocks -ffreestanding -O1 -I "$ROOT/frameworks" \
+        -c "$ROOT/tests/urlcache_test.m" -o "$T/urlcache_test.o"
+    "$LD64" -arch x86_64 -platform_version $PLATFORM -e _main \
+        -o "$T/urlcache_test" "$T/urlcache_test.o" \
+        "$ROOT/runtime/System/Library/Frameworks/Foundation.framework/Foundation" \
+        -undefined dynamic_lookup
+    out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/urlcache_test" \
+        "$CACHE_PORT" 2>&1)"
+    check "[cache] done" "$out" "the URL cache fixture runs"
+    if report="$(python3 - "$out" <<'PY'
+import re
+import sys
+
+lines = sys.argv[1].splitlines()
+want = [
+    r'\[cache\] capacity 4194304',
+    r'\[cache\] first 200 count 1',
+    r'\[cache\] second 200 count 1',
+    r'\[cache\] manual 1 manual',
+]
+for pattern in want:
+    if not any(re.fullmatch(pattern, line) for line in lines):
+        raise SystemExit('missing cache line: ' + pattern)
+print("ok   a repeated GET is served from the shared cache")
+PY
+)"; then
+        echo "$report"
+    else
+        echo "FAIL cache replay"; echo "$report"; fails=$((fails+1))
+    fi
+    if report="$(python3 - "$out" <<'PY'
+import re
+import sys
+
+lines = sys.argv[1].splitlines()
+want = [r'\[cache\] third 200 count 2',
+        r'\[cache\] reload 200 count 3']
+for pattern in want:
+    if not any(re.fullmatch(pattern, line) for line in lines):
+        raise SystemExit('missing cache line: ' + pattern)
+print("ok   removal and a reload policy force fresh requests")
+PY
+)"; then
+        echo "$report"
+    else
+        echo "FAIL cache policy"; echo "$report"; fails=$((fails+1))
+    fi
+fi
+kill "$CACHE_PID" 2>/dev/null || true
+
 # ---------- 4h. NSOperationQueue block operations ----------
 "$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc -fblocks \
     -ffreestanding -O1 -I "$ROOT/frameworks" \

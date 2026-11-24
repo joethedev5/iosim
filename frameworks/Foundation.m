@@ -7679,6 +7679,7 @@ static void cookie_store_response_headers(const char *raw, id url)
     request->_URL = url;
     request->_timeoutInterval = 60.0;
     request->_HTTPMethod = @"GET";
+    request->_cachePolicy = NSURLRequestUseProtocolCachePolicy;
     return request;
 }
 - (id)URL { return _URL; }
@@ -7689,6 +7690,8 @@ static void cookie_store_response_headers(const char *raw, id url)
 - (void)setHTTPMethod:(id)method { _HTTPMethod = method; }
 - (id)HTTPBody { return _HTTPBody; }
 - (void)setHTTPBody:(id)body { _HTTPBody = body; }
+- (long)cachePolicy { return _cachePolicy; }
+- (void)setCachePolicy:(long)policy { _cachePolicy = policy; }
 - (id)allHTTPHeaderFields { return _allHTTPHeaderFields; }
 - (void)setAllHTTPHeaderFields:(id)fields { _allHTTPHeaderFields = fields; }
 - (id)valueForHTTPHeaderField:(id)field
@@ -7746,6 +7749,8 @@ static void cookie_store_response_headers(const char *raw, id url)
 struct url_task_ctx {
     id task;
     id url;
+    id request;
+    id cached;
     id url_string_object;
     id method_object;
     id headers_object;
@@ -7772,6 +7777,11 @@ static void url_task_main(void *raw)
         error = [NSError errorWithDomain:@"NSURLErrorDomain" code:-999
                                     userInfo:nil];
     }
+    else if (ctx->cached)
+    {
+        data = [ctx->cached data];
+        response = [ctx->cached response];
+    }
     else if (iosim_http_request(ctx->url_string, ctx->method, ctx->headers,
                                 ctx->body, ctx->body_length, &bytes, &length,
                                 &status, &raw_headers, &service_error) == 0)
@@ -7782,6 +7792,14 @@ static void url_task_main(void *raw)
              statusCode:status
                 headers:url_headers_from_raw(raw_headers)];
         cookie_store_response_headers(raw_headers, ctx->url);
+        id method = ctx->request ? [ctx->request HTTPMethod] : nil;
+        if (!method || [method isEqual:@"GET"])
+        {
+            NSCachedURLResponse *cached = [[NSCachedURLResponse alloc]
+                initWithResponse:response data:data];
+            [[NSURLCache sharedURLCache] storeCachedResponse:cached
+                                                  forRequest:ctx->request];
+        }
     }
     else
     {
@@ -7810,6 +7828,104 @@ static void url_task_main(void *raw)
     free(ctx);
 }
 
+@implementation NSCachedURLResponse
+- (id)initWithResponse:(id)response data:(id)data
+{
+    return [self initWithResponse:response data:data userInfo:nil
+                    storagePolicy:NSURLCacheStorageAllowed];
+}
+- (id)initWithResponse:(id)response data:(id)data userInfo:(id)userInfo
+         storagePolicy:(long)storagePolicy
+{
+    self = [super init];
+    if (self)
+    {
+        _response = response;
+        _data = data;
+        _userInfo = userInfo;
+        _storagePolicy = storagePolicy;
+    }
+    return self;
+}
+- (id)response { return _response; }
+- (id)data { return _data; }
+- (id)userInfo { return _userInfo; }
+- (long)storagePolicy { return _storagePolicy; }
+@end
+
+static id url_cache_key(id request)
+{
+    if (!request || ![request isKindOfClass:[NSURLRequest class]])
+        return nil;
+    NSURLRequest *urlRequest = (NSURLRequest *)request;
+    id method = [urlRequest HTTPMethod];
+    if (method && ![method isEqual:@"GET"])
+        return nil;
+    id url = [urlRequest URL];
+    return url ? [url absoluteString] : nil;
+}
+
+@implementation NSURLCache
++ (id)sharedURLCache
+{
+    static NSURLCache *cache;
+    if (!cache)
+        cache = [[NSURLCache alloc]
+            initWithMemoryCapacity:4 * 1024 * 1024
+                      diskCapacity:0
+                          diskPath:nil];
+    return cache;
+}
+- (id)init
+{
+    return [self initWithMemoryCapacity:4 * 1024 * 1024 diskCapacity:0
+                               diskPath:nil];
+}
+- (id)initWithMemoryCapacity:(unsigned long)memoryCapacity
+                diskCapacity:(unsigned long)diskCapacity
+                    diskPath:(id)diskPath
+{
+    (void)diskPath;
+    self = [super init];
+    if (self)
+    {
+        _memoryCapacity = memoryCapacity;
+        _diskCapacity = diskCapacity;
+        _storage = [[NSMutableDictionary alloc] init];
+    }
+    return self;
+}
+- (id)cachedResponseForRequest:(id)request
+{
+    id key = url_cache_key(request);
+    return key && _storage
+               ? [(NSMutableDictionary *)_storage objectForKey:key] : nil;
+}
+- (void)storeCachedResponse:(NSCachedURLResponse *)cachedResponse
+                 forRequest:(id)request
+{
+    id key = url_cache_key(request);
+    if (!key || !cachedResponse)
+        return;
+    if (!_storage)
+        _storage = [[NSMutableDictionary alloc] init];
+    [(NSMutableDictionary *)_storage setObject:cachedResponse forKey:key];
+}
+- (void)removeCachedResponseForRequest:(id)request
+{
+    id key = url_cache_key(request);
+    if (key && _storage)
+        [(NSMutableDictionary *)_storage removeObjectForKey:key];
+}
+- (void)removeAllCachedResponses
+{
+    if (_storage)
+        [(NSMutableDictionary *)_storage removeAllObjects];
+}
+- (unsigned long)memoryCapacity { return _memoryCapacity; }
+- (unsigned long)diskCapacity { return _diskCapacity; }
+@end
+
 @implementation NSURLSessionDataTask
 - (void)resume
 {
@@ -7822,6 +7938,7 @@ static void url_task_main(void *raw)
         return;
     ctx->task = self;
     ctx->url = [request URL];
+    ctx->request = request;
     ctx->url_string_object = [ctx->url absoluteString];
     ctx->url_string = [ctx->url_string_object UTF8String];
     ctx->method_object = [request HTTPMethod];
@@ -7860,6 +7977,15 @@ static void url_task_main(void *raw)
             ctx->headers_object = raw;
             ctx->headers = [raw UTF8String];
         }
+    }
+    if ([request isKindOfClass:[NSURLRequest class]] &&
+        ((NSURLRequest *)request)->_cachePolicy !=
+            NSURLRequestReloadIgnoringLocalCacheData)
+    {
+        id cached =
+            [[NSURLCache sharedURLCache] cachedResponseForRequest:request];
+        if (cached)
+            ctx->cached = cached;
     }
     id body = [request HTTPBody];
     if (body)

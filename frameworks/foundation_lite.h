@@ -922,6 +922,54 @@ extern id NSHTTPCookieHTTPOnly;
 - (NSArray *)cookiesForURL:(NSURL *)URL;
 @end
 
+enum {
+    NSURLRequestUseProtocolCachePolicy = 0,
+    NSURLRequestReloadIgnoringLocalCacheData = 1,
+    NSURLRequestReturnCacheDataElseLoad = 2,
+    NSURLRequestReturnCacheDataDontLoad = 3
+};
+
+enum {
+    NSURLCacheStorageAllowed = 0,
+    NSURLCacheStorageAllowedInMemoryOnly = 1,
+    NSURLCacheStorageNotAllowed = 2
+};
+
+@interface NSCachedURLResponse : NSObject {
+@public
+    id _response;
+    id _data;
+    id _userInfo;
+    long _storagePolicy;
+}
+- (id)initWithResponse:(id)response data:(id)data;
+- (id)initWithResponse:(id)response data:(id)data userInfo:(id)userInfo
+         storagePolicy:(long)storagePolicy;
+- (id)response;
+- (id)data;
+- (id)userInfo;
+- (long)storagePolicy;
+@end
+
+@interface NSURLCache : NSObject {
+@public
+    unsigned long _memoryCapacity;
+    unsigned long _diskCapacity;
+    id _storage;
+}
++ (id)sharedURLCache;
+- (id)initWithMemoryCapacity:(unsigned long)memoryCapacity
+                diskCapacity:(unsigned long)diskCapacity
+                    diskPath:(id)diskPath;
+- (id)cachedResponseForRequest:(id)request;
+- (void)storeCachedResponse:(NSCachedURLResponse *)cachedResponse
+                 forRequest:(id)request;
+- (void)removeCachedResponseForRequest:(id)request;
+- (void)removeAllCachedResponses;
+- (unsigned long)memoryCapacity;
+- (unsigned long)diskCapacity;
+@end
+
 @interface NSURLRequest : NSObject {
 @public
     id _URL;
@@ -929,6 +977,7 @@ extern id NSHTTPCookieHTTPOnly;
     id _HTTPMethod;
     id _HTTPBody;
     id _allHTTPHeaderFields;
+    long _cachePolicy;
 }
 + (id)requestWithURL:(id)url;
 - (id)URL;
@@ -939,6 +988,8 @@ extern id NSHTTPCookieHTTPOnly;
 - (void)setHTTPMethod:(id)method;
 - (id)HTTPBody;
 - (void)setHTTPBody:(id)body;
+- (long)cachePolicy;
+- (void)setCachePolicy:(long)policy;
 - (id)allHTTPHeaderFields;
 - (void)setAllHTTPHeaderFields:(id)fields;
 - (id)valueForHTTPHeaderField:(id)field;

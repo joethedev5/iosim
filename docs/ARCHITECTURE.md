@@ -365,6 +365,14 @@ and builds the request `Cookie` header. A URL session appends matching stored
 cookies to outgoing requests and scans every raw `Set-Cookie` response line
 into the storage before the completion handler runs.
 
+`NSURLCache` keeps a shared in-memory dictionary keyed by a GET request's
+URL string. A URL session task checks the cache before dispatching unless
+the request's `cachePolicy` is `NSURLRequestReloadIgnoringLocalCacheData`,
+delivers a stored `NSCachedURLResponse` data/response pair through the same
+completion path, and stores every successful GET response after the network
+transfer. `removeCachedResponseForRequest:` and `removeAllCachedResponses`
+drop entries so the next request goes to the network.
+
 `NSRegularExpression` compiles patterns through a loader-host POSIX regex
 shim: the pattern translator accepts ICU spellings for `\d`, `\w`, `\s`
 (and their negations), non-capturing groups and lazy quantifiers before
