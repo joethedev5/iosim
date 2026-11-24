@@ -2276,6 +2276,29 @@ returns the same `p=50 t=12 v=4.0` output and exits 51. Guest addresses
 are rebased between runs and helper calls are rebound to the current
 loader.
 
+### arm64: variadic calls beyond printf
+
+`tests/arm64_varargs.m` calls `snprintf` (including a truncating
+four-byte case), `sprintf`, `fprintf` and `NSLog(@"...%@...")` from arm64
+code. Anonymous variadic arguments arrive on the stack; each gate renders
+the format, applies the function's own fixed arguments and returns that
+function's result, and NSLog resolves an NSString format and its `%@`
+objects. The suite checks `snprintf 3 x=7`, `sprintf 5 2.5 k`,
+`trunc 6 abc`, `fprintf 42 err` and `NSLog: NSLog value 9`, then runs the
+same fixture with `IOSIM_ARM64_NOJIT=1`.
+
+### arm64: AdvSIMD coverage
+
+`tests/arm64_neon.c` exercises float max/min/div/sqrt/abs, integer
+add/sub/mul in 4S, 8H and 16B lanes, signed and unsigned min/max and
+horizontal reductions, shifts by immediate, vector compares and
+compare-with-zero, integer/float conversions, pairwise add, zip/uzp/trn
+permutations, element duplication and insertion, LD1R, and LD1/ST1
+loads and stores of two-register lists. The suite
+checks selected result lines and compares the complete output of the
+block translator with the `IOSIM_ARM64_NOJIT=1` interpreter run; the two
+must be identical.
+
 ### arm64: an app bundle on the device path
 
 `tests/arm64_device_app.m` is a thin arm64 bundle with the same scene as

@@ -33,9 +33,17 @@ into the device framebuffer. Translated image blocks can be
 persisted in a directory named by `IOSIM_ARM64_CACHE_DIR`, keyed by
 image UUID and image-relative pc, with guest addresses and helper calls
 recorded as fixups and rebound by slide when the file is loaded, so a
-second launch skips translation. Broader NEON coverage and varargs
-beyond the printf gate are the remaining work. This document records
-the method and the milestones that prove it.
+second launch skips translation. The printf-family gates now cover
+fprintf, sprintf, snprintf and NSLog, including %@ through the object's
+description, and AdvSIMD coverage includes shifts by immediate, integer
+add/sub/mul/mla in every lane size, signed and unsigned min/max,
+compares, float max/min/div/sqrt/abs/neg, integer/float conversions,
+pairwise adds, horizontal reductions, element moves and zip/uzp/trn
+permutations; LD1/ST1 single-structure loads and stores cover one to
+four consecutive registers with no offset or a post-index. Interleaved
+LD2/LD3/LD4 structures and the remaining AdvSIMD rounding and narrowing
+families are the remaining work. This document records the method and
+the milestones that prove it.
 
 ## The constraint and the reframing
 

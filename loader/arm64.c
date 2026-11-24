@@ -17,6 +17,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <errno.h>
+#include <math.h>
 #include <unistd.h>
 #include <dlfcn.h>
 #include <sys/mman.h>
@@ -499,6 +500,10 @@ struct native_gate {
 enum {
     NG_PUTS = 1,
     NG_PRINTF,
+    NG_FPRINTF,
+    NG_SPRINTF,
+    NG_SNPRINTF,
+    NG_NSLOG,
     NG_EXIT,
     NG_MALLOC,
     NG_FREE,
@@ -541,6 +546,10 @@ static void native_gates_init(void)
         return;
     native_gate_add("puts", gate_symbol("puts"), NG_PUTS);
     native_gate_add("printf", gate_symbol("printf"), NG_PRINTF);
+    native_gate_add("fprintf", gate_symbol("fprintf"), NG_FPRINTF);
+    native_gate_add("sprintf", gate_symbol("sprintf"), NG_SPRINTF);
+    native_gate_add("snprintf", gate_symbol("snprintf"), NG_SNPRINTF);
+    native_gate_add("NSLog", gate_symbol("NSLog"), NG_NSLOG);
     native_gate_add("exit", gate_symbol("exit"), NG_EXIT);
     native_gate_add("malloc", gate_symbol("malloc"), NG_MALLOC);
     native_gate_add("free", gate_symbol("free"), NG_FREE);
@@ -618,6 +627,220 @@ static int in_any_arm64_image(struct a64_cpu *c, uint64_t addr)
     return image_contains(c->img, addr) || a64_exec_region_contains(addr);
 }
 
+/* Returns the UTF-8 text behind an NSString object the guest passed to a
+ * printf-family gate. Constant strings carry the bytes directly; other
+ * strings ask their native description for UTF8String. */
+static const char *a64_nsstring_cstr(uint64_t obj)
+{
+    if (!obj)
+        return NULL;
+    struct {
+        void *isa;
+        uint32_t flags;
+        uint32_t pad;
+        const char *cstr;
+        uint64_t length;
+    } *cs = (void *)(uintptr_t)obj;
+    if (cs->flags == 0x7c8 && cs->cstr)
+        return cs->cstr;
+    void *text = objc_msgSend((void *)(uintptr_t)obj,
+                              sel_registerName("UTF8String"));
+    return (const char *)text;
+}
+
+/* Renders a printf-style format with Darwin arm64 variadic arguments,
+ * which arrive on the stack one eight-byte slot each. Integer, pointer,
+ * character, string and floating-point conversions are rendered; with
+ * objects set, %@ asks the object for its description and UTF-8 text.
+ * The rendered text is truncated to cap-1 bytes. */
+static size_t a64_render_format(struct a64_cpu *c, const char *fmt,
+                                char *out, size_t cap, int objects)
+{
+    uint64_t argbase = c->sp;
+    int argi = 0;
+    size_t o = 0;
+
+    if (!fmt)
+        fmt = "(null)";
+    for (const char *p = fmt; *p && o + 1 < cap; p++)
+    {
+        if (*p != '%')
+        {
+            out[o++] = *p;
+            continue;
+        }
+        p++;
+        if (*p == '%')
+        {
+            out[o++] = '%';
+            continue;
+        }
+        const char *spec_begin = p - 1;
+        int is_long = 0;
+        while (*p && strchr("-+ #0", *p))
+            p++;
+        while (*p >= '0' && *p <= '9')
+            p++;
+        if (*p == '.')
+        {
+            p++;
+            while (*p >= '0' && *p <= '9')
+                p++;
+        }
+        while (*p == 'l')
+        {
+            is_long = 1;
+            p++;
+        }
+        while (*p == 'z' || *p == 't' || *p == 'j')
+        {
+            is_long = 1;
+            p++;
+        }
+        while (*p == 'h')
+            p++;
+        uint64_t arg = a64_load(c, argbase + 8ull * (unsigned)argi, 8, 0);
+        argi++;
+        if (*p == 's')
+        {
+            const char *s = (const char *)(uintptr_t)arg;
+            if (!s)
+                s = "(null)";
+            size_t l = strlen(s);
+            if (l > cap - o - 1)
+                l = cap - o - 1;
+            memcpy(out + o, s, l);
+            o += l;
+        }
+        else if (*p == '@' && objects)
+        {
+            const char *s = arg ? a64_nsstring_cstr(arg) : NULL;
+            if (!s && arg)
+            {
+                void *desc = objc_msgSend((void *)(uintptr_t)arg,
+                                          sel_registerName("description"));
+                if (desc)
+                    s = objc_msgSend(desc, sel_registerName("UTF8String"));
+            }
+            if (!s)
+                s = "(null)";
+            size_t l = strlen(s);
+            if (l > cap - o - 1)
+                l = cap - o - 1;
+            memcpy(out + o, s, l);
+            o += l;
+        }
+        else if (*p == 'd' || *p == 'i')
+        {
+            long long v = (long long)arg;
+            if (!is_long)
+                v = (int)v;
+            o += (size_t)snprintf(out + o, cap - o, "%lld", v);
+        }
+        else if (*p == 'u' || *p == 'x' || *p == 'X')
+        {
+            unsigned long long v = arg;
+            if (!is_long)
+                v = (unsigned)v;
+            const char *spec = *p == 'x' ? "%llx"
+                               : *p == 'X' ? "%llX" : "%llu";
+            o += (size_t)snprintf(out + o, cap - o, spec, v);
+        }
+        else if (*p == 'p')
+        {
+            o += (size_t)snprintf(out + o, cap - o, "%p",
+                                  (void *)(uintptr_t)arg);
+        }
+        else if (*p == 'c')
+        {
+            out[o++] = (char)arg;
+        }
+        else if (*p == 'f' || *p == 'F' || *p == 'e' || *p == 'E' ||
+                 *p == 'g' || *p == 'G' || *p == 'a' || *p == 'A')
+        {
+            /* Variadic doubles arrive in one stack slot; keep the
+             * caller's flags and precision in the spec. */
+            size_t sl = (size_t)(p - spec_begin + 1);
+            char spec[32];
+            if (sl >= sizeof spec)
+                sl = sizeof spec - 1;
+            memcpy(spec, spec_begin, sl);
+            spec[sl] = 0;
+            double d;
+            memcpy(&d, &arg, 8);
+            o += (size_t)snprintf(out + o, cap - o, spec, d);
+        }
+        else
+        {
+            out[o++] = '%';
+            if (o + 1 < cap)
+                out[o++] = *p;
+        }
+    }
+    out[o] = 0;
+    return o;
+}
+
+/* Runs one of the printf-family calls. Darwin arm64 passes anonymous
+ * variadic arguments on the stack; the format's fixed position depends on
+ * the function. NSLog's format is an NSString and may use %@. */
+static int a64_variadic_call(struct a64_cpu *c, int kind, uint64_t *ret)
+{
+    char out[4096];
+    if (kind == NG_PRINTF)
+    {
+        size_t n = a64_render_format(c, (const char *)(uintptr_t)c->x[0],
+                                     out, sizeof(out), 0);
+        fputs(out, stdout);
+        fflush(stdout);
+        *ret = (uint64_t)(int64_t)(int)n;
+        return 1;
+    }
+    if (kind == NG_FPRINTF)
+    {
+        FILE *stream = (FILE *)(uintptr_t)c->x[0];
+        size_t n = a64_render_format(c, (const char *)(uintptr_t)c->x[1],
+                                     out, sizeof(out), 0);
+        if (!stream)
+            stream = stdout;
+        fputs(out, stream);
+        fflush(stream);
+        *ret = (uint64_t)(int64_t)(int)n;
+        return 1;
+    }
+    if (kind == NG_SPRINTF)
+    {
+        char *dst = (char *)(uintptr_t)c->x[0];
+        size_t n = a64_render_format(c, (const char *)(uintptr_t)c->x[1],
+                                     out, sizeof(out), 0);
+        if (dst)
+            memcpy(dst, out, n + 1);
+        *ret = (uint64_t)(int64_t)(int)n;
+        return 1;
+    }
+    if (kind == NG_SNPRINTF)
+    {
+        char *dst = (char *)(uintptr_t)c->x[0];
+        size_t size = (size_t)c->x[1];
+        size_t n = a64_render_format(c, (const char *)(uintptr_t)c->x[2],
+                                     out, sizeof(out), 0);
+        if (dst && size)
+        {
+            size_t k = n < size - 1 ? n : size - 1;
+            memcpy(dst, out, k);
+            dst[k] = 0;
+        }
+        *ret = (uint64_t)(int64_t)(int)n;
+        return 1;
+    }
+    const char *fmt = a64_nsstring_cstr(c->x[0]);
+    a64_render_format(c, fmt, out, sizeof(out), 1);
+    fprintf(stderr, "NSLog: %s\n", out);
+    fflush(stderr);
+    *ret = 0;
+    return 1;
+}
+
 static int a64_native_call(struct a64_cpu *c, uint64_t target, uint64_t *ret)
 {
     native_gates_init();
@@ -630,122 +853,12 @@ static int a64_native_call(struct a64_cpu *c, uint64_t target, uint64_t *ret)
         case NG_PUTS:
             *ret = (uint64_t)(int64_t)puts((const char *)(uintptr_t)c->x[0]);
             return 1;
-        case NG_PRINTF: {
-            /* The format is x0; Darwin arm64 places the variadic arguments
-             * on the stack. Only integer, pointer, character and string
-             * formats are rendered. */
-            const char *fmt = (const char *)(uintptr_t)c->x[0];
-            int n = 0;
-            /* Darwin arm64 passes printf's variadic arguments on the
-             * stack, one eight-byte slot each. */
-            uint64_t argbase = c->sp;
-            int argi = 0;
-            char out[4096];
-            size_t o = 0;
-            for (const char *p = fmt; *p && o + 1 < sizeof(out); p++)
-            {
-                if (*p != '%')
-                {
-                    out[o++] = *p;
-                    continue;
-                }
-                p++;
-                if (*p == '%')
-                {
-                    out[o++] = '%';
-                    continue;
-                }
-                const char *spec_begin = p - 1;
-                int is_long = 0;
-                while (*p && strchr("-+ #0", *p))
-                    p++;
-                while (*p >= '0' && *p <= '9')
-                    p++;
-                if (*p == '.')
-                {
-                    p++;
-                    while (*p >= '0' && *p <= '9')
-                        p++;
-                }
-                while (*p == 'l')
-                {
-                    is_long = 1;
-                    p++;
-                }
-                while (*p == 'z' || *p == 't' || *p == 'j')
-                {
-                    is_long = 1;
-                    p++;
-                }
-                while (*p == 'h')
-                    p++;
-                uint64_t arg = a64_load(c, argbase + 8ull * (unsigned)argi,
-                                        8, 0);
-                argi++;
-                if (*p == 's')
-                {
-                    const char *s = (const char *)(uintptr_t)arg;
-                    if (!s)
-                        s = "(null)";
-                    size_t l = strlen(s);
-                    memcpy(out + o, s, l);
-                    o += l;
-                }
-                else if (*p == 'd' || *p == 'i')
-                {
-                    long long v = (long long)arg;
-                    if (!is_long)
-                        v = (int)v;
-                    o += (size_t)snprintf(out + o, sizeof(out) - o, "%lld",
-                                          v);
-                }
-                else if (*p == 'u' || *p == 'x' || *p == 'X')
-                {
-                    unsigned long long v = arg;
-                    if (!is_long)
-                        v = (unsigned)v;
-                    const char *spec = *p == 'x' ? "%llx"
-                                       : *p == 'X' ? "%llX" : "%llu";
-                    o += (size_t)snprintf(out + o, sizeof(out) - o, spec, v);
-                }
-                else if (*p == 'p')
-                {
-                    o += (size_t)snprintf(out + o, sizeof(out) - o, "%p",
-                                          (void *)(uintptr_t)arg);
-                }
-                else if (*p == 'c')
-                {
-                    out[o++] = (char)arg;
-                }
-                else if (*p == 'f' || *p == 'F' || *p == 'e' || *p == 'E' ||
-                         *p == 'g' || *p == 'G' || *p == 'a' || *p == 'A')
-                {
-                    /* Variadic doubles arrive in one stack slot; keep the
-                     * caller's flags and precision in the spec. */
-                    size_t sl = (size_t)(p - spec_begin + 1);
-                    char spec[32];
-                    if (sl >= sizeof spec)
-                        sl = sizeof spec - 1;
-                    memcpy(spec, spec_begin, sl);
-                    spec[sl] = 0;
-                    double d;
-                    memcpy(&d, &arg, 8);
-                    o += (size_t)snprintf(out + o, sizeof(out) - o, spec, d);
-                }
-                else
-                {
-                    out[o++] = '%';
-                    if (o + 1 < sizeof(out))
-                        out[o++] = *p;
-                }
-            }
-            out[o] = 0;
-            n = (int)strlen(out);
-            fputs(out, stdout);
-            fflush(stdout);
-            *ret = (uint64_t)(int64_t)n;
-            return 1;
-        }
+        case NG_PRINTF:
+        case NG_FPRINTF:
+        case NG_SPRINTF:
+        case NG_SNPRINTF:
+        case NG_NSLOG:
+            return a64_variadic_call(c, g_gates[i].kind, ret);
         case NG_EXIT:
             exit((int)c->x[0]);
         case NG_MALLOC:
@@ -836,11 +949,23 @@ static int a64_native_call(struct a64_cpu *c, uint64_t target, uint64_t *ret)
     const char *base_name = shim_name && shim_name[0] == '_'
                                 ? shim_name + 1
                                 : shim_name;
-    if (known && base_name && strcmp(base_name, "printf") != 0 &&
-        strcmp(base_name, "NSLog") != 0 &&
-        strcmp(base_name, "fprintf") != 0 &&
-        strcmp(base_name, "sprintf") != 0 &&
-        strcmp(base_name, "snprintf") != 0)
+    if (known && base_name)
+    {
+        int vk = 0;
+        if (strcmp(base_name, "printf") == 0)
+            vk = NG_PRINTF;
+        else if (strcmp(base_name, "fprintf") == 0)
+            vk = NG_FPRINTF;
+        else if (strcmp(base_name, "sprintf") == 0)
+            vk = NG_SPRINTF;
+        else if (strcmp(base_name, "snprintf") == 0)
+            vk = NG_SNPRINTF;
+        else if (strcmp(base_name, "NSLog") == 0)
+            vk = NG_NSLOG;
+        if (vk)
+            return a64_variadic_call(c, vk, ret);
+    }
+    if (known && base_name)
     {
         uint64_t gp_args[4] = {c->x[2], c->x[3], c->x[4], c->x[5]};
         uint64_t sse_args[8];
@@ -1497,6 +1622,34 @@ static int a64_dispatch_native(struct a64_cpu *c, uint64_t target,
     c->x[0] = ret;
     *pc_out = is_bl ? next : saved;
     return 0;
+}
+
+/* Lane access for AdvSIMD operations over a 128-bit register image. */
+static uint64_t a64_lane_get(const uint8_t *v, int index, int esize)
+{
+    uint64_t out = 0;
+    memcpy(&out, v + index * (esize / 8), (size_t)(esize / 8));
+    return out;
+}
+
+static void a64_lane_put(uint8_t *v, int index, int esize, uint64_t val)
+{
+    memcpy(v + index * (esize / 8), &val, (size_t)(esize / 8));
+}
+
+static int64_t a64_lane_signed(uint64_t v, int esize)
+{
+    switch (esize)
+    {
+    case 8:
+        return (int8_t)v;
+    case 16:
+        return (int16_t)v;
+    case 32:
+        return (int32_t)v;
+    default:
+        return (int64_t)v;
+    }
 }
 
 /* Runs arm64 code until the top-level return address (0) is used. Returns
@@ -2360,6 +2513,635 @@ static int a64_run(struct a64_cpu *c)
             c->pc = next;
             continue;
         }
+        /* AdvSIMD shifts by immediate: SHL/USHR/SSHR. The encoding shares
+         * the modified-immediate group's mask, so it is decoded first. */
+        {
+            unsigned sm = insn & 0xbf80fc00;
+            if ((sm == 0x0f005400 || sm == 0x0f000400 ||
+                 sm == 0x2f000400) && ((insn >> 19) & 0xf) != 0)
+            {
+                unsigned immh = (insn >> 19) & 0xf;
+                unsigned immb = (insn >> 16) & 7;
+                int Q = (insn >> 30) & 1;
+                int rn = (insn >> 5) & 31;
+                int rd = insn & 31;
+                int h = 31 - __builtin_clz(immh);
+                int esize = 8 << h;
+                unsigned imm = (immh << 3) | immb;
+                int lanes = (Q ? 128 : 64) / esize;
+                uint8_t a[16], r[16];
+                memcpy(a, &c->d[rn], 8);
+                memcpy(a + 8, &c->dhi[rn], 8);
+                memset(r, 0, sizeof r);
+                uint64_t mask = esize == 64 ? ~0ull
+                                            : ((1ull << esize) - 1);
+                for (int i = 0; i < lanes; i++)
+                {
+                    uint64_t v = a64_lane_get(a, i, esize);
+                    uint64_t out;
+                    if (sm == 0x0f005400)
+                        out = v << (imm - (unsigned)esize);
+                    else if (sm == 0x0f000400)
+                        out = (uint64_t)(a64_lane_signed(v, esize) >>
+                                         (2 * esize - (int)imm));
+                    else
+                        out = v >> (2 * esize - (int)imm);
+                    a64_lane_put(r, i, esize, out & mask);
+                }
+                memcpy(&c->d[rd], r, 8);
+                memcpy(&c->dhi[rd], r + 8, 8);
+                c->pc = next;
+                continue;
+            }
+        }
+        /* AdvSIMD integer add/sub/mul/mla for every element size. */
+        {
+            unsigned m = insn & 0xbfe0fc00;
+            int op = 0; /* 1 add, 2 sub, 3 mul, 4 mla */
+            if (m == 0x0e208400 || m == 0x0e608400 ||
+                m == 0x0ea08400 || m == 0x0ee08400)
+                op = 1;
+            else if (m == 0x2e208400 || m == 0x2e608400 ||
+                     m == 0x2ea08400 || m == 0x2ee08400)
+                op = 2;
+            else if (m == 0x0e209c00 || m == 0x0e609c00 ||
+                     m == 0x0ea09c00)
+                op = 3;
+            else if (m == 0x0e209400 || m == 0x0e609400 ||
+                     m == 0x0ea09400)
+                op = 4;
+            if (op)
+            {
+                int Q = (insn >> 30) & 1;
+                int esize = 8 << ((insn >> 22) & 3);
+                int rn = (insn >> 5) & 31;
+                int rm = (insn >> 16) & 31;
+                int rd = insn & 31;
+                int lanes = (Q ? 128 : 64) / esize;
+                uint8_t a[16], b[16], acc[16], r[16];
+                memcpy(a, &c->d[rn], 8);
+                memcpy(a + 8, &c->dhi[rn], 8);
+                memcpy(b, &c->d[rm], 8);
+                memcpy(b + 8, &c->dhi[rm], 8);
+                memcpy(acc, &c->d[rd], 8);
+                memcpy(acc + 8, &c->dhi[rd], 8);
+                memset(r, 0, sizeof r);
+                uint64_t mask = esize == 64 ? ~0ull
+                                            : ((1ull << esize) - 1);
+                for (int i = 0; i < lanes; i++)
+                {
+                    uint64_t x = a64_lane_get(a, i, esize);
+                    uint64_t y = a64_lane_get(b, i, esize);
+                    uint64_t v;
+                    if (op == 1)
+                        v = x + y;
+                    else if (op == 2)
+                        v = x - y;
+                    else if (op == 3)
+                        v = x * y;
+                    else
+                        v = a64_lane_get(acc, i, esize) + x * y;
+                    a64_lane_put(r, i, esize, v & mask);
+                }
+                memcpy(&c->d[rd], r, 8);
+                memcpy(&c->dhi[rd], r + 8, 8);
+                c->pc = next;
+                continue;
+            }
+        }
+        /* AdvSIMD integer max/min, signed and unsigned. */
+        {
+            unsigned m = insn & 0xbfe0fc00;
+            int kind = 0; /* 1 smax, 2 smin, 3 umax, 4 umin */
+            if (m == 0x0e206400 || m == 0x0e606400 ||
+                m == 0x0ea06400 || m == 0x0ee06400)
+                kind = 1;
+            else if (m == 0x0e206c00 || m == 0x0e606c00 ||
+                     m == 0x0ea06c00 || m == 0x0ee06c00)
+                kind = 2;
+            else if (m == 0x2e206400 || m == 0x2e606400 ||
+                     m == 0x2ea06400 || m == 0x2ee06400)
+                kind = 3;
+            else if (m == 0x2e206c00 || m == 0x2e606c00 ||
+                     m == 0x2ea06c00 || m == 0x2ee06c00)
+                kind = 4;
+            if (kind)
+            {
+                int Q = (insn >> 30) & 1;
+                int esize = 8 << ((insn >> 22) & 3);
+                int rn = (insn >> 5) & 31;
+                int rm = (insn >> 16) & 31;
+                int rd = insn & 31;
+                int lanes = (Q ? 128 : 64) / esize;
+                uint8_t a[16], b[16], r[16];
+                memcpy(a, &c->d[rn], 8);
+                memcpy(a + 8, &c->dhi[rn], 8);
+                memcpy(b, &c->d[rm], 8);
+                memcpy(b + 8, &c->dhi[rm], 8);
+                memset(r, 0, sizeof r);
+                for (int i = 0; i < lanes; i++)
+                {
+                    uint64_t x = a64_lane_get(a, i, esize);
+                    uint64_t y = a64_lane_get(b, i, esize);
+                    uint64_t v;
+                    if (kind == 1)
+                        v = a64_lane_signed(x, esize) >=
+                                    a64_lane_signed(y, esize) ? x : y;
+                    else if (kind == 2)
+                        v = a64_lane_signed(x, esize) <=
+                                    a64_lane_signed(y, esize) ? x : y;
+                    else if (kind == 3)
+                        v = x >= y ? x : y;
+                    else
+                        v = x <= y ? x : y;
+                    a64_lane_put(r, i, esize, v);
+                }
+                memcpy(&c->d[rd], r, 8);
+                memcpy(&c->dhi[rd], r + 8, 8);
+                c->pc = next;
+                continue;
+            }
+        }
+        /* AdvSIMD 4S floating-point max/min/divide. */
+        if ((insn & 0xffe0fc00) == 0x4e20f400 ||
+            (insn & 0xffe0fc00) == 0x4ea0f400 ||
+            (insn & 0xffe0fc00) == 0x6e20fc00)
+        {
+            int rm = (insn >> 16) & 31;
+            int rn = (insn >> 5) & 31;
+            int rd = insn & 31;
+            float a[4], b[4], r[4];
+            memcpy(a, &c->d[rn], 8);
+            memcpy(a + 2, &c->dhi[rn], 8);
+            memcpy(b, &c->d[rm], 8);
+            memcpy(b + 2, &c->dhi[rm], 8);
+            unsigned m = insn & 0xffe0fc00;
+            for (int i = 0; i < 4; i++)
+            {
+                if (m == 0x4e20f400)
+                    r[i] = a[i] > b[i] ? a[i] : b[i];
+                else if (m == 0x4ea0f400)
+                    r[i] = a[i] < b[i] ? a[i] : b[i];
+                else
+                    r[i] = a[i] / b[i];
+            }
+            memcpy(&c->d[rd], r, 8);
+            memcpy(&c->dhi[rd], r + 2, 8);
+            c->pc = next;
+            continue;
+        }
+        /* AdvSIMD single-source 4S floating point and integer ops. */
+        if ((insn & 0xfffffc00) == 0x6ea1f800 ||   /* fsqrt */
+            (insn & 0xfffffc00) == 0x4ea0f800 ||   /* fabs */
+            (insn & 0xfffffc00) == 0x6ea0f800 ||   /* fneg */
+            (insn & 0xfffffc00) == 0x4ea0b800 ||   /* abs */
+            (insn & 0xfffffc00) == 0x6ea0b800)     /* neg */
+        {
+            unsigned m = insn & 0xfffffc00;
+            int rn = (insn >> 5) & 31;
+            int rd = insn & 31;
+            if (m == 0x4ea0b800 || m == 0x6ea0b800)
+            {
+                int32_t a[4], r[4];
+                memcpy(a, &c->d[rn], 8);
+                memcpy(a + 2, &c->dhi[rn], 8);
+                for (int i = 0; i < 4; i++)
+                    r[i] = m == 0x4ea0b800
+                               ? (a[i] < 0 ? -a[i] : a[i])
+                               : -a[i];
+                memcpy(&c->d[rd], r, 8);
+                memcpy(&c->dhi[rd], r + 2, 8);
+            }
+            else
+            {
+                uint32_t a[4], r[4];
+                memcpy(a, &c->d[rn], 8);
+                memcpy(a + 2, &c->dhi[rn], 8);
+                for (int i = 0; i < 4; i++)
+                {
+                    if (m == 0x4ea0f800)
+                        r[i] = a[i] & 0x7fffffffu;
+                    else if (m == 0x6ea0f800)
+                        r[i] = a[i] ^ 0x80000000u;
+                    else
+                    {
+                        float f;
+                        memcpy(&f, &a[i], 4);
+                        f = sqrtf(f);
+                        memcpy(&r[i], &f, 4);
+                    }
+                }
+                memcpy(&c->d[rd], r, 8);
+                memcpy(&c->dhi[rd], r + 2, 8);
+            }
+            c->pc = next;
+            continue;
+        }
+        /* AdvSIMD vector conversions between integer and float (4S). */
+        if ((insn & 0xfffffc00) == 0x4e21d800 ||
+            (insn & 0xfffffc00) == 0x4ea1b800)
+        {
+            unsigned m = insn & 0xfffffc00;
+            int rn = (insn >> 5) & 31;
+            int rd = insn & 31;
+            int32_t a[4], r[4];
+            float f[4];
+            memcpy(a, &c->d[rn], 8);
+            memcpy(a + 2, &c->dhi[rn], 8);
+            memcpy(f, a, sizeof f);
+            for (int i = 0; i < 4; i++)
+            {
+                if (m == 0x4e21d800)
+                {
+                    float v = (float)a[i];
+                    memcpy(&r[i], &v, 4);
+                }
+                else
+                    r[i] = (int32_t)f[i];
+            }
+            memcpy(&c->d[rd], r, 8);
+            memcpy(&c->dhi[rd], r + 2, 8);
+            c->pc = next;
+            continue;
+        }
+        /* AdvSIMD vector compares producing all-ones lane masks. */
+        {
+            unsigned m = insn & 0xbfe0fc00;
+            int kind = 0; /* 1 eq, 2 gt, 3 ge, 4 hi, 5 hs */
+            if (m == 0x2e208c00 || m == 0x2e608c00 ||
+                m == 0x2ea08c00 || m == 0x2ee08c00)
+                kind = 1;
+            else if (m == 0x0e203400 || m == 0x0e603400 ||
+                     m == 0x0ea03400 || m == 0x0ee03400)
+                kind = 2;
+            else if (m == 0x0e203c00 || m == 0x0e603c00 ||
+                     m == 0x0ea03c00 || m == 0x0ee03c00)
+                kind = 3;
+            else if (m == 0x2e203400 || m == 0x2e603400 ||
+                     m == 0x2ea03400 || m == 0x2ee03400)
+                kind = 4;
+            else if (m == 0x2e203c00 || m == 0x2e603c00 ||
+                     m == 0x2ea03c00 || m == 0x2ee03c00)
+                kind = 5;
+            if (kind)
+            {
+                int Q = (insn >> 30) & 1;
+                int esize = 8 << ((insn >> 22) & 3);
+                int rn = (insn >> 5) & 31;
+                int rm = (insn >> 16) & 31;
+                int rd = insn & 31;
+                int lanes = (Q ? 128 : 64) / esize;
+                uint8_t a[16], b[16], r[16];
+                memcpy(a, &c->d[rn], 8);
+                memcpy(a + 8, &c->dhi[rn], 8);
+                memcpy(b, &c->d[rm], 8);
+                memcpy(b + 8, &c->dhi[rm], 8);
+                memset(r, 0, sizeof r);
+                uint64_t ones = esize == 64 ? ~0ull
+                                            : ((1ull << esize) - 1);
+                for (int i = 0; i < lanes; i++)
+                {
+                    uint64_t x = a64_lane_get(a, i, esize);
+                    uint64_t y = a64_lane_get(b, i, esize);
+                    int64_t sx = a64_lane_signed(x, esize);
+                    int64_t sy = a64_lane_signed(y, esize);
+                    int t;
+                    if (kind == 1)
+                        t = x == y;
+                    else if (kind == 2)
+                        t = sx > sy;
+                    else if (kind == 3)
+                        t = sx >= sy;
+                    else if (kind == 4)
+                        t = x > y;
+                    else
+                        t = x >= y;
+                    a64_lane_put(r, i, esize, t ? ones : 0);
+                }
+                memcpy(&c->d[rd], r, 8);
+                memcpy(&c->dhi[rd], r + 8, 8);
+                c->pc = next;
+                continue;
+            }
+        }
+        /* AdvSIMD compare-with-zero (CMEQ #0). */
+        if ((insn & 0xbfe0fc00) == 0x0e209800 ||
+            (insn & 0xbfe0fc00) == 0x0e609800 ||
+            (insn & 0xbfe0fc00) == 0x0ea09800 ||
+            (insn & 0xbfe0fc00) == 0x0ee09800)
+        {
+            int Q = (insn >> 30) & 1;
+            int esize = 8 << ((insn >> 22) & 3);
+            int rn = (insn >> 5) & 31;
+            int rd = insn & 31;
+            int lanes = (Q ? 128 : 64) / esize;
+            uint8_t a[16], r[16];
+            memcpy(a, &c->d[rn], 8);
+            memcpy(a + 8, &c->dhi[rn], 8);
+            memset(r, 0, sizeof r);
+            uint64_t ones = esize == 64 ? ~0ull : ((1ull << esize) - 1);
+            for (int i = 0; i < lanes; i++)
+                a64_lane_put(r, i, esize,
+                             a64_lane_get(a, i, esize) == 0 ? ones : 0);
+            memcpy(&c->d[rd], r, 8);
+            memcpy(&c->dhi[rd], r + 8, 8);
+            c->pc = next;
+            continue;
+        }
+        /* AdvSIMD pairwise add (ADDP). */
+        if ((insn & 0xbfe0fc00) == 0x0e20bc00 ||
+            (insn & 0xbfe0fc00) == 0x0e60bc00 ||
+            (insn & 0xbfe0fc00) == 0x0ea0bc00 ||
+            (insn & 0xbfe0fc00) == 0x0ee0bc00)
+        {
+            int Q = (insn >> 30) & 1;
+            int esize = 8 << ((insn >> 22) & 3);
+            int rn = (insn >> 5) & 31;
+            int rm = (insn >> 16) & 31;
+            int rd = insn & 31;
+            int lanes = (Q ? 128 : 64) / esize;
+            uint8_t a[16], b[16], r[16];
+            memcpy(a, &c->d[rn], 8);
+            memcpy(a + 8, &c->dhi[rn], 8);
+            memcpy(b, &c->d[rm], 8);
+            memcpy(b + 8, &c->dhi[rm], 8);
+            memset(r, 0, sizeof r);
+            uint64_t mask = esize == 64 ? ~0ull : ((1ull << esize) - 1);
+            for (int i = 0; i < lanes / 2; i++)
+            {
+                uint64_t va = a64_lane_get(a, 2 * i, esize) +
+                              a64_lane_get(a, 2 * i + 1, esize);
+                uint64_t vb = a64_lane_get(b, 2 * i, esize) +
+                              a64_lane_get(b, 2 * i + 1, esize);
+                a64_lane_put(r, i, esize, va & mask);
+                a64_lane_put(r, lanes / 2 + i, esize, vb & mask);
+            }
+            memcpy(&c->d[rd], r, 8);
+            memcpy(&c->dhi[rd], r + 8, 8);
+            c->pc = next;
+            continue;
+        }
+        /* AdvSIMD horizontal reductions for 4S vectors. */
+        if ((insn & 0xfffffc00) == 0x4eb0a800 ||
+            (insn & 0xfffffc00) == 0x4eb1a800 ||
+            (insn & 0xfffffc00) == 0x6eb0a800 ||
+            (insn & 0xfffffc00) == 0x6eb1a800 ||
+            (insn & 0xfffffc00) == 0x6e30f800 ||
+            (insn & 0xfffffc00) == 0x6eb0f800)
+        {
+            unsigned m = insn & 0xfffffc00;
+            int rn = (insn >> 5) & 31;
+            int rd = insn & 31;
+            if (m == 0x4eb0a800 || m == 0x4eb1a800 ||
+                m == 0x6eb0a800 || m == 0x6eb1a800)
+            {
+                int32_t a[4];
+                memcpy(a, &c->d[rn], 8);
+                memcpy(a + 2, &c->dhi[rn], 8);
+                int32_t v = a[0];
+                for (int i = 1; i < 4; i++)
+                {
+                    if (m == 0x4eb0a800)
+                        v = a[i] > v ? a[i] : v;
+                    else if (m == 0x4eb1a800)
+                        v = a[i] < v ? a[i] : v;
+                    else if (m == 0x6eb0a800)
+                        v = (uint32_t)a[i] > (uint32_t)v ? a[i] : v;
+                    else
+                        v = (uint32_t)a[i] < (uint32_t)v ? a[i] : v;
+                }
+                c->d[rd] = (uint32_t)v;
+            }
+            else
+            {
+                float a[4], v;
+                memcpy(a, &c->d[rn], 8);
+                memcpy(a + 2, &c->dhi[rn], 8);
+                v = a[0];
+                for (int i = 1; i < 4; i++)
+                {
+                    if (m == 0x6e30f800)
+                        v = a[i] > v ? a[i] : v;
+                    else
+                        v = a[i] < v ? a[i] : v;
+                }
+                uint32_t bits;
+                memcpy(&bits, &v, 4);
+                c->d[rd] = bits;
+            }
+            c->dhi[rd] = 0;
+            c->pc = next;
+            continue;
+        }
+        /* AdvSIMD DUP (element) and INS (general). */
+        if ((insn & 0xbfe0fc00) == 0x0e000400)
+        {
+            unsigned imm5 = (insn >> 16) & 31;
+            int Q = (insn >> 30) & 1;
+            int rn = (insn >> 5) & 31;
+            int rd = insn & 31;
+            if (!imm5)
+                return a64_fail(c, "bad vector element move", insn);
+            int lz = __builtin_ctz(imm5);
+            int esize = 8 << lz;
+            int index = (int)(imm5 >> (lz + 1));
+            uint8_t a[16], r[16];
+            memcpy(a, &c->d[rn], 8);
+            memcpy(a + 8, &c->dhi[rn], 8);
+            memset(r, 0, sizeof r);
+            int lanes = (Q ? 128 : 64) / esize;
+            uint64_t v = a64_lane_get(a, index, esize);
+            for (int i = 0; i < lanes; i++)
+                a64_lane_put(r, i, esize, v);
+            memcpy(&c->d[rd], r, 8);
+            memcpy(&c->dhi[rd], r + 8, 8);
+            c->pc = next;
+            continue;
+        }
+        if ((insn & 0xffe0fc00) == 0x4e001c00)
+        {
+            unsigned imm5 = (insn >> 16) & 31;
+            int rn = (insn >> 5) & 31;
+            int rd = insn & 31;
+            if (!imm5)
+                return a64_fail(c, "bad vector element insert", insn);
+            int lz = __builtin_ctz(imm5);
+            int esize = 8 << lz;
+            int index = (int)(imm5 >> (lz + 1));
+            uint8_t r[16];
+            memcpy(r, &c->d[rd], 8);
+            memcpy(r + 8, &c->dhi[rd], 8);
+            uint64_t v = c->x[rn];
+            if (esize < 64)
+                v &= (1ull << esize) - 1;
+            a64_lane_put(r, index, esize, v);
+            memcpy(&c->d[rd], r, 8);
+            memcpy(&c->dhi[rd], r + 8, 8);
+            c->pc = next;
+            continue;
+        }
+        /* AdvSIMD ZIP/UZP/TRN permutations. */
+        {
+            unsigned m = insn & 0xbfe0fc00;
+            int op = 0; /* 1 zip1, 2 zip2, 3 uzp1, 4 uzp2, 5 trn1, 6 trn2 */
+            if (m == 0x0e003800 || m == 0x0e403800 ||
+                m == 0x0e803800 || m == 0x0ec03800)
+                op = 1;
+            else if (m == 0x0e007800 || m == 0x0e407800 ||
+                     m == 0x0e807800 || m == 0x0ec07800)
+                op = 2;
+            else if (m == 0x0e001800 || m == 0x0e401800 ||
+                     m == 0x0e801800 || m == 0x0ec01800)
+                op = 3;
+            else if (m == 0x0e005800 || m == 0x0e405800 ||
+                     m == 0x0e805800 || m == 0x0ec05800)
+                op = 4;
+            else if (m == 0x0e002800 || m == 0x0e402800 ||
+                     m == 0x0e802800 || m == 0x0ec02800)
+                op = 5;
+            else if (m == 0x0e006800 || m == 0x0e406800 ||
+                     m == 0x0e806800 || m == 0x0ec06800)
+                op = 6;
+            if (op)
+            {
+                int Q = (insn >> 30) & 1;
+                int esize = 8 << ((insn >> 22) & 3);
+                int rn = (insn >> 5) & 31;
+                int rm = (insn >> 16) & 31;
+                int rd = insn & 31;
+                int lanes = (Q ? 128 : 64) / esize;
+                int half = lanes / 2;
+                uint8_t a[16], b[16], r[16];
+                memcpy(a, &c->d[rn], 8);
+                memcpy(a + 8, &c->dhi[rn], 8);
+                memcpy(b, &c->d[rm], 8);
+                memcpy(b + 8, &c->dhi[rm], 8);
+                memset(r, 0, sizeof r);
+                for (int i = 0; i < half; i++)
+                {
+                    uint64_t v0, v1;
+                    if (op == 1)
+                    {
+                        v0 = a64_lane_get(a, i, esize);
+                        v1 = a64_lane_get(b, i, esize);
+                    }
+                    else if (op == 2)
+                    {
+                        v0 = a64_lane_get(a, half + i, esize);
+                        v1 = a64_lane_get(b, half + i, esize);
+                    }
+                    else if (op == 3)
+                    {
+                        v0 = a64_lane_get(a, 2 * i, esize);
+                        v1 = a64_lane_get(b, 2 * i, esize);
+                    }
+                    else if (op == 4)
+                    {
+                        v0 = a64_lane_get(a, 2 * i + 1, esize);
+                        v1 = a64_lane_get(b, 2 * i + 1, esize);
+                    }
+                    else if (op == 5)
+                    {
+                        v0 = a64_lane_get(a, 2 * i, esize);
+                        v1 = a64_lane_get(b, 2 * i, esize);
+                    }
+                    else
+                    {
+                        v0 = a64_lane_get(a, 2 * i + 1, esize);
+                        v1 = a64_lane_get(b, 2 * i + 1, esize);
+                    }
+                    if (op == 3 || op == 4)
+                    {
+                        a64_lane_put(r, i, esize, v0);
+                        a64_lane_put(r, half + i, esize, v1);
+                    }
+                    else
+                    {
+                        a64_lane_put(r, 2 * i, esize, v0);
+                        a64_lane_put(r, 2 * i + 1, esize, v1);
+                    }
+                }
+                memcpy(&c->d[rd], r, 8);
+                memcpy(&c->dhi[rd], r + 8, 8);
+                c->pc = next;
+                continue;
+            }
+        }
+        /* AdvSIMD load-one-lane-replicate (LD1R). */
+        {
+            unsigned m = insn & 0xbfe0fc00;
+            if (m == 0x0d40c000 || m == 0x0d40c400 ||
+                m == 0x0d40c800 || m == 0x0d40cc00)
+            {
+                int Q = (insn >> 30) & 1;
+                int esize = 8 << ((insn >> 10) & 3);
+                int rn = (insn >> 5) & 31;
+                int rd = insn & 31;
+                uint64_t addr = c->x[rn];
+                uint64_t v = a64_load(c, addr, esize / 8, 0);
+                int lanes = (Q ? 128 : 64) / esize;
+                uint8_t r[16];
+                memset(r, 0, sizeof r);
+                for (int i = 0; i < lanes; i++)
+                    a64_lane_put(r, i, esize, v);
+                memcpy(&c->d[rd], r, 8);
+                memcpy(&c->dhi[rd], r + 8, 8);
+                c->pc = next;
+                continue;
+            }
+        }
+        /* AdvSIMD single-structure load/store (LD1/ST1) of one to four
+         * consecutive registers, with no offset or a post-index. */
+        if ((insn & 0xbf000000) == 0x0c000000 &&
+            ((insn >> 21) & 1) == 0)
+        {
+            unsigned opcode = (insn >> 12) & 0xf;
+            int nregs = opcode == 0x7 ? 1 : opcode == 0xa ? 2 :
+                        opcode == 0x6 ? 3 : opcode == 0x2 ? 4 : 0;
+            if (nregs)
+            {
+                int load = (insn >> 22) & 1;
+                int post = (insn >> 23) & 1;
+                int Q = (insn >> 30) & 1;
+                int rm = (insn >> 16) & 31;
+                int rn = (insn >> 5) & 31;
+                int rt = insn & 31;
+                int regbytes = Q ? 16 : 8;
+                uint64_t addr = c->x[rn];
+                for (int i = 0; i < nregs; i++)
+                {
+                    int r = rt + i;
+                    if (r > 31)
+                        return a64_fail(c, "bad vector list", insn);
+                    if (load)
+                    {
+                        c->d[r] = a64_load(c,
+                                           addr + (uint64_t)i * regbytes,
+                                           8, 0);
+                        c->dhi[r] = Q
+                            ? a64_load(c,
+                                       addr + (uint64_t)i * regbytes + 8,
+                                       8, 0)
+                            : 0;
+                    }
+                    else
+                    {
+                        a64_store(c, addr + (uint64_t)i * regbytes,
+                                  c->d[r], 8);
+                        if (Q)
+                            a64_store(c,
+                                      addr + (uint64_t)i * regbytes + 8,
+                                      c->dhi[r], 8);
+                    }
+                }
+                if (post)
+                    c->x[rn] += rm == 31
+                                    ? (uint64_t)nregs * (uint64_t)regbytes
+                                    : c->x[rm];
+                c->pc = next;
+                continue;
+            }
+        }
         /* AdvSIMD modified immediate: MOVI vectors and FMOV vector
          * immediates. */
         if ((insn & 0x9f000400) == 0x0f000400)
@@ -2632,6 +3414,31 @@ static int a64_run(struct a64_cpu *c)
             int rn = (insn >> 5) & 31;
             int rd = insn & 31;
             c->d[rd] = (uint32_t)c->x[rn];
+            c->dhi[rd] = 0;
+            c->pc = next;
+            continue;
+        }
+        /* FCVT between single and double precision. */
+        if ((insn & 0xfffffc00) == 0x1e22c000) /* fcvt Dd, Sn */
+        {
+            int rn = (insn >> 5) & 31;
+            int rd = insn & 31;
+            float f;
+            memcpy(&f, &c->d[rn], 4);
+            double d = (double)f;
+            memcpy(&c->d[rd], &d, 8);
+            c->dhi[rd] = 0;
+            c->pc = next;
+            continue;
+        }
+        if ((insn & 0xfffffc00) == 0x1e624000) /* fcvt Sd, Dn */
+        {
+            int rn = (insn >> 5) & 31;
+            int rd = insn & 31;
+            double d;
+            memcpy(&d, &c->d[rn], 8);
+            float f = (float)d;
+            memcpy(&c->d[rd], &f, 4);
             c->dhi[rd] = 0;
             c->pc = next;
             continue;

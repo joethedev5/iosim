@@ -1937,6 +1937,74 @@ else
     fails=$((fails+1))
 fi
 
+# ---------- 4f10ad. arm64 variadic calls beyond printf ----------
+# Darwin arm64 passes anonymous variadic arguments on the stack. Each
+# printf-family function has a gate that renders the format and returns
+# its own result; NSLog resolves an NSString format and %@ objects.
+"$CC" -target arm64-apple-ios18.0-simulator -ffreestanding \
+    -fobjc-runtime=ios-18.0 -fno-objc-arc -O1 -I "$ROOT/demo" \
+    -c "$ROOT/tests/arm64_varargs.m" -o "$T/arm64_varargs.o"
+"$LD64" -arch arm64 -platform_version $PLATFORM -e _main \
+    -o "$T/arm64_varargs" "$T/arm64_varargs.o" -undefined dynamic_lookup
+if out="$(DYLD_ROOT_PATH="$ROOT/runtime" timeout 10 "$RUN" --arm64 \
+    $FW_ARGS "$T/arm64_varargs" 2>&1)"; then
+    rc=0
+else
+    rc=$?
+fi
+check "snprintf 3 x=7" "$out" "arm64 snprintf renders and returns its length"
+check "sprintf 5 2.5 k" "$out" "arm64 sprintf renders into a buffer"
+check "trunc 6 abc" "$out" "snprintf truncates to the requested size"
+check "fprintf 42 err" "$out" "arm64 fprintf writes to a stream"
+check "NSLog: NSLog value 9" "$out" "arm64 NSLog resolves its format and %@"
+if [ "$rc" -eq 0 ]; then
+    echo "ok   the arm64 varargs fixture exits zero"
+else
+    echo "FAIL arm64 varargs (exit $rc)"; fails=$((fails+1))
+fi
+if out_nj="$(IOSIM_ARM64_NOJIT=1 DYLD_ROOT_PATH="$ROOT/runtime" timeout 10 \
+    "$RUN" --arm64 $FW_ARGS "$T/arm64_varargs" 2>&1)"; then
+    :
+fi
+check "NSLog: NSLog value 9" "$out_nj" \
+    "the interpreter runs the same variadic calls"
+
+# ---------- 4f10ae. arm64 AdvSIMD coverage ----------
+# Vector shifts, integer add/sub/mul, max/min, compares, conversions,
+# pairwise adds, horizontal reductions, element moves and permutations,
+# compared between the block translator and the pure interpreter.
+"$CC" -target arm64-apple-ios18.0-simulator -ffreestanding -O0 \
+    -c "$ROOT/tests/arm64_neon.c" -o "$T/arm64_neon.o"
+"$LD64" -arch arm64 -platform_version $PLATFORM -e _main \
+    -o "$T/arm64_neon" "$T/arm64_neon.o" -undefined dynamic_lookup
+if out_j="$(DYLD_ROOT_PATH="$ROOT/runtime" timeout 15 "$RUN" --arm64 \
+    "$T/arm64_neon" 2>&1)"; then
+    rc_j=0
+else
+    rc_j=$?
+fi
+if out_n="$(IOSIM_ARM64_NOJIT=1 DYLD_ROOT_PATH="$ROOT/runtime" timeout 15 \
+    "$RUN" --arm64 "$T/arm64_neon" 2>&1)"; then
+    rc_n=0
+else
+    rc_n=$?
+fi
+check "fmax 2.0 2.0 3.0 0.5" "$out_j" "arm64 vector float max"
+check "iadd 5 4 4 6" "$out_j" "arm64 vector integer add"
+check "ushr 0 1073741823 1 0" "$out_j" "arm64 vector logical shift"
+check "smaxv 7 sminv -1 umaxv 4294967295 uminv 2" "$out_j" \
+    "arm64 vector horizontal reductions"
+check "zip1 3 2 -1 5" "$out_j" "arm64 vector zip permutation"
+check "ins 3 -1 9 2" "$out_j" "arm64 vector element insert"
+check "ld1 1.0 2.0 3.0 4.0 5.0 6.0 7.0 8.0" "$out_j" \
+    "arm64 LD1/ST1 lists transfer consecutive vectors"
+if [ "$rc_j" -eq 0 ] && [ "$rc_n" -eq 0 ] && [ "$out_j" = "$out_n" ]; then
+    echo "ok   the translator and interpreter agree on every AdvSIMD result"
+else
+    echo "FAIL AdvSIMD translation agreement (exit $rc_j, $rc_n)"
+    fails=$((fails+1))
+fi
+
 # ---------- 4f11. CAAnimation completion and fill modes ----------
 rm -f "$T/arem.fifo"
 mkfifo "$T/arem.fifo"

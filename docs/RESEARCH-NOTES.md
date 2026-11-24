@@ -2363,3 +2363,31 @@ components.
   capture shows the same scene, and a `home` event suspends it. A manual
   run of the same binary directly under `build/iosim-run` with only
   `DYLD_ROOT_PATH` (no `--load-dylib`) produced a byte-identical PNG.
+
+## 2026-11-24: variadic gates and broader AdvSIMD
+
+- A variadic native call cannot go through the ordinary call gate:
+  arm64 passes anonymous arguments on the stack, one eight-byte slot
+  each. The printf formatter became `a64_render_format`, and gates for
+  `fprintf` (stream, format), `sprintf` (dest, format), `snprintf` (dest,
+  size, format) and `NSLog` run it with the right fixed arguments and
+  return each function's own result. NSLog's format is an NSString; its
+  `%@` arguments use the constant-string layout when present and
+  `-description`/`-UTF8String` otherwise. Messaging a constant string's
+  shim isa crashes (its method list is a placeholder), so constants must
+  bypass the object path.
+- NSLog resolved to Foundation's exported NSLog when the framework image
+  was preloaded instead of to the loader shim, so the address-keyed gate
+  missed it. The native dispatcher now routes the five printf-family
+  names by symbol name as well, covering shim and image addresses.
+- AdvSIMD: the shift-by-immediate encodings share the modified-immediate
+  group's mask, so they are decoded before MOVI. Masks were derived from
+  llvm-mc encodings rather than guessed. Added shl/ushr/sshr, integer
+  add/sub/mul/mla in 8/16/32/64-bit lanes, signed and unsigned min/max,
+  4S float max/min/div/sqrt/abs/neg, cmeq/cmgt/cmge/cmhi/cmhs and
+  cmeq #0, addp, horizontal reductions
+  (smaxv/sminv/umaxv/uminv/fmaxv/fminv), dup/ins element moves,
+  zip/uzp/trn permutations, scvtf/fcvtzs and LD1R. Scalar FCVT between
+  single and double precision was missing and broke float printf
+  arguments compiled at -O0. `tests/arm64_neon.c` is the coverage
+  fixture; the translator and the interpreter produce identical output.
