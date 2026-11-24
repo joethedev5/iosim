@@ -3771,6 +3771,47 @@ else
     echo "FAIL rounded clipping"; echo "$out"; fails=$((fails+1))
 fi
 
+"$ROOT/tools/build_app.sh" "$ROOT/tests/snapshot_view_test.m" \
+    "$T/snapshot_view_test" >/dev/null
+out="$(IOSIM_TEST_PNG="$T/snapshot_view.png" DYLD_ROOT_PATH="$ROOT/runtime" \
+    "$RUN" "$T/snapshot_view_test" 2>&1)"
+check "[snap] size 100.0 80.0" "$out" \
+    "a view snapshot keeps the source bounds"
+check "[snap] png written" "$out" \
+    "the snapshot fixture captures a frame"
+if out="$(python3 - "$ROOT/tools" "$T/snapshot_view.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+
+def rgb(x, y):
+    c = pngpixel.px(rows, bpp, x * 3, y * 3)
+    return ((c >> 16) & 255, (c >> 8) & 255, c & 255)
+
+def near(c, r, g, b, slack=12):
+    return (abs(c[0] - r) <= slack and abs(c[1] - g) <= slack and
+            abs(c[2] - b) <= slack)
+
+checks = [
+    ((90, 140), near(rgb(90, 140), 0, 0, 255), "source recolored"),
+    ((42, 102), near(rgb(42, 102), 0, 0, 0), "source corner"),
+    ((250, 340), near(rgb(250, 340), 255, 0, 0), "snapshot red"),
+    ((230, 320), near(rgb(230, 320), 255, 230, 0), "snapshot chip"),
+    ((202, 302), near(rgb(202, 302), 0, 0, 0), "snapshot corner"),
+]
+bad = [name for _pt, ok, name in checks if not ok]
+if bad:
+    raise SystemExit("snapshot pixels failed: " + ", ".join(bad))
+print("ok   a view snapshot keeps old colors and rounded corners")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL view snapshot"; echo "$out"; fails=$((fails+1))
+fi
+
 "$ROOT/tools/build_app.sh" "$ROOT/tests/draw_rect_test.m" \
     "$T/draw_rect_test" >/dev/null
 out="$(IOSIM_TEST_PNG="$T/draw_rect.png" DYLD_ROOT_PATH="$ROOT/runtime" \

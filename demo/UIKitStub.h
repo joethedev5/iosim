@@ -915,6 +915,7 @@ enum {
 + (Class)layerClass;
 @property(readonly) CALayer *layer;
 - (void)drawRect:(CGRect)rect;
+- (UIView *)snapshotViewAfterScreenUpdates:(BOOL)afterUpdates;
 - (void)addSubview:(UIView *)view;
 - (void)addGestureRecognizer:(id)recognizer;
 - (void)addInteraction:(id)interaction;

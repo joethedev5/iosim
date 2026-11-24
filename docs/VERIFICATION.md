@@ -548,6 +548,16 @@ The same synthetic tap path focuses a `UITextField` and the runtime keyboard
 accepts the next tap, verified by the text-input fixture. `ui swipe` emits a
 whole down/moves/up gesture in one command.
 
+### Graphics: view snapshots
+
+`tests/snapshot_view_test.m` builds a red 100x80 source with a yellow chip
+and a 12 pt rounded clip, snapshots it, places the snapshot at (200,300) and
+recolors the source blue/green. The captured frame shows a blue source with a
+rounded corner, while the snapshot keeps its red background, yellow chip and
+rounded corner. The fixture reports `[snap] size 100.0 80.0` and prints
+`ok   a view snapshot keeps old colors and rounded corners` after checking
+those five pixels.
+
 ### Graphics: rounded subtree clipping
 
 `tests/rounded_clip_test.m` stacks three cards. The first clips to bounds

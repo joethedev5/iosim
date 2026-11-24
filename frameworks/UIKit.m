@@ -1438,6 +1438,7 @@ typedef enum {
 - (double)alpha;
 - (BOOL)pointInside:(CGPoint)point;
 - (UIView *)hitTest:(CGPoint)point;
+- (UIView *)snapshotViewAfterScreenUpdates:(BOOL)afterUpdates;
 - (id)superview;
 - (UIWindow *)window;
 - (CGAffineTransform)transform;
@@ -26091,6 +26092,61 @@ static void app_enter_background(id sceneDelegate, id scene,
     printf("[UIKit-lite] resumed from suspension\n");
     fflush(0);
 }
+
+@implementation UIView (IOSIMSnapshot)
+- (UIView *)snapshotViewAfterScreenUpdates:(BOOL)afterUpdates
+{
+    (void)afterUpdates;
+    CGRect frame = [self frame];
+    double scale = [[UIScreen mainScreen] scale];
+    if (scale <= 0)
+        scale = 1.0;
+    int w = (int)(frame.size.width * scale + 0.5);
+    int h = (int)(frame.size.height * scale + 0.5);
+    if (w <= 0 || h <= 0)
+        return nil;
+    void *state = iosim_fb_begin_offscreen((unsigned)w, (unsigned)h);
+    if (!state)
+        return nil;
+    render_view(self, -frame.origin.x, -frame.origin.y, scale, 1.0);
+    int bw = 0, bh = 0;
+    unsigned *buf = iosim_fb_end_offscreen(state, &bw, &bh);
+    if (!buf || bw <= 0 || bh <= 0)
+    {
+        if (buf)
+            iosim_fb_free_offscreen(buf);
+        return nil;
+    }
+    unsigned char *rgba = malloc((unsigned long)bw * (unsigned long)bh * 4);
+    if (!rgba)
+    {
+        iosim_fb_free_offscreen(buf);
+        return nil;
+    }
+    for (int i = 0; i < bw * bh; i++)
+    {
+        unsigned pixel = buf[i];
+        rgba[i * 4 + 0] = (unsigned char)((pixel >> 16) & 255);
+        rgba[i * 4 + 1] = (unsigned char)((pixel >> 8) & 255);
+        rgba[i * 4 + 2] = (unsigned char)(pixel & 255);
+        rgba[i * 4 + 3] = (unsigned char)((pixel >> 24) & 255);
+    }
+    iosim_fb_free_offscreen(buf);
+    CGImageRef image = CGImageCreateWithRGBA(rgba, bw, bh);
+    free(rgba);
+    if (!image)
+        return nil;
+    UIImage *ui_image = [UIImage imageWithCGImage:image];
+    CGImageRelease(image);
+    if (!ui_image)
+        return nil;
+    UIImageView *snapshot = [[UIImageView alloc] initWithImage:ui_image];
+    snapshot.frame = CGRectMake(0, 0, frame.size.width, frame.size.height);
+    snapshot.layer.contentsScale = scale;
+    snapshot.userInteractionEnabled = NO;
+    return snapshot;
+}
+@end
 
 int UIApplicationMain(int argc, char **argv, id principal, id delegateName)
 {

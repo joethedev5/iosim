@@ -1096,3 +1096,17 @@ components.
 - The fixture's 800 ms window yields about 8 slow and 46 fast callbacks; the
   assertion requires at least four slow fires and a fast-to-slow ratio above
   three, which tolerates scheduling jitter.
+
+## 2026-11-24: View snapshots
+
+- `snapshotViewAfterScreenUpdates:` uses the normal renderer: begin an
+  offscreen of the view's bounds, call `render_view(view, -frame.origin.x,
+  -frame.origin.y, scale, 1.0)`, then convert the 0xAARRGGBB buffer into RGBA
+  and a CGImage. `UIImage imageWithCGImage:` copies the pixels, so the
+  CGImage can be released immediately.
+- The returned non-interactive UIImageView has the source's point size and
+  a layer contentsScale equal to the screen scale. Rendering the snapshot as
+  an image means rounded clipping and subview composition are already baked
+  into the pixels; changing the source afterwards does not affect it.
+- The `afterScreenUpdates` argument is accepted but ignored: the snapshot is
+  taken from the current model state rather than waiting for a commit.

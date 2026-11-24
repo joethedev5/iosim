@@ -1004,6 +1004,12 @@ decoded with libpng in `loader/image.c`.
 - `CAShapeLayer` stores a `UIBezierPath` (via `CGPath`) and draws its fill and
   stroke; `CAGradientLayer` interpolates up to two color stops; `UIImageView`
   blits a decoded image with aspect-fit or centered content modes.
+- `snapshotViewAfterScreenUpdates:` renders the receiver's subtree into an
+  offscreen of its bounds at the screen scale, converts the pixels into a
+  `UIImage` and returns a non-interactive `UIImageView` with the same
+  point size. Because the normal renderer draws the snapshot, rounded
+  clipping, contents, subviews and colors are captured at the moment of the
+  call; later changes to the source do not alter the snapshot.
 - A view that clips to bounds and has a corner radius renders its whole
   subtree into an offscreen pass, masks the four corners and composites the
   result. The wrapper sits after the transform handling and skips itself for
