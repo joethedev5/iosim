@@ -1647,3 +1647,14 @@ components.
   opacity through a new `iosim_fb_get_opacity` shim and restores it.
 - Attributed label runs, single-line and multiline labels, and attributed
   text views share the pass.
+
+## 2026-11-24: CGContext shadows
+
+- `CGContextSetShadowWithColor` and `CGContextSetShadow` store an offset,
+  blur radius and color in the graphics state, so save/restore carries them.
+- Fills, ellipse fills, paths and strokes paint the shifted geometry behind
+  the shape; a blur radius adds four ring positions at reduced opacity, and
+  both the shadow color alpha and the shape alpha scale the framebuffer
+  opacity, which is restored afterwards.
+- Image blits do not take shadows yet; view and text shadows are separate
+  passes (`CALayer.shadow*`, `UILabel.shadow*`, `NSShadow`).

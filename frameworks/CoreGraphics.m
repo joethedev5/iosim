@@ -23,6 +23,7 @@ extern void iosim_fb_stroke_polyline(const double *xs, const double *ys,
 extern void iosim_fb_fill_polygon(const double *xs, const double *ys,
                                   int count, unsigned color);
 extern void iosim_fb_set_opacity(double opacity);
+extern double iosim_fb_get_opacity(void);
 extern void iosim_fb_set_blend_mode(int mode);
 extern int iosim_fb_push_clip(int x, int y, int w, int h);
 extern void iosim_fb_pop_clip(void);
@@ -128,6 +129,10 @@ struct cg_state {
     double dash_phase;
     int clips;
     int masks;
+    int has_shadow;
+    double shadow_dx, shadow_dy;
+    double shadow_blur;
+    struct CGColor shadow_color;
 };
 
 struct CGContext {
@@ -174,6 +179,127 @@ static void cg_apply_opacity(CGContextRef context, struct CGColor color)
 {
     iosim_fb_set_opacity(context->base_alpha * context->state.alpha *
                          cg_clamp(color.a));
+    iosim_fb_set_blend_mode(context->state.blend_mode);
+}
+
+/* CGContext shadows paint a blurred copy of the shape behind it. The copy is
+ * the same geometry shifted by the offset, plus four ring positions at
+ * reduced opacity when a blur radius is set; the framebuffer accumulates
+ * their coverage. The shadow color's alpha and the shape's own alpha both
+ * scale the current framebuffer opacity, which is restored afterwards. */
+static int cg_shadow_ready(CGContextRef context, double shape_alpha,
+                           double *dx, double *dy, int *spread, int *step)
+{
+    if (!context->state.has_shadow)
+        return 0;
+    if (cg_clamp(context->state.shadow_color.a) <= 0.0 ||
+        cg_clamp(shape_alpha) <= 0.0)
+        return 0;
+    *dx = context->state.shadow_dx * context->scale;
+    *dy = context->state.shadow_dy * context->scale;
+    *spread = (int)(context->state.shadow_blur * context->scale + 0.5);
+    *step = *spread > 0 ? *spread / 2 : 0;
+    if (*spread > 0 && *step < 1)
+        *step = 1;
+    return 1;
+}
+
+static void cg_shadow_fill_polygon(CGContextRef context, const double *xs,
+                                   const double *ys, int count,
+                                   double shape_alpha)
+{
+    double dx, dy;
+    int spread, step;
+    if (count < 3 ||
+        !cg_shadow_ready(context, shape_alpha, &dx, &dy, &spread, &step))
+        return;
+    unsigned rgb = cg_rgb(context->state.shadow_color);
+    double saved = iosim_fb_get_opacity();
+    iosim_fb_set_opacity(saved * cg_clamp(context->state.shadow_color.a) *
+                         cg_clamp(shape_alpha) *
+                         (spread > 0 ? 0.55 : 1.0));
+    iosim_fb_set_blend_mode(0);
+    double tx[CG_MAX_POINTS], ty[CG_MAX_POINTS];
+    int limit = count < CG_MAX_POINTS ? count : CG_MAX_POINTS;
+    const double ox[4] = { -step, step, 0, 0 };
+    const double oy[4] = { 0, 0, -step, step };
+    for (int pass = 0; pass < (spread > 0 ? 5 : 1); pass++)
+    {
+        double offx = dx + (pass ? ox[pass - 1] : 0);
+        double offy = dy + (pass ? oy[pass - 1] : 0);
+        for (int i = 0; i < limit; i++)
+        {
+            tx[i] = xs[i] + offx;
+            ty[i] = ys[i] + offy;
+        }
+        iosim_fb_fill_polygon(tx, ty, limit, rgb);
+    }
+    iosim_fb_set_opacity(saved);
+    iosim_fb_set_blend_mode(context->state.blend_mode);
+}
+
+static void cg_shadow_fill_ellipse(CGContextRef context, int cx, int cy,
+                                   int rx, int ry, double shape_alpha)
+{
+    double dx, dy;
+    int spread, step;
+    if (!cg_shadow_ready(context, shape_alpha, &dx, &dy, &spread, &step))
+        return;
+    unsigned rgb = cg_rgb(context->state.shadow_color);
+    double saved = iosim_fb_get_opacity();
+    iosim_fb_set_opacity(saved * cg_clamp(context->state.shadow_color.a) *
+                         cg_clamp(shape_alpha) *
+                         (spread > 0 ? 0.55 : 1.0));
+    iosim_fb_set_blend_mode(0);
+    const double ox[4] = { -step, step, 0, 0 };
+    const double oy[4] = { 0, 0, -step, step };
+    for (int pass = 0; pass < (spread > 0 ? 5 : 1); pass++)
+    {
+        double offx = dx + (pass ? ox[pass - 1] : 0);
+        double offy = dy + (pass ? oy[pass - 1] : 0);
+        iosim_fb_fill_ellipse((int)(cx + offx), (int)(cy + offy), rx, ry,
+                              rgb);
+    }
+    iosim_fb_set_opacity(saved);
+    iosim_fb_set_blend_mode(context->state.blend_mode);
+}
+
+static void cg_shadow_stroke_points(CGContextRef context, const double *xs,
+                                    const double *ys, int count, int closed,
+                                    double width, double shape_alpha)
+{
+    double dx, dy;
+    int spread, step;
+    if (count < 2 ||
+        !cg_shadow_ready(context, shape_alpha, &dx, &dy, &spread, &step))
+        return;
+    unsigned rgb = cg_rgb(context->state.shadow_color);
+    double saved = iosim_fb_get_opacity();
+    iosim_fb_set_opacity(saved * cg_clamp(context->state.shadow_color.a) *
+                         cg_clamp(shape_alpha) *
+                         (spread > 0 ? 0.55 : 1.0));
+    iosim_fb_set_blend_mode(0);
+    double sx[CG_MAX_POINTS], sy[CG_MAX_POINTS];
+    int limit = count < CG_MAX_POINTS ? count : CG_MAX_POINTS;
+    const double ox[4] = { -step, step, 0, 0 };
+    const double oy[4] = { 0, 0, -step, step };
+    for (int pass = 0; pass < (spread > 0 ? 5 : 1); pass++)
+    {
+        double offx = dx + (pass ? ox[pass - 1] : 0);
+        double offy = dy + (pass ? oy[pass - 1] : 0);
+        for (int i = 0; i < limit; i++)
+        {
+            sx[i] = xs[i] + offx;
+            sy[i] = ys[i] + offy;
+        }
+        iosim_fb_stroke_polyline(
+            sx, sy, limit, closed, 0.0, 1.0, width, rgb,
+            context->state.line_cap, context->state.line_join,
+            context->state.miter_limit,
+            context->state.dash_count > 0 ? context->state.dash : 0,
+            context->state.dash_count, context->state.dash_phase);
+    }
+    iosim_fb_set_opacity(saved);
     iosim_fb_set_blend_mode(context->state.blend_mode);
 }
 
@@ -519,6 +645,54 @@ void CGContextSetAlpha(CGContextRef context, double alpha)
         context->state.alpha = cg_clamp(alpha);
 }
 
+static void cg_set_shadow(CGContextRef context, CGSize offset, double blur,
+                          struct CGColor color)
+{
+    context->state.has_shadow = 1;
+    context->state.shadow_dx = offset.width;
+    context->state.shadow_dy = offset.height;
+    context->state.shadow_blur = blur > 0 ? blur : 0;
+    context->state.shadow_color = color;
+}
+
+void CGContextSetShadowWithColor(CGContextRef context, CGSize offset,
+                                 double blur, CGColorRef color)
+{
+    if (!context)
+        context = g_current_context;
+    if (!context)
+        return;
+    struct CGColor shadow;
+    if (color)
+        shadow = *(struct CGColor *)color;
+    else
+    {
+        shadow.refs = 0;
+        shadow.magic = 0;
+        shadow.r = 0;
+        shadow.g = 0;
+        shadow.b = 0;
+        shadow.a = 1.0 / 3.0;
+    }
+    cg_set_shadow(context, offset, blur, shadow);
+}
+
+void CGContextSetShadow(CGContextRef context, CGSize offset, double blur)
+{
+    if (!context)
+        context = g_current_context;
+    if (!context)
+        return;
+    struct CGColor shadow;
+    shadow.refs = 0;
+    shadow.magic = 0;
+    shadow.r = 0;
+    shadow.g = 0;
+    shadow.b = 0;
+    shadow.a = 1.0 / 3.0;
+    cg_set_shadow(context, offset, blur, shadow);
+}
+
 void CGContextSetBlendMode(CGContextRef context, int mode)
 {
     if (!context)
@@ -551,6 +725,9 @@ void CGContextFillRect(CGContextRef context, CGRect rect)
     int pw = (int)(x1 - x0 + 0.5), ph = (int)(y1 - y0 + 0.5);
     if (pw <= 0 || ph <= 0)
         return;
+    double qx[4] = { x0, x1, x1, x0 };
+    double qy[4] = { y0, y0, y1, y1 };
+    cg_shadow_fill_polygon(context, qx, qy, 4, context->state.fill.a);
     cg_apply_opacity(context, context->state.fill);
     iosim_fb_fill_rect(px, py, pw, ph, cg_rgb(context->state.fill));
 }
@@ -562,10 +739,12 @@ static void cg_stroke_points(CGContextRef context, const double *xs,
 {
     if (!context || !xs || !ys || count < 2)
         return;
-    cg_apply_opacity(context, context->state.stroke);
     double width = context->state.line_width * context->scale;
     if (width < 1.0)
         width = 1.0;
+    cg_shadow_stroke_points(context, xs, ys, count, closed, width,
+                            context->state.stroke.a);
+    cg_apply_opacity(context, context->state.stroke);
     iosim_fb_stroke_polyline(
         xs, ys, count, closed, 0.0, 1.0, width,
         cg_rgb(context->state.stroke), context->state.line_cap,
@@ -604,6 +783,8 @@ void CGContextFillEllipseInRect(CGContextRef context, CGRect rect)
                        context->scale + 0.5);
     if (rx <= 0 || ry <= 0)
         return;
+    cg_shadow_fill_ellipse(context, (int)cx, (int)cy, rx, ry,
+                           context->state.fill.a);
     cg_apply_opacity(context, context->state.fill);
     iosim_fb_fill_ellipse((int)cx, (int)cy, rx, ry,
                           cg_rgb(context->state.fill));
@@ -965,6 +1146,8 @@ void CGContextFillPath(CGContextRef context)
     for (int i = 0; i < context->count; i++)
         cg_transform(context, context->xs[i], context->ys[i], &xs[i],
                      &ys[i]);
+    cg_shadow_fill_polygon(context, xs, ys, context->count,
+                           context->state.fill.a);
     cg_apply_opacity(context, context->state.fill);
     iosim_fb_fill_polygon(xs, ys, context->count,
                           cg_rgb(context->state.fill));

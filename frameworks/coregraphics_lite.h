@@ -63,6 +63,9 @@ void CGContextSetMiterLimit(CGContextRef context, double limit);
 void CGContextSetLineDash(CGContextRef context, double phase,
                           const double *lengths, unsigned long count);
 void CGContextSetAlpha(CGContextRef context, double alpha);
+void CGContextSetShadow(CGContextRef context, CGSize offset, double blur);
+void CGContextSetShadowWithColor(CGContextRef context, CGSize offset,
+                                 double blur, CGColorRef color);
 enum {
     kCGBlendModeNormal = 0,
     kCGBlendModeMultiply = 1,

@@ -1840,6 +1840,107 @@ else
 fi
 
 
+# ---------- 4f26. CGContext shadows ----------
+rm -f "$T/cgshadow.fifo"
+mkfifo "$T/cgshadow.fifo"
+"$ROOT/tools/build_app.sh" "$ROOT/tests/cg_shadow_test.m" \
+    "$T/cg_shadow_test" >/dev/null
+out="$(IOSIM_EVENT_FIFO="$T/cgshadow.fifo" IOSIM_TEST_PNG="$T/cgshadow.png" \
+    DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/cg_shadow_test" 2>&1)"
+rm -f "$T/cgshadow.fifo"
+check "[cgshadow] ready" "$out" "the CGContext shadow fixture starts"
+check "[cgshadow] done" "$out" "the CGContext shadow fixture draws its shapes"
+if report="$(python3 - "$ROOT/tools" "$T/cgshadow.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+def region(x0, x1, top, bottom):
+    stats = {}
+    for name in ('white', 'red', 'blue'):
+        stats[name] = {'n': 0, 'minx': 10 ** 9, 'maxx': -1,
+                       'miny': 10 ** 9, 'maxy': -1}
+    for yy in range(top * 3, bottom * 3):
+        for xx in range(x0 * 3, x1 * 3):
+            c = pngpixel.px(rows, bpp, xx, yy)
+            r, g, b = (c >> 16) & 255, (c >> 8) & 255, c & 255
+            if min(r, g, b) > 200:
+                key = 'white'
+            elif r > 150 and g < 90 and b < 90:
+                key = 'red'
+            elif b > 100 and r < 90 and g < 90:
+                key = 'blue'
+            else:
+                continue
+            s = stats[key]
+            s['n'] += 1
+            s['minx'] = min(s['minx'], xx)
+            s['maxx'] = max(s['maxx'], xx)
+            s['miny'] = min(s['miny'], yy)
+            s['maxy'] = max(s['maxy'], yy)
+    return stats
+
+rect = region(20, 190, 100, 240)
+if rect['white']['n'] < 2000 or rect['red']['n'] < 500:
+    raise SystemExit('rect pixels: white %d red %d' %
+                     (rect['white']['n'], rect['red']['n']))
+dx = rect['red']['maxx'] - rect['white']['maxx']
+dy = rect['red']['maxy'] - rect['white']['maxy']
+if not (9 <= dx <= 16 and 9 <= dy <= 16):
+    raise SystemExit('rect shadow offset is %d,%d' % (dx, dy))
+c = pngpixel.px(rows, bpp, 100 * 3, 160 * 3)
+if min((c >> 16) & 255, (c >> 8) & 255, c & 255) < 200:
+    raise SystemExit('the rect fill was covered by its shadow')
+print("ok   a hard CGContext shadow sits behind an offset fill")
+PY
+)"; then
+    echo "$report"
+else
+    echo "FAIL CGContext rect shadow"; echo "$report"; fails=$((fails+1))
+fi
+if report="$(python3 - "$ROOT/tools" "$T/cgshadow.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+stats = {}
+for name in ('white', 'blue'):
+    stats[name] = {'n': 0, 'minx': 10 ** 9, 'maxx': -1,
+                   'miny': 10 ** 9, 'maxy': -1}
+for yy in range(100 * 3, 240 * 3):
+    for xx in range(200 * 3, 380 * 3):
+        c = pngpixel.px(rows, bpp, xx, yy)
+        r, g, b = (c >> 16) & 255, (c >> 8) & 255, c & 255
+        if min(r, g, b) > 200:
+            key = 'white'
+        elif b > 100 and r < 90 and g < 90:
+            key = 'blue'
+        else:
+            continue
+        s = stats[key]
+        s['n'] += 1
+        s['minx'] = min(s['minx'], xx)
+        s['maxx'] = max(s['maxx'], xx)
+        s['miny'] = min(s['miny'], yy)
+        s['maxy'] = max(s['maxy'], yy)
+if stats['white']['n'] < 2000 or stats['blue']['n'] < 500:
+    raise SystemExit('ellipse pixels: white %d blue %d' %
+                     (stats['white']['n'], stats['blue']['n']))
+dx = stats['blue']['minx'] - stats['white']['minx']
+dy = stats['blue']['maxy'] - stats['white']['maxy']
+if not (-24 <= dx <= -5 and 5 <= dy <= 24):
+    raise SystemExit('blurred shadow offset is %d,%d' % (dx, dy))
+print("ok   a blurred CGContext shadow spreads around a path fill")
+PY
+)"; then
+    echo "$report"
+else
+    echo "FAIL CGContext blurred shadow"; echo "$report"; fails=$((fails+1))
+fi
+
+
 # ---------- 4g. NSCalendar components ----------
 "$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
     -ffreestanding -O1 -I "$ROOT/frameworks" \

@@ -459,7 +459,11 @@ is copied out as RGBA for `UIGraphicsGetImageFromCurrentImageContext`, and
 `CGBitmapContextGetData` copies its current pixels into the caller's rows,
 and `CGBitmapContextCreateImage` snapshots them as a `CGImage`.
 `CGContextDrawTiledImage` repeats an image at one pixel per point from the
-rect's origin, clipped to the rect and the current clip stack. Mutable
+rect's origin, clipped to the rect and the current clip stack.
+`CGContextSetShadowWithColor` stores an offset, blur radius and color in the
+graphics state; fills and strokes paint the shifted geometry — plus four blur
+ring positions at reduced opacity — in the shadow color behind the shape,
+scaled by both the shadow color alpha and the shape's own alpha. Mutable
 `CGPath` objects record move/line/close elements, `CGPathAddRect`,
 `CGPathAddEllipseInRect` and `CGPathAddPath` append geometry, `CGPathApply`
 walks them, and `CGContextAddPath` flattens a path into the context point

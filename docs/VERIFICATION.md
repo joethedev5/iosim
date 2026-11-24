@@ -1986,6 +1986,17 @@ blue pixels sit around the white text, extending 3–16 px to the left of the
 white box and 4–16 px below it, and the blur spreads them past the bare 9 px
 offset.
 
+### CoreGraphics: context shadows
+
+`tests/cg_shadow_test.m` draws a white 120x80 pt rect with a red (4, 4) pt
+hard shadow and a white ellipse path with a blue (-4, 4) pt shadow carrying a
+3 pt blur. The captured frame reads more than 2000 white pixels and more than
+500 red pixels around the rect, with the red bounding box 9–16 px past the
+white box to the right and below, and the rect's center still pure white. In
+the ellipse window more than 500 blue pixels surround the white ellipse,
+extending 5–24 px to the left and below — the 12 px offset plus the 4 px blur
+spread.
+
 ### Page view controllers
 
 `tests/pageview_test.m` installs a scroll-style horizontal page controller as a
