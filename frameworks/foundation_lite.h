@@ -829,8 +829,12 @@ enum {
 #ifdef __BLOCKS__
 typedef void (^NSURLSessionCompletionHandler)(id data, id response,
                                               id error);
+typedef void (^NSURLSessionDownloadCompletionHandler)(id location,
+                                                      id response,
+                                                      id error);
 #else
 typedef void *NSURLSessionCompletionHandler;
+typedef void *NSURLSessionDownloadCompletionHandler;
 #endif
 
 @interface NSURLQueryItem : NSObject {
@@ -1022,9 +1026,17 @@ enum {
     volatile int _canceled;
     int _resumed;
     void *_context;
+    id _uploadData;
+    int _download;
 }
 - (void)resume;
 - (void)cancel;
+@end
+
+@interface NSURLSessionUploadTask : NSURLSessionDataTask
+@end
+
+@interface NSURLSessionDownloadTask : NSURLSessionDataTask
 @end
 
 @interface NSURLSession : NSObject
@@ -1033,6 +1045,13 @@ enum {
                         completionHandler:(NSURLSessionCompletionHandler)handler;
 - (NSURLSessionDataTask *)dataTaskWithRequest:(id)request
                             completionHandler:(NSURLSessionCompletionHandler)handler;
+- (NSURLSessionUploadTask *)uploadTaskWithRequest:(id)request
+                                         fromData:(id)body
+                                completionHandler:(NSURLSessionCompletionHandler)handler;
+- (NSURLSessionDownloadTask *)downloadTaskWithURL:(id)url
+                                completionHandler:(NSURLSessionDownloadCompletionHandler)handler;
+- (NSURLSessionDownloadTask *)downloadTaskWithRequest:(id)request
+                                    completionHandler:(NSURLSessionDownloadCompletionHandler)handler;
 @end
 
 @interface NSFileManager : NSObject

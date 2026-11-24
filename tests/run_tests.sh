@@ -2100,6 +2100,39 @@ PY
 fi
 kill "$CACHE_PID" 2>/dev/null || true
 
+# ---------- 4g8. NSURLSession upload and download tasks ----------
+python3 -u "$ROOT/tests/tasks_http_server.py" > "$T/tasks.log" 2>&1 &
+TASKS_PID=$!
+TASKS_PORT=""
+i=0
+while [ "$i" -lt 100 ]; do
+    TASKS_PORT=$(sed -n 's/.*port \([0-9][0-9]*\).*/\1/p' "$T/tasks.log" | head -1)
+    [ -n "$TASKS_PORT" ] && break
+    i=$((i + 1))
+    sleep 0.05
+done
+if [ -z "$TASKS_PORT" ]; then
+    echo "FAIL tasks server did not start"
+    fails=$((fails + 1))
+    kill "$TASKS_PID" 2>/dev/null || true
+else
+    "$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
+        -fblocks -ffreestanding -O1 -I "$ROOT/frameworks" \
+        -c "$ROOT/tests/urlsession_tasks_test.m" -o "$T/urlsession_tasks_test.o"
+    "$LD64" -arch x86_64 -platform_version $PLATFORM -e _main \
+        -o "$T/urlsession_tasks_test" "$T/urlsession_tasks_test.o" \
+        "$ROOT/runtime/System/Library/Frameworks/Foundation.framework/Foundation" \
+        -undefined dynamic_lookup
+    out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/urlsession_tasks_test" \
+        "$TASKS_PORT" 2>&1)"
+    check "[tasks] download 200 1 16 downloaded bytes" "$out" \
+        "a download task completes with a temp file holding the body"
+    check "[tasks] upload 200 14 upload payload" "$out" \
+        "an upload task sends its data and receives the echo"
+    check "[tasks] done" "$out" "the URLSession task fixture runs"
+fi
+kill "$TASKS_PID" 2>/dev/null || true
+
 # ---------- 4h. NSOperationQueue block operations ----------
 "$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc -fblocks \
     -ffreestanding -O1 -I "$ROOT/frameworks" \

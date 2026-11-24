@@ -7817,7 +7817,24 @@ static void url_task_main(void *raw)
     if (service_error)
         iosim_http_free(service_error);
     void (^handler)(id, id, id) = (void (^)(id, id, id))task->_completion;
-    if (handler)
+    if (task->_download)
+    {
+        id location = nil;
+        if (!error && data)
+        {
+            const char *tmp = getenv("TMPDIR");
+            if (!tmp || !*tmp)
+                tmp = "/tmp";
+            char path[512];
+            snprintf(path, sizeof(path), "%s/iosim-download-%p", tmp, task);
+            NSString *file = [NSString stringWithUTF8String:path];
+            if ([data writeToFile:file atomically:NO])
+                location = [NSURL fileURLWithPath:file];
+        }
+        if (handler)
+            handler(location, response, error);
+    }
+    else if (handler)
         handler(data, response, error);
     if (task->_completion)
     {
@@ -7988,6 +8005,8 @@ static id url_cache_key(id request)
             ctx->cached = cached;
     }
     id body = [request HTTPBody];
+    if (!body && self->_uploadData)
+        body = self->_uploadData;
     if (body)
     {
         if ([body isKindOfClass:[NSData class]])
@@ -8005,6 +8024,12 @@ static id url_cache_key(id request)
     dispatch_async_f(dispatch_get_global_queue(0, 0), ctx, url_task_main);
 }
 - (void)cancel { _canceled = 1; }
+@end
+
+@implementation NSURLSessionUploadTask
+@end
+
+@implementation NSURLSessionDownloadTask
 @end
 
 @implementation NSURLSession
@@ -8026,6 +8051,31 @@ static id url_cache_key(id request)
 {
     NSURLSessionDataTask *task = [[NSURLSessionDataTask alloc] init];
     task->_request = request;
+    task->_completion = handler ? _Block_copy((void *)handler) : 0;
+    return task;
+}
+- (NSURLSessionUploadTask *)uploadTaskWithRequest:(id)request
+                                         fromData:(id)body
+                                completionHandler:(NSURLSessionCompletionHandler)handler
+{
+    NSURLSessionUploadTask *task = [[NSURLSessionUploadTask alloc] init];
+    task->_request = request;
+    task->_uploadData = body;
+    task->_completion = handler ? _Block_copy((void *)handler) : 0;
+    return task;
+}
+- (NSURLSessionDownloadTask *)downloadTaskWithURL:(id)url
+                                completionHandler:(NSURLSessionDownloadCompletionHandler)handler
+{
+    return [self downloadTaskWithRequest:[NSURLRequest requestWithURL:url]
+                       completionHandler:handler];
+}
+- (NSURLSessionDownloadTask *)downloadTaskWithRequest:(id)request
+                                    completionHandler:(NSURLSessionDownloadCompletionHandler)handler
+{
+    NSURLSessionDownloadTask *task = [[NSURLSessionDownloadTask alloc] init];
+    task->_request = request;
+    task->_download = 1;
     task->_completion = handler ? _Block_copy((void *)handler) : 0;
     return task;
 }

@@ -1587,3 +1587,14 @@ components.
   clips the loop to the rect and any existing clip. The fixture checks the
   four tile colors, rect edges, an intersecting clip, and a bitmap context's
   data and image round trip.
+
+## 2026-11-24: URLSession upload and download tasks
+
+- `NSURLSessionUploadTask` and `NSURLSessionDownloadTask` subclass the data
+  task. An upload task carries its `fromData:` body into the existing request
+  path when the request has no body of its own.
+- A download task marks its context; after the transfer the body is written
+  to `$TMPDIR/iosim-download-<task>` and the completion handler receives the
+  `file://` URL rather than the data. Errors keep the location nil.
+- The fixture runs both against a loopback server that serves a file and
+  echoes a POST body.

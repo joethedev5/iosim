@@ -1174,6 +1174,15 @@ again from the cache. After `removeAllCachedResponses`, a third GET reads
 policy bypass. A manually stored `NSCachedURLResponse` reads back with its
 `manual` data.
 
+### Foundation: URLSession upload and download tasks
+
+`tests/urlsession_tasks_test.m` points `downloadTaskWithURL:` at
+`tests/tasks_http_server.py`, whose `/file` response is `downloaded bytes`.
+The completion handler receives a temp file URL, reads 16 bytes back and
+prints `[tasks] download 200 1 16 downloaded bytes`; it then removes the
+file. `uploadTaskWithRequest:fromData:` posts `upload payload` to `/echo`,
+and the echoed body comes back as `[tasks] upload 200 14 upload payload`.
+
 ### Foundation: KVC collection operators
 
 `tests/kvc_operators_test.m` runs the operators over an array of boxed

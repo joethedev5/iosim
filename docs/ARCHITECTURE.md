@@ -371,7 +371,10 @@ the request's `cachePolicy` is `NSURLRequestReloadIgnoringLocalCacheData`,
 delivers a stored `NSCachedURLResponse` data/response pair through the same
 completion path, and stores every successful GET response after the network
 transfer. `removeCachedResponseForRequest:` and `removeAllCachedResponses`
-drop entries so the next request goes to the network.
+drop entries so the next request goes to the network. Upload tasks run the
+same request machinery with their `fromData:` body, and download tasks write
+the response body to a temp file whose `file://` URL is passed to the
+download completion handler instead of the data.
 
 `NSRegularExpression` compiles patterns through a loader-host POSIX regex
 shim: the pattern translator accepts ICU spellings for `\d`, `\w`, `\s`
