@@ -1478,8 +1478,12 @@ drawn as a dark tile holding up to four mini icons. Dropping it on an existing
 tile adds it to that folder. Tap the tile to open an overlay over the dimmed
 wallpaper: the folder title at 22 pt, a rounded panel, and members in a
 four-column grid. Tapping a member launches or resumes its app; tapping
-outside, a vertical swipe, or the home event closes the overlay. The grouping
-is written to
+outside, a vertical swipe, or the home event closes the overlay. A long press
+on the overlay title swaps it for a text field with the software keyboard:
+typed characters edit the name, the keyboard's return key (or the `key return`
+event) trims and commits it, and a tap outside commits too. Committing writes
+the name to `folders.txt`, rekeys a `folder:<name>` entry in a saved
+`home_order.txt`, and redraws the title. The grouping is written to
 `Library/SpringBoard/folders.txt` under the device's shared resources directory
 as `name|bundle,bundle` lines, reloaded and pruned at the next SpringBoard boot
 when a member's bundle is no longer installed. Stock system apps carry no

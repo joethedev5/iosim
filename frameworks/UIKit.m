@@ -8723,6 +8723,9 @@ static void label_ellipsized(const char *text, int style, double points,
 @end
 
 static id g_firstResponder;
+/* A rename field starts with the old name selected: the first edit
+ * replaces the whole string. */
+static int g_rename_replace;
 
 /* Editable multiline text view: text is appended at the end, wrapped with
  * spaces preserved, and drawn with a caret while first responder. */
@@ -9445,6 +9448,31 @@ static int iosim_text_press_tick(void)
 - (CGSize)intrinsicContentSize
 {
     return CGSizeMake(160, 34);
+}
+@end
+
+@interface UIRenameField : UITextField
+@end
+
+@implementation UIRenameField
+- (void)insertText:(id)text
+{
+    if (g_rename_replace)
+    {
+        self.text = @"";
+        g_rename_replace = 0;
+    }
+    [super insertText:text];
+}
+- (void)deleteBackward
+{
+    if (g_rename_replace)
+    {
+        self.text = @"";
+        g_rename_replace = 0;
+        return;
+    }
+    [super deleteBackward];
 }
 @end
 
@@ -24132,6 +24160,11 @@ struct shell_folder {
 static struct shell_folder g_folders[SHELL_MAX_FOLDERS];
 static int g_folder_count;
 static int g_open_folder = -1;
+/* Folder rename: the open folder's title becomes a text field with the
+ * software keyboard while g_renaming_folder matches the open folder. */
+static UITextField *g_rename_field;
+static int g_renaming_folder = -1;
+static char g_rename_old[64];
 
 struct shell_grid_entry {
     int app;
@@ -25067,11 +25100,36 @@ static void shell_draw_folder(int fbWidth, int fbHeight, double scale,
     double W = fbWidth / scale;
     if (g_open_folder >= 0 && g_open_folder < g_folder_count)
     {
-        int tw = iosim_fb_font_text_width(g_folders[g_open_folder].name,
-                                          IOSIM_FONT_SEMIBOLD, 22, scale);
-        iosim_fb_font_text((fbWidth - tw) / 2, (int)(92 * scale),
-                           g_folders[g_open_folder].name,
-                           IOSIM_FONT_SEMIBOLD, 22, scale, 0xffffff);
+        if (g_renaming_folder == g_open_folder && g_rename_field)
+        {
+            const char *typed = iosim_string_cstr(g_rename_field->_text);
+            if (!typed)
+                typed = "";
+            iosim_fb_set_opacity(0.85);
+            iosim_fb_fill_round_rect((int)((W / 2 - 121) * scale),
+                                     (int)(74 * scale),
+                                     (int)(242 * scale),
+                                     (int)(40 * scale),
+                                     (int)(12 * scale), 0x2c2c2e);
+            iosim_fb_set_opacity(1.0);
+            int tw = iosim_fb_font_text_width(typed, IOSIM_FONT_SEMIBOLD, 22,
+                                              scale);
+            int tx = (fbWidth - tw) / 2;
+            iosim_fb_font_text(tx, (int)(101 * scale), typed,
+                               IOSIM_FONT_SEMIBOLD, 22, scale, 0xffffff);
+            iosim_fb_fill_rect(tx + tw + (int)(2 * scale),
+                               (int)(80 * scale), (int)(2 * scale),
+                               (int)(26 * scale), 0x426bf2);
+        }
+        else
+        {
+            int tw = iosim_fb_font_text_width(g_folders[g_open_folder].name,
+                                              IOSIM_FONT_SEMIBOLD, 22,
+                                              scale);
+            iosim_fb_font_text((fbWidth - tw) / 2, (int)(92 * scale),
+                               g_folders[g_open_folder].name,
+                               IOSIM_FONT_SEMIBOLD, 22, scale, 0xffffff);
+        }
         iosim_fb_set_opacity(0.90);
         iosim_fb_fill_round_rect((int)(24 * scale), (int)(120 * scale),
                                  (int)((W - 48) * scale),
@@ -25097,9 +25155,87 @@ static void shell_draw_folder(int fbWidth, int fbHeight, double scale,
                         scale);
         }
     }
+    draw_keyboard(fbWidth, fbHeight, scale);
     draw_device_chrome(fbWidth, scale);
     if (path && *path)
         iosim_fb_present(path);
+}
+
+static void shell_reset_folder_rename(void)
+{
+    if (g_renaming_folder >= 0 && g_rename_field)
+        [g_rename_field resignFirstResponder];
+    g_renaming_folder = -1;
+}
+
+/* Begin renaming the open folder: a text field takes the keyboard and the
+ * overlay title becomes an editable pill. */
+static void shell_begin_folder_rename(int fbWidth, int fbHeight, double scale,
+                                      const char *path)
+{
+    if (g_open_folder < 0 || g_open_folder >= g_folder_count)
+        return;
+    if (!g_rename_field)
+    {
+        g_rename_field = [[UIRenameField alloc]
+            initWithFrame:CGRectMake(80, 74, 242, 40)];
+        g_rename_field.textColor = [UIColor whiteColor];
+        g_rename_field.font = [UIFont systemFontOfSize:22];
+        g_rename_field.textAlignment = 1;
+    }
+    shell_copy(g_rename_old, (int)sizeof(g_rename_old),
+               g_folders[g_open_folder].name);
+    g_rename_field.text =
+        [NSString stringWithUTF8String:g_folders[g_open_folder].name];
+    g_rename_replace = 1;
+    g_renaming_folder = g_open_folder;
+    [g_rename_field becomeFirstResponder];
+    printf("[SpringBoard] renaming %s\n", g_folders[g_open_folder].name);
+    fflush(0);
+    shell_draw_folder(fbWidth, fbHeight, scale, path);
+}
+
+/* Commit (or discard) the typed folder name and dismiss the keyboard. */
+static void shell_finish_folder_rename(int fbWidth, int fbHeight,
+                                       double scale, const char *path,
+                                       int commit)
+{
+    int folder = g_renaming_folder;
+    if (commit && folder >= 0 && folder < g_folder_count && g_rename_field)
+    {
+        const char *text = iosim_string_cstr(g_rename_field->_text);
+        char name[64];
+        shell_copy(name, (int)sizeof(name), text ? text : "");
+        int n = (int)strlen(name);
+        while (n > 0 && (name[n - 1] == ' ' || name[n - 1] == '\n' ||
+                         name[n - 1] == '\r'))
+            name[--n] = 0;
+        if (name[0])
+        {
+            shell_copy(g_folders[folder].name,
+                       (int)sizeof(g_folders[folder].name), name);
+            if (g_home_order_count > 0)
+            {
+                char oldKey[160], newKey[160];
+                snprintf(oldKey, sizeof oldKey, "folder:%s", g_rename_old);
+                snprintf(newKey, sizeof newKey, "folder:%s",
+                         g_folders[folder].name);
+                for (int k = 0; k < g_home_order_count; k++)
+                    if (strcmp(g_home_order[k], oldKey) == 0)
+                        snprintf(g_home_order[k], sizeof(g_home_order[0]),
+                                 "%s", newKey);
+                shell_home_order_store(g_home_order, g_home_order_count);
+            }
+            shell_folders_save();
+            printf("[SpringBoard] folder renamed %s (%d apps)\n",
+                   g_folders[folder].name, g_folders[folder].count);
+            fflush(0);
+        }
+    }
+    if (g_rename_field)
+        [g_rename_field resignFirstResponder];
+    g_renaming_folder = -1;
+    shell_draw_folder(fbWidth, fbHeight, scale, path);
 }
 
 /* Member row under a point in the open folder overlay, or -1. */
@@ -27788,6 +27924,8 @@ static int run_springboard(void)
     int type = 0, x = 0, y = 0, r;
     while ((r = iosim_event_next(&type, &x, &y)) != 0)
     {
+        if (g_renaming_folder >= 0 && g_open_folder < 0)
+            shell_reset_folder_rename();
         if (shell_notification_tick(fbWidth, fbHeight, scale, path))
         {
             shell_refresh_all(fbWidth, fbHeight, scale, path);
@@ -28100,6 +28238,22 @@ static int run_springboard(void)
             }
             if (g_open_folder >= 0)
             {
+                if (g_renaming_folder >= 0)
+                {
+                    if (!(py >= 74.0 && py <= 116.0 &&
+                          __builtin_fabs(px - W / 2) <= 125.0))
+                        shell_finish_folder_rename(fbWidth, fbHeight, scale,
+                                                   path, 1);
+                    continue;
+                }
+                if (!g_sb_moved && iosim_now() - g_sb_down_time >= 0.45 &&
+                    py >= 74.0 && py <= 116.0 &&
+                    __builtin_fabs(px - W / 2) <= 125.0)
+                {
+                    shell_begin_folder_rename(fbWidth, fbHeight, scale,
+                                              path);
+                    continue;
+                }
                 if (dy < -90 || dy > 90)
                 {
                     g_open_folder = -1;
@@ -28241,6 +28395,25 @@ static int run_springboard(void)
                     fflush(0);
                     shell_repaint(fbWidth, fbHeight, scale, path, 0);
                 }
+            }
+            continue;
+        }
+        if (r == 1 && (type == 5 || type == 6) && g_renaming_folder >= 0 &&
+            g_rename_field)
+        {
+            if (type == 5 && (x == '\n' || x == '\r'))
+                shell_finish_folder_rename(fbWidth, fbHeight, scale, path, 1);
+            else
+            {
+                if (type == 5)
+                {
+                    char buf[2] = {(char)x, 0};
+                    [g_rename_field
+                        insertText:[NSString stringWithUTF8String:buf]];
+                }
+                else
+                    [g_rename_field deleteBackward];
+                shell_draw_folder(fbWidth, fbHeight, scale, path);
             }
             continue;
         }
@@ -28398,6 +28571,28 @@ static int run_springboard(void)
         }
         if (g_open_folder >= 0)
         {
+            if (g_renaming_folder >= 0)
+            {
+                double H = fbHeight / scale;
+                int returnKey = px > W - 99.4 && py > H - 114.0 &&
+                                py < H - 71.0;
+                if (keyboard_handle_tap((int)(px * scale), (int)(py * scale),
+                                        fbWidth, fbHeight, scale))
+                {
+                    if (returnKey)
+                        shell_finish_folder_rename(fbWidth, fbHeight, scale,
+                                                   path, 1);
+                    else
+                        shell_draw_folder(fbWidth, fbHeight, scale, path);
+                    continue;
+                }
+                if (py >= 74.0 && py <= 116.0 &&
+                    __builtin_fabs(px - W / 2) <= 125.0)
+                    continue;
+                shell_finish_folder_rename(fbWidth, fbHeight, scale, path,
+                                           1);
+                continue;
+            }
             int member = shell_folder_member_at(px, py, W);
             if (member >= 0)
             {

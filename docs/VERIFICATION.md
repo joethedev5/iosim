@@ -1705,6 +1705,18 @@ Fitness ring colors in the second page's fourth column at (339.8333,
 and boot, swiping to page 2 shows the same rings in the same slot, so the
 saved order, not the manifest order, drives the grid.
 
+### Folder rename
+
+With the folder open, `ui down` at the title (201, 92) pt, a 0.5 s hold and
+`ui up` log `[SpringBoard] renaming Folder`. The screenshot taken after typing
+`Toolx`, a backspace and `s` shows the software keyboard (the key pixel at
+(23, 620) pt is a mid gray), the edit pill behind the title, and more than 40
+white pixels of the typed name in the title band. `ui key return` logs
+`folder renamed Tools (2 apps)`; `folders.txt` then starts
+`Tools|com.iosim.datepicker,com.iosim.picker`, the overlay redraws the new
+title, and the keyboard sample is dark again. Tapping outside at (201, 700) pt
+closes the folder.
+
 ### Lock screen
 
 Locking is a real system event, not a drawn overlay the test triggers directly.
@@ -2293,8 +2305,8 @@ messages, the bootstrap namespace and serialized XPC dictionaries are shared
 across guest processes. SpringBoard pages in groups of 16 without a sliding
 page animation, and the switcher shows at most three cards with no scrolling
 animation; stock system apps have no executables in this runtime. Home-screen
-folders group apps by bundle identifier and persist; they cannot be renamed or
-nested, and the grid compacts entries when a folder forms. Icons can be
+folders group apps by bundle identifier and persist; they can be renamed from
+the title's long-press editor but cannot be nested, and the grid compacts entries when a folder forms. Icons can be
 reordered by dragging them to empty slots, including across pages, with the
 layout persisted in `home_order.txt`; folder tiles themselves are not
 draggable. The lock screen has no passcode, Face ID, notifications or

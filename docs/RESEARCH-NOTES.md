@@ -1658,3 +1658,12 @@ components.
   opacity, which is restored afterwards.
 - Image blits do not take shadows yet; view and text shadows are separate
   passes (`CALayer.shadow*`, `UILabel.shadow*`, `NSShadow`).
+
+## 2026-11-24: folder rename
+
+- A long press on the open folder's title opens a rename mode: a UITextField
+  takes the keyboard and the title becomes an editable pill with a caret.
+- Key events edit the field; Return trims and commits the name, rewrites the
+  folder record, rekeys any saved `folder:` order entry, and redraws the
+  overlay. Tapping on the software keyboard inserts its characters; tapping
+  outside the field commits, and closing the folder clears a stale rename.

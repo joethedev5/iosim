@@ -4590,6 +4590,112 @@ SBLOG="$SAVED_SBLOG"
 "$ROOT/tools/iosimctl" shutdown "$GRID_UDID" >/dev/null || true
 
 
+# ---------- 14c. folder rename ----------
+# A long press on the open folder's title turns it into an editable field
+# with the software keyboard. Typing edits the name, Return commits it, and
+# the new name is saved to folders.txt and drawn in the overlay.
+: > "$SBLOG"
+"$ROOT/tools/iosimctl" ui "$UDID" tap 62.1667 121.8333 >/dev/null
+if wait_log "[SpringBoard] folder opened name=Folder (2 apps)"; then
+    echo "ok   the persisted folder opens for renaming"
+else
+    echo "FAIL folder reopen for rename"; fails=$((fails+1))
+fi
+sleep 0.3
+"$ROOT/tools/iosimctl" ui "$UDID" down 201 92 >/dev/null
+sleep 0.7
+"$ROOT/tools/iosimctl" ui "$UDID" up 201 92 >/dev/null
+if wait_log "[SpringBoard] renaming Folder"; then
+    echo "ok   a long press on the folder title starts a rename"
+else
+    echo "FAIL folder rename start"; fails=$((fails+1))
+fi
+for c in T o o l x; do
+    "$ROOT/tools/iosimctl" ui "$UDID" key "$c" >/dev/null
+done
+"$ROOT/tools/iosimctl" ui "$UDID" backspace >/dev/null
+"$ROOT/tools/iosimctl" ui "$UDID" key s >/dev/null
+sleep 0.3
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/folder-rename.png" >/dev/null
+if out="$(python3 - "$ROOT/tools" "$T/folder-rename.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+def px(x, y):
+    c = pngpixel.px(rows, bpp, x * 3, y * 3)
+    return ((c >> 16) & 255, (c >> 8) & 255, c & 255)
+key = px(23, 620)
+if not (50 <= key[0] <= 100 and abs(key[0] - key[1]) < 12 and
+        abs(key[1] - key[2]) < 12):
+    raise SystemExit("rename keyboard not visible: %r" % (key,))
+field = px(100, 94)
+if not (20 <= field[0] <= 70 and abs(field[0] - field[2]) < 22):
+    raise SystemExit("edit field not drawn: %r" % (field,))
+white = 0
+for yy in range(80 * 3, 112 * 3):
+    for xx in range(140 * 3, 262 * 3):
+        c = pngpixel.px(rows, bpp, xx, yy)
+        if min((c >> 16) & 255, (c >> 8) & 255, c & 255) > 200:
+            white += 1
+if white < 40:
+    raise SystemExit("typed folder name is not drawn: %d" % white)
+print("ok   the rename field and keyboard draw the typed name")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL folder rename editing"; echo "$out"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" key return >/dev/null
+if wait_log "[SpringBoard] folder renamed Tools (2 apps)"; then
+    echo "ok   Return commits the new folder name"
+else
+    echo "FAIL folder rename commit"; fails=$((fails+1))
+fi
+sleep 0.3
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/folder-renamed.png" >/dev/null
+if out="$(python3 - "$ROOT/tools" "$T/folder-renamed.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+def px(x, y):
+    c = pngpixel.px(rows, bpp, x * 3, y * 3)
+    return ((c >> 16) & 255, (c >> 8) & 255, c & 255)
+key = px(23, 620)
+if not (key[0] < 30 and key[1] < 40 and key[2] < 70):
+    raise SystemExit("keyboard still visible after rename: %r" % (key,))
+white = 0
+for yy in range(78 * 3, 104 * 3):
+    for xx in range(140 * 3, 262 * 3):
+        c = pngpixel.px(rows, bpp, xx, yy)
+        if min((c >> 16) & 255, (c >> 8) & 255, c & 255) > 200:
+            white += 1
+if white < 40:
+    raise SystemExit("renamed title is not drawn: %d" % white)
+print("ok   the overlay draws the renamed title without the keyboard")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL folder renamed drawing"; echo "$out"; fails=$((fails+1))
+fi
+if grep -Fq -- "Tools|com.iosim.datepicker,com.iosim.picker" \
+    "$IOSIM_HOME/Devices/$UDID/data/Library/SpringBoard/folders.txt" \
+    2>/dev/null; then
+    echo "ok   the new folder name is saved to folders.txt"
+else
+    echo "FAIL folder rename file"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" tap 201 700 >/dev/null
+if wait_log "[SpringBoard] folder closed"; then
+    echo "ok   tapping outside closes the renamed folder"
+else
+    echo "FAIL renamed folder close"; fails=$((fails+1))
+fi
+
+
 # ---------- 15. lock screen ----------
 # Locking draws the lock screen over the wallpaper; swiping up unlocks. An
 # app that is foreground when the device locks backgrounds, and the unlock
