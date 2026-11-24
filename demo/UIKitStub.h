@@ -31,6 +31,7 @@ __attribute__((objc_root_class))
 - (id)retain;
 - (void)release;
 - (id)autorelease;
++ (BOOL)instancesRespondToSelector:(SEL)sel;
 + (BOOL)resolveInstanceMethod:(SEL)sel;
 + (BOOL)resolveClassMethod:(SEL)sel;
 - (id)forwardingTargetForSelector:(SEL)sel;

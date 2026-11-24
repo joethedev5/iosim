@@ -296,6 +296,14 @@ ivar_t { offset_ptr, name, type, alignment, size }
   Retain and release stay no-ops, so objects are never deallocated and weak
   slots clear only when assigned nil. The ObjC personality declines
   unwinding and a resumed unwind aborts; exceptions remain unsupported.
+- Method lists emitted by clang can live in read-only sections, so
+  `method_setImplementation`, `method_exchangeImplementations` and
+  `class_replaceMethod` record an override keyed by the `method_t` pointer,
+  and every dispatch path resolves the effective implementation through it.
+  `class_getClassMethod`, `class_respondsToSelector` and
+  `class_copyMethodList` (own methods plus category and runtime-injected
+  ones) are implemented, and NSObject answers
+  `+instancesRespondToSelector:`.
 
 ### 2.6 Darwin ABI shims
 

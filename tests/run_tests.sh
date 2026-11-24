@@ -1113,6 +1113,37 @@ check "[arc] bridge 1" "$out" \
     "__bridge casts preserve object identity"
 check "[arc] done" "$out" "the ARC fixture finishes"
 
+# ---------- 4f10i. Runtime swizzling ----------
+"$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
+    -ffreestanding -O1 -I "$ROOT/frameworks" \
+    -c "$ROOT/tests/runtime_swizzle_test.m" \
+    -o "$T/runtime_swizzle_test.o"
+"$LD64" -arch x86_64 -platform_version $PLATFORM -e _main \
+    -o "$T/runtime_swizzle_test" "$T/runtime_swizzle_test.o" \
+    "$ROOT/runtime/System/Library/Frameworks/Foundation.framework/Foundation" \
+    -undefined dynamic_lookup
+out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" \
+    "$T/runtime_swizzle_test" 2>&1)"
+check "[sw] before 1 2" "$out" \
+    "the swizzle fixture starts with the original implementations"
+check "[sw] exchanged 2 1" "$out" \
+    "method_exchangeImplementations swaps two instance methods"
+check "[sw] replace 1 9" "$out" \
+    "class_replaceMethod replaces a method and reports the old one"
+check "[sw] set 1 11" "$out" \
+    "method_setImplementation replaces an implementation directly"
+check "[sw] override sub 12 super 11" "$out" \
+    "a subclass replacement adds an override without touching the superclass"
+check "[sw] target list 2 1" "$out" \
+    "class_copyMethodList returns the class's own methods"
+check "[sw] sub list 1 1" "$out" \
+    "class_copyMethodList includes a runtime-added override"
+check "[sw] class exchanged 6 5" "$out" \
+    "method_exchangeImplementations swaps class methods"
+check "[sw] responds 1 1 0" "$out" \
+    "class_respondsToSelector and instancesRespondToSelector report matches"
+check "[sw] done" "$out" "the swizzle fixture finishes"
+
 # ---------- 4f11. CAAnimation completion and fill modes ----------
 rm -f "$T/arem.fifo"
 mkfifo "$T/arem.fifo"

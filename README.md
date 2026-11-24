@@ -85,6 +85,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | Mach ports/messages with refcounted rights, launchd bootstrap namespace, cross-process messaging | ✅ |
 | Objective-C runtime associated objects with assign/retain/copy policies, per-object keys, nil clearing and bulk removal | ✅ |
 | Objective-C runtime dynamic method resolution (`+resolveInstanceMethod:`, `+resolveClassMethod:`) and `-forwardingTargetForSelector:` redirection, with `-doesNotRecognizeSelector:` termination | ✅ |
+| Objective-C runtime method swizzling (`method_exchangeImplementations`, `class_replaceMethod`, `method_setImplementation`) through pointer-keyed overrides over read-only method lists, plus `class_getClassMethod`, `class_respondsToSelector` and `class_copyMethodList` | ✅ |
 | ARC entry points (`objc_storeStrong`, the weak family, `objc_retainBlock`, the autoreleased-return family), so ARC-compiled code runs; objects are never freed, so weak slots do not zero | ✅ |
 | Mach-O initializers (`__init_offsets`, `__mod_init_func`), thread-local variables, Darwin pthread normalization | ✅ |
 | Darwin ABI translation: `stat$INODE64`, `open` flags, signals, CommonCrypto, `dispatch_data` | ✅ |

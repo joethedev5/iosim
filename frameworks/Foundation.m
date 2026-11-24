@@ -65,6 +65,7 @@ extern void objc_registerClassPair(void *cls);
 extern int class_addMethod(void *cls, void *sel, void *imp, const char *types);
 extern void *class_getInstanceMethod(void *cls, void *sel);
 extern void *class_getMethodImplementation(void *cls, void *sel);
+extern int class_respondsToSelector(void *cls, void *sel);
 extern const char *method_getTypeEncoding(void *method);
 extern void *class_getSuperclass(void *cls);
 extern void *sel_registerName(const char *name);
@@ -762,6 +763,10 @@ static void kvc_operator_unique_add(NSMutableArray *array, id value)
 - (BOOL)isKindOfClass:(Class)cls { return (BOOL)iosim_objc_is_kind_of(self, cls); }
 - (BOOL)isMemberOfClass:(Class)cls { return iosim_objc_class_of(self) == cls; }
 - (BOOL)respondsToSelector:(SEL)sel { return (BOOL)iosim_objc_responds(self, sel); }
++ (BOOL)instancesRespondToSelector:(SEL)sel
+{
+    return (BOOL)class_respondsToSelector(self, sel);
+}
 /* Forwarding hooks. Resolution is consulted once per class and selector;
  * the default answers NO. The default forwarding target is nil, and an
  * unrecognized selector terminates with the message real NSObject prints. */

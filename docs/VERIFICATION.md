@@ -2059,6 +2059,20 @@ block and reads it from a second, and round-trips the object through
 `__bridge` casts. All values print as expected, so the entry points ARC
 codegen references resolve and behave.
 
+### Objective-C runtime: swizzling
+
+`tests/runtime_swizzle_test.m` exchanges `value` and `other` on a class and
+observes 2 and 1 instead of 1 and 2, replaces `value` with a 9-returning
+implementation while `class_replaceMethod` reports the old one, sets `other`
+to 11 with `method_setImplementation`, and replaces `other` on a subclass so
+it returns 12 while the superclass instance still returns 11.
+`class_copyMethodList` reports two methods on the class and finds the
+eleven-returning implementation, while the subclass lists its single
+runtime-added override. Exchanging `classValue` and `classOther` through
+`class_getClassMethod` turns 5/6 into 6/5, and
+`class_respondsToSelector`/`instancesRespondToSelector` report 1, 1 and 0
+for a missing selector.
+
 ### CoreAnimation: completion and fill modes
 
 `tests/animation_removal_test.m` starts three 0.5 s opacity animations from

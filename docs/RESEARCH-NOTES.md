@@ -1901,3 +1901,18 @@ components.
 - `tests/arc_test.m` compiles with `-fobjc-arc` and covers strong and weak
   properties, an autoreleased return, a `__block` capture shared by two
   blocks, and `__bridge` casts.
+
+## 2026-11-24: Runtime swizzling
+
+- clang emits method lists in read-only sections for these binaries, so
+  `method_setImplementation`, `method_exchangeImplementations` and
+  `class_replaceMethod` cannot write the `method_t` in place. They record an
+  override keyed by the method pointer, and lookup resolves the effective
+  implementation through the override list. This applies to class methods,
+  instance methods, category methods and runtime-injected methods alike.
+- `class_getClassMethod` walks the metaclass chain, `class_replaceMethod`
+  adds an override when the class does not implement the selector (including
+  a subclass that inherits it), `class_respondsToSelector` consults dynamic
+  resolution, and `class_copyMethodList` returns the class's own methods plus
+  category and injected methods.
+- NSObject gains `+instancesRespondToSelector:`.

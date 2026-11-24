@@ -65,6 +65,11 @@ void *objc_allocateClassPair(void *superclass, const char *name,
 void objc_registerClassPair(void *cls);
 int   class_addMethod(void *cls, void *sel, void *imp, const char *types);
 void *class_getInstanceMethod(void *cls, void *sel);
+void *class_getClassMethod(void *cls, void *sel);
+void *class_replaceMethod(void *cls, void *sel, void *imp, const char *types);
+void method_exchangeImplementations(void *first, void *second);
+int   class_respondsToSelector(void *cls, void *sel);
+void **class_copyMethodList(void *cls, unsigned int *out_count);
 void *class_getMethodImplementation(void *cls, void *sel);
 const char *method_getTypeEncoding(void *method);
 void *method_getImplementation(void *method);

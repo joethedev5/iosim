@@ -339,10 +339,48 @@ static const struct method_min *lookup_method_entry(const void *list_ptr,
     return NULL;
 }
 
+/* Swizzling cannot rewrite method lists that clang places in read-only
+ * Mach-O sections, so method_setImplementation, method_exchangeImplementations
+ * and class_replaceMethod record an override keyed by the method_t pointer
+ * and every dispatch path resolves the effective implementation through it. */
+struct method_override {
+    void *method;
+    void *imp;
+    struct method_override *next;
+};
+static struct method_override *g_method_overrides;
+
+static void *method_effective_imp(const struct method_min *m)
+{
+    if (!m)
+        return NULL;
+    for (struct method_override *o = g_method_overrides; o; o = o->next)
+        if (o->method == (void *)m)
+            return o->imp;
+    return m->imp;
+}
+
+static void set_method_override(void *method, void *imp)
+{
+    for (struct method_override *o = g_method_overrides; o; o = o->next)
+        if (o->method == method)
+        {
+            o->imp = imp;
+            return;
+        }
+    struct method_override *o = calloc(1, sizeof(*o));
+    if (!o)
+        return;
+    o->method = method;
+    o->imp = imp;
+    o->next = g_method_overrides;
+    g_method_overrides = o;
+}
+
 static void *lookup_in_methods(const void *list_ptr, const char *sel)
 {
     const struct method_min *m = lookup_method_entry(list_ptr, sel);
-    return m ? m->imp : NULL;
+    return m ? method_effective_imp(m) : NULL;
 }
 
 static struct class_ro_min *metaclass_ro(struct objc_class_min *cls)
@@ -367,6 +405,24 @@ static void *lookup_category_method(const char *class_name, const char *sel,
         void *imp = lookup_in_methods(list, sel);
         if (imp)
             return imp;
+    }
+    return NULL;
+}
+
+static const struct method_min *lookup_category_method_entry(
+    const char *class_name, const char *sel, int class_methods)
+{
+    if (!class_name)
+        return NULL;
+    for (int i = 0; i < g_ncategories; i++)
+    {
+        if (strcmp(g_categories[i].class_name, class_name) != 0)
+            continue;
+        const void *list = class_methods ? g_categories[i].class_methods
+                                         : g_categories[i].instance_methods;
+        const struct method_min *m = lookup_method_entry(list, sel);
+        if (m)
+            return m;
     }
     return NULL;
 }
@@ -403,7 +459,7 @@ static void *lookup_instance_method(struct objc_class_min *cls, const char *sel)
         struct injected_method *injected =
             find_injected_method(cls, sel, 0);
         if (injected)
-            return injected->method.imp;
+            return method_effective_imp(&injected->method);
         struct class_ro_min *ro = class_ro(cls);
         void *imp = lookup_in_methods(ro ? ro->baseMethods : NULL, sel);
         if (imp)
@@ -423,7 +479,7 @@ static void *lookup_class_method(struct objc_class_min *cls, const char *sel)
         struct injected_method *injected =
             find_injected_method(cls, sel, 1);
         if (injected)
-            return injected->method.imp;
+            return method_effective_imp(&injected->method);
         struct class_ro_min *ro = metaclass_ro(cls);
         void *imp = lookup_in_methods(ro ? ro->baseMethods : NULL, sel);
         if (imp)
@@ -1077,6 +1133,163 @@ int class_addMethod(void *cls, void *sel, void *imp, const char *types)
     return 1;
 }
 
+void *class_getClassMethod(void *cls, void *sel)
+{
+    if (!cls || !sel)
+        return NULL;
+    const char *name = (const char *)sel;
+    for (int depth = 0; cls && depth < 64; depth++)
+    {
+        struct objc_class_min *c = cls;
+        struct injected_method *injected =
+            find_injected_method(cls, name, 1);
+        if (injected)
+            return &injected->method;
+        struct class_ro_min *ro = metaclass_ro(c);
+        const struct method_min *m =
+            lookup_method_entry(ro ? ro->baseMethods : NULL, name);
+        if (m)
+            return (void *)m;
+        const struct method_min *category =
+            lookup_category_method_entry(ro_name(ro), name, 1);
+        if (category)
+            return (void *)category;
+        cls = c->superclass;
+    }
+    return NULL;
+}
+
+void *class_replaceMethod(void *cls, void *sel, void *imp, const char *types)
+{
+    if (!cls || !sel || !imp)
+        return NULL;
+    const char *name = (const char *)sel;
+    int class_method = 0;
+    struct class_entry *entry = find_class_entry(cls);
+    if (!entry)
+    {
+        for (int i = 0; i < g_nclasses; i++)
+            if (class_isa(g_classes[i].cls) == cls)
+            {
+                entry = &g_classes[i];
+                class_method = 1;
+                break;
+            }
+    }
+    if (!entry)
+        return NULL;
+    struct class_ro_min *target_ro =
+        class_method ? metaclass_ro(entry->cls) : class_ro(entry->cls);
+    struct injected_method *injected =
+        find_injected_method(entry->cls, name, class_method);
+    if (injected)
+    {
+        void *old = method_effective_imp(&injected->method);
+        set_method_override(&injected->method, imp);
+        return old;
+    }
+    const struct method_min *own = lookup_method_entry(
+        target_ro ? target_ro->baseMethods : NULL, name);
+    if (own)
+    {
+        void *old = method_effective_imp(own);
+        set_method_override((void *)own, imp);
+        return old;
+    }
+    const struct method_min *category =
+        lookup_category_method_entry(ro_name(target_ro), name, class_method);
+    if (category)
+    {
+        void *old = method_effective_imp(category);
+        set_method_override((void *)category, imp);
+        return old;
+    }
+    class_addMethod(cls, sel, imp, types);
+    return NULL;
+}
+
+void method_exchangeImplementations(void *first, void *second)
+{
+    if (!first || !second)
+        return;
+    void *first_imp = method_effective_imp(first);
+    void *second_imp = method_effective_imp(second);
+    set_method_override(first, second_imp);
+    set_method_override(second, first_imp);
+}
+
+int class_respondsToSelector(void *cls, void *sel)
+{
+    if (!cls || !sel)
+        return 0;
+    if (lookup_instance_method((struct objc_class_min *)cls,
+                               (const char *)sel))
+        return 1;
+    return resolve_method(cls, sel, 0) != NULL;
+}
+
+static unsigned int method_list_count(const void *list_ptr)
+{
+    if (!list_ptr)
+        return 0;
+    const struct method_list_min *list = list_ptr;
+    if (list->entsizeAndFlags & 0x80000000u)
+        return 0;
+    return list->count;
+}
+
+static unsigned int append_methods(const void *list_ptr, void **out,
+                                   unsigned int index)
+{
+    if (!list_ptr)
+        return index;
+    const struct method_list_min *list = list_ptr;
+    if (list->entsizeAndFlags & 0x80000000u)
+        return index;
+    uint32_t entsize = list->entsizeAndFlags & 0xFFFC;
+    if (entsize < sizeof(struct method_min))
+        entsize = sizeof(struct method_min);
+    const uint8_t *base = (const uint8_t *)list + sizeof(*list);
+    for (uint32_t i = 0; i < list->count; i++)
+        out[index++] = (void *)(base + (size_t)i * entsize);
+    return index;
+}
+
+void **class_copyMethodList(void *cls, unsigned int *out_count)
+{
+    if (out_count)
+        *out_count = 0;
+    struct class_entry *entry = find_class_entry(cls);
+    if (!entry)
+        return NULL;
+    struct class_ro_min *ro = class_ro(entry->cls);
+    const char *name = ro_name(ro);
+    unsigned int total = method_list_count(ro ? ro->baseMethods : NULL);
+    for (int i = 0; i < g_ncategories; i++)
+        if (strcmp(g_categories[i].class_name, name) == 0)
+            total += method_list_count(g_categories[i].instance_methods);
+    for (struct injected_method *m = g_injected_methods; m; m = m->next)
+        if (m->cls == entry->cls && !m->class_method)
+            total++;
+    if (total == 0)
+        return NULL;
+    void **out = malloc(total * sizeof(void *));
+    if (!out)
+        return NULL;
+    unsigned int index = 0;
+    index = append_methods(ro ? ro->baseMethods : NULL, out, index);
+    for (int i = 0; i < g_ncategories; i++)
+        if (strcmp(g_categories[i].class_name, name) == 0)
+            index = append_methods(g_categories[i].instance_methods, out,
+                                   index);
+    for (struct injected_method *m = g_injected_methods; m; m = m->next)
+        if (m->cls == entry->cls && !m->class_method)
+            out[index++] = &m->method;
+    if (out_count)
+        *out_count = index;
+    return out;
+}
+
 void *class_getInstanceMethod(void *cls, void *sel)
 {
     if (!cls || !sel)
@@ -1094,6 +1307,10 @@ void *class_getInstanceMethod(void *cls, void *sel)
             lookup_method_entry(ro ? ro->baseMethods : NULL, name);
         if (m)
             return (void *)m;
+        const struct method_min *category =
+            lookup_category_method_entry(ro_name(ro), name, 0);
+        if (category)
+            return (void *)category;
         cls = c->superclass;
     }
     return NULL;
@@ -1112,16 +1329,15 @@ const char *method_getTypeEncoding(void *method)
 
 void *method_getImplementation(void *method)
 {
-    return method ? ((const struct method_min *)method)->imp : NULL;
+    return method ? method_effective_imp(method) : NULL;
 }
 
 void *method_setImplementation(void *method, void *imp)
 {
     if (!method)
         return NULL;
-    struct method_min *m = method;
-    void *old = m->imp;
-    m->imp = imp;
+    void *old = method_effective_imp(method);
+    set_method_override(method, imp);
     return old;
 }
 
