@@ -2475,6 +2475,7 @@ if wait_log "[section] select 0:2 Cherry"; then
 else
     echo "FAIL section selection"; fails=$((fails+1))
 fi
+sleep 0.3
 "$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/sections-selected.png" >/dev/null
 if out="$(python3 - "$ROOT/tools" "$T/sections-selected.png" <<'PY'
 import sys
@@ -2498,6 +2499,7 @@ if wait_log "[section] select 1:1 Pea"; then
 else
     echo "FAIL second section selection"; fails=$((fails+1))
 fi
+sleep 0.3
 "$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/sections-second.png" >/dev/null
 if out="$(python3 - "$ROOT/tools" "$T/sections-second.png" <<'PY'
 import sys
