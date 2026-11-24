@@ -2312,7 +2312,20 @@ default x86_64 target, run with `IOSIM_SCREENSHOT_PATH`, and the two PNG
 captures are compared; the full 1206x2622 frames are byte-identical. The
 launch lines are compared after replacing pointer values with a
 placeholder, since each build allocates the window at a different host
-address.
+address. `demo/ListApp.m`, a table scene with reusable cells and a
+selection callback, is built the same way and also renders a
+byte-identical frame with the same normalized log.
+
+### arm64: ivars on a native superclass
+
+`tests/arm64_ivars.m` declares a guest class with four object ivars on
+`UIResponder`, fills them in one method and prints all four in another.
+The runtime lays each ivar out at the end of the native superclass and
+writes the offset into the image's 4-byte ivar-offset slot; a 64-bit
+store would zero the slot after it, so the fixture would print a nil
+ivar or crash. The suite checks `ivars one two three four`, the exit
+status and the interpreter run, and compares the log with the x86_64
+build.
 
 ### arm64: variadic Objective-C format methods
 

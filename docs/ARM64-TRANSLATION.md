@@ -25,10 +25,11 @@ a page drops the translations that started in it. Native code can call
 arm64 blocks back through the callback bridge, so libdispatch timers
 and queues run app blocks, and the call gate recognizes the loader's
 service symbols by address. A UIKit app compiled once for each
-architecture renders the same pixels. A stock demo app built for both
-architectures produces byte-identical frame captures, and the arm64
-printf gates print the same log as the x86_64 build. An app bundle whose
-executable is
+architecture renders the same pixels. Two stock demo apps built for both
+architectures produce byte-identical frame captures, and the arm64
+printf gates print the same log as the x86_64 build. Guest classes on a
+native superclass keep their ivar offsets in 32-bit slots, so sibling
+ivars do not clobber each other. An app bundle whose executable is
 thin arm64 starts through the normal device-manager path too: a launch
 that names no frameworks gets Foundation, UIKit, QuartzCore and
 UserNotifications preloaded from the runtime root, and the scene renders

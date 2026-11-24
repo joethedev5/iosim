@@ -2267,6 +2267,48 @@ else
     echo "FAIL dual-architecture HelloSim log"; echo "$out"
     fails=$((fails+1))
 fi
+"$ROOT/tools/build_app.sh" --arch arm64 "$ROOT/demo/ListApp.m" \
+    "$T/ListApp_a64" >/dev/null
+"$ROOT/tools/build_app.sh" "$ROOT/demo/ListApp.m" "$T/ListApp_x64" >/dev/null
+if IOSIM_SCREENSHOT_PATH="$T/ListApp_a64.png" \
+    DYLD_ROOT_PATH="$ROOT/runtime" timeout 15 "$RUN" --arm64 $FW_ARGS \
+    "$T/ListApp_a64" >"$T/ListApp_a64.log" 2>&1; then
+    rc_a=0
+else
+    rc_a=$?
+fi
+if IOSIM_SCREENSHOT_PATH="$T/ListApp_x64.png" \
+    DYLD_ROOT_PATH="$ROOT/runtime" timeout 15 "$RUN" \
+    "$T/ListApp_x64" >"$T/ListApp_x64.log" 2>&1; then
+    rc_x=0
+else
+    rc_x=$?
+fi
+if [ "$rc_a" -eq 0 ] && [ "$rc_x" -eq 0 ] && \
+    cmp -s "$T/ListApp_a64.png" "$T/ListApp_x64.png"; then
+    echo "ok   the arm64 and x86_64 ListApp builds render identical frames"
+else
+    echo "FAIL dual-architecture ListApp frame"; fails=$((fails+1))
+fi
+if out="$(python3 - "$T/ListApp_a64.log" "$T/ListApp_x64.log" <<'PY'
+import re, sys
+
+def normalized(path):
+    with open(path, "rb") as f:
+        text = f.read()
+    text = re.sub(rb"ListApp_(a64|x64)\.png", b"ListApp.png", text)
+    return re.sub(rb"0x[0-9a-fA-F]+", b"0xADDR", text)
+
+if normalized(sys.argv[1]) != normalized(sys.argv[2]):
+    raise SystemExit("launch logs differ")
+print("ok   the two ListApp builds log the same lines")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL dual-architecture ListApp log"; echo "$out"
+    fails=$((fails+1))
+fi
 
 # ---------- 4f10aj. arm64 variadic Objective-C format methods ----------
 # NSString's format constructors are variadic methods: the type encoding
@@ -2372,6 +2414,55 @@ if [ "$rc_x" -eq 0 ] && [ "$out" = "$out_x" ]; then
     echo "ok   the arm64 nil messages match the x86_64 build"
 else
     echo "FAIL dual-architecture nil messages"; echo "$out_x"
+    fails=$((fails+1))
+fi
+
+# ---------- 4f10al. arm64 ivar layout on a native superclass ----------
+# An arm64 guest class with four ivars on UIResponder writes every ivar
+# and reads all four back. The runtime writes each layout offset into a
+# 32-bit slot in the image; a 64-bit store would zero the slot after it.
+"$CC" -target arm64-apple-ios18.0-simulator -ffreestanding \
+    -fobjc-runtime=ios-18.0 -fno-objc-arc -fblocks -O1 -I "$ROOT/demo" \
+    -c "$ROOT/tests/arm64_ivars.m" -o "$T/arm64_ivars.o"
+"$LD64" -arch arm64 -platform_version $PLATFORM -e _main \
+    -o "$T/arm64_ivars" "$T/arm64_ivars.o" -undefined dynamic_lookup
+if out="$(DYLD_ROOT_PATH="$ROOT/runtime" timeout 10 "$RUN" --arm64 \
+    $FW_ARGS "$T/arm64_ivars" 2>&1)"; then
+    rc=0
+else
+    rc=$?
+fi
+check "ivars one two three four" "$out" \
+    "a guest class on a native superclass keeps every ivar"
+if [ "$rc" -eq 0 ]; then
+    echo "ok   the arm64 ivar fixture exits zero"
+else
+    echo "FAIL arm64 ivars (exit $rc)"; fails=$((fails+1))
+fi
+if out_nj="$(IOSIM_ARM64_NOJIT=1 DYLD_ROOT_PATH="$ROOT/runtime" \
+    timeout 10 "$RUN" --arm64 $FW_ARGS "$T/arm64_ivars" 2>&1)"; then
+    :
+fi
+if [ "$out" = "$out_nj" ]; then
+    echo "ok   the interpreter keeps the same ivars"
+else
+    echo "FAIL arm64 ivars under interpretation"; fails=$((fails+1))
+fi
+"$CC" -target x86_64-apple-ios18.0-simulator -ffreestanding \
+    -fobjc-runtime=ios-18.0 -fno-objc-arc -fblocks -O1 -I "$ROOT/demo" \
+    -c "$ROOT/tests/arm64_ivars.m" -o "$T/ivars_x64.o"
+"$LD64" -arch x86_64 -platform_version $PLATFORM -e _main \
+    -o "$T/ivars_x64" "$T/ivars_x64.o" -undefined dynamic_lookup
+if out_x="$(DYLD_ROOT_PATH="$ROOT/runtime" timeout 10 "$RUN" \
+    $FW_ARGS "$T/ivars_x64" 2>&1)"; then
+    rc_x=0
+else
+    rc_x=$?
+fi
+if [ "$rc_x" -eq 0 ] && [ "$out" = "$out_x" ]; then
+    echo "ok   the arm64 ivar values match the x86_64 build"
+else
+    echo "FAIL dual-architecture ivars"; echo "$out_x"
     fails=$((fails+1))
 fi
 

@@ -69,7 +69,7 @@ struct ivar_list_min {
 };
 
 struct ivar_min {
-    uint64_t *offset;
+    int32_t *offset;
     const char *name;
     const char *type;
     uint32_t alignment;
@@ -295,13 +295,13 @@ static uint32_t class_instance_size(struct objc_class_min *cls)
                 (const struct ivar_min *)(p + (size_t)i * entsize);
             uint32_t alignment = iv->alignment ? (1u << iv->alignment) : 1u;
             base = align_up(base, alignment);
+            if (iv->offset)
+                *iv->offset = base;
             if (getenv("IOSIM_OBJC_DEBUG"))
                 fprintf(stderr,
                         "objc: ivar %s.%s entsize=%u align=%u size=%u -> %u\n",
                         ro_name(ro), iv->name ? iv->name : "?",
                         entsize, alignment, iv->size, base);
-            if (iv->offset)
-                *iv->offset = base;
             base += iv->size;
         }
     }

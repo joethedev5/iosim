@@ -2511,3 +2511,18 @@ components.
   sixteen-byte integer struct return and d0-d3 clear an HFA return, so
   object, integer and floating-point results read zero as they do on
   x86_64.
+
+## 2026-11-24: guest ivar offset slots are 32-bit
+
+- The runtime's view of `__objc_ivar` declared the offset field as
+  `uint64_t *`, so storing a layout offset wrote eight bytes: four for
+  the ivar and four zero bytes over the *next* ivar's offset slot. A
+  class with one ivar hid the bug; ListApp's scene delegate, with four
+  ivars, lost `_table` and `_status` depending on the order the compiler
+  assigned the slots. The guest then stored the table at offset 0 and
+  overwrote the delegate's isa, so the native data source check saw an
+  unknown class.
+- The field is `int32_t *`, matching the image format: each ivar's
+  offset variable is a four-byte slot. tests/arm64_ivars.m stores and
+  reads back four ivars on a native superclass, and ListApp's arm64
+  frame is byte-identical to its x86_64 build.
