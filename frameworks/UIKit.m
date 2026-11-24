@@ -26799,6 +26799,10 @@ static void shell_add_delivered(struct sb_notification *n, double when)
     g_sb_delivered_count++;
 }
 
+/* Advances an in-flight switcher card slide; see its definition. */
+static int shell_switcher_slide_tick(int fbWidth, int fbHeight, double scale,
+                                     const char *path);
+
 /* Scans the shared schedule; returns 1 when a banner or list changed. */
 static int shell_notification_tick(int fbWidth, int fbHeight, double scale,
                                    const char *path)
@@ -26822,6 +26826,11 @@ static int shell_notification_tick(int fbWidth, int fbHeight, double scale,
         }
         redraw = 1;
     }
+    int slide = shell_switcher_slide_tick(fbWidth, fbHeight, scale, path);
+    if (slide > 0)
+        redraw = 1;
+    else if (slide < 0)
+        return 0;
     if (g_sb_banner_active && now - g_sb_banner_start >= 5.0)
     {
         g_sb_banner_active = 0;
@@ -27029,8 +27038,41 @@ static void shell_capture_snapshot(struct shell_app *a)
     free(bytes);
 }
 
+/* A horizontal swipe eases the card strip to the neighbouring card. The
+ * event-loop tick redraws while the slide is in flight and reports the new
+ * card after the final frame, so a harness screenshots the settled card. */
+#define SHELL_SWITCHER_SLIDE_SECONDS 0.22
+static int g_switcher_slide_active;
+static int g_switcher_slide_from;
+static double g_switcher_slide_start;
+
+static void shell_switcher_slide_begin(int from, int to)
+{
+    g_switcher_slide_from = from;
+    g_switcher_index = to;
+    g_switcher_slide_start = iosim_now();
+    g_switcher_slide_active = 1;
+}
+
+/* The strip's fractional centre: eased from the old index towards the new
+ * one while a slide is in flight, and the resting index otherwise. */
+static double shell_switcher_pos(void)
+{
+    if (!g_switcher_slide_active)
+        return g_switcher_index;
+    double p = (iosim_now() - g_switcher_slide_start) /
+               SHELL_SWITCHER_SLIDE_SECONDS;
+    if (p < 0)
+        p = 0;
+    if (p > 1)
+        p = 1;
+    p = 1 - (1 - p) * (1 - p);
+    return g_switcher_slide_from +
+           (g_switcher_index - g_switcher_slide_from) * p;
+}
+
 static void shell_switcher_geometry(int fbWidth, int fbHeight, double scale,
-                                    int ordinal, double *out_x,
+                                    double pos, int ordinal, double *out_x,
                                     double *out_y, double *out_w,
                                     double *out_h)
 {
@@ -27039,7 +27081,7 @@ static void shell_switcher_geometry(int fbWidth, int fbHeight, double scale,
     double cardH = cardW * H / W;
     double gap = 20.0;
     double y = (H - cardH) / 2.0;
-    double cx = W / 2.0 + (ordinal - g_switcher_index) * (cardW + gap);
+    double cx = W / 2.0 + (ordinal - pos) * (cardW + gap);
     *out_x = cx - cardW / 2.0;
     *out_y = y;
     *out_w = cardW;
@@ -27080,25 +27122,44 @@ static void shell_draw_switcher(int fbWidth, int fbHeight, double scale,
     if (g_switcher_index < 0)
         g_switcher_index = 0;
 
-    int first = g_switcher_index > 0 ? g_switcher_index - 1 : 0;
-    int last = g_switcher_index + 1 < count ? g_switcher_index + 1 : count - 1;
+    double W = fbWidth / scale;
+    double pos = shell_switcher_pos();
+    int first = (int)__builtin_floor(pos) - 2;
+    int last = (int)__builtin_ceil(pos) + 2;
+    if (first < 0)
+        first = 0;
+    if (last >= count)
+        last = count - 1;
     for (int i = first; i <= last; i++)
     {
         struct shell_app *a = shell_suspended_app(i, 0);
         if (!a)
             continue;
         double x, y, w, h;
-        shell_switcher_geometry(fbWidth, fbHeight, scale, i, &x, &y, &w, &h);
+        shell_switcher_geometry(fbWidth, fbHeight, scale, pos, i, &x, &y, &w,
+                                &h);
+        if (x + w < 0 || x > W)
+            continue;
+        double d = i - pos;
+        if (d < 0)
+            d = -d;
+        if (d > 1)
+            d = 1;
+        double cardScale = 1.0 - 0.08 * d;
+        double cardAlpha = 1.0 - 0.25 * d;
         int wpx = (int)(w * scale + 0.5);
         int hpx = (int)(h * scale + 0.5);
-        int xpx = (int)(x * scale + 0.5);
-        int ypx = (int)(y * scale + 0.5);
         if (wpx <= 0 || hpx <= 0)
             continue;
+        int dwpx = (int)(wpx * cardScale + 0.5);
+        int dhpx = (int)(hpx * cardScale + 0.5);
+        int dxpx = (int)((x + w / 2) * scale + 0.5) - dwpx / 2;
+        int dypx = (int)((y + h / 2) * scale + 0.5) - dhpx / 2;
 
-        iosim_fb_set_opacity(0.45);
-        iosim_fb_fill_round_rect(xpx - (int)(6 * scale), ypx + (int)(8 * scale),
-                                 wpx + (int)(12 * scale), hpx,
+        iosim_fb_set_opacity(0.45 * cardAlpha);
+        iosim_fb_fill_round_rect(dxpx - (int)(6 * scale),
+                                 dypx + (int)(8 * scale),
+                                 dwpx + (int)(12 * scale), dhpx,
                                  (int)(46 * scale), 0x000000);
         iosim_fb_set_opacity(1.0);
 
@@ -27125,20 +27186,44 @@ static void shell_draw_switcher(int fbWidth, int fbHeight, double scale,
             unsigned *buf = iosim_fb_end_offscreen(state, &bw, &bh);
             if (buf)
             {
-                iosim_fb_blit_affine(buf, bw, bh, 1.0, 0.0, 0.0, 1.0,
-                                     xpx, ypx, 1.0);
+                iosim_fb_blit_affine(buf, bw, bh, cardScale, 0.0, 0.0,
+                                     cardScale, dxpx, dypx, cardAlpha);
                 iosim_fb_free_offscreen(buf);
             }
         }
         int tw = iosim_fb_font_text_width(a->name, IOSIM_FONT_SEMIBOLD, 15,
                                           scale);
+        iosim_fb_set_opacity(cardAlpha);
         iosim_fb_font_text((int)((x + w / 2) * scale) - tw / 2,
                            (int)((y - 22) * scale), a->name,
                            IOSIM_FONT_SEMIBOLD, 15, scale, 0xffffff);
+        iosim_fb_set_opacity(1.0);
     }
     draw_device_chrome(fbWidth, scale);
     if (path && *path)
         iosim_fb_present(path);
+}
+
+/* Advances an in-flight switcher card slide: 1 while another frame is due,
+ * -1 when this call drew the completed slide's final frame, 0 when idle. */
+static int shell_switcher_slide_tick(int fbWidth, int fbHeight, double scale,
+                                     const char *path)
+{
+    if (!g_switcher)
+    {
+        g_switcher_slide_active = 0;
+        return 0;
+    }
+    if (!g_switcher_slide_active)
+        return 0;
+    if (iosim_now() - g_switcher_slide_start < SHELL_SWITCHER_SLIDE_SECONDS)
+        return 1;
+    g_switcher_slide_active = 0;
+    shell_refresh_all(fbWidth, fbHeight, scale, path);
+    struct shell_app *card = shell_suspended_app(g_switcher_index, 0);
+    printf("[SpringBoard] switcher card %s\n", card ? card->name : "?");
+    fflush(0);
+    return -1;
 }
 
 /* Spotlight-style search over the installed apps. The search field shares
@@ -27620,7 +27705,8 @@ static int shell_switcher_hit(int xpx, int ypx, int fbWidth, int fbHeight,
     for (int i = 0; i < count; i++)
     {
         double x, y, w, h;
-        shell_switcher_geometry(fbWidth, fbHeight, scale, i, &x, &y, &w, &h);
+        shell_switcher_geometry(fbWidth, fbHeight, scale, g_switcher_index, i,
+                                &x, &y, &w, &h);
         if (xpx >= x * scale && xpx < (x + w) * scale &&
             ypx >= y * scale && ypx < (y + h) * scale)
             return i;
@@ -27784,6 +27870,7 @@ static void shell_after_app_stop(int fbWidth, int fbHeight, double scale,
         int count = shell_suspended_count();
         g_switcher_requested = 0;
         g_switcher = 1;
+        g_switcher_slide_active = 0;
         g_switcher_index = count > 0 ? count - 1 : 0;
         printf("[SpringBoard] app switcher opened (%d suspended)\n", count);
         fflush(0);
@@ -27812,6 +27899,7 @@ static void shell_close_app(int index, int fbWidth, int fbHeight, double scale,
         g_switcher = 0;
     if (g_switcher_index >= count)
         g_switcher_index = count > 0 ? count - 1 : 0;
+    g_switcher_slide_active = 0;
     shell_repaint(fbWidth, fbHeight, scale, path, g_switcher);
 }
 
@@ -28066,6 +28154,7 @@ static int run_springboard(void)
             }
             int count = shell_suspended_count();
             g_switcher = !g_switcher;
+            g_switcher_slide_active = 0;
             if (g_switcher)
             {
                 g_switcher_index = count > 0 ? count - 1 : 0;
@@ -28399,6 +28488,7 @@ static int run_springboard(void)
             {
                 int count = shell_suspended_count();
                 g_switcher = 1;
+                g_switcher_slide_active = 0;
                 g_switcher_index = count > 0 ? count - 1 : 0;
                 printf("[SpringBoard] app switcher opened (%d suspended)\n",
                        count);
@@ -28427,12 +28517,17 @@ static int run_springboard(void)
             else if (g_switcher && (dx > 100 || dx < -100))
             {
                 int count = shell_suspended_count();
-                g_switcher_index += dx < 0 ? 1 : -1;
-                if (g_switcher_index < 0)
-                    g_switcher_index = 0;
-                if (g_switcher_index >= count)
-                    g_switcher_index = count > 0 ? count - 1 : 0;
-                shell_repaint(fbWidth, fbHeight, scale, path, 1);
+                int from = g_switcher_index;
+                int to = from + (dx < 0 ? 1 : -1);
+                if (to < 0)
+                    to = 0;
+                if (to >= count)
+                    to = count > 0 ? count - 1 : 0;
+                if (to != from)
+                {
+                    shell_switcher_slide_begin(from, to);
+                    shell_repaint(fbWidth, fbHeight, scale, path, 1);
+                }
             }
             else if (!g_switcher && !icon_hold && (dx > 80 || dx < -80) &&
                      dy > -60 && dy < 60)

@@ -1717,3 +1717,12 @@ components.
   `waitUntilFinished`, which polls the finished/cancelled flags.
 - `queuePriority` is stored on the operation, and `NSOperationQueue.operations`
   returns only the operations that are still unfinished and uncancelled.
+
+## 2026-11-24: switcher card strip slide
+
+- The app switcher's card strip has a fractional centre: a horizontal swipe
+  eases it to the neighbouring card over 0.22 s, driven by the event-loop
+  tick, and the `switcher card <name>` log follows the final frame.
+- Every card intersecting the viewport is drawn, with the centred card full
+  size and neighbours at 92% size and 75% opacity, so the entering card shows
+  during the slide.

@@ -91,7 +91,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | SpringBoard system UI: measured iOS 26 home screen, installed apps, real app launching | ✅ |
 | Real app suspension: home stops the process, the icon resumes it in place | ✅ |
 | Application/scene lifecycle callbacks, notifications, UIApplication state and a background execution window for `beginBackgroundTaskWithExpirationHandler:` | ✅ |
-| App switcher: bottom-edge gestures, cached frames, resume, swipe-up kill | ✅ |
+| App switcher: bottom-edge gestures, cached frames, animated card strip, resume, swipe-up kill | ✅ |
 | Multi-page home screen: 16-slot pages, page dots, horizontal swipe paging with a slide animation | ✅ |
 | Home-screen folders: drag to group apps, member launch, title rename, persisted across boots | ✅ |
 | Home-screen icon drag: lifted ghost, edge page turns, cross-page drop and a persisted layout | ✅ |

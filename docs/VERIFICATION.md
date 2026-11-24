@@ -1665,6 +1665,12 @@ shows the card carrying the app's live content, including the dots the drag
 left in its trail view. The test asserts the switcher's log line, the cached
 PNG's 1206 x 2622 dimensions, selection of the card, and a second
 `resumed from suspension` — the card really continues the stopped process.
+The strip itself slides between cards: with two apps suspended, the test
+swipes right, asserts that no `switcher card` line appears in the first
+100 ms, waits for `switcher card UIKitApp`, measures at least 150 ms from
+the gesture, and swipes left back to `switcher card TouchApp` before tapping
+the centre card. During the slide both cards are drawn — the centred card
+full size, the neighbour at 92% size and 75% opacity.
 A bottom-edge swipe up opens the switcher from the home screen and a downward
 swipe closes it; `ui switcher` injects the same toggle for headless tests.
 The same gesture works inside a foreground app. The test resumes TouchApp from
@@ -2367,8 +2373,9 @@ primary touch, and SpringBoard's own UI remains single-touch. Mach
 messages, the bootstrap namespace and serialized XPC dictionaries are shared
 across guest processes. SpringBoard pages in groups of 16; a horizontal
 swipe slides between pages, but an icon dragged to a screen edge still turns
-the page without a slide, and the switcher shows at most three cards with no
-scrolling animation; stock system apps have no executables in this runtime. Home-screen
+the page without a slide, and the switcher eases between cards one swipe at
+a time but the strip cannot be dragged freely; stock system apps have no
+executables in this runtime. Home-screen
 folders group apps by bundle identifier and persist; they can be renamed from
 the title's long-press editor but cannot be nested, and the grid compacts entries when a folder forms. Icons can be
 reordered by dragging them to empty slots, including across pages, with the

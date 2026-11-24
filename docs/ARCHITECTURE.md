@@ -913,8 +913,11 @@ exist: `list`, `create`, `delete`, `boot`, `bootstatus`, `shutdown`, `erase`,
   (or `ui switcher`) opens the switcher: the wallpaper dims and the suspended
   apps appear as snapshot cards with their names. Tapping a card resumes that
   process through the same SIGCONT path; a downward swipe closes the switcher.
-  Cards for off-screen apps are not drawn; a horizontal swipe moves the focus
-  between up to three visible cards.
+  Every card whose layout rect intersects the viewport is drawn, so a card
+  entering from the edge is already rendered; the centred card is full size
+  and its neighbours shrink by 8% and fade to 75%. A horizontal swipe eases
+  the strip to the neighbouring card over 0.22 s, driven by the same
+  event-loop tick, and the card log follows the final frame.
 - An app can ask for the switcher itself. A bottom-edge swipe inside the app
   (touch down within 45 pt of the bottom edge, release at least 100 pt higher
   and within 140 pt horizontally) runs the same background lifecycle as
@@ -1656,15 +1659,18 @@ Python for iteration speed.
 - The dyld shared cache is not parsed; each dylib is loaded from disk.
 - Class method dispatch covers the common path; message forwarding, associated
   objects, ARC entry points and exceptions are pending.
-- The SpringBoard grid pages in 16-slot pages; page changes are discrete (no
-  sliding animation), and there are no folders, widgets or Today view. The
-  switcher shows at most three cards and opens from the home screen, an
-  in-app bottom-edge swipe, or `ui switcher`; cards have no scrolling
-  animation, and a swipe up on a card force-quits its app. A backgrounded app
-  is suspended in place (the process stops and the same process resumes from
-  its icon), with no memory-pressure termination policy. Stock system apps are display icons
-  without executables, and a directly launched app alongside a running
-  SpringBoard is not coordinated through launchd.
+- The SpringBoard grid pages in 16-slot pages; a horizontal swipe slides
+  between pages over 0.28 s, while an icon dragged to a screen edge turns the
+  page without a slide. Home-screen folders group apps and persist, but
+  folders cannot nest. Widgets and a Today view are absent. The switcher opens
+  from the home screen, an in-app bottom-edge swipe, or `ui switcher`; a
+  horizontal swipe eases the strip to the neighbouring card, the strip is not
+  freely draggable, and a swipe up on a card force-quits its app. A
+  backgrounded app is suspended in place (the process stops and the same
+  process resumes from its icon), with no memory-pressure termination policy.
+  Stock system apps are display icons without executables, and a directly
+  launched app alongside a running SpringBoard is not coordinated through
+  launchd.
 `UICollectionViewFlowLayout` lays cells out along its scroll direction: a
 horizontal layout computes the row count from the section's available
 height, fills each column top to bottom, wraps into the next column and

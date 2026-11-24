@@ -2874,6 +2874,63 @@ PY
 else
     echo "FAIL switcher snapshot"; echo "$out"; fails=$((fails+1))
 fi
+# ---------- 7c2. switcher cards slide between suspended apps ----------
+# The switcher strip eases to the neighbouring card instead of jumping. The
+# card log is deferred until the slide's final frame, so a waiting harness
+# screenshots the settled card. This device holds two suspended apps; the
+# newest (TouchApp) is centred, so a right swipe selects the older UIKitApp.
+"$ROOT/tools/iosimctl" ui "$UDID" swipe 60 400 340 400 0.2 >/dev/null
+slide_start=$(date +%s%N)
+card_before="$(grep -Fc "[SpringBoard] switcher card" "$SBLOG" 2>/dev/null || true)"
+sleep 0.10
+card_mid="$(grep -Fc "[SpringBoard] switcher card" "$SBLOG" 2>/dev/null || true)"
+if [ "$card_mid" -eq "$card_before" ]; then
+    echo "ok   the switcher card slide is still in flight 100 ms after the swipe"
+else
+    echo "FAIL switcher slide timing ($card_before -> $card_mid)"; fails=$((fails+1))
+fi
+card_now="$card_mid"
+i=0
+while [ "$i" -lt 50 ]; do
+    card_now="$(grep -Fc "[SpringBoard] switcher card" "$SBLOG" 2>/dev/null || true)"
+    [ "$card_now" -gt "$card_before" ] && break
+    sleep 0.1
+    i=$((i+1))
+done
+card_last="$(grep -F "[SpringBoard] switcher card" "$SBLOG" 2>/dev/null | tail -1)"
+if [ "$card_now" -gt "$card_before" ] &&
+    printf '%s\n' "$card_last" | grep -Fq "switcher card UIKitApp"; then
+    echo "ok   a right swipe slides to the older app's card"
+else
+    echo "FAIL switcher slide selection ($card_before -> $card_now: $card_last)"
+    fails=$((fails+1))
+fi
+slide_ms=$(( ($(date +%s%N) - slide_start) / 1000000 ))
+if [ "$slide_ms" -ge 150 ]; then
+    echo "ok   the switcher slide animates before reporting the new card"
+else
+    echo "FAIL switcher slide duration ($slide_ms ms)"; fails=$((fails+1))
+fi
+# Swipe back so the existing tap below lands on the centred TouchApp card.
+card_before="$card_now"
+"$ROOT/tools/iosimctl" ui "$UDID" swipe 340 400 60 400 0.2 >/dev/null
+card_now="$card_before"
+i=0
+while [ "$i" -lt 50 ]; do
+    card_now="$(grep -Fc "[SpringBoard] switcher card" "$SBLOG" 2>/dev/null || true)"
+    [ "$card_now" -gt "$card_before" ] && break
+    sleep 0.1
+    i=$((i+1))
+done
+card_last="$(grep -F "[SpringBoard] switcher card" "$SBLOG" 2>/dev/null | tail -1)"
+if [ "$card_now" -gt "$card_before" ] &&
+    printf '%s\n' "$card_last" | grep -Fq "switcher card TouchApp"; then
+    echo "ok   a left swipe slides back to the newer card"
+else
+    echo "FAIL switcher slide back ($card_before -> $card_now: $card_last)"
+    fails=$((fails+1))
+fi
+sleep 0.1
 resumed_before="$(grep -Fc "[UIKit-lite] resumed from suspension" "$SBLOG" 2>/dev/null || true)"
 "$ROOT/tools/iosimctl" ui "$UDID" tap 201 400 >/dev/null
 if wait_log "switcher selected TouchApp"; then
