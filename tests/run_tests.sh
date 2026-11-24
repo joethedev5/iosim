@@ -1420,6 +1420,84 @@ else
     echo "FAIL attributed label alignment"; echo "$report"; fails=$((fails+1))
 fi
 
+# ---------- 4f20. Paragraph styles in attributed labels ----------
+rm -f "$T/para.fifo"
+mkfifo "$T/para.fifo"
+"$ROOT/tools/build_app.sh" "$ROOT/tests/paragraph_style_test.m" \
+    "$T/paragraph_style_test" >/dev/null
+out="$(IOSIM_EVENT_FIFO="$T/para.fifo" IOSIM_TEST_PNG="$T/para.png" \
+    DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/paragraph_style_test" 2>&1)"
+rm -f "$T/para.fifo"
+check "[para] ready" "$out" \
+    "the paragraph style fixture starts"
+check "[para] done" "$out" \
+    "the paragraph style fixture draws its lines"
+if report="$(python3 - "$ROOT/tools" "$T/para.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+stats = {name: {'n': 0, 'minx': 10 ** 9, 'maxx': -1}
+         for name in ('red', 'green')}
+for yy in range(560, 1100):
+    for xx in range(40, 1160):
+        c = pngpixel.px(rows, bpp, xx, yy)
+        r, g, b = (c >> 16) & 255, (c >> 8) & 255, c & 255
+        if r > 180 and g < 80 and b < 80:
+            key = 'red'
+        elif g > 150 and r < 80 and b < 80:
+            key = 'green'
+        else:
+            continue
+        s = stats[key]
+        s['n'] += 1
+        s['minx'] = min(s['minx'], xx)
+        s['maxx'] = max(s['maxx'], xx)
+for name in ('red', 'green'):
+    s = stats[name]
+    if s['n'] < 300:
+        raise SystemExit('%s line has only %d pixels' % (name, s['n']))
+    center = (s['minx'] + s['maxx']) / 2.0
+    if abs(center - 600.0) > 20.0:
+        raise SystemExit('%s line center is %.1f, expected 600' %
+                         (name, center))
+print("ok   paragraph alignment centers both attributed lines")
+PY
+)"; then
+    echo "$report"
+else
+    echo "FAIL paragraph alignment"; echo "$report"; fails=$((fails+1))
+fi
+if report="$(python3 - "$ROOT/tools" "$T/para.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+red_bottom = -1
+green_top = 10 ** 9
+for yy in range(560, 1100):
+    for xx in range(40, 1160):
+        c = pngpixel.px(rows, bpp, xx, yy)
+        r, g, b = (c >> 16) & 255, (c >> 8) & 255, c & 255
+        if r > 180 and g < 80 and b < 80 and yy > red_bottom:
+            red_bottom = yy
+        if g > 150 and r < 80 and b < 80 and yy < green_top:
+            green_top = yy
+if red_bottom < 0 or green_top >= 10 ** 9:
+    raise SystemExit('one of the lines is missing')
+gap = green_top - red_bottom
+if gap < 45 or gap > 80:
+    raise SystemExit('line gap is %d px, expected the 10 pt spacing' % gap)
+print("ok   paragraph line spacing separates the attributed lines")
+PY
+)"; then
+    echo "$report"
+else
+    echo "FAIL paragraph line spacing"; echo "$report"; fails=$((fails+1))
+fi
+
 # ---------- 4g. NSCalendar components ----------
 "$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
     -ffreestanding -O1 -I "$ROOT/frameworks" \

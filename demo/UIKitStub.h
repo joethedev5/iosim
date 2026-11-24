@@ -100,6 +100,45 @@ __attribute__((objc_root_class))
 - (void)appendAttributedString:(id)other;
 @end
 
+@interface NSParagraphStyle : NSObject {
+@public
+    long _alignment;
+    double _lineSpacing;
+    double _paragraphSpacing;
+    double _paragraphSpacingBefore;
+    double _firstLineHeadIndent;
+    double _headIndent;
+    double _tailIndent;
+    long _lineBreakMode;
+    double _minimumLineHeight;
+    double _maximumLineHeight;
+}
++ (id)defaultParagraphStyle;
+- (long)alignment;
+- (double)lineSpacing;
+- (double)paragraphSpacing;
+- (double)paragraphSpacingBefore;
+- (double)firstLineHeadIndent;
+- (double)headIndent;
+- (double)tailIndent;
+- (long)lineBreakMode;
+- (double)minimumLineHeight;
+- (double)maximumLineHeight;
+@end
+
+@interface NSMutableParagraphStyle : NSParagraphStyle
+- (void)setAlignment:(long)alignment;
+- (void)setLineSpacing:(double)spacing;
+- (void)setParagraphSpacing:(double)spacing;
+- (void)setParagraphSpacingBefore:(double)spacing;
+- (void)setFirstLineHeadIndent:(double)indent;
+- (void)setHeadIndent:(double)indent;
+- (void)setTailIndent:(double)indent;
+- (void)setLineBreakMode:(long)mode;
+- (void)setMinimumLineHeight:(double)height;
+- (void)setMaximumLineHeight:(double)height;
+@end
+
 @interface NSData : NSObject
 + (NSData *)dataWithBytes:(const void *)bytes length:(unsigned long)length;
 + (NSData *)dataWithContentsOfFile:(NSString *)path;
@@ -2638,6 +2677,7 @@ extern id NSFontAttributeName;
 extern id NSForegroundColorAttributeName;
 extern id NSBackgroundColorAttributeName;
 extern id NSUnderlineStyleAttributeName;
+extern id NSParagraphStyleAttributeName;
 
 @interface NSString (UIKitDrawing)
 - (CGSize)sizeWithAttributes:(NSDictionary *)attributes;

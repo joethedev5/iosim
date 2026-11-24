@@ -5662,6 +5662,7 @@ id NSFontAttributeName = @"NSFontAttributeName";
 id NSForegroundColorAttributeName = @"NSForegroundColorAttributeName";
 id NSBackgroundColorAttributeName = @"NSBackgroundColorAttributeName";
 id NSUnderlineStyleAttributeName = @"NSUnderlineStyleAttributeName";
+id NSParagraphStyleAttributeName = @"NSParagraphStyleAttributeName";
 
 static unsigned text_color_rgb(UIColor *color)
 {
@@ -21410,7 +21411,7 @@ static void blur_box_xrgb(unsigned *pix, int w, int h, int radius, int passes)
  * font size and weight, foreground and background colors, and underline.
  * Only ASCII strings whose runs fit inside the label take this path; the
  * caller falls back to the plain-text label renderer otherwise. */
-static int label_draw_attributed_label(UILabel *label, int x, int y, int w,
+static int label_draw_attributed_single(UILabel *label, int x, int y, int w,
                                        int h, double scale)
 {
     if (!label || label->_numberOfLines != 1)
@@ -21528,6 +21529,219 @@ static int label_draw_attributed_label(UILabel *label, int x, int y, int w,
                                runWidth, (int)(scale + 0.5), color);
         cursor += runWidth;
         index = range.location + range.length;
+    }
+    return 1;
+}
+
+static int attributed_range_width(NSAttributedString *attributed,
+                                  const char *bytes, unsigned long start,
+                                  unsigned long end, double scale,
+                                  double basePoints, int baseStyle)
+{
+    unsigned long length = [attributed length];
+    int width = 0;
+    for (unsigned long index = start; index < end; )
+    {
+        NSRange range;
+        id attributes = [attributed attributesAtIndex:index
+                                       effectiveRange:&range];
+        if (range.length == 0 || range.length >= 1024 ||
+            range.location + range.length <= index ||
+            range.location + range.length > length)
+            return -1;
+        unsigned long pieceEnd = range.location + range.length;
+        if (pieceEnd > end)
+            pieceEnd = end;
+        if (pieceEnd <= index)
+            return -1;
+        double points = basePoints;
+        int style = baseStyle;
+        id font = attributes ? [attributes objectForKey:NSFontAttributeName]
+                             : nil;
+        if (font && [font isKindOfClass:[UIFont class]])
+        {
+            points = ((UIFont *)font)->_size;
+            style = ((UIFont *)font)->_bold ? IOSIM_FONT_BOLD
+                                            : IOSIM_FONT_REGULAR;
+        }
+        char segment[1024];
+        unsigned long n = pieceEnd - index;
+        for (unsigned long k = 0; k < n; k++)
+            segment[k] = bytes[index + k];
+        segment[n] = 0;
+        width += iosim_fb_font_text_width(segment, style, points, scale);
+        index = pieceEnd;
+    }
+    return width;
+}
+
+static int attributed_draw_range(NSAttributedString *attributed,
+                                 const char *bytes, unsigned long start,
+                                 unsigned long end, int x, int lineTop,
+                                 int lineHeight, int baseline, double scale,
+                                 double basePoints, int baseStyle,
+                                 unsigned baseColor)
+{
+    unsigned long length = [attributed length];
+    int cursor = x;
+    for (unsigned long index = start; index < end; )
+    {
+        NSRange range;
+        id attributes = [attributed attributesAtIndex:index
+                                       effectiveRange:&range];
+        if (range.length == 0 || range.length >= 1024 ||
+            range.location + range.length <= index ||
+            range.location + range.length > length)
+            return -1;
+        unsigned long pieceEnd = range.location + range.length;
+        if (pieceEnd > end)
+            pieceEnd = end;
+        if (pieceEnd <= index)
+            return -1;
+        double points = basePoints;
+        int style = baseStyle;
+        id font = attributes ? [attributes objectForKey:NSFontAttributeName]
+                             : nil;
+        if (font && [font isKindOfClass:[UIFont class]])
+        {
+            points = ((UIFont *)font)->_size;
+            style = ((UIFont *)font)->_bold ? IOSIM_FONT_BOLD
+                                            : IOSIM_FONT_REGULAR;
+        }
+        unsigned color = baseColor;
+        UIColor *runColor = attributes
+            ? (UIColor *)[attributes
+                  objectForKey:NSForegroundColorAttributeName]
+            : nil;
+        if (runColor && [runColor isKindOfClass:[UIColor class]])
+            color = color_rgb(runColor);
+        char segment[1024];
+        unsigned long n = pieceEnd - index;
+        for (unsigned long k = 0; k < n; k++)
+            segment[k] = bytes[index + k];
+        segment[n] = 0;
+        int runWidth = iosim_fb_font_text_width(segment, style, points, scale);
+        UIColor *background = attributes
+            ? (UIColor *)[attributes
+                  objectForKey:NSBackgroundColorAttributeName]
+            : nil;
+        if (background && [background isKindOfClass:[UIColor class]])
+            iosim_fb_fill_rect(cursor, lineTop, runWidth, lineHeight,
+                               color_rgb(background));
+        iosim_fb_font_text(cursor, baseline, segment, style, points, scale,
+                           color);
+        id underline = attributes
+            ? [attributes objectForKey:NSUnderlineStyleAttributeName]
+            : nil;
+        if (underline && [underline isKindOfClass:[NSNumber class]] &&
+            [underline integerValue] != 0)
+            iosim_fb_fill_rect(cursor, baseline + (int)(2 * scale + 0.5),
+                               runWidth, (int)(scale + 0.5), color);
+        cursor += runWidth;
+        index = pieceEnd;
+    }
+    return cursor - x;
+}
+
+static int label_draw_attributed_label(UILabel *label, int x, int y, int w,
+                                       int h, double scale)
+{
+    if (!label)
+        return 0;
+    if (label->_numberOfLines == 1)
+        return label_draw_attributed_single(label, x, y, w, h, scale);
+    if (w <= 0)
+        return 0;
+    NSAttributedString *attributed = nil;
+    if ([label->_attributedText isKindOfClass:[NSAttributedString class]])
+        attributed = (NSAttributedString *)label->_attributedText;
+    if (!attributed || [attributed length] == 0)
+        return 0;
+    id string = [attributed string];
+    if (!string || ![string isKindOfClass:[NSString class]])
+        return 0;
+    const char *bytes = [string UTF8String];
+    unsigned long length = [attributed length];
+    if (!bytes || strlen(bytes) != length)
+        return 0;
+    double basePoints = label->_font ? label->_font->_size : 17.0;
+    int baseStyle = label->_font && label->_font->_bold
+                        ? IOSIM_FONT_BOLD : IOSIM_FONT_REGULAR;
+    unsigned baseColor = label->_textColor ? color_rgb(label->_textColor)
+                                           : 0xffffff;
+
+    char lines[IOSIM_MAX_WRAP_LINES][256];
+    int maxLines = label->_numberOfLines > 1 ? label->_numberOfLines
+                                             : IOSIM_MAX_WRAP_LINES;
+    int n = wrap_text_lines(bytes, baseStyle, basePoints, scale, w, lines,
+                            maxLines);
+    if (n <= 0)
+        return 0;
+
+    int ascent = 0, descent = 0, lineHeight = 0;
+    iosim_fb_font_metrics(baseStyle, basePoints, scale, &ascent, &descent,
+                          &lineHeight);
+    unsigned long starts[IOSIM_MAX_WRAP_LINES], ends[IOSIM_MAX_WRAP_LINES];
+    int spacing[IOSIM_MAX_WRAP_LINES];
+    const char *search = bytes;
+    int totalHeight = n * lineHeight;
+    for (int i = 0; i < n; i++)
+    {
+        const char *found = strstr(search, lines[i]);
+        if (!found)
+            return 0;
+        starts[i] = (unsigned long)(found - bytes);
+        ends[i] = starts[i] + strlen(lines[i]);
+        search = found + strlen(lines[i]);
+        spacing[i] = 0;
+        if (i + 1 < n && starts[i] < length)
+        {
+            id attributes = [attributed attributesAtIndex:starts[i]
+                                           effectiveRange:0];
+            NSParagraphStyle *style = attributes
+                ? (NSParagraphStyle *)[attributes
+                      objectForKey:NSParagraphStyleAttributeName]
+                : nil;
+            if (style && [style isKindOfClass:[NSParagraphStyle class]] &&
+                style->_lineSpacing > 0)
+                spacing[i] = (int)(style->_lineSpacing * scale + 0.5);
+        }
+        totalHeight += spacing[i];
+    }
+
+    int startY = y + (h - totalHeight) / 2;
+    if (startY < y)
+        startY = y;
+    int cursorY = startY;
+    for (int i = 0; i < n; i++)
+    {
+        int lineWidth = attributed_range_width(attributed, bytes, starts[i],
+                                               ends[i], scale, basePoints,
+                                               baseStyle);
+        if (lineWidth < 0)
+            return 0;
+        int alignment = label->_textAlignment;
+        if (starts[i] < length)
+        {
+            id attributes = [attributed attributesAtIndex:starts[i]
+                                           effectiveRange:0];
+            NSParagraphStyle *style = attributes
+                ? (NSParagraphStyle *)[attributes
+                      objectForKey:NSParagraphStyleAttributeName]
+                : nil;
+            if (style && [style isKindOfClass:[NSParagraphStyle class]])
+                alignment = (int)style->_alignment;
+        }
+        int tx = x;
+        if (alignment == 1)
+            tx = x + (w - lineWidth) / 2;
+        else if (alignment == 2)
+            tx = x + w - lineWidth;
+        if (attributed_draw_range(attributed, bytes, starts[i], ends[i], tx,
+                                  cursorY, lineHeight, cursorY + ascent,
+                                  scale, basePoints, baseStyle, baseColor) < 0)
+            return 0;
+        cursorY += lineHeight + spacing[i];
     }
     return 1;
 }

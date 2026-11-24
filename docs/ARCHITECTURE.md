@@ -473,9 +473,12 @@ with a new offset; `attributesAtIndex:effectiveRange:` returns the covering
 run and its range. A single-line `UILabel` walks its runs and draws each
 segment with that run's font size/weight, foreground color, background
 color and underline, aligning the summed run widths by `textAlignment`;
-labels that wrap or whose runs overflow the frame fall back to the plain
-string with the first run's font and color. `UIButton` reads the first
-attribute dictionary only. A single-line label shrinks its font
+a run overflowing the frame falls back to the plain string with the first
+run's font and color. A multiline attributed label wraps with the existing
+plain-text wrapper, maps each printed line back to its source range, draws
+that range run by run, and takes `NSParagraphStyle` alignment and
+`lineSpacing` from the paragraph style at the line start. `UIButton` reads
+the first attribute dictionary only. A single-line label shrinks its font
 only when `adjustsFontSizeToFitWidth` is set, in half-point steps down to
 `minimumScaleFactor` (or 1 pt when it is zero), and otherwise truncates
 according to `lineBreakMode`: clipping keeps the string, while head, tail and

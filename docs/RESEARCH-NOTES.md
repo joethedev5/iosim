@@ -1445,3 +1445,19 @@ components.
   The PNG reads three colors, green glyphs are 71 px tall against red's
   54 px, the blue underline row spans all 179 px of its run, and the block
   centers at 200.8 pt in the 360 pt label.
+
+## 2026-11-24: Paragraph styles in attributed labels
+
+- `NSParagraphStyle`/`NSMutableParagraphStyle` store alignment, line and
+  paragraph spacing, paragraph spacing before, first-line/head/tail indents,
+  line-break mode and minimum/maximum line heights. The mutable subclass
+  fills setters; the default style is a shared zeroed instance.
+- A multiline attributed label reuses `wrap_text_lines` with its base font,
+  finds each printed line back in the source string, and draws the matching
+  run range segment by segment. The paragraph style at the line start
+  supplies alignment and `lineSpacing` (scaled to pixels); run fonts, colors,
+  backgrounds and underlines still come from each run.
+- The fixture uses `Red\nGreen` with centered paragraph alignment, 10 pt
+  line spacing and a left-aligned label. Red and green pixels center at
+  600.5 and 599.5 px, and the 57 px gap matches two line heights plus the
+  spacing.

@@ -2181,6 +2181,45 @@ static void attributed_runs_rebuild(id *runs, unsigned long oldLength,
 }
 @end
 
+@implementation NSParagraphStyle
++ (id)defaultParagraphStyle
+{
+    static NSParagraphStyle *style;
+    if (!style)
+        style = [[NSParagraphStyle alloc] init];
+    return style;
+}
+- (long)alignment { return _alignment; }
+- (double)lineSpacing { return _lineSpacing; }
+- (double)paragraphSpacing { return _paragraphSpacing; }
+- (double)paragraphSpacingBefore { return _paragraphSpacingBefore; }
+- (double)firstLineHeadIndent { return _firstLineHeadIndent; }
+- (double)headIndent { return _headIndent; }
+- (double)tailIndent { return _tailIndent; }
+- (long)lineBreakMode { return _lineBreakMode; }
+- (double)minimumLineHeight { return _minimumLineHeight; }
+- (double)maximumLineHeight { return _maximumLineHeight; }
+@end
+
+@implementation NSMutableParagraphStyle
+- (void)setAlignment:(long)alignment { _alignment = alignment; }
+- (void)setLineSpacing:(double)spacing { _lineSpacing = spacing; }
+- (void)setParagraphSpacing:(double)spacing { _paragraphSpacing = spacing; }
+- (void)setParagraphSpacingBefore:(double)spacing
+{
+    _paragraphSpacingBefore = spacing;
+}
+- (void)setFirstLineHeadIndent:(double)indent
+{
+    _firstLineHeadIndent = indent;
+}
+- (void)setHeadIndent:(double)indent { _headIndent = indent; }
+- (void)setTailIndent:(double)indent { _tailIndent = indent; }
+- (void)setLineBreakMode:(long)mode { _lineBreakMode = mode; }
+- (void)setMinimumLineHeight:(double)height { _minimumLineHeight = height; }
+- (void)setMaximumLineHeight:(double)height { _maximumLineHeight = height; }
+@end
+
 @implementation NSScanner
 + (id)scannerWithString:(id)string
 {

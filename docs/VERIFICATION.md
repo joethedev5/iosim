@@ -1855,6 +1855,15 @@ renderer. The blue run is 179 px wide and its widest row is 179 px, the
 underline spanning the run below the glyph baseline, and the overall run
 block centers at 200.8 pt in the 360 pt-wide, centered label.
 
+### UIKit: paragraph styles in attributed labels
+
+`tests/paragraph_style_test.m` gives a multiline label the attributed string
+`Red\nGreen` with a mutable paragraph style that centers each line and adds
+10 pt of line spacing, while the label itself is left-aligned. The captured
+frame reads red line pixels centered at 600.5 px and green line pixels at
+599.5 px, both on the label's 600 px center line, and the green line starts
+57 px below the red line's last glyph row, matching the 10 pt spacing.
+
 ### Page view controllers
 
 `tests/pageview_test.m` installs a scroll-style horizontal page controller as a
