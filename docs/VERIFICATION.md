@@ -600,6 +600,12 @@ clear and destination-out, and (128,0,0) for plus-darker. A path-filled box
 under multiply matches the rect-filled one. The suite samples those eleven
 points with a tolerance of four levels per channel.
 
+`tests/blend_text_image_test.m` draws a red 2x2 `CGImage` and red bold
+`MMMM` text over the same gray field. Under multiply the image center reads
+(128,0,0) and under screen (255,128,128); the suite also scans the two text
+rows for at least twenty pixels at those values, so glyph coverage
+interpolates the blend result while empty pixels keep the gray field.
+
 ### Graphics: rounded subtree clipping
 
 `tests/rounded_clip_test.m` stacks three cards. The first clips to bounds

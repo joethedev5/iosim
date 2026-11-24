@@ -426,8 +426,9 @@ applies it through the framebuffer's shape compositor: the PDF separable
 and non-separable blend functions compute a blended colour that is then
 lerped over the destination by the source coverage. Clear and SourceOut
 fade the destination, DestinationIn/Out and XOR scale it, and
-PlusLighter/PlusDarker clamp the sum. Text and image blits stay
-source-over and reset the mode so a fill cannot leak into them.
+PlusLighter/PlusDarker clamp the sum. Text glyph coverage and image
+blits route through the same compositor, so a blend mode applies to
+fills, gradients, images and text alike.
 `UIGraphicsBeginImageContextWithOptions`
 redirects the same CGContext into a loader offscreen framebuffer; the result
 is copied out as RGBA for `UIGraphicsGetImageFromCurrentImageContext`, and

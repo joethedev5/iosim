@@ -1102,6 +1102,74 @@ else
     echo "FAIL horizontal collection rendering"; echo "$out"; fails=$((fails+1))
 fi
 
+# ---------- 4f16. Blend modes on text and images ----------
+rm -f "$T/blend2.fifo"
+mkfifo "$T/blend2.fifo"
+"$ROOT/tools/build_app.sh" "$ROOT/tests/blend_text_image_test.m" \
+    "$T/blend_text_image_test" >/dev/null
+out="$(IOSIM_EVENT_FIFO="$T/blend2.fifo" IOSIM_TEST_PNG="$T/blend2.png" \
+    DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/blend_text_image_test" 2>&1)"
+rm -f "$T/blend2.fifo"
+check "[blend2] ready" "$out" \
+    "the text and image blend fixture starts"
+check "[blend2] done" "$out" \
+    "the text and image blend fixture draws"
+if out="$(python3 - "$ROOT/tools" "$T/blend2.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+samples = [
+    ('image-multiply', 54, 142, (128, 0, 0)),
+    ('image-screen', 106, 142, (255, 128, 128)),
+]
+for name, x, y, want in samples:
+    c = pngpixel.px(rows, bpp, x * 3, y * 3)
+    got = ((c >> 16) & 255, (c >> 8) & 255, c & 255)
+    for a, b in zip(got, want):
+        if abs(a - b) > 4:
+            raise SystemExit('%s pixel at %d,%d is %r, expected %r' %
+                             (name, x, y, got, want))
+print("ok   images blend with the CGContext blend mode")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL image blend pixels"; echo "$out"; fails=$((fails+1))
+fi
+if out="$(python3 - "$ROOT/tools" "$T/blend2.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+multiply = 0
+for yy in range(660, 810):
+    for xx in range(96, 700):
+        c = pngpixel.px(rows, bpp, xx, yy)
+        r, g, b = (c >> 16) & 255, (c >> 8) & 255, c & 255
+        if abs(r - 128) <= 2 and g < 50 and b < 50:
+            multiply += 1
+screen = 0
+for yy in range(840, 990):
+    for xx in range(96, 700):
+        c = pngpixel.px(rows, bpp, xx, yy)
+        r, g, b = (c >> 16) & 255, (c >> 8) & 255, c & 255
+        if r > 250 and abs(g - 128) <= 3 and abs(b - 128) <= 3:
+            screen += 1
+if multiply < 20:
+    raise SystemExit('multiply text has %d blended pixels' % multiply)
+if screen < 20:
+    raise SystemExit('screen text has %d blended pixels' % screen)
+print("ok   glyph coverage blends with the CGContext blend mode")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL text blend pixels"; echo "$out"; fails=$((fails+1))
+fi
+
 # ---------- 4g. NSCalendar components ----------
 "$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
     -ffreestanding -O1 -I "$ROOT/frameworks" \

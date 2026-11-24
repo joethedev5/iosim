@@ -374,7 +374,7 @@ void iosim_cg_draw_image(CGContextRef context, const unsigned char *rgba,
     if (pw <= 0 || ph <= 0)
         return;
     iosim_fb_set_opacity(context->base_alpha * context->state.alpha);
-    iosim_fb_set_blend_mode(kCGBlendModeNormal);
+    iosim_fb_set_blend_mode(context->state.blend_mode);
     iosim_fb_blit_rgba_scaled(px, py, pw, ph, rgba, w, h, w * 4);
 }
 
@@ -1044,7 +1044,7 @@ void iosim_cg_draw_text(CGContextRef context, const char *text, double x,
     double px, py;
     cg_transform(context, x, baseline, &px, &py);
     iosim_fb_set_opacity(context->base_alpha * context->state.alpha);
-    iosim_fb_set_blend_mode(kCGBlendModeNormal);
+    iosim_fb_set_blend_mode(context->state.blend_mode);
     iosim_fb_font_text((int)(px + 0.5), (int)(py + 0.5), text,
                        bold ? IOSIM_FONT_SEMIBOLD : IOSIM_FONT_REGULAR,
                        size_pt, context->scale, color);

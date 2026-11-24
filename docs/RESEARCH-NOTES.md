@@ -1381,3 +1381,19 @@ components.
   style uses symbols; medium and long use singular for 1 and the plural
   otherwise. Provided-unit skips scaling and the temperature-without-unit
   option omits the unit text.
+
+## 2026-11-24: Blend modes on text and images
+
+- `iosim_cg_draw_text` and `iosim_cg_draw_image` stop forcing Normal: both
+  install `context->state.blend_mode` into the framebuffer. The `CGImage`
+  path keeps its scaled RGBA sampler; the FreeType glyph path keeps the
+  coverage from the rasterized slot.
+- The framebuffer's glyph compositor blends the text color against the
+  destination with `fb_blend_color` when a mode is installed, using the
+  coverage-times-opacity fraction. Scaled RGBA blits do the same with the
+  interpolated source color. Normal mode keeps the previous per-channel
+  source-over math byte for byte.
+- The fixture blends a red image and red bold text over 50% gray. Multiply
+  reads (128,0,0); screen reads (255,128,128). Text pixels are scanned
+  because glyph antialiasing varies, while the image centers are sampled
+  directly.

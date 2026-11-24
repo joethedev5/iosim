@@ -2223,12 +2223,22 @@ void iosim_fb_font_text(int x, int baseline_y, const char *text, int style,
                 if (!a)
                     continue;
                 uint32_t d = dst[xx];
-                unsigned dr = (d >> 16) & 0xFF;
-                unsigned dg = (d >> 8) & 0xFF;
-                unsigned db = d & 0xFF;
-                unsigned r = (fg_r * a + dr * (255 - a) + 127) / 255;
-                unsigned g = (fg_g * a + dg * (255 - a) + 127) / 255;
-                unsigned b = (fg_b * a + db * (255 - a) + 127) / 255;
+                unsigned r, g, b;
+                if (fb_blend_mode)
+                    fb_blend_color(fb_blend_mode,
+                                   ((uint32_t)fg_r << 16) |
+                                       ((uint32_t)fg_g << 8) |
+                                       (uint32_t)fg_b,
+                                   d, a / 255.0, &r, &g, &b);
+                else
+                {
+                    unsigned dr = (d >> 16) & 0xFF;
+                    unsigned dg = (d >> 8) & 0xFF;
+                    unsigned db = d & 0xFF;
+                    r = (fg_r * a + dr * (255 - a) + 127) / 255;
+                    g = (fg_g * a + dg * (255 - a) + 127) / 255;
+                    b = (fg_b * a + db * (255 - a) + 127) / 255;
+                }
                 dst[xx] = fb_pack(d, r, g, b, a);
             }
         }
@@ -3049,9 +3059,20 @@ void iosim_fb_blit_rgba_scaled(int x, int y, int w, int h,
                 continue;
             uint32_t dst = row[dx];
             unsigned ia = (unsigned)(a * 255.0 + 0.5);
-            unsigned r = ((unsigned)(c[0] + 0.5) * ia + ((dst >> 16) & 0xFF) * (255 - ia) + 127) / 255;
-            unsigned g = ((unsigned)(c[1] + 0.5) * ia + ((dst >> 8) & 0xFF) * (255 - ia) + 127) / 255;
-            unsigned b = ((unsigned)(c[2] + 0.5) * ia + (dst & 0xFF) * (255 - ia) + 127) / 255;
+            unsigned r, g, b;
+            if (fb_blend_mode)
+            {
+                uint32_t src = ((unsigned)(c[0] + 0.5) << 16) |
+                               ((unsigned)(c[1] + 0.5) << 8) |
+                               (unsigned)(c[2] + 0.5);
+                fb_blend_color(fb_blend_mode, src, dst, a, &r, &g, &b);
+            }
+            else
+            {
+                r = ((unsigned)(c[0] + 0.5) * ia + ((dst >> 16) & 0xFF) * (255 - ia) + 127) / 255;
+                g = ((unsigned)(c[1] + 0.5) * ia + ((dst >> 8) & 0xFF) * (255 - ia) + 127) / 255;
+                b = ((unsigned)(c[2] + 0.5) * ia + (dst & 0xFF) * (255 - ia) + 127) / 255;
+            }
             row[dx] = fb_pack(dst, r, g, b, ia);
         }
     }
