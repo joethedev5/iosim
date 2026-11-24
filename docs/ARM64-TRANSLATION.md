@@ -18,9 +18,13 @@ measured recursively, sixteen-byte integer structs use GP registers,
 HFAs (up to four same-type fields) use d0-d3 even when larger than
 sixteen bytes, and other large structs pass by pointer and return
 through x8/hidden buffers, with stack arguments on a dedicated call
-gate. Broader NEON coverage, varargs beyond the printf gate, and
-persistent caches and JIT pages are the remaining work. This
-document records the method and the milestones that prove it.
+gate. Runtime-generated code pages are translated as well: a guest mmap
+or mprotect that grants PROT_EXEC registers the range, so branches into
+it run through the interpreter and block translator, and re-protecting
+a page drops the translations that started in it. Broader NEON
+coverage, varargs beyond the printf gate, and a persistent translation
+cache are the remaining work. This document records the method and the
+milestones that prove it.
 
 ## The constraint and the reframing
 

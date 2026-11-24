@@ -1206,3 +1206,15 @@ void a64_jit_invalidate(void)
     g_nblocks = 0;
     g_arena_used = 0;
 }
+
+void a64_jit_invalidate_range(uint64_t lo, uint64_t hi)
+{
+    int out = 0;
+    for (int i = 0; i < g_nblocks; i++)
+    {
+        if (g_blocks[i].pc >= lo && g_blocks[i].pc < hi)
+            continue;
+        g_blocks[out++] = g_blocks[i];
+    }
+    g_nblocks = out;
+}

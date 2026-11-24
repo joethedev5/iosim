@@ -510,6 +510,8 @@ enum {
     NG_MSG_SEND_SUPER2,
     NG_GET_CLASS,
     NG_SEL_REGISTER,
+    NG_MMAP,
+    NG_MPROTECT,
 };
 
 static struct native_gate g_gates[32];
@@ -553,6 +555,8 @@ static void native_gates_init(void)
                     NG_GET_CLASS);
     native_gate_add("sel_registerName", gate_symbol("sel_registerName"),
                     NG_SEL_REGISTER);
+    native_gate_add("mmap", gate_symbol("mmap"), NG_MMAP);
+    native_gate_add("mprotect", gate_symbol("mprotect"), NG_MPROTECT);
 }
 
 static int image_contains(struct iosim_image *img, uint64_t addr)
@@ -569,9 +573,49 @@ static int image_contains(struct iosim_image *img, uint64_t addr)
     return 0;
 }
 
+/* Runtime-generated arm64 code: guest mmap/mprotect calls that ask for
+ * PROT_EXEC register their ranges, so branches into them enter the
+ * interpreter and the block translator instead of the native dispatch
+ * path. The registry is per process; the guest is single-threaded. */
+#define A64_MAX_EXEC_REGIONS 32
+static struct
+{
+    uint64_t lo, hi;
+} g_exec_regions[A64_MAX_EXEC_REGIONS];
+static int g_nexec_regions;
+
+static void a64_exec_region_add(uint64_t lo, uint64_t len)
+{
+    if (!len || g_nexec_regions >= A64_MAX_EXEC_REGIONS)
+        return;
+    uint64_t hi = lo + len;
+    for (int i = 0; i < g_nexec_regions; i++)
+    {
+        if (lo <= g_exec_regions[i].hi && hi >= g_exec_regions[i].lo)
+        {
+            if (lo < g_exec_regions[i].lo)
+                g_exec_regions[i].lo = lo;
+            if (hi > g_exec_regions[i].hi)
+                g_exec_regions[i].hi = hi;
+            return;
+        }
+    }
+    g_exec_regions[g_nexec_regions].lo = lo;
+    g_exec_regions[g_nexec_regions].hi = hi;
+    g_nexec_regions++;
+}
+
+static int a64_exec_region_contains(uint64_t addr)
+{
+    for (int i = 0; i < g_nexec_regions; i++)
+        if (addr >= g_exec_regions[i].lo && addr < g_exec_regions[i].hi)
+            return 1;
+    return 0;
+}
+
 static int in_any_arm64_image(struct a64_cpu *c, uint64_t addr)
 {
-    return image_contains(c->img, addr);
+    return image_contains(c->img, addr) || a64_exec_region_contains(addr);
 }
 
 static int a64_native_call(struct a64_cpu *c, uint64_t target, uint64_t *ret)
@@ -736,6 +780,43 @@ static int a64_native_call(struct a64_cpu *c, uint64_t target, uint64_t *ret)
             *ret = (uint64_t)(uintptr_t)sel_registerName(
                 (const char *)(uintptr_t)c->x[0]);
             return 1;
+        case NG_MMAP: {
+            /* Darwin flags: MAP_SHARED 0x1, MAP_PRIVATE 0x2, MAP_FIXED
+             * 0x10, MAP_NORESERVE 0x40, MAP_JIT 0x800, MAP_ANON 0x1000.
+             * Linux wants MAP_ANONYMOUS 0x20 and MAP_NORESERVE 0x4000. */
+            int dflags = (int)c->x[3];
+            int flags = dflags & (0x1 | 0x2 | 0x10);
+            if (dflags & 0x1000)
+                flags |= MAP_ANONYMOUS;
+            if (dflags & 0x40)
+                flags |= MAP_NORESERVE;
+            int prot = (int)c->x[2];
+            size_t len = (size_t)c->x[1];
+            void *p = mmap((void *)(uintptr_t)c->x[0], len, prot, flags,
+                           (int)c->x[4], (long)c->x[5]);
+            if (p != MAP_FAILED && (prot & PROT_EXEC))
+                a64_exec_region_add((uint64_t)(uintptr_t)p, len);
+            *ret = p == MAP_FAILED ? (uint64_t)-1
+                                   : (uint64_t)(uintptr_t)p;
+            return 1;
+        }
+        case NG_MPROTECT: {
+            uint64_t addr = c->x[0];
+            size_t len = (size_t)c->x[1];
+            int prot = (int)c->x[2];
+            int rc = mprotect((void *)(uintptr_t)addr, len, prot);
+            if (rc == 0)
+            {
+                if (prot & PROT_EXEC)
+                    a64_exec_region_add(addr, len);
+                /* The range may have been rewritten as code or data; drop
+                 * translations that started in it. The arena is not
+                 * reclaimed, so a running block stays valid. */
+                a64_jit_invalidate_range(addr, addr + len);
+            }
+            *ret = (uint64_t)(int64_t)rc;
+            return 1;
+        }
         case NG_MSG_SEND:
             return 0; /* handled by the caller, needs the method encoding */
         case NG_MSG_SEND_SUPER2:
@@ -3349,7 +3430,8 @@ void a64t_fcmp_insn(struct a64_cpu *c, uint32_t insn)
 
 int iosim_arm64_pc_in_image(struct a64_cpu *c, uint64_t pc)
 {
-    return c && c->img && image_contains(c->img, pc);
+    return c && ((c->img && image_contains(c->img, pc)) ||
+                 a64_exec_region_contains(pc));
 }
 
 /* Runs translated blocks until the guest returns. Blocks edit the machine
@@ -3369,10 +3451,11 @@ static int a64_run_blocks(struct a64_cpu *c)
         if (c->trace)
             fprintf(stderr, "arm64 driver pc=0x%llx\n",
                     (unsigned long long)c->pc);
-        if (!image_contains(c->img, c->pc))
+        if (!in_any_arm64_image(c, c->pc))
         {
-            /* A tail branch or call left the guest image: run the native
-             * target and resume at its return address. */
+            /* A tail branch or call left the guest image and its
+             * runtime-generated code pages: run the native target and
+             * resume at its return address. */
             uint64_t out = 0;
             if (a64_dispatch_native(c, c->pc, 0, 0, &out) < 0)
                 return -1;
@@ -3427,8 +3510,9 @@ int arm64_run_main(struct iosim_image *img, int argc, char **argv,
 
 int iosim_arm64_is_guest_code(void *fn)
 {
-    return fn && g_arm64_img &&
-           image_contains(g_arm64_img, (uint64_t)(uintptr_t)fn);
+    uint64_t addr = (uint64_t)(uintptr_t)fn;
+    return fn && ((g_arm64_img && image_contains(g_arm64_img, addr)) ||
+                  a64_exec_region_contains(addr));
 }
 
 /* General native-to-guest call used by C callbacks (qsort comparators and

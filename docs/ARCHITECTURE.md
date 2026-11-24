@@ -1777,7 +1777,9 @@ Python for iteration speed.
   read-modify-write and CAS forms clang emits for the simulator target,
   LDAPR/LDAR/STLR loads and stores, DMB/DSB/ISB barriers and LDXR/STXR
   exclusives with a per-cpu monitor; 128-bit SIMD literal loads are
-  modelled too. Native `qsort`/`bsearch` shims call an arm64 comparator
+  modelled too. Executable pages the guest creates through `mmap` or
+  `mprotect` are registered as guest code and translated on demand;
+  re-protecting a page drops the cached blocks that started in it. Native `qsort`/`bsearch` shims call an arm64 comparator
   back through a general native-to-guest C call bridge. The message-send
   trampoline also has a reverse bridge: when
   native x86_64 code sends to an arm64 IMP, the saved register frame is

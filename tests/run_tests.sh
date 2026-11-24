@@ -1734,6 +1734,60 @@ else
     fails=$((fails+1))
 fi
 
+# ---------- 4f10aa. arm64 runtime-generated code pages ----------
+# A guest mmap or mprotect with PROT_EXEC registers the range as guest
+# code, so a call through a pointer into the page enters the interpreter
+# and the block translator. Rewriting a page and re-protecting it drops
+# the cached translation; the trace check proves the translator compiled
+# the page rather than only falling back to the interpreter.
+"$CC" -target arm64-apple-ios18.0-simulator -ffreestanding -O1 \
+    -c "$ROOT/tests/arm64_jitpage.c" -o "$T/arm64_jitpage.o"
+"$LD64" -arch arm64 -platform_version $PLATFORM -e _main \
+    -o "$T/arm64_jitpage" "$T/arm64_jitpage.o" -undefined dynamic_lookup
+if out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" --arm64 "$T/arm64_jitpage")"
+then
+    rc_arm=0
+else
+    rc_arm=$?
+fi
+check "jit=61,127 mprotect=61 reprotect=62" "$out" \
+    "arm64 code copied into executable pages runs"
+if [ "$rc_arm" -eq 96 ]; then
+    echo "ok   the arm64 JIT-page fixture returns 96"
+else
+    echo "FAIL arm64 JIT page (exit $rc_arm)"; fails=$((fails+1))
+fi
+if out_t="$(IOSIM_ARM64_JIT_TRACE=1 DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" \
+    --arm64 "$T/arm64_jitpage" 2>&1)"; then
+    rc_t=0
+else
+    rc_t=$?
+fi
+# The page address must come from the traced run itself; a separate run
+# maps the page at a different address.
+page=$(printf '%s\n' "$out_t" | sed -n 's/^page=//p')
+if [ -n "$page" ] && printf '%s\n' "$out_t" | grep -q "jit block 0x$page"; then
+    echo "ok   the block translator compiles the generated page"
+else
+    echo "FAIL the generated page was not translated"; fails=$((fails+1))
+fi
+if [ "$rc_t" -eq 96 ]; then
+    echo "ok   the traced JIT-page run returns 96"
+else
+    echo "FAIL traced JIT-page run (exit $rc_t)"; fails=$((fails+1))
+fi
+if IOSIM_ARM64_NOJIT=1 DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" --arm64 \
+    "$T/arm64_jitpage" >/dev/null; then
+    rc_nj=0
+else
+    rc_nj=$?
+fi
+if [ "$rc_nj" -eq 96 ]; then
+    echo "ok   the JIT-page fixture agrees with pure interpretation"
+else
+    echo "FAIL JIT-page interpreter (exit $rc_nj)"; fails=$((fails+1))
+fi
+
 # ---------- 4f11. CAAnimation completion and fill modes ----------
 rm -f "$T/arem.fifo"
 mkfifo "$T/arem.fifo"

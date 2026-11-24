@@ -2254,3 +2254,27 @@ components.
 - With aggregate returns in place, the arm64 `demo/HelloSimApp.m` build
   runs through `UIApplicationMain` until the timeout with no bridge
   errors; bringing up the device and framebuffer path is separate work.
+
+## 2026-11-24: runtime-generated arm64 code pages
+
+- The interpreter and the block driver treated every branch target
+  outside the image as a native function, so an app JIT that builds
+  arm64 code at runtime would be rejected. A small registry in
+  `loader/arm64.c` now records guest executable ranges, and
+  `in_any_arm64_image`, `iosim_arm64_pc_in_image`,
+  `iosim_arm64_is_guest_code` and the driver's boundary check consult it.
+- `mmap` and `mprotect` gained static gates. The mmap gate translates
+  Darwin flags (MAP_ANON 0x1000 to Linux MAP_ANONYMOUS 0x20,
+  MAP_NORESERVE 0x40 to 0x4000, MAP_JIT dropped) and registers
+  PROT_EXEC results. The mprotect gate registers ranges that gain
+  PROT_EXEC and calls `a64_jit_invalidate_range`, so a rewritten page is
+  translated again; the arena is not reclaimed, which keeps a block that
+  is executing the mprotect call valid.
+- `tests/arm64_jitpage.c` hand-embeds clang's -O1 code for a mix
+  function (`add`, `subs`, `csel`, `add lsl`, `add`, `ret`), maps it RWX
+  and calls it. A second page starts read-write, is made executable with
+  mprotect and called, and the first page is then rewritten and
+  re-protected to prove invalidation. It prints
+  `jit=61,127 mprotect=61 reprotect=62` and exits 96;
+  `IOSIM_ARM64_JIT_TRACE` shows `jit block 0x<page>..`, which the suite
+  greps.

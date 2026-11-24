@@ -2237,6 +2237,20 @@ buffer from `-CGAffineTransformValue`. The fixture prints
 `transform=1,2,3,4,5,6`, and exits 93 for the arm64 run, the x86_64 build
 and `IOSIM_ARM64_NOJIT=1`.
 
+### arm64: runtime-generated code pages
+
+`tests/arm64_jitpage.c` maps a page with `PROT_READ|PROT_WRITE|PROT_EXEC`,
+copies a hand-assembled arm64 function (`add`, `subs`, `csel`, `add lsl`,
+`add`, `ret`) into it and calls through the pointer. The loader registers
+the range from the guest's `mmap`, and the block translator compiles a
+block starting at the page address; the suite checks the
+`IOSIM_ARM64_JIT_TRACE` line. A second page is mapped read-write and made
+executable with `mprotect`. The fixture then rewrites the first page's
+constant while writable and re-protects it; the next call must see the
+new value, proving cached translations are dropped. It prints
+`jit=61,127 mprotect=61 reprotect=62` and exits 96 under the translator,
+the traced run and `IOSIM_ARM64_NOJIT=1`.
+
 ### SpringBoard: folder pagination
 
 A folder is rewritten to hold thirteen members across two pages.
