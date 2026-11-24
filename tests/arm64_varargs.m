@@ -44,6 +44,14 @@ int main(void)
     printf("llong %s\n", buf);
     snprintf(buf, sizeof buf, "[%6.2f]", 3.14159);
     printf("width %s\n", buf);
+    snprintf(buf, sizeof buf, "%2$d %1$d", 11, 22);
+    printf("pos %s\n", buf);
+    snprintf(buf, sizeof buf, "%2$*1$d", 5, 42);
+    printf("posstar %s\n", buf);
+    snprintf(buf, sizeof buf, "%1$.*2$s", "abcdef", 3);
+    printf("posprec %s\n", buf);
+    snprintf(buf, sizeof buf, "%2$d %d", 7, 8);
+    printf("posmix %s\n", buf);
     NSLog(@"%@ %5.1f", @"nslog", 2.25);
     return 0;
 }

@@ -659,19 +659,39 @@ struct a64_fmt_spec
 {
     char flags[6];
     int nflags;
+    int argpos;      /* 1-based conversion argument, 0 = sequential */
     int width;
     int has_width;
+    int width_pos;   /* 1-based argument for '*', 0 = sequential */
     int precision;
     int has_precision;
+    int precision_pos; /* 1-based argument for '.*', 0 = sequential */
     char len[3];
     char conv;
 };
+
+/* Reads a 1-based positional argument number ("2$") if one is present at
+ * *pp. Returns 0 and leaves the pointer alone otherwise. */
+static int a64_fmt_argnum(const char **pp)
+{
+    const char *p = *pp;
+    int v = 0;
+    while (*p >= '0' && *p <= '9')
+        v = v * 10 + (*p++ - '0');
+    if (p > *pp && *p == '$')
+    {
+        *pp = p + 1;
+        return v;
+    }
+    return 0;
+}
 
 static void a64_fmt_parse(struct a64_cpu *c, int *argi, const char **pp,
                           struct a64_fmt_spec *f)
 {
     const char *p = *pp;
     memset(f, 0, sizeof *f);
+    f->argpos = a64_fmt_argnum(&p);
     while (*p && strchr("-+ #0'", *p))
     {
         if (f->nflags < (int)sizeof f->flags - 1)
@@ -680,10 +700,17 @@ static void a64_fmt_parse(struct a64_cpu *c, int *argi, const char **pp,
     }
     if (*p == '*')
     {
-        f->width = (int)a64_load(c, c->sp + 8ull * (unsigned)*argi, 8, 0);
-        f->has_width = 1;
-        (*argi)++;
         p++;
+        f->width_pos = a64_fmt_argnum(&p);
+        if (f->width_pos)
+            f->width = (int)a64_load(
+                c, c->sp + 8ull * (unsigned)(f->width_pos - 1), 8, 0);
+        else
+        {
+            f->width = (int)a64_load(c, c->sp + 8ull * (unsigned)*argi, 8, 0);
+            (*argi)++;
+        }
+        f->has_width = 1;
     }
     else
     {
@@ -701,11 +728,18 @@ static void a64_fmt_parse(struct a64_cpu *c, int *argi, const char **pp,
         p++;
         if (*p == '*')
         {
-            f->precision =
-                (int)a64_load(c, c->sp + 8ull * (unsigned)*argi, 8, 0);
-            f->has_precision = 1;
-            (*argi)++;
             p++;
+            f->precision_pos = a64_fmt_argnum(&p);
+            if (f->precision_pos)
+                f->precision = (int)a64_load(
+                    c, c->sp + 8ull * (unsigned)(f->precision_pos - 1), 8, 0);
+            else
+            {
+                f->precision =
+                    (int)a64_load(c, c->sp + 8ull * (unsigned)*argi, 8, 0);
+                (*argi)++;
+            }
+            f->has_precision = 1;
         }
         else
         {
@@ -801,8 +835,15 @@ static size_t a64_render_format(struct a64_cpu *c, const char *fmt,
         }
         struct a64_fmt_spec f;
         a64_fmt_parse(c, &argi, &p, &f);
-        uint64_t arg = a64_load(c, argbase + 8ull * (unsigned)argi, 8, 0);
-        argi++;
+        uint64_t arg;
+        if (f.argpos)
+            arg = a64_load(c, argbase + 8ull * (unsigned)(f.argpos - 1),
+                           8, 0);
+        else
+        {
+            arg = a64_load(c, argbase + 8ull * (unsigned)argi, 8, 0);
+            argi++;
+        }
         char spec[A64_FMT_MAX];
         char conv = f.conv;
         if (conv == '@' && objects)

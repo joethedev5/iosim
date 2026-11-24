@@ -2300,6 +2300,12 @@ rendered lines (`fmt 0002.500`, `sign +7`, `left [42    ]`, `prec ab`,
 `star    42`, `starp abc`, `hex 0xff`, `size 99`, `long 123456789`,
 `llong -5`, `width [  3.14]`, `NSLog: nslog   2.2`) and repeats the
 fixture with `IOSIM_ARM64_NOJIT=1`, where the output is identical.
+The same fixture passes positional references: `%2$d %1$d` prints
+`pos 22 11`, `%2$*1$d` takes its width from argument 1 and prints
+`posstar    42`, `%1$.*2$s` takes its precision from argument 2 and
+prints `posprec abc`, and `%2$d %d` shows that a non-positional
+conversion resumes the sequential list (`posmix 8 7`). The x86_64 build
+of the fixture prints the same stdout and stderr byte for byte.
 
 ### arm64: one source, two architectures
 

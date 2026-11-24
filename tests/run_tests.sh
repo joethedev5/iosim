@@ -1970,6 +1970,11 @@ check "long 123456789" "$out" "%ld takes a long argument"
 check "llong -5" "$out" "%lld takes a long long argument"
 check "width [  3.14]" "$out" "float width and precision combine"
 check "NSLog: nslog   2.2" "$out" "NSLog applies width and precision"
+check "pos 22 11" "$out" "positional arguments select values by index"
+check "posstar    42" "$out" "a positional argument supplies the field width"
+check "posprec abc" "$out" "a positional argument supplies the precision"
+check "posmix 8 7" "$out" \
+    "a non-positional conversion resumes the sequential argument list"
 if [ "$rc" -eq 0 ]; then
     echo "ok   the arm64 varargs fixture exits zero"
 else
@@ -1983,6 +1988,8 @@ check "NSLog: NSLog value 9" "$out_nj" \
     "the interpreter runs the same variadic calls"
 check "fmt 0002.500" "$out_nj" \
     "the interpreter renders the same full format"
+check "pos 22 11" "$out_nj" \
+    "the interpreter resolves positional arguments"
 
 # ---------- 4f10ae. arm64 AdvSIMD coverage ----------
 # Vector shifts, integer add/sub/mul, max/min, compares, conversions,

@@ -47,7 +47,9 @@ cell and menu providers, preview providers). The printf-family gates now cover
 fprintf, sprintf, snprintf and NSLog, including %@ through the object's
 description, and each conversion's flags, width, precision and length
 modifier survive by rebuilding the specification and letting the C
-library render the value. NSString's variadic format constructors are
+library render the value. Positional references (`%2$d`, `%2$*1$d`,
+`%1$.*2$s`) select the stack slot by number, and a non-positional
+conversion resumes at the next sequential slot. NSString's variadic format constructors are
 rendered the same way and forwarded to their non-variadic forms, and a
 message to nil returns zero from the bridge. AdvSIMD coverage includes shifts by immediate, integer
 add/sub/mul/mla in every lane size, signed and unsigned min/max,
@@ -235,8 +237,7 @@ can still hit today.
   take or return floating-point, vector or struct values are not
   bridged.
 - The variadic gates cover printf, fprintf, sprintf, snprintf and NSLog;
-  another variadic C function needs a fixed-arity shim, and positional
-  format arguments are not interpreted.
+  another variadic C function needs a fixed-arity shim.
 - arm64 images have no thread-local storage setup and no exception
   unwinding: the Objective-C personality declines every frame and a
   resumed unwind terminates the guest.

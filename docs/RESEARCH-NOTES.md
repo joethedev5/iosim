@@ -2555,3 +2555,20 @@ components.
   negation, which compiles to shifted-register SUB with XZR. The suite
   also compares SectionApp and CollectionApp frames and normalized logs
   across architectures.
+
+## 2026-11-24: positional printf arguments from arm64
+
+- POSIX positional references select an anonymous stack argument by
+  number. The arm64 renderer now parses `n$` before the flags for the
+  conversion value, `*n$` for a star width and `.*n$` for a star
+  precision. A positional reference does not advance the sequential
+  slot counter, so a later `%d` still reads the next sequential
+  argument, matching the native C library (`printf("%2$d %d", 7, 8)`
+  prints "8 7").
+- The x86_64 build of tests/arm64_varargs.m supports positional
+  references through the host C library, so the dual-architecture
+  comparison stays byte for byte. Foundation's native format_va inside
+  the runtime framework does not implement POSIX positions (it scans to
+  the first conversion character and would consume the wrong va_arg
+  type), so the NSString constructor fixture stays with sequential
+  formats.
