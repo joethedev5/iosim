@@ -1199,3 +1199,27 @@ components.
   `NSDate timeIntervalSinceDate:` supplies the signed interval for date-pair
   formatting.
 
+## 2026-11-24: Layer position animations
+
+- A layer animation whose key path is `position` can carry CGPoint `NSValue`
+  endpoints (`CABasicAnimation`) or a CGPoint `values` array
+  (`CAKeyframeAnimation`). The keyframe evaluator reads `CGPointValue` and
+  interpolates both components with key times and per-segment timing
+  functions; basic animations evaluate the animation's timing function once.
+- `layer_progress` reproduces the scalar key path's fill-mode, delay, speed,
+  repeat-count and autoreverse rules, so point animations share the same
+  clock. Its duration falls back to 0.25 s when unset.
+- `current_frame` converts the animated anchor-relative position back into a
+  frame origin using the layer's anchor point. Because rendering, hit-testing
+  and `presentationLayer` all call `current_frame`, a direct layer position
+  animation moves the drawn view and the reported geometry together. A
+  standalone layer's `presentationLayer` applies the same conversion without
+  an owning view.
+- A keyframe position animation can carry a CGPath instead of values.
+  `layer_path_point` collects the path through `CGPathApply`; the CGPath
+  store flattens quad and cubic curves into line segments at construction
+  time, so accumulating segment lengths already measures the drawn geometry.
+  The sampler accumulates total length, maps the animation fraction into that
+  length and interpolates on the containing segment, which gives constant
+  speed along the path. Curves are handled defensively in the applier too.
+

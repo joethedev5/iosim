@@ -1668,6 +1668,28 @@ same values with an ease-in timing function read 0.071 (below linear). The
 fixture exits after printing `[kfmode] done`; the suite parses the five
 samples and checks those relationships with timing-tolerant ranges.
 
+### CoreAnimation: layer position animations
+
+`tests/layer_position_test.m` animates two white 40 pt boxes for two seconds
+with animations added directly to their backing layers. The first uses a
+`CABasicAnimation` from position (60,300) to (260,300); the second uses a
+`CAKeyframeAnimation` with CGPoint values (60,500), (260,500), (160,500) at
+key times 0, 0.5 and 1. At 0.25 s the presentation frames report origins
+65.1,280 and 90.3,480, both moved from their base x of 40. The capture's white
+ink spans 65.3–105.0 and 90.7–130.3 pt, so the renderer moved the views, and
+the sample points (83,300) and (108,500) are white while (50,300) and
+(55,500) are black. The same `current_frame` path feeds hit-testing and
+`presentationLayer`, keeping rendering and reported geometry consistent.
+
+`tests/layer_path_test.m` gives one box a straight CGPath from (60,300) to
+(260,300) over two seconds and another a quadratic path from (60,500) through
+control point (160,450) to (260,500) over half a second. At 0.25 s the
+presentation origins are 66.5,280 (moved along the line) and 146.1,455.3 (the
+curve's center sits at about 475 pt, near the apex). The captured white ink
+spans 66.7–106.3 and 146.7–186.3 pt; (83,300) and (160,475) are white while
+(50,300) and (55,500) remain black, so both the line and curve paths move the
+rendered views by arc length.
+
 ### Image renderer and PNG output
 
 `tests/image_renderer_test.m` uses `UIGraphicsImageRenderer` at scale 1 to

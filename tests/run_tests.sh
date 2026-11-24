@@ -487,6 +487,144 @@ else
     echo "FAIL keyframe modes"; echo "$out"; fails=$((fails+1))
 fi
 
+# ---------- 4f7. Direct CALayer position animations ----------
+rm -f "$T/lpos.fifo"
+mkfifo "$T/lpos.fifo"
+"$ROOT/tools/build_app.sh" "$ROOT/tests/layer_position_test.m" \
+    "$T/layer_position_test" >/dev/null
+out="$(IOSIM_EVENT_FIFO="$T/lpos.fifo" IOSIM_TEST_PNG="$T/layer_position.png" \
+    DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/layer_position_test" 2>&1)"
+rm -f "$T/lpos.fifo"
+check "[lpos] ready" "$out" \
+    "the layer position fixture starts"
+check "[lpos] png written" "$out" \
+    "the layer position fixture captures a frame"
+if out="$(python3 - "$out" <<'PY'
+import re
+import sys
+
+vals = {}
+for line in sys.argv[1].splitlines():
+    m = re.match(r'\[lpos\] (basic|key) ([-0-9.]+) ([-0-9.]+)$', line)
+    if m:
+        vals[m.group(1)] = (float(m.group(2)), float(m.group(3)))
+if 'basic' not in vals or 'key' not in vals:
+    raise SystemExit('missing presentation origins: %r' % vals)
+bx, by = vals['basic']
+kx, ky = vals['key']
+if not (55.0 <= bx <= 80.0 and abs(by - 280.0) < 0.5):
+    raise SystemExit('basic position is not mid-flight: %.1f %.1f' %
+                     (bx, by))
+if not (80.0 <= kx <= 105.0 and abs(ky - 480.0) < 0.5):
+    raise SystemExit('keyframe position is not mid-flight: %.1f %.1f' %
+                     (kx, ky))
+print("ok   layer position animations reach the presentation layer")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL layer position origins"; echo "$out"; fails=$((fails+1))
+fi
+if out="$(python3 - "$ROOT/tools" "$T/layer_position.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+
+def rgb(x, y):
+    c = pngpixel.px(rows, bpp, x * 3, y * 3)
+    return ((c >> 16) & 255, (c >> 8) & 255, c & 255)
+
+def white(x, y):
+    return rgb(x, y) == (255, 255, 255)
+
+def black(x, y):
+    return rgb(x, y) == (0, 0, 0)
+
+checks = [
+    ((83, 300), white(83, 300), "basic box moved onto the sample"),
+    ((50, 300), black(50, 300), "basic box vacated its base origin"),
+    ((108, 500), white(108, 500), "keyframe box moved onto the sample"),
+    ((55, 500), black(55, 500), "keyframe box vacated its base origin"),
+]
+bad = [name for _pt, ok, name in checks if not ok]
+if bad:
+    raise SystemExit("layer position pixels failed: " + ", ".join(bad))
+print("ok   renderer moves view layers along animated positions")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL layer position pixels"; echo "$out"; fails=$((fails+1))
+fi
+
+# ---------- 4f8. CGPath-driven keyframe positions ----------
+rm -f "$T/lpath.fifo"
+mkfifo "$T/lpath.fifo"
+"$ROOT/tools/build_app.sh" "$ROOT/tests/layer_path_test.m" \
+    "$T/layer_path_test" >/dev/null
+out="$(IOSIM_EVENT_FIFO="$T/lpath.fifo" IOSIM_TEST_PNG="$T/layer_path.png" \
+    DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/layer_path_test" 2>&1)"
+rm -f "$T/lpath.fifo"
+check "[lpath] ready" "$out" \
+    "the path animation fixture starts"
+check "[lpath] png written" "$out" \
+    "the path animation fixture captures a frame"
+if out="$(python3 - "$out" <<'PY'
+import re
+import sys
+
+vals = {}
+for line in sys.argv[1].splitlines():
+    m = re.match(r'\[lpath\] (line|curve) ([-0-9.]+) ([-0-9.]+)$', line)
+    if m:
+        vals[m.group(1)] = (float(m.group(2)), float(m.group(3)))
+if 'line' not in vals or 'curve' not in vals:
+    raise SystemExit('missing path positions: %r' % vals)
+lx, ly = vals['line']
+cx, cy = vals['curve']
+if not (55.0 <= lx <= 80.0 and abs(ly - 280.0) < 0.5):
+    raise SystemExit('line path position is not mid-flight: %.1f %.1f' %
+                     (lx, ly))
+if not (130.0 <= cx <= 160.0 and 450.0 <= cy <= 465.0):
+    raise SystemExit('quadratic path position is not near the apex: '
+                     '%.1f %.1f' % (cx, cy))
+print("ok   a CAKeyframeAnimation path drives the presentation position")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL path origins"; echo "$out"; fails=$((fails+1))
+fi
+if out="$(python3 - "$ROOT/tools" "$T/layer_path.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+
+def rgb(x, y):
+    c = pngpixel.px(rows, bpp, x * 3, y * 3)
+    return ((c >> 16) & 255, (c >> 8) & 255, c & 255)
+
+checks = [
+    ((83, 300), rgb(83, 300) == (255, 255, 255), "line box moved"),
+    ((50, 300), rgb(50, 300) == (0, 0, 0), "line base vacated"),
+    ((160, 475), rgb(160, 475) == (255, 255, 255), "curve apex covered"),
+    ((55, 500), rgb(55, 500) == (0, 0, 0), "curve base vacated"),
+]
+bad = [name for _pt, ok, name in checks if not ok]
+if bad:
+    raise SystemExit("path pixels failed: " + ", ".join(bad))
+print("ok   renderer follows quadratic path positions on screen")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL path pixels"; echo "$out"; fails=$((fails+1))
+fi
+
 # ---------- 4g. NSCalendar components ----------
 "$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
     -ffreestanding -O1 -I "$ROOT/frameworks" \

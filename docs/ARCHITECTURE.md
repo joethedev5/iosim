@@ -1067,6 +1067,14 @@ decoded with libpng in `loader/image.c`.
   distance-paced timing or a Catmull-Rom cubic spline; a `timingFunctions`
   array replaces the animation-wide function per segment, except in paced
   modes where Apple ignores it.
+  A `CABasicAnimation` or `CAKeyframeAnimation` on the backing layer's
+  `position` path carries CGPoint `NSValue` endpoints or values; the renderer
+  reads the animated position around the layer's anchor point in
+  `current_frame`, so presentation frames, hit-testing and drawing share the
+  same presentation geometry. A keyframe animation can instead carry a
+  CGPath: the renderer walks the path through `CGPathApply`, accumulates
+  segment lengths (the path store already flattens curves into lines) and
+  samples the point at the animation fraction of total arc length.
   Named timing functions store their two control points and keep the fast
   smoothstep-style evaluation; `functionWithControlPoints::::` marks a custom
   function, whose `evaluate:` solves x(t) by bisection and returns y(t) for

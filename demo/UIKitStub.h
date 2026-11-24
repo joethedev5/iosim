@@ -608,6 +608,8 @@ extern id kCAMediaTimingFunctionEaseInEaseOut;
 - (id)calculationMode;
 - (void)setTimingFunctions:(id)functions;
 - (id)timingFunctions;
+- (void)setPath:(CGPathRef)path;
+- (CGPathRef)path;
 @end
 
 @interface CASpringAnimation : CAAnimation

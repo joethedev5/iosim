@@ -190,6 +190,7 @@ struct layer_anim {
     id keyTimes;
     id calcMode;
     id timingFunctions;
+    CGPathRef path;
     id timingFunction;
     id key;
     id animation;
@@ -519,6 +520,7 @@ extern id kCAMediaTimingFunctionEaseInEaseOut;
     id _keyTimes;
     id _calculationMode;
     id _timingFunctions;
+    CGPathRef _path;
 }
 - (void)setValues:(id)values;
 - (void)setKeyTimes:(id)keyTimes;
@@ -526,6 +528,8 @@ extern id kCAMediaTimingFunctionEaseInEaseOut;
 - (id)calculationMode;
 - (void)setTimingFunctions:(id)functions;
 - (id)timingFunctions;
+- (void)setPath:(CGPathRef)path;
+- (CGPathRef)path;
 @end
 
 @interface CASpringAnimation : CAAnimation {
@@ -3971,6 +3975,8 @@ static void animation_unmark_infinite(void);
 static CGRect current_frame(UIView *view);
 static double current_alpha(UIView *view);
 static CGAffineTransform current_transform(UIView *view);
+static int layer_animated_position(CALayer *layer, CGPoint base,
+                                   CGPoint *out);
 static CGPoint view_untransform_point(UIView *view, CGPoint point);
 static double layer_key_value(CALayer *layer, const char *key, double base);
 
@@ -4260,6 +4266,7 @@ static int anim_delegates_pending(void)
                           : nil;
     entry->timingFunctions =
         keyframe ? ((CAKeyframeAnimation *)anim)->_timingFunctions : nil;
+    entry->path = keyframe ? ((CAKeyframeAnimation *)anim)->_path : 0;
     if (spring)
     {
         CASpringAnimation *sa = (CASpringAnimation *)anim;
@@ -4362,6 +4369,20 @@ static int anim_delegates_pending(void)
     {
         frame = current_frame((UIView *)_ownerView);
         opacity = current_alpha((UIView *)_ownerView) * _opacity;
+    }
+    else
+    {
+        CGPoint base = CGPointMake(
+            frame.origin.x + _anchorPoint.x * frame.size.width,
+            frame.origin.y + _anchorPoint.y * frame.size.height);
+        CGPoint position;
+        if (layer_animated_position(self, base, &position))
+        {
+            frame.origin.x =
+                position.x - _anchorPoint.x * frame.size.width;
+            frame.origin.y =
+                position.y - _anchorPoint.y * frame.size.height;
+        }
     }
     presentation->_frame = frame;
     presentation->_opacity = layer_key_value(self, "opacity", opacity);
@@ -4711,6 +4732,8 @@ double CACurrentMediaTime(void)
     _timingFunctions = functions;
 }
 - (id)timingFunctions { return _timingFunctions; }
+- (void)setPath:(CGPathRef)path { _path = path; }
+- (CGPathRef)path { return _path; }
 @end
 
 @implementation CASpringAnimation
@@ -17677,6 +17700,7 @@ static double view_animation_progress(UIView *view, int *finished)
 
 static CGRect current_frame(UIView *view)
 {
+    CGRect frame = view->_frame;
     if (view->_animatingFrame)
     {
         int finished = 0;
@@ -17684,18 +17708,39 @@ static CGRect current_frame(UIView *view)
         if (finished)
         {
             view->_animatingFrame = NO;
-            view->_frame = view->_animFrameTo;
+            frame = view->_frame = view->_animFrameTo;
         }
         else
         {
             CGRect a = view->_animFrameFrom, b = view->_animFrameTo;
-            return CGRectMake(a.origin.x + (b.origin.x - a.origin.x) * e,
-                              a.origin.y + (b.origin.y - a.origin.y) * e,
-                              a.size.width + (b.size.width - a.size.width) * e,
-                              a.size.height + (b.size.height - a.size.height) * e);
+            frame = CGRectMake(
+                a.origin.x + (b.origin.x - a.origin.x) * e,
+                a.origin.y + (b.origin.y - a.origin.y) * e,
+                a.size.width + (b.size.width - a.size.width) * e,
+                a.size.height + (b.size.height - a.size.height) * e);
         }
     }
-    return view->_frame;
+    /* A CAAnimation on the backing layer's position moves the view around
+     * the layer's anchor point. The presentation layer reads the same
+     * value, so rendering, hit-testing and reported frames agree. */
+    if (view->_layer)
+    {
+        CGPoint base = CGPointMake(
+            frame.origin.x + view->_layer->_anchorPoint.x * frame.size.width,
+            frame.origin.y +
+                view->_layer->_anchorPoint.y * frame.size.height);
+        CGPoint position;
+        if (layer_animated_position(view->_layer, base, &position))
+        {
+            frame.origin.x =
+                position.x -
+                view->_layer->_anchorPoint.x * frame.size.width;
+            frame.origin.y =
+                position.y -
+                view->_layer->_anchorPoint.y * frame.size.height;
+        }
+    }
+    return frame;
 }
 
 static double current_alpha(UIView *view)
@@ -17918,6 +17963,284 @@ static double layer_keyframe_value(id values, id keyTimes, id calcMode,
         }
     }
     return vals[n - 1];
+}
+
+static int layer_point_value(id value, CGPoint *point)
+{
+    if (!value || ![value respondsToSelector:@selector(CGPointValue)])
+        return 0;
+    *point = ((CGPoint (*)(id, SEL))objc_msgSend)(value,
+                                                 @selector(CGPointValue));
+    return 1;
+}
+
+/* Normalized progress of a layer animation, with fill-mode handling and
+ * the same repeat/autoreverse rules as scalar key paths. Returns 0 when a
+ * fill-backwards animation has not started yet. */
+static int layer_progress(struct layer_anim *anim, double *outT)
+{
+    double elapsed = (iosim_now() - anim->start - anim->delay) *
+                         anim->speed +
+                     anim->timeOffset;
+    if (elapsed < 0)
+    {
+        const char *fill =
+            anim->fillMode ? iosim_string_cstr(anim->fillMode) : 0;
+        int backwards =
+            fill && (strstr(fill, "backward") || strstr(fill, "both"));
+        if (!backwards)
+            return 0;
+        elapsed = 0;
+    }
+    double duration = anim->duration > 0 ? anim->duration : 0.25;
+    double t = elapsed / duration;
+    double repeat = anim->repeatCount;
+    if (repeat < 0)
+        t = t - (long)t;
+    else if (repeat > 1 && t >= repeat)
+        t = 1.0;
+    else if (t >= 1.0)
+        t = 1.0;
+    if (anim->autoreverses)
+    {
+        if (t >= 1.0)
+            t = 0.0;
+        else if (t < 0.5)
+            t *= 2.0;
+        else
+            t = (1.0 - t) * 2.0;
+    }
+    *outT = t;
+    return 1;
+}
+
+static CGPoint layer_keyframe_point(id values, id keyTimes,
+                                    id timingFunctions, CGPoint base,
+                                    double t)
+{
+    int n = values ? (int)[values count] : 0;
+    if (n <= 0)
+        return base;
+    if (n > 256)
+        n = 256;
+    CGPoint points[256];
+    for (int i = 0; i < n; i++)
+    {
+        if (!layer_point_value([values objectAtIndex:(unsigned long)i],
+                               &points[i]))
+            points[i] = base;
+    }
+    if (n == 1 || t <= 0.0)
+        return points[0];
+    if (t >= 1.0)
+        return points[n - 1];
+    for (int i = 0; i + 1 < n; i++)
+    {
+        double t0 = keyTimes
+            ? number_value([keyTimes objectAtIndex:(unsigned long)i],
+                           (double)i / (n - 1))
+            : (double)i / (n - 1);
+        double t1 = keyTimes
+            ? number_value([keyTimes objectAtIndex:(unsigned long)(i + 1)],
+                           (double)(i + 1) / (n - 1))
+            : (double)(i + 1) / (n - 1);
+        if (t <= t1 || i == n - 2)
+        {
+            if (t1 <= t0)
+                return points[i + 1];
+            double f = (t - t0) / (t1 - t0);
+            if (f < 0)
+                f = 0;
+            if (f > 1)
+                f = 1;
+            f = keyframe_timing(timingFunctions, i, f);
+            return CGPointMake(
+                points[i].x + (points[i + 1].x - points[i].x) * f,
+                points[i].y + (points[i + 1].y - points[i].y) * f);
+        }
+    }
+    return points[n - 1];
+}
+
+struct layer_path_points {
+    CGPoint points[512];
+    int count;
+    CGPoint start;
+    int have_start;
+};
+
+static void layer_path_add(struct layer_path_points *builder, double x,
+                           double y)
+{
+    if (builder->count >= 512)
+        return;
+    CGPoint point = CGPointMake(x, y);
+    if (builder->count > 0)
+    {
+        CGPoint last = builder->points[builder->count - 1];
+        if (last.x == point.x && last.y == point.y)
+            return;
+    }
+    builder->points[builder->count++] = point;
+}
+
+static void layer_path_element(void *info, const CGPathElement *element)
+{
+    struct layer_path_points *builder = info;
+    switch (element->type)
+    {
+    case kCGPathElementMoveToPoint:
+        builder->start = element->points[0];
+        builder->have_start = 1;
+        layer_path_add(builder, element->points[0].x, element->points[0].y);
+        break;
+    case kCGPathElementAddLineToPoint:
+        layer_path_add(builder, element->points[0].x, element->points[0].y);
+        break;
+    case kCGPathElementAddQuadCurveToPoint:
+    case kCGPathElementAddCurveToPoint:
+    {
+        CGPoint from = builder->count
+                           ? builder->points[builder->count - 1]
+                           : element->points[0];
+        int quad = element->type == kCGPathElementAddQuadCurveToPoint;
+        int steps = quad ? 12 : 24;
+        for (int i = 1; i <= steps; i++)
+        {
+            double u = (double)i / steps;
+            double m = 1.0 - u;
+            double x, y;
+            if (quad)
+            {
+                x = m * m * from.x + 2 * m * u * element->points[0].x +
+                    u * u * element->points[1].x;
+                y = m * m * from.y + 2 * m * u * element->points[0].y +
+                    u * u * element->points[1].y;
+            }
+            else
+            {
+                x = m * m * m * from.x +
+                    3 * m * m * u * element->points[0].x +
+                    3 * m * u * u * element->points[1].x +
+                    u * u * u * element->points[2].x;
+                y = m * m * m * from.y +
+                    3 * m * m * u * element->points[0].y +
+                    3 * m * u * u * element->points[1].y +
+                    u * u * u * element->points[2].y;
+            }
+            layer_path_add(builder, x, y);
+        }
+        break;
+    }
+    case kCGPathElementCloseSubpath:
+        if (builder->have_start)
+            layer_path_add(builder, builder->start.x, builder->start.y);
+        break;
+    }
+}
+
+/* Point at fraction t of a path's total arc length. CGPath stores curves as
+ * flattened line segments, so straight-line accumulation matches the
+ * geometry that CGContext draws. */
+static int layer_path_point(CGPathRef path, double t, CGPoint *out)
+{
+    if (!path)
+        return 0;
+    struct layer_path_points builder;
+    memset(&builder, 0, sizeof(builder));
+    CGPathApply(path, &builder, layer_path_element);
+    if (builder.count <= 0)
+        return 0;
+    if (builder.count == 1 || t <= 0.0)
+    {
+        *out = builder.points[0];
+        return 1;
+    }
+    if (t >= 1.0)
+    {
+        *out = builder.points[builder.count - 1];
+        return 1;
+    }
+    double total = 0.0;
+    for (int i = 1; i < builder.count; i++)
+    {
+        double dx = builder.points[i].x - builder.points[i - 1].x;
+        double dy = builder.points[i].y - builder.points[i - 1].y;
+        total += __builtin_sqrt(dx * dx + dy * dy);
+    }
+    if (total <= 0.0)
+    {
+        *out = builder.points[0];
+        return 1;
+    }
+    double target = t * total;
+    double acc = 0.0;
+    for (int i = 1; i < builder.count; i++)
+    {
+        double dx = builder.points[i].x - builder.points[i - 1].x;
+        double dy = builder.points[i].y - builder.points[i - 1].y;
+        double length = __builtin_sqrt(dx * dx + dy * dy);
+        if (target <= acc + length || i == builder.count - 1)
+        {
+            double f = length > 0 ? (target - acc) / length : 1.0;
+            if (f < 0)
+                f = 0;
+            if (f > 1)
+                f = 1;
+            *out = CGPointMake(builder.points[i - 1].x + dx * f,
+                               builder.points[i - 1].y + dy * f);
+            return 1;
+        }
+        acc += length;
+    }
+    *out = builder.points[builder.count - 1];
+    return 1;
+}
+
+static int layer_animated_position(CALayer *layer, CGPoint base,
+                                   CGPoint *out)
+{
+    struct layer_anim *anim = 0;
+    for (int i = 0; i < LAYER_ANIM_SLOTS; i++)
+    {
+        struct layer_anim *entry = &layer->_anims[i];
+        if (!entry->used || !entry->keyPath)
+            continue;
+        const char *path = iosim_string_cstr(entry->keyPath);
+        if (!path || strcmp(path, "position") != 0)
+            continue;
+        if (!anim || entry->seq > anim->seq)
+            anim = entry;
+    }
+    if (!anim)
+        return 0;
+    double t = 0.0;
+    if (!layer_progress(anim, &t))
+        return 0;
+    if (anim->path)
+        return layer_path_point(anim->path, t, out);
+    if (anim->values)
+    {
+        *out = layer_keyframe_point(anim->values, anim->keyTimes,
+                                    anim->timingFunctions, base, t);
+        return 1;
+    }
+    CGPoint from = base, to = base;
+    int haveFrom = layer_point_value(anim->fromValue, &from);
+    int haveTo = layer_point_value(anim->toValue, &to);
+    if (!haveFrom && !haveTo)
+        return 0;
+    if (!haveFrom)
+        from = to;
+    if (!haveTo)
+        to = from;
+    double e = t;
+    if (anim->timingFunction)
+        e = ((double (*)(id, SEL, double))objc_msgSend)(
+            anim->timingFunction, @selector(evaluate:), t);
+    *out = CGPointMake(from.x + (to.x - from.x) * e,
+                       from.y + (to.y - from.y) * e);
+    return 1;
 }
 
 static double layer_key_value(CALayer *layer, const char *key, double base)
