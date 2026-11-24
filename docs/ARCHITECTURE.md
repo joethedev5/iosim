@@ -1539,6 +1539,11 @@ Python for iteration speed.
   its icon), with no memory-pressure termination policy. Stock system apps are display icons
   without executables, and a directly launched app alongside a running
   SpringBoard is not coordinated through launchd.
+`UICollectionViewFlowLayout` lays cells out along its scroll direction: a
+horizontal layout computes the row count from the section's available
+height, fills each column top to bottom, wraps into the next column and
+grows the content width, while hit-testing shares those same frames.
+Headers and footers are placed only in vertical flow sections.
 `UICollectionViewCompositionalLayout` resolves sizes against the section's
 content width and the collection view's height: fractional dimensions are
 fractions of the parent slot, absolute ones are points. A group lays its

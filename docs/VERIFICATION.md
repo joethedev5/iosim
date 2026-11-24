@@ -203,6 +203,16 @@ second section starts at y=470 and item 19 is (206,845), for a 940 pt content
 height. Captured pixels are white at cell centers and black at the 10 pt gap
 between the two columns, so rendering uses the same frames as hit-testing.
 
+### UIKit: horizontal collection flow layout
+
+`tests/horizontal_collection_test.m` gives a 402x200 collection a 90x60 item
+size, 10 pt inter-item and 5 pt line spacing, 20/10 pt section insets and a
+horizontal scroll direction. Ten items wrap after two rows, so cells sit at
+(10,20), (10,85), (110,20), (110,85) and (410,85), the content size is
+510x200, and a tap at (155,50) reports section 0 item 2. After setting a
+60 pt content offset, captured pixels read white at the second and fourth
+column centers and black in the 10 pt gap, so rendering follows the offset.
+
 ### UIKit: split-view columns
 
 `tests/foundation_extra_test.m` lays out a 1024 pt double-column split view and

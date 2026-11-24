@@ -15595,6 +15595,16 @@ static int collection_columns(double width, double itemW, double interitem,
     return columns;
 }
 
+static long collection_rows(double height, double itemH, double line,
+                            double top, double bottom)
+{
+    double available = height - top - bottom;
+    long rows = (long)((available + line) / (itemH + line));
+    if (rows < 1)
+        rows = 1;
+    return rows;
+}
+
 struct cl_frame_context {
     CGRect *frames;
     long count;
@@ -15987,6 +15997,57 @@ static double cl_place_section(UICollectionViewCompositionalLayout *layout,
             : nil;
     double headerH = flow ? flow->_headerReferenceSize.height : 0.0;
     double footerH = flow ? flow->_footerReferenceSize.height : 0.0;
+    if (flow &&
+        flow->_scrollDirection == UICollectionViewScrollDirectionHorizontal)
+    {
+        long rows = collection_rows(_frame.size.height, itemH, line, top,
+                                    bottom);
+        double x = 0;
+        for (long section = 0; section < sections; section++)
+        {
+            long count = collection_items_in_section(self, section);
+            long columns = (count + rows - 1) / rows;
+            x += left;
+            for (long i = 0; i < count; i++)
+            {
+                NSIndexPath *path =
+                    [NSIndexPath indexPathForRow:i inSection:section];
+                UICollectionViewCell *cell = nil;
+                if (_dataSource && [_dataSource respondsToSelector:
+                        @selector(collectionView:cellForItemAtIndexPath:)])
+                {
+                    SEL sel =
+                        @selector(collectionView:cellForItemAtIndexPath:);
+                    cell = (UICollectionViewCell *)((id (*)(id, void *, id, id))
+                        objc_msgSend)(_dataSource, (void *)sel, self, path);
+                }
+                if (cell)
+                {
+                    long column = i / rows, row = i % rows;
+                    [cell setFrame:CGRectMake(
+                        x + (double)column * (itemW + interitem),
+                        top + (double)row * (itemH + line), itemW, itemH)];
+                    [cell setSelected:(section == _selectedSection &&
+                                      i == _selectedItem)
+                             animated:NO];
+                    [self addSubview:cell];
+                    [_cells addObject:cell];
+                }
+                else
+                    [_cells addObject:[NSNull null]];
+            }
+            if (columns > 0)
+                x += (double)columns * itemW +
+                     (double)(columns - 1) * interitem;
+            x += right;
+            if (section + 1 < sections)
+                x += interitem;
+        }
+        if (x < _frame.size.width)
+            x = _frame.size.width;
+        _contentSize = CGSizeMake(x, _frame.size.height);
+        return;
+    }
     double cursor = 0;
     for (long section = 0; section < sections; section++)
     {
@@ -16104,6 +16165,48 @@ static void collection_select_item(UICollectionView *collectionView,
 }
 - (void)handleTapAtPoint:(CGPoint)point
 {
+    UICollectionViewFlowLayout *hflow =
+        _collectionLayout &&
+                [_collectionLayout isKindOfClass:
+                    [UICollectionViewFlowLayout class]]
+            ? (UICollectionViewFlowLayout *)_collectionLayout
+            : nil;
+    if (hflow && hflow->_scrollDirection ==
+            UICollectionViewScrollDirectionHorizontal)
+    {
+        double itemW, itemH, interitem, line, left, right, top, bottom;
+        collection_metrics(self, &itemW, &itemH, &interitem, &line,
+                           &left, &right, &top, &bottom);
+        long rows = collection_rows(_frame.size.height, itemH, line, top,
+                                    bottom);
+        long sections = collection_sections(self);
+        double x = 0;
+        for (long section = 0; section < sections; section++)
+        {
+            long count = collection_items_in_section(self, section);
+            long columns = (count + rows - 1) / rows;
+            x += left;
+            for (long i = 0; i < count; i++)
+            {
+                long column = i / rows, row = i % rows;
+                double cx = x + (double)column * (itemW + interitem);
+                double cy = top + (double)row * (itemH + line);
+                if (point.x >= cx && point.x < cx + itemW &&
+                    point.y >= cy && point.y < cy + itemH)
+                {
+                    collection_select_item(self, section, i);
+                    return;
+                }
+            }
+            if (columns > 0)
+                x += (double)columns * itemW +
+                     (double)(columns - 1) * interitem;
+            x += right;
+            if (section + 1 < sections)
+                x += interitem;
+        }
+        return;
+    }
     UICollectionViewCompositionalLayout *compositional =
         _collectionLayout &&
                 [_collectionLayout isKindOfClass:

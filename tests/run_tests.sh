@@ -1001,6 +1001,107 @@ else
     echo "FAIL blend modes"; echo "$out"; fails=$((fails+1))
 fi
 
+# ---------- 4f15. Horizontal collection flow layout ----------
+rm -f "$T/hflow.fifo"
+mkfifo "$T/hflow.fifo"
+"$ROOT/tools/build_app.sh" "$ROOT/tests/horizontal_collection_test.m" \
+    "$T/horizontal_collection_test" >/dev/null
+out="$(IOSIM_EVENT_FIFO="$T/hflow.fifo" IOSIM_TEST_PNG="$T/hflow.png" \
+    DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/horizontal_collection_test" \
+    2>&1)"
+rm -f "$T/hflow.fifo"
+check "[hflow] ready" "$out" \
+    "the horizontal collection fixture starts"
+check "[hflow] done" "$out" \
+    "the horizontal collection fixture scrolls its content"
+if out="$(python3 - "$out" <<'PY'
+import re
+import sys
+
+frames = {}
+size = None
+tap = None
+tapstate = None
+offset = None
+for line in sys.argv[1].splitlines():
+    m = re.match(r'\[hflow\] cell (\d+) '
+                 r'([-0-9.]+) ([-0-9.]+) ([-0-9.]+) ([-0-9.]+)$', line)
+    if m:
+        frames[int(m.group(1))] = tuple(
+            float(m.group(i)) for i in (2, 3, 4, 5))
+        continue
+    m = re.match(r'\[hflow\] size ([-0-9.]+) ([-0-9.]+)$', line)
+    if m:
+        size = (float(m.group(1)), float(m.group(2)))
+    m = re.match(r'\[hflow\] tap (\d+) (\d+)$', line)
+    if m:
+        tap = (int(m.group(1)), int(m.group(2)))
+    m = re.match(r'\[hflow\] tapstate (\d+) (\d+)$', line)
+    if m:
+        tapstate = (int(m.group(1)), int(m.group(2)))
+    m = re.match(r'\[hflow\] offset ([-0-9.]+)$', line)
+    if m:
+        offset = float(m.group(1))
+
+expected = {
+    0: (10.0, 20.0, 90.0, 60.0),
+    1: (10.0, 85.0, 90.0, 60.0),
+    2: (110.0, 20.0, 90.0, 60.0),
+    3: (110.0, 85.0, 90.0, 60.0),
+    9: (410.0, 85.0, 90.0, 60.0),
+}
+for key, want in expected.items():
+    if key not in frames:
+        raise SystemExit('missing cell %r' % (key,))
+    got = frames[key]
+    for a, b in zip(got, want):
+        if abs(a - b) > 0.6:
+            raise SystemExit('cell %r is %r, expected %r' %
+                             (key, got, want))
+if size is None or abs(size[0] - 510.0) > 0.6 or abs(size[1] - 200.0) > 0.6:
+    raise SystemExit('content size is %r, expected (510, 200)' % (size,))
+if tap != (0, 2) or tapstate != (0, 2):
+    raise SystemExit('horizontal tap disagrees: %r %r' % (tap, tapstate))
+if offset is None or abs(offset - 60.0) > 0.6:
+    raise SystemExit('content offset is %r, expected 60' % (offset,))
+print("ok   horizontal flow layout wraps columns and shares hit-testing")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL horizontal flow layout"; echo "$out"; fails=$((fails+1))
+fi
+if out="$(python3 - "$ROOT/tools" "$T/hflow.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+samples = [
+    ('item2', 95, 350, True),
+    ('gap', 145, 350, False),
+    ('item4', 195, 350, True),
+    ('item1', 20, 415, True),
+]
+for name, x, y, expect_white in samples:
+    c = pngpixel.px(rows, bpp, x * 3, y * 3)
+    r, g, b = (c >> 16) & 255, (c >> 8) & 255, c & 255
+    white = r > 200 and g > 200 and b > 200
+    dark = r < 60 and g < 60 and b < 60
+    if expect_white and not white:
+        raise SystemExit('%s sample at %d,%d is not white: %06x' %
+                         (name, x, y, c))
+    if not expect_white and not dark:
+        raise SystemExit('%s sample at %d,%d is not black: %06x' %
+                         (name, x, y, c))
+print("ok   the renderer shifts horizontal collection cells by content offset")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL horizontal collection rendering"; echo "$out"; fails=$((fails+1))
+fi
+
 # ---------- 4g. NSCalendar components ----------
 "$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
     -ffreestanding -O1 -I "$ROOT/frameworks" \

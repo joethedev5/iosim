@@ -1341,3 +1341,22 @@ components.
   read 255,128,128, difference reads 127,128,128, copy reads pure red, clear
   and destination-out read black, and a path-filled multiply box matches the
   rect-filled one.
+
+## 2026-11-24: Horizontal collection flow layouts
+
+- `UICollectionViewFlowLayout` now honors
+  `UICollectionViewScrollDirectionHorizontal`. The row count comes from the
+  height left after the section's top/bottom insets; each column holds that
+  many items, and items wrap into the next column. The main axis advances by
+  the item width plus inter-item spacing, sections add their left/right inset
+  and one inter-item gap, and the content size becomes the total width by
+  the collection view's height. Vertical layouts keep the previous column
+  fill and content-height sizing.
+- Header and footer reference sizes are ignored in horizontal layouts;
+  vertical sections still place them. The shared hit-testing branch mirrors
+  the frame loop and uses `collection_select_item`, so selection and delegate
+  callbacks behave identically in both directions.
+- The fixture uses ten 90x60 items on a 402 pt-wide, 200 pt-tall collection:
+  two rows per column give five 90 pt columns plus four 10 pt gaps and 20 pt
+  of insets, for a 510 pt content width. A 60 pt horizontal content offset
+  shifts the rendered cells, confirmed from the captured framebuffer.
