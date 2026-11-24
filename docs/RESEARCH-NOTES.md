@@ -2572,3 +2572,21 @@ components.
   the first conversion character and would consume the wrong va_arg
   type), so the NSString constructor fixture stays with sequential
   formats.
+
+## 2026-11-24: thread-local variables in an arm64 image
+
+- A `_Thread_local` access compiles to `adrp`/`add` for the variable's
+  thunk in `__DATA,__thread_vars`, then `ldr x8,[x0]; blr x8`. The
+  24-byte thunk is {getter, key, offset}; chained fixups bind the getter
+  to the loader's `tlv_bootstrap` gate, which the arm64 bridge resolves
+  by name and calls natively. It returned NULL because main.c skipped
+  `iosim_tlv_setup_image` for arm64 images, so the first access loaded
+  through NULL.
+- The metadata now covers arm64 images: the loader records each thunk's
+  offset into the image's concatenated `__thread_data`/`__thread_bss`
+  block and one pthread key per image. It leaves the fixup-bound getter
+  in place; the x86_64 register-preserving getter stub is only needed
+  for x86 images, because a call through the arm64 bridge already
+  preserves every guest register except x0.
+- tests/arm64_tlv.c covers initializers, a zero-filled array and a
+  double; arm64, x86_64 and NOJIT runs print `tlv 42 Tlv 9 3.0`.

@@ -257,12 +257,12 @@ int main(int argc, char **argv)
         iosim_objc_dump();
 
     /* Prepare language-runtime data before any constructor runs: thread-local
-     * thunks get their getter and per-image metadata, and Darwin pthread
-     * static initializers are translated to the host library's layout. arm64
-     * images have no x86_64 thunks yet. */
+     * thunks get their per-image metadata, and Darwin pthread static
+     * initializers are translated to the host library's layout. An arm64
+     * image's getter already points at the native tlv_bootstrap gate; only
+     * the x86_64 thunk is rewritten to the register-preserving stub. */
     for (int i = 0; i < ctx.nimages; i++)
-        if (!ctx.images[i]->is_arm64)
-            iosim_tlv_setup_image(ctx.images[i]);
+        iosim_tlv_setup_image(ctx.images[i]);
     iosim_normalize_pthread_objects(&ctx);
 
     /* dyld runs each image's initializer functions after fixups and before

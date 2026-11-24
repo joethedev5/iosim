@@ -2579,6 +2579,54 @@ else
     fails=$((fails+1))
 fi
 
+# ---------- 4f10an. arm64 thread-local variables ----------
+# Each thread-local variable has a 24-byte thunk in __thread_vars whose
+# getter the fixups bind to the native tlv_bootstrap gate. The loader
+# registers the thunk's offset into the image's __thread_data/__thread_bss
+# block and lazily allocates one block per thread.
+"$CC" -target arm64-apple-ios18.0-simulator -ffreestanding -O1 \
+    -c "$ROOT/tests/arm64_tlv.c" -o "$T/arm64_tlv.o"
+"$LD64" -arch arm64 -platform_version $PLATFORM -e _main \
+    -o "$T/arm64_tlv" "$T/arm64_tlv.o" -undefined dynamic_lookup
+if out="$(DYLD_ROOT_PATH="$ROOT/runtime" timeout 10 "$RUN" --arm64 \
+    $FW_ARGS "$T/arm64_tlv" 2>&1)"; then
+    rc=0
+else
+    rc=$?
+fi
+check "tlv 42 Tlv 9 3.0" "$out" \
+    "arm64 thread-local variables keep their initializers"
+if [ "$rc" -eq 0 ]; then
+    echo "ok   the arm64 tlv fixture exits zero"
+else
+    echo "FAIL arm64 tlv (exit $rc)"; fails=$((fails+1))
+fi
+if out_nj="$(IOSIM_ARM64_NOJIT=1 DYLD_ROOT_PATH="$ROOT/runtime" \
+    timeout 10 "$RUN" --arm64 $FW_ARGS "$T/arm64_tlv" 2>&1)"; then
+    :
+fi
+if [ "$out" = "$out_nj" ]; then
+    echo "ok   the interpreter reads the same thread-local block"
+else
+    echo "FAIL arm64 tlv under interpretation"; fails=$((fails+1))
+fi
+"$CC" -target x86_64-apple-ios18.0-simulator -ffreestanding -O1 \
+    -c "$ROOT/tests/arm64_tlv.c" -o "$T/tlv_x64.o"
+"$LD64" -arch x86_64 -platform_version $PLATFORM -e _main \
+    -o "$T/tlv_x64" "$T/tlv_x64.o" -undefined dynamic_lookup
+if out_x="$(DYLD_ROOT_PATH="$ROOT/runtime" timeout 10 "$RUN" \
+    $FW_ARGS "$T/tlv_x64" 2>&1)"; then
+    rc_x=0
+else
+    rc_x=$?
+fi
+if [ "$rc_x" -eq 0 ] && [ "$out" = "$out_x" ]; then
+    echo "ok   the arm64 thread-local values match the x86_64 build"
+else
+    echo "FAIL dual-architecture tlv"; echo "$out_x"
+    fails=$((fails+1))
+fi
+
 # ---------- 4f11. CAAnimation completion and fill modes ----------
 rm -f "$T/arem.fifo"
 mkfifo "$T/arem.fifo"

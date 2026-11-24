@@ -160,7 +160,12 @@ void iosim_tlv_setup_image(struct iosim_image *img)
             if (add_meta(&meta) != 0)
                 continue;
             void *getter = (void *)(uintptr_t)&iosim_tlv_get_addr;
-            memcpy(runtime, &getter, sizeof(getter));
+            /* An arm64 image's thunk was bound to the native tlv_bootstrap
+             * gate by the chained fixups. Calling it through the arm64
+             * bridge already preserves every guest register except x0, so
+             * the x86_64 register-preserving stub is not installed there. */
+            if (!img->is_arm64)
+                memcpy(runtime, &getter, sizeof(getter));
             if (getenv("IOSIM_DEBUG_TLV"))
                 fprintf(stderr, "iosim: tlv %s thunk=%p offset=%zu size=%zu\n",
                         img->path, runtime, meta.offset, meta.size);

@@ -2380,6 +2380,21 @@ instead of publishing a stale register as the result. The interpreter
 records the sentinel in `pc` on `ret` so a normal return is
 distinguishable from a stopped frame under both execution paths.
 
+### arm64: thread-local variables
+
+`tests/arm64_tlv.c` declares an initialized int, a character array, a
+zero-filled long array and a double as `_Thread_local`. Clang addresses
+them through 24-byte thunks in `__DATA,__thread_vars`: the first word is
+the getter, which the chained fixups bind to the loader's
+`tlv_bootstrap` gate, and the third is the variable's offset into the
+image's `__thread_data`/`__thread_bss` block. The loader now registers
+that metadata for arm64 images as well, so the getter's first call
+allocates the per-thread block, copies the initializers and returns the
+variable address. The fixture mutates every variable and prints
+`tlv 42 Tlv 9 3.0`; the suite checks the line and exit status, repeats
+the run with `IOSIM_ARM64_NOJIT=1`, and compares the log with the
+x86_64 build of the same source.
+
 ### arm64: AdvSIMD coverage
 
 `tests/arm64_neon.c` exercises float max/min/div/sqrt/abs, integer
