@@ -2287,6 +2287,20 @@ objects. The suite checks `snprintf 3 x=7`, `sprintf 5 2.5 k`,
 `trunc 6 abc`, `fprintf 42 err` and `NSLog: NSLog value 9`, then runs the
 same fixture with `IOSIM_ARM64_NOJIT=1`.
 
+### arm64: full printf format specifications
+
+`tests/arm64_varargs.m` also passes flags, width, precision and length
+modifiers through `snprintf`: `%08.3f`, `%+d`, `%-6d`, `%.2s`, `%*d`,
+`%.*s`, `%#x`, `%zu`, `%ld`, `%lld` and `[%6.2f]`, plus an NSLog with
+`%@ %5.1f`. The renderer parses each conversion into a specification,
+resolves `*` width and precision from stack slots in format order, and
+rebuilds the specification with the value in its C type, so the C
+library applies the exact conversion semantics. The suite checks the
+rendered lines (`fmt 0002.500`, `sign +7`, `left [42    ]`, `prec ab`,
+`star    42`, `starp abc`, `hex 0xff`, `size 99`, `long 123456789`,
+`llong -5`, `width [  3.14]`, `NSLog: nslog   2.2`) and repeats the
+fixture with `IOSIM_ARM64_NOJIT=1`, where the output is identical.
+
 ### arm64: AdvSIMD coverage
 
 `tests/arm64_neon.c` exercises float max/min/div/sqrt/abs, integer

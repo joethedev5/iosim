@@ -21,5 +21,29 @@ int main(void)
     printf("trunc %d %s\n", n3, buf);
     fprintf(stderr, "fprintf %d %s\n", 42, "err");
     NSLog(@"NSLog %@ %d", @"value", 9);
+
+    snprintf(buf, sizeof buf, "%08.3f", 2.5);
+    printf("fmt %s\n", buf);
+    snprintf(buf, sizeof buf, "%+d", 7);
+    printf("sign %s\n", buf);
+    snprintf(buf, sizeof buf, "[%-6d]", 42);
+    printf("left %s\n", buf);
+    snprintf(buf, sizeof buf, "%.2s", "abcdef");
+    printf("prec %s\n", buf);
+    snprintf(buf, sizeof buf, "%*d", 5, 42);
+    printf("star %s\n", buf);
+    snprintf(buf, sizeof buf, "%.*s", 3, "abcdef");
+    printf("starp %s\n", buf);
+    snprintf(buf, sizeof buf, "%#x", 255);
+    printf("hex %s\n", buf);
+    snprintf(buf, sizeof buf, "%zu", (unsigned long)99);
+    printf("size %s\n", buf);
+    snprintf(buf, sizeof buf, "%ld", 123456789L);
+    printf("long %s\n", buf);
+    snprintf(buf, sizeof buf, "%lld", -5LL);
+    printf("llong %s\n", buf);
+    snprintf(buf, sizeof buf, "[%6.2f]", 3.14159);
+    printf("width %s\n", buf);
+    NSLog(@"%@ %5.1f", @"nslog", 2.25);
     return 0;
 }

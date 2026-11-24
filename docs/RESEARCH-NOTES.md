@@ -2453,3 +2453,16 @@ components.
   providers, UIViewPropertyAnimator animation and completion blocks, and
   alert and context-menu action handlers are all reachable from an
   arm64 app now.
+
+## 2026-11-24: printf flags, width, precision and length
+
+- Rendering each conversion with a fixed format string dropped its
+  flags, width and precision. Parsing the conversion and rebuilding its
+  specification, then calling snprintf with the value in its C type,
+  restores all of them without reimplementing the C library's conversion
+  rules.
+- `*` width and precision consume stack slots in format order before the
+  value slot. A negative width becomes the left-justify flag; a negative
+  precision is omitted, as C specifies.
+- `%@` takes the same path: the object's text becomes a `%s` argument
+  under the original flags, width and precision.

@@ -653,6 +653,129 @@ static const char *a64_nsstring_cstr(uint64_t obj)
  * character, string and floating-point conversions are rendered; with
  * objects set, %@ asks the object for its description and UTF-8 text.
  * The rendered text is truncated to cap-1 bytes. */
+#define A64_FMT_MAX 64
+
+struct a64_fmt_spec
+{
+    char flags[6];
+    int nflags;
+    int width;
+    int has_width;
+    int precision;
+    int has_precision;
+    char len[3];
+    char conv;
+};
+
+static void a64_fmt_parse(struct a64_cpu *c, int *argi, const char **pp,
+                          struct a64_fmt_spec *f)
+{
+    const char *p = *pp;
+    memset(f, 0, sizeof *f);
+    while (*p && strchr("-+ #0'", *p))
+    {
+        if (f->nflags < (int)sizeof f->flags - 1)
+            f->flags[f->nflags++] = *p;
+        p++;
+    }
+    if (*p == '*')
+    {
+        f->width = (int)a64_load(c, c->sp + 8ull * (unsigned)*argi, 8, 0);
+        f->has_width = 1;
+        (*argi)++;
+        p++;
+    }
+    else
+    {
+        int w = 0;
+        while (*p >= '0' && *p <= '9')
+        {
+            w = (w < 0 ? 0 : w * 10) + (*p - '0');
+            f->has_width = 1;
+            p++;
+        }
+        f->width = w;
+    }
+    if (*p == '.')
+    {
+        p++;
+        if (*p == '*')
+        {
+            f->precision =
+                (int)a64_load(c, c->sp + 8ull * (unsigned)*argi, 8, 0);
+            f->has_precision = 1;
+            (*argi)++;
+            p++;
+        }
+        else
+        {
+            int pr = 0;
+            while (*p >= '0' && *p <= '9')
+                pr = pr * 10 + (*p++ - '0');
+            f->precision = pr;
+            f->has_precision = 1;
+        }
+    }
+    if (*p == 'h')
+    {
+        f->len[0] = *p++;
+        if (*p == 'h')
+            f->len[1] = *p++;
+    }
+    else if (*p == 'l')
+    {
+        f->len[0] = *p++;
+        if (*p == 'l')
+            f->len[1] = *p++;
+    }
+    else if (*p == 'z' || *p == 't' || *p == 'j')
+        f->len[0] = *p++;
+    f->conv = *p;
+    if (*p)
+        p++;
+    *pp = p;
+}
+
+static void a64_fmt_build(char *buf, size_t cap, const struct a64_fmt_spec *f,
+                          char conv)
+{
+    size_t o = 0;
+    int n;
+    buf[o++] = '%';
+    for (int i = 0; i < f->nflags && o + 1 < cap; i++)
+        buf[o++] = f->flags[i];
+    if (f->has_width && f->width < 0 && o + 1 < cap)
+        buf[o++] = '-';
+    if (f->has_width && f->width != 0)
+    {
+        n = snprintf(buf + o, cap - o, "%d",
+                     f->width < 0 ? -f->width : f->width);
+        if (n > 0)
+            o += (size_t)n;
+    }
+    if (f->has_precision && f->precision >= 0)
+    {
+        n = snprintf(buf + o, cap - o, ".%d", f->precision);
+        if (n > 0)
+            o += (size_t)n;
+    }
+    for (int i = 0; f->len[i] && o + 1 < cap; i++)
+        buf[o++] = f->len[i];
+    if (o + 1 < cap)
+        buf[o++] = conv;
+    buf[o < cap ? o : cap - 1] = 0;
+}
+
+/* snprintf result clamped to the space left in the output buffer. */
+static size_t a64_fmt_emit(char *out, size_t cap, size_t o, int n)
+{
+    if (n < 0)
+        return o;
+    if ((size_t)n > cap - o - 1)
+        n = (int)(cap - o - 1);
+    return o + (size_t)n;
+}
+
 static size_t a64_render_format(struct a64_cpu *c, const char *fmt,
                                 char *out, size_t cap, int objects)
 {
@@ -662,57 +785,27 @@ static size_t a64_render_format(struct a64_cpu *c, const char *fmt,
 
     if (!fmt)
         fmt = "(null)";
-    for (const char *p = fmt; *p && o + 1 < cap; p++)
+    for (const char *p = fmt; *p && o + 1 < cap;)
     {
         if (*p != '%')
         {
-            out[o++] = *p;
+            out[o++] = *p++;
             continue;
         }
-        p++;
+        const char *spec_begin = p++;
         if (*p == '%')
         {
             out[o++] = '%';
+            p++;
             continue;
         }
-        const char *spec_begin = p - 1;
-        int is_long = 0;
-        while (*p && strchr("-+ #0", *p))
-            p++;
-        while (*p >= '0' && *p <= '9')
-            p++;
-        if (*p == '.')
-        {
-            p++;
-            while (*p >= '0' && *p <= '9')
-                p++;
-        }
-        while (*p == 'l')
-        {
-            is_long = 1;
-            p++;
-        }
-        while (*p == 'z' || *p == 't' || *p == 'j')
-        {
-            is_long = 1;
-            p++;
-        }
-        while (*p == 'h')
-            p++;
+        struct a64_fmt_spec f;
+        a64_fmt_parse(c, &argi, &p, &f);
         uint64_t arg = a64_load(c, argbase + 8ull * (unsigned)argi, 8, 0);
         argi++;
-        if (*p == 's')
-        {
-            const char *s = (const char *)(uintptr_t)arg;
-            if (!s)
-                s = "(null)";
-            size_t l = strlen(s);
-            if (l > cap - o - 1)
-                l = cap - o - 1;
-            memcpy(out + o, s, l);
-            o += l;
-        }
-        else if (*p == '@' && objects)
+        char spec[A64_FMT_MAX];
+        char conv = f.conv;
+        if (conv == '@' && objects)
         {
             const char *s = arg ? a64_nsstring_cstr(arg) : NULL;
             if (!s && arg)
@@ -724,58 +817,101 @@ static size_t a64_render_format(struct a64_cpu *c, const char *fmt,
             }
             if (!s)
                 s = "(null)";
-            size_t l = strlen(s);
-            if (l > cap - o - 1)
-                l = cap - o - 1;
-            memcpy(out + o, s, l);
-            o += l;
+            struct a64_fmt_spec fs = f;
+            memset(fs.len, 0, sizeof fs.len);
+            a64_fmt_build(spec, sizeof spec, &fs, 's');
+            o = a64_fmt_emit(out, cap, o,
+                             snprintf(out + o, cap - o, spec, s));
+            continue;
         }
-        else if (*p == 'd' || *p == 'i')
+        if (conv == 'd' || conv == 'i')
         {
             long long v = (long long)arg;
-            if (!is_long)
-                v = (int)v;
-            o += (size_t)snprintf(out + o, cap - o, "%lld", v);
+            a64_fmt_build(spec, sizeof spec, &f, conv);
+            int n;
+            if (!f.len[0])
+                n = snprintf(out + o, cap - o, spec, (int)v);
+            else if (f.len[0] == 'h' && !f.len[1])
+                n = snprintf(out + o, cap - o, spec, (short)v);
+            else if (f.len[0] == 'h')
+                n = snprintf(out + o, cap - o, spec, (signed char)v);
+            else if (f.len[0] == 'l' && !f.len[1])
+                n = snprintf(out + o, cap - o, spec, (long)v);
+            else if (f.len[0] == 'l')
+                n = snprintf(out + o, cap - o, spec, v);
+            else if (f.len[0] == 'z')
+                n = snprintf(out + o, cap - o, spec, (size_t)v);
+            else if (f.len[0] == 't')
+                n = snprintf(out + o, cap - o, spec, (ptrdiff_t)v);
+            else
+                n = snprintf(out + o, cap - o, spec, (intmax_t)v);
+            o = a64_fmt_emit(out, cap, o, n);
+            continue;
         }
-        else if (*p == 'u' || *p == 'x' || *p == 'X')
+        if (conv == 'u' || conv == 'x' || conv == 'X' || conv == 'o')
         {
             unsigned long long v = arg;
-            if (!is_long)
-                v = (unsigned)v;
-            const char *spec = *p == 'x' ? "%llx"
-                               : *p == 'X' ? "%llX" : "%llu";
-            o += (size_t)snprintf(out + o, cap - o, spec, v);
+            a64_fmt_build(spec, sizeof spec, &f, conv);
+            int n;
+            if (!f.len[0])
+                n = snprintf(out + o, cap - o, spec, (unsigned)v);
+            else if (f.len[0] == 'h' && !f.len[1])
+                n = snprintf(out + o, cap - o, spec, (unsigned short)v);
+            else if (f.len[0] == 'h')
+                n = snprintf(out + o, cap - o, spec, (unsigned char)v);
+            else if (f.len[0] == 'l' && !f.len[1])
+                n = snprintf(out + o, cap - o, spec, (unsigned long)v);
+            else if (f.len[0] == 'l')
+                n = snprintf(out + o, cap - o, spec, v);
+            else if (f.len[0] == 'z')
+                n = snprintf(out + o, cap - o, spec, (size_t)v);
+            else if (f.len[0] == 't')
+                n = snprintf(out + o, cap - o, spec,
+                             (size_t)(ptrdiff_t)v);
+            else
+                n = snprintf(out + o, cap - o, spec, (uintmax_t)v);
+            o = a64_fmt_emit(out, cap, o, n);
+            continue;
         }
-        else if (*p == 'p')
+        if (conv == 'c')
         {
-            o += (size_t)snprintf(out + o, cap - o, "%p",
-                                  (void *)(uintptr_t)arg);
+            a64_fmt_build(spec, sizeof spec, &f, 'c');
+            o = a64_fmt_emit(out, cap, o,
+                             snprintf(out + o, cap - o, spec, (int)arg));
+            continue;
         }
-        else if (*p == 'c')
+        if (conv == 's')
         {
-            out[o++] = (char)arg;
+            const char *s = (const char *)(uintptr_t)arg;
+            if (!s)
+                s = "(null)";
+            a64_fmt_build(spec, sizeof spec, &f, 's');
+            o = a64_fmt_emit(out, cap, o,
+                             snprintf(out + o, cap - o, spec, s));
+            continue;
         }
-        else if (*p == 'f' || *p == 'F' || *p == 'e' || *p == 'E' ||
-                 *p == 'g' || *p == 'G' || *p == 'a' || *p == 'A')
+        if (conv == 'p')
         {
-            /* Variadic doubles arrive in one stack slot; keep the
-             * caller's flags and precision in the spec. */
-            size_t sl = (size_t)(p - spec_begin + 1);
-            char spec[32];
-            if (sl >= sizeof spec)
-                sl = sizeof spec - 1;
-            memcpy(spec, spec_begin, sl);
-            spec[sl] = 0;
+            a64_fmt_build(spec, sizeof spec, &f, 'p');
+            o = a64_fmt_emit(out, cap, o,
+                             snprintf(out + o, cap - o, spec,
+                                      (void *)(uintptr_t)arg));
+            continue;
+        }
+        if (strchr("fFeEgGaA", conv) && conv)
+        {
             double d;
             memcpy(&d, &arg, 8);
-            o += (size_t)snprintf(out + o, cap - o, spec, d);
+            a64_fmt_build(spec, sizeof spec, &f, conv);
+            o = a64_fmt_emit(out, cap, o,
+                             snprintf(out + o, cap - o, spec, d));
+            continue;
         }
-        else
-        {
-            out[o++] = '%';
-            if (o + 1 < cap)
-                out[o++] = *p;
-        }
+        if (!conv)
+            break;
+        /* Unknown conversion: copy it through unchanged. */
+        while (spec_begin < p && o + 1 < cap)
+            out[o++] = *spec_begin++;
     }
     out[o] = 0;
     return o;

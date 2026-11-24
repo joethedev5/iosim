@@ -1957,6 +1957,19 @@ check "sprintf 5 2.5 k" "$out" "arm64 sprintf renders into a buffer"
 check "trunc 6 abc" "$out" "snprintf truncates to the requested size"
 check "fprintf 42 err" "$out" "arm64 fprintf writes to a stream"
 check "NSLog: NSLog value 9" "$out" "arm64 NSLog resolves its format and %@"
+check "fmt 0002.500" "$out" \
+    "a float keeps width, zero padding and precision"
+check "sign +7" "$out" "the plus flag reaches the sign"
+check "left [42    ]" "$out" "a negative width field left-justifies"
+check "prec ab" "$out" "string precision truncates"
+check "star    42" "$out" "a stack width argument sizes the field"
+check "starp abc" "$out" "a stack precision argument truncates"
+check "hex 0xff" "$out" "the alternate form adds the base prefix"
+check "size 99" "$out" "%zu takes a size argument"
+check "long 123456789" "$out" "%ld takes a long argument"
+check "llong -5" "$out" "%lld takes a long long argument"
+check "width [  3.14]" "$out" "float width and precision combine"
+check "NSLog: nslog   2.2" "$out" "NSLog applies width and precision"
 if [ "$rc" -eq 0 ]; then
     echo "ok   the arm64 varargs fixture exits zero"
 else
@@ -1968,6 +1981,8 @@ if out_nj="$(IOSIM_ARM64_NOJIT=1 DYLD_ROOT_PATH="$ROOT/runtime" timeout 10 \
 fi
 check "NSLog: NSLog value 9" "$out_nj" \
     "the interpreter runs the same variadic calls"
+check "fmt 0002.500" "$out_nj" \
+    "the interpreter renders the same full format"
 
 # ---------- 4f10ae. arm64 AdvSIMD coverage ----------
 # Vector shifts, integer add/sub/mul, max/min, compares, conversions,

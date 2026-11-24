@@ -41,7 +41,9 @@ arm64 invoke pointer on the interpreter. Blocks with four arguments and
 blocks that return objects are bridged as well (activity completions,
 cell and menu providers, preview providers). The printf-family gates now cover
 fprintf, sprintf, snprintf and NSLog, including %@ through the object's
-description, and AdvSIMD coverage includes shifts by immediate, integer
+description, and each conversion's flags, width, precision and length
+modifier survive by rebuilding the specification and letting the C
+library render the value. AdvSIMD coverage includes shifts by immediate, integer
 add/sub/mul/mla in every lane size, signed and unsigned min/max,
 compares, float max/min/div/sqrt/abs/neg, integer/float conversions,
 pairwise adds, horizontal reductions, element moves and zip/uzp/trn
