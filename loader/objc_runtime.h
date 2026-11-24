@@ -52,6 +52,12 @@ unsigned long class_getInstanceSize(void *cls);
 void *object_getClass(void *obj);
 void *object_setClass(void *obj, void *cls);
 
+/* Associated objects, stored by the loader for the life of the process. */
+void  objc_setAssociatedObject(void *object, const void *key, void *value,
+                               unsigned long policy);
+void *objc_getAssociatedObject(void *object, const void *key);
+void  objc_removeAssociatedObjects(void *object);
+
 extern char _objc_empty_cache[32];
 
 #endif

@@ -83,6 +83,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | libdispatch queues (FIFO serial queues with ordered sync and barriers), groups, semaphores, timer/data sources; UIKit and run-loop drain | ✅ |
 | Block runtime: heap block copies with retain/release counts and `__block` byref promotion to shared heap storage | ✅ |
 | Mach ports/messages with refcounted rights, launchd bootstrap namespace, cross-process messaging | ✅ |
+| Objective-C runtime associated objects with assign/retain/copy policies, per-object keys, nil clearing and bulk removal | ✅ |
 | Mach-O initializers (`__init_offsets`, `__mod_init_func`), thread-local variables, Darwin pthread normalization | ✅ |
 | Darwin ABI translation: `stat$INODE64`, `open` flags, signals, CommonCrypto, `dispatch_data` | ✅ |
 | Unmodified macOS x86_64 CLIs: Apple Metal Shader Converter DXIL→metallib, end to end | ✅ |

@@ -885,3 +885,86 @@ void iosim_objc_dump(void)
         fprintf(stderr, "objc: class %s at %p\n",
                 g_classes[i].name, (void *)g_classes[i].cls);
 }
+
+/* ------------------------------------------------------- associated objects
+ *
+ * Keys are the addresses callers pass; values are stored for the life of the
+ * process (objects are never freed by this runtime). Copy policies send
+ * -copy so a mutable value cannot change behind the association, while
+ * assign and retain keep the pointer they were given. */
+struct objc_association {
+    void *object;
+    const void *key;
+    void *value;
+    unsigned long policy;
+    struct objc_association *next;
+};
+static struct objc_association *g_associations;
+
+void objc_setAssociatedObject(void *object, const void *key, void *value,
+                              unsigned long policy)
+{
+    if (!object || !key)
+        return;
+    struct objc_association **link = &g_associations;
+    while (*link)
+    {
+        struct objc_association *entry = *link;
+        if (entry->object == object && entry->key == key)
+        {
+            if (!value)
+            {
+                *link = entry->next;
+                free(entry);
+                return;
+            }
+            entry->value = value;
+            entry->policy = policy;
+            return;
+        }
+        link = &entry->next;
+    }
+    if (!value)
+        return;
+    if (policy == 2 || policy == 4)
+    {
+        void *sel = sel_registerName("copy");
+        void *(*copy_imp)(void *, void *) = objc_lookup_imp(value, sel);
+        if (copy_imp)
+            value = copy_imp(value, sel);
+    }
+    struct objc_association *entry = calloc(1, sizeof(*entry));
+    if (!entry)
+        return;
+    entry->object = object;
+    entry->key = key;
+    entry->value = value;
+    entry->policy = policy;
+    entry->next = g_associations;
+    g_associations = entry;
+}
+
+void *objc_getAssociatedObject(void *object, const void *key)
+{
+    for (struct objc_association *entry = g_associations; entry;
+         entry = entry->next)
+        if (entry->object == object && entry->key == key)
+            return entry->value;
+    return NULL;
+}
+
+void objc_removeAssociatedObjects(void *object)
+{
+    struct objc_association **link = &g_associations;
+    while (*link)
+    {
+        struct objc_association *entry = *link;
+        if (entry->object == object)
+        {
+            *link = entry->next;
+            free(entry);
+        }
+        else
+            link = &entry->next;
+    }
+}

@@ -1702,8 +1702,11 @@ Python for iteration speed.
 - arm64 binaries are rejected (fat containers are accepted only for x86_64
   slices).
 - The dyld shared cache is not parsed; each dylib is loaded from disk.
-- Class method dispatch covers the common path; message forwarding, associated
-  objects, ARC entry points and exceptions are pending.
+- Class method dispatch covers the common path; message forwarding, ARC
+  entry points and exceptions are pending. Associated objects are stored by
+  the loader in a per-object list: assign and retain policies keep the given
+  pointer, copy policies send `-copy`, setting nil removes one key and
+  `objc_removeAssociatedObjects` drops every key for one object.
 - The SpringBoard grid pages in 16-slot pages; a horizontal swipe slides
   between pages over 0.28 s, while an icon dragged to a screen edge turns the
   page without a slide. Home-screen folders group apps and persist, but

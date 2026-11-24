@@ -986,6 +986,32 @@ else
     echo "FAIL transformed alpha compositing"; echo "$out"; fails=$((fails+1))
 fi
 
+# ---------- 4f10f. Associated objects ----------
+"$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
+    -ffreestanding -O1 -I "$ROOT/frameworks" \
+    -c "$ROOT/tests/associated_objects_test.m" -o "$T/associated_objects_test.o"
+"$LD64" -arch x86_64 -platform_version $PLATFORM -e _main \
+    -o "$T/associated_objects_test" "$T/associated_objects_test.o" \
+    "$ROOT/runtime/System/Library/Frameworks/Foundation.framework/Foundation" \
+    -undefined dynamic_lookup
+out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" \
+    "$T/associated_objects_test" 2>&1)"
+check "[assoc] one alpha beta two other" "$out" \
+    "associated values are keyed per object"
+check "[assoc] replaced gamma" "$out" \
+    "setting an existing key replaces its value"
+check "[assoc] cleared 1" "$out" \
+    "setting nil removes the association"
+check "[assoc] retain same 1 9" "$out" \
+    "a retain policy stores the same pointer"
+check "[assoc] copy isolated 11 13" "$out" \
+    "a copy policy snapshots the value against later mutation"
+check "[assoc] string copy copy copy!" "$out" \
+    "a copied mutable string keeps its old contents"
+check "[assoc] removed 1 other" "$out" \
+    "removing associations leaves another object's entries"
+check "[assoc] done" "$out" "the associated-object fixture finishes"
+
 # ---------- 4f11. CAAnimation completion and fill modes ----------
 rm -f "$T/arem.fifo"
 mkfifo "$T/arem.fifo"

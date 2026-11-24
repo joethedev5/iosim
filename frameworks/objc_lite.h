@@ -1,6 +1,20 @@
 #ifndef IOSIM_OBJC_LITE_H
 #define IOSIM_OBJC_LITE_H
 
+/* Associated objects. The policy is pointer-sized, matching objc4. */
+typedef unsigned long objc_AssociationPolicy;
+enum {
+    OBJC_ASSOCIATION_ASSIGN = 0,
+    OBJC_ASSOCIATION_RETAIN_NONATOMIC = 1,
+    OBJC_ASSOCIATION_COPY_NONATOMIC = 2,
+    OBJC_ASSOCIATION_RETAIN = 3,
+    OBJC_ASSOCIATION_COPY = 4
+};
+void objc_setAssociatedObject(id object, const void *key, id value,
+                              objc_AssociationPolicy policy);
+id objc_getAssociatedObject(id object, const void *key);
+void objc_removeAssociatedObjects(id object);
+
 #ifndef YES
 typedef signed char BOOL;
 #define YES ((BOOL)1)

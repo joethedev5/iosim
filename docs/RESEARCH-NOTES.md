@@ -1835,3 +1835,18 @@ components.
 - The fixture's `keepalive-exit <code>` mode exits with the given status; the
   suite loads a zero-exit job under each SuccessfulExit value and counts
   starts: the true job restarts, the false job stays stopped.
+
+## 2026-11-24: Associated objects
+
+- The loader now implements `objc_setAssociatedObject`,
+  `objc_getAssociatedObject` and `objc_removeAssociatedObjects` over a per
+  object association list. Assign/retain policies store the given pointer;
+  copy policies send `-copy` through the loader's dispatch and store the
+  result; setting nil removes one key and removing all drops the receiver's
+  entries only.
+- `NSString` copies return the receiver and `NSMutableString` copies
+  allocate an immutable snapshot, so COPY associations on strings behave like
+  the real ones.
+- The fixture exercises key isolation, replacement, nil clearing, retain
+  identity under mutation, copy isolation for a custom object and for a
+  mutable string.

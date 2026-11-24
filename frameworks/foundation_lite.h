@@ -150,6 +150,7 @@ extern id NSShadowAttributeName;
 + (id)stringWithUTF8String:(const char *)s;
 + (id)stringWithFormat:(id)format, ...;
 + (id)stringWithString:(id)other;
+- (id)copy;
 - (id)initWithUTF8String:(const char *)s;
 - (id)initWithFormat:(id)format, ...;
 - (const char *)UTF8String;

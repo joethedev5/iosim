@@ -2013,6 +2013,18 @@ settles it at 200, firing one stop. A third block sets
 card plus backdrop and both snapshots, the did-stop callback fires, and the
 stage ends with only the card.
 
+### Objective-C runtime: associated objects
+
+`tests/associated_objects_test.m` stores two keys on one object and one key
+on another, then overwrites, clears with nil and removes all entries for the
+first object. The printed values show per-object isolation (`one alpha beta
+two other`), replacement (`replaced gamma`), nil removal (`cleared 1`) and
+selective bulk removal (`removed 1 other`). A retain association keeps the
+same pointer after the source mutates (7 becomes 9 through that pointer),
+while a copy association snapshots a box at 11 so mutating the source to 13
+does not change the stored value, and a copied mutable string keeps `copy`
+while the source becomes `copy!`.
+
 ### CoreAnimation: completion and fill modes
 
 `tests/animation_removal_test.m` starts three 0.5 s opacity animations from

@@ -1221,6 +1221,7 @@ static char *format_va(const char *fmt, va_list ap)
 }
 
 @implementation NSString
+- (id)copy { return self; }
 + (id)stringWithUTF8String:(const char *)s
 {
     return [[[self alloc] initWithUTF8String:s] autorelease];
@@ -2388,6 +2389,10 @@ static void attributed_runs_rebuild(id *runs, unsigned long oldLength,
 @end
 
 @implementation NSMutableString
+- (id)copy
+{
+    return [[NSString alloc] initWithUTF8String:iosim_string_cstr(self)];
+}
 + (id)string { return [[[self alloc] init] autorelease]; }
 - (void)appendString:(id)string
 {
