@@ -1440,8 +1440,8 @@ icon), and hit-tests taps against the same grid. Slots are assigned in order
 and split into 16-slot pages; the first page holds seven stock apps plus the
 first nine installed apps. With more than one page, page dots (3.5 pt radius,
 16 pt pitch, white for the active page) sit between the grid and the search
-pill, a horizontal swipe moves between pages, and hit-testing only considers
-the current page. Tapping an installed app closes the UI's event stream, forks
+pill, a horizontal swipe slides the old page out and the new one in over
+0.28 s, and hit-testing only considers the current page. Tapping an installed app closes the UI's event stream, forks
 the loader with the app executable and waits for it with `WUNTRACED`. The child
 runs the app's own `main` → `UIApplicationMain` → scene lifecycle, with its
 `HOME` moved to the bundle's data container and `XPC_SERVICE_NAME` set, and

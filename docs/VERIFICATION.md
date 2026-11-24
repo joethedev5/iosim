@@ -1671,7 +1671,9 @@ logs `control center closed`.
 
 The home grid pages in groups of 16 once seven stock apps and nine
 installed apps are present. The test installs ten extra page fixtures (21 grid apps in
-all), then swipes left: SpringBoard reports `home page 2 of 2`, draws the
+all), then swipes left. The swipe slides the pages for 0.28 s and only then logs
+`home page 2 of 2`; the suite times from the gesture's return to that log and
+requires at least 150 ms. SpringBoard draws the
 second page with `Page6` at the top-left slot, and the page dots swap from
 white-on-the-left to white-on-the-right. A screenshot check reads the two dot
 centres at x = 193 pt and 209 pt, y = 686 pt, verifying #ffffff for the active
@@ -2324,9 +2326,10 @@ landing together arrive as separate events; there is no touch prediction or
 pressure. Controls, scroll views and gesture recognizers still track the
 primary touch, and SpringBoard's own UI remains single-touch. Mach
 messages, the bootstrap namespace and serialized XPC dictionaries are shared
-across guest processes. SpringBoard pages in groups of 16 without a sliding
-page animation, and the switcher shows at most three cards with no scrolling
-animation; stock system apps have no executables in this runtime. Home-screen
+across guest processes. SpringBoard pages in groups of 16; a horizontal
+swipe slides between pages, but an icon dragged to a screen edge still turns
+the page without a slide, and the switcher shows at most three cards with no
+scrolling animation; stock system apps have no executables in this runtime. Home-screen
 folders group apps by bundle identifier and persist; they can be renamed from
 the title's long-press editor but cannot be nested, and the grid compacts entries when a folder forms. Icons can be
 reordered by dragging them to empty slots, including across pages, with the

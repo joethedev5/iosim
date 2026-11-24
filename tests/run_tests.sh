@@ -3041,10 +3041,17 @@ done
 sleep 0.5
 "$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/page1.png" >/dev/null
 "$ROOT/tools/iosimctl" ui "$UDID" swipe 350 400 50 400 0.3 >/dev/null
+slide_start=$(date +%s%N)
 if wait_log "home page 2 of 2"; then
     echo "ok   horizontal swipe moves to the second home page"
 else
     echo "FAIL home page swipe"; fails=$((fails+1))
+fi
+slide_ms=$(( ($(date +%s%N) - slide_start) / 1000000 ))
+if [ "$slide_ms" -ge 150 ]; then
+    echo "ok   the page turn slides before reporting the new page"
+else
+    echo "FAIL page slide timing ($slide_ms ms)"; fails=$((fails+1))
 fi
 sleep 0.4
 "$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/page2.png" >/dev/null

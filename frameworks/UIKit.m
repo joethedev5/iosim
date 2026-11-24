@@ -602,8 +602,8 @@ extern id kCAFillModeRemoved;
 
 /* Replicates its sublayers instanceCount times, applying instanceTransform
  * cumulatively. instanceColor tints the copies and the channel offsets shift
- * each successive copy; instanceDelay is accepted but copies render in the
- * same animation phase. */
+ * each successive copy; instanceDelay gives each copy its own render pass
+ * and animation phase. */
 @interface CAReplicatorLayer : CALayer {
 @public
     long _instanceCount;
@@ -25597,15 +25597,29 @@ static double g_sb_drag_x, g_sb_drag_y;
 static int g_sb_drag_edge;
 static double g_sb_drag_drawn;
 
-static void shell_draw(int fbWidth, int fbHeight, double scale)
-{
-    shell_wallpaper_build(fbWidth, fbHeight);
-    if (g_shell_wallpaper)
-        iosim_fb_paste_xrgb(g_shell_wallpaper);
-    else
-        iosim_fb_clear(0x05070d);
+/* A completed horizontal page swipe slides the old page out and the new one
+ * in from the other side. The loop tick redraws until the slide finishes and
+ * then reports the new page, so a waiting harness screenshots the final
+ * frame. */
+#define SHELL_PAGE_SLIDE_SECONDS 0.28
+static int g_page_slide_active;
+static int g_page_slide_from;
+static int g_page_slide_dir;
+static double g_page_slide_start;
 
-    double W = fbWidth / scale;
+static void shell_page_slide_begin(int from, int to, int dir)
+{
+    g_page_slide_from = from;
+    g_home_page = to;
+    g_page_slide_dir = dir;
+    g_page_slide_start = iosim_now();
+    g_page_slide_active = 1;
+}
+
+/* Draw one home-screen page with every icon, badge and label shifted by
+ * offset device pixels. */
+static void shell_draw_page(double W, double scale, int page, int offset)
+{
     double pitch = (W - 2 * SHELL_MARGIN_PT - SHELL_ICON_PT) / 3.0;
     int s = (int)(SHELL_ICON_PT * scale + 0.5);
     struct shell_grid_entry entries[SHELL_MAX_APPS + SHELL_MAX_FOLDERS];
@@ -25613,13 +25627,13 @@ static void shell_draw(int fbWidth, int fbHeight, double scale)
         shell_grid_entries(entries, SHELL_MAX_APPS + SHELL_MAX_FOLDERS);
     for (int e = 0; e < entry_count; e++)
     {
-        int page = e / 16;
+        int entry_page = e / 16;
         int page_slot = e % 16;
-        if (page != g_home_page)
+        if (entry_page != page)
             continue;
         int col = page_slot % 4, row = page_slot / 4;
-        int cx = (int)((SHELL_MARGIN_PT + SHELL_ICON_PT / 2 + col * pitch) *
-                       scale + 0.5);
+        int cx = offset + (int)((SHELL_MARGIN_PT + SHELL_ICON_PT / 2 +
+                                 col * pitch) * scale + 0.5);
         int cy = (int)(shell_row_center[row] * scale + 0.5);
         int baseline = cy + s / 2 + (int)(16.1 * scale + 0.5);
         if (entries[e].folder >= 0)
@@ -25641,6 +25655,35 @@ static void shell_draw(int fbWidth, int fbHeight, double scale)
             shell_label(a->name, cx, baseline, scale);
         }
     }
+}
+
+static void shell_draw(int fbWidth, int fbHeight, double scale)
+{
+    shell_wallpaper_build(fbWidth, fbHeight);
+    if (g_shell_wallpaper)
+        iosim_fb_paste_xrgb(g_shell_wallpaper);
+    else
+        iosim_fb_clear(0x05070d);
+
+    double W = fbWidth / scale;
+    int s = (int)(SHELL_ICON_PT * scale + 0.5);
+    if (g_page_slide_active)
+    {
+        double p = (iosim_now() - g_page_slide_start) /
+                   SHELL_PAGE_SLIDE_SECONDS;
+        if (p < 0)
+            p = 0;
+        if (p > 1)
+            p = 1;
+        p = 1 - (1 - p) * (1 - p);
+        int travel = (int)(W * scale + 0.5);
+        int old_offset = -(int)(g_page_slide_dir * p * travel);
+        int new_offset = old_offset + g_page_slide_dir * travel;
+        shell_draw_page(W, scale, g_page_slide_from, old_offset);
+        shell_draw_page(W, scale, g_home_page, new_offset);
+    }
+    else
+        shell_draw_page(W, scale, g_home_page, 0);
 
     if (g_sb_drag_app >= 0 && g_sb_drag_app < g_shell_app_count)
     {
@@ -26766,6 +26809,19 @@ static int shell_notification_tick(int fbWidth, int fbHeight, double scale,
     (void)path;
     int redraw = 0;
     double now = iosim_now();
+    if (g_page_slide_active)
+    {
+        if (now - g_page_slide_start >= SHELL_PAGE_SLIDE_SECONDS)
+        {
+            g_page_slide_active = 0;
+            shell_refresh_all(fbWidth, fbHeight, scale, path);
+            printf("[SpringBoard] home page %d of %d\n",
+                   g_home_page + 1, shell_page_count());
+            fflush(0);
+            return 0;
+        }
+        redraw = 1;
+    }
     if (g_sb_banner_active && now - g_sb_banner_start >= 5.0)
     {
         g_sb_banner_active = 0;
@@ -28389,10 +28445,8 @@ static int run_springboard(void)
                     page = pages - 1;
                 if (page != g_home_page)
                 {
-                    g_home_page = page;
-                    printf("[SpringBoard] home page %d of %d\n", page + 1,
-                           pages);
-                    fflush(0);
+                    shell_page_slide_begin(g_home_page, page,
+                                           dx < 0 ? 1 : -1);
                     shell_repaint(fbWidth, fbHeight, scale, path, 0);
                 }
             }

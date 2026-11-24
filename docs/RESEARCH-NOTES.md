@@ -1685,3 +1685,12 @@ components.
 - `CGContextDrawImage` now casts the graphics state's shadow: the image's
   alpha channel is tinted with the shadow color, then blitted at the offset
   and four blur ring positions before the image itself.
+
+## 2026-11-24: home-screen page slide
+
+- A horizontal page swipe no longer swaps the grid instantly: the old page
+  moves off by a eased fraction of the screen while the new page enters from
+  the other side. The loop tick drives the 0.28 s slide and logs the new page
+  only after the final frame, so screenshots after the log show the settled
+  page.
+- Edge-of-screen page turns during an icon drag stay instantaneous.
