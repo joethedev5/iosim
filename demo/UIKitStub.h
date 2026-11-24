@@ -627,6 +627,7 @@ enum {
 @property(readonly) double timestamp;
 @property(readonly) double duration;
 @property(readonly) double targetTimestamp;
+@property long preferredFramesPerSecond;
 @property(getter=isPaused) BOOL paused;
 @property(readonly, getter=isValid) BOOL valid;
 @end

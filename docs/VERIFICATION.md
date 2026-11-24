@@ -586,6 +586,12 @@ to a booted device's foreground app.
 
 ### Animation timeline and display link
 
+`tests/display_link_rate_test.m` schedules one link at 10 fps and one at the
+default rate. It reports `[dlink] duration 0.1000 0.0167`, then after 800 ms
+`[dlink] rates 1 1` when the slow link fired at least four times and the fast
+link fired more than three times as often (a representative run is 8 slow and
+46 fast callbacks), and exits itself.
+
 `demo/AnimationApp.m` runs a `CADisplayLink` that moves a green dot every
 frame, then starts `animateWithDuration:2.0 delay:0.1
 options:UIViewAnimationOptionCurveEaseInOut animations:completion:` on a blue
@@ -1934,8 +1940,8 @@ modeled. `CATransform3D` layers project through a homography when the
 perspective terms are set; 3D rotation, scale and translation render, but
 the layer's offscreen is still its untransformed size, so extreme perspective
 can clip. Core Animation keeps four
-explicit animation slots per layer, and `CADisplayLink` ignores preferred
-frame-rate ranges. XPC carries dictionaries
+explicit animation slots per layer. `CADisplayLink` honors
+`preferredFramesPerSecond` but not `CAFrameRateRange`. XPC carries dictionaries
 and value objects between processes but not connections, file descriptors or
 reply ports. The pasteboard shares strings, URLs, colors and PNG images but has no
 item providers or removal notifications. Metal and video

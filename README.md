@@ -39,7 +39,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | UIAlertController alerts with stacked or side-by-side actions, action sheets with a bottom-anchored card and a separated cancel action, text fields and preferred actions, UIActivityViewController share sheet with Copy and application activities, animated page-sheet modal presentation and dismissal | ✅ |
 | UINavigationController push/pop and interactive edge-pan pop transition, UITabBarController, UIStackView, standalone UINavigationBar/UIToolbar with item targets/images/custom views, UIButton titles/images, `UIButtonConfiguration`, button content/title/image edge insets, UITextField border styles and left/right views, navigation large-title/bar-button array properties | ✅ |
 | UIView animations (frame, alpha, transform), delay/curve/repeat options, completion blocks | ✅ |
-| `CADisplayLink`, presentation layers, multiple concurrent layer animations | ✅ |
+| `CADisplayLink` with `preferredFramesPerSecond`, presentation layers, multiple concurrent layer animations | ✅ |
 | `CAAnimationGroup`: grouped opacity/corner animations, group removal clears children | ✅ |
 | `CASpringAnimation`: mass/stiffness/damping/initial velocity, settling duration | ✅ |
 | CAAnimation timing (`beginTime`, `speed`, `timeOffset`, `autoreverses`, `fillMode`) and value getters, `CAAnimationDelegate` start/stop callbacks, `animationKeys`/`animationForKey:`/`removeAllAnimations`, `CACurrentMediaTime`, `CATransaction` completion, `performWithoutAnimation:` | ✅ |

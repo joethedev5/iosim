@@ -1084,3 +1084,15 @@ components.
   every corner.
 - The top-only card in the fixture confirms that a selected top-left and
   top-right corner are cut while the bottom corners remain green squares.
+
+## 2026-11-24: CADisplayLink preferred frame rate
+
+- The display-link tick already compared `iosim_now()` against
+  `targetTimestamp`; the rate work is only duration bookkeeping.
+  `preferredFramesPerSecond` clamps to 0..60 and sets the duration to
+  `1 / rate` (0 restores 1/60), while `frameInterval` sets
+  `interval / 60`. Each fire advances the target from the current time, so a
+  slow machine coalesces rather than bursts.
+- The fixture's 800 ms window yields about 8 slow and 46 fast callbacks; the
+  assertion requires at least four slow fires and a fast-to-slow ratio above
+  three, which tolerates scheduling jitter.

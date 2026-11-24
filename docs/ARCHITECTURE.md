@@ -1141,8 +1141,11 @@ framebuffer has an intersection clip stack, used by scroll views and
 While an app is foreground its run loop is `UIApplicationMain`: it wakes
 every 16 ms even when the event stream is idle, drains Foundation timers and
 the main dispatch queue, fires scheduled `CADisplayLink` callbacks, completes
-finished animations, and re-renders when any of them changed state. A display
-link keeps the loop rendering at 60 Hz until it is paused or invalidated.
+finished animations, and re-renders when any of them changed state. Each
+display link fires when its `targetTimestamp` is due and then advances that
+target by its duration: 1/60 s by default, or 1/`preferredFramesPerSecond`
+after the rate is set (0 restores 60 fps). `frameInterval` similarly sets the
+duration to `interval / 60`. A paused or invalidated link stops firing.
 
 `UITextField` participates in the responder chain. A focused field draws its
 placeholder or text, secure bullets and a caret, and `UITextField` edits from

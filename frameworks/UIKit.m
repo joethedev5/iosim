@@ -728,6 +728,7 @@ extern id kCAMediaTimingFunctionEaseInEaseOut;
     double _duration;
     double _targetTimestamp;
     long _frameInterval;
+    long _preferredFramesPerSecond;
     BOOL _paused;
     BOOL _valid;
     BOOL _scheduled;
@@ -741,6 +742,8 @@ extern id kCAMediaTimingFunctionEaseInEaseOut;
 - (double)targetTimestamp;
 - (BOOL)isPaused;
 - (void)setPaused:(BOOL)paused;
+- (long)preferredFramesPerSecond;
+- (void)setPreferredFramesPerSecond:(long)rate;
 - (BOOL)isValid;
 - (long)frameInterval;
 - (void)setFrameInterval:(long)interval;
@@ -4753,6 +4756,7 @@ int iosim_display_link_tick(void)
         link->_timestamp = iosim_now();
         link->_targetTimestamp = link->_timestamp;
         link->_frameInterval = 1;
+        link->_preferredFramesPerSecond = 0;
         link->_valid = YES;
     }
     return link;
@@ -4798,6 +4802,19 @@ int iosim_display_link_tick(void)
         interval = 1;
     _frameInterval = interval;
     _duration = interval / 60.0;
+}
+- (long)preferredFramesPerSecond
+{
+    return _preferredFramesPerSecond;
+}
+- (void)setPreferredFramesPerSecond:(long)rate
+{
+    if (rate < 0)
+        rate = 0;
+    if (rate > 60)
+        rate = 60;
+    _preferredFramesPerSecond = rate;
+    _duration = rate > 0 ? 1.0 / rate : 1.0 / 60.0;
 }
 @end
 

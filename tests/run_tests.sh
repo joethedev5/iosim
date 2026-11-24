@@ -410,6 +410,20 @@ check "[mt] b ended changed=1 all=1" "$out" \
 check "[mt] done" "$out" \
     "both fingers end cleanly"
 
+# ---------- 4f4. CADisplayLink preferred frame rate ----------
+rm -f "$T/dlink.fifo"
+mkfifo "$T/dlink.fifo"
+"$ROOT/tools/build_app.sh" "$ROOT/tests/display_link_rate_test.m" \
+    "$T/display_link_rate_test" >/dev/null
+out="$(IOSIM_EVENT_FIFO="$T/dlink.fifo" DYLD_ROOT_PATH="$ROOT/runtime" \
+    "$RUN" "$T/display_link_rate_test" 2>&1)"
+check "[dlink] duration 0.1000 0.0167" "$out" \
+    "preferredFramesPerSecond sets the display link duration"
+check "[dlink] rates 1 1" "$out" \
+    "a 10 fps link fires far less often than a default 60 fps link"
+check "[dlink] done" "$out" \
+    "the display-link rate fixture ends on its own"
+
 # ---------- 4g. NSCalendar components ----------
 "$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
     -ffreestanding -O1 -I "$ROOT/frameworks" \
