@@ -25,7 +25,10 @@ a page drops the translations that started in it. Native code can call
 arm64 blocks back through the callback bridge, so libdispatch timers
 and queues run app blocks, and the call gate recognizes the loader's
 service symbols by address. A UIKit app compiled once for each
-architecture renders the same pixels. An app bundle whose executable is
+architecture renders the same pixels. A stock demo app built for both
+architectures produces byte-identical frame captures, and the arm64
+printf gates print the same log as the x86_64 build. An app bundle whose
+executable is
 thin arm64 starts through the normal device-manager path too: a launch
 that names no frameworks gets Foundation, UIKit, QuartzCore and
 UserNotifications preloaded from the runtime root, and the scene renders
@@ -43,7 +46,9 @@ cell and menu providers, preview providers). The printf-family gates now cover
 fprintf, sprintf, snprintf and NSLog, including %@ through the object's
 description, and each conversion's flags, width, precision and length
 modifier survive by rebuilding the specification and letting the C
-library render the value. AdvSIMD coverage includes shifts by immediate, integer
+library render the value. NSString's variadic format constructors are
+rendered the same way and forwarded to their non-variadic forms, and a
+message to nil returns zero from the bridge. AdvSIMD coverage includes shifts by immediate, integer
 add/sub/mul/mla in every lane size, signed and unsigned min/max,
 compares, float max/min/div/sqrt/abs/neg, integer/float conversions,
 pairwise adds, horizontal reductions, element moves and zip/uzp/trn

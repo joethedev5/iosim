@@ -2466,3 +2466,48 @@ components.
   precision is omitted, as C specifies.
 - `%@` takes the same path: the object's text becomes a `%s` argument
   under the original flags, width and precision.
+
+## 2026-11-24: the same source built for both architectures
+
+- A demo app run directly with IOSIM_SCREENSHOT_PATH presents its frame
+  right after UIApplicationMain's initial render, before any event loop,
+  so one launch produces a deterministic whole-screen PNG.
+  HelloSimApp's arm64 and x86_64 builds produce byte-identical files.
+- The only log difference between the two HelloSim builds is the delegate
+  and window host addresses printed by UIApplicationMain; normalizing hex
+  addresses makes the logs equal.
+- The arm64 printf gates' output for the extended varargs fixture matches
+  the x86_64 build's native C library output exactly on stdout and
+  stderr. The streams must be captured separately because the native
+  build's stderr is unbuffered and interleaves differently in a merged
+  capture.
+
+## 2026-11-24: variadic Objective-C methods from arm64 code
+
+- A probe calling `[NSString stringWithFormat:@"%d-%@", 42, @"x"]` from an
+  arm64 main returns `0-(null)`: the method's type encoding stops at the
+  named arguments, so the native IMP is called without the anonymous
+  ones and its va_list reads empty slots. The call neither crashes nor
+  formats.
+- The arm64 variadic printf gates do not help here because the call goes
+  through objc_msgSend. A fix can decode the format on the loader side
+  and forward to a non-variadic equivalent (stringWithUTF8String:,
+  stringByAppendingString:, appendString:), or marshal the anonymous
+  arguments into the native call according to the format.
+- Implemented in the message bridge: for a native IMP whose selector is
+  stringWithFormat: or initWithFormat: and whose receiver is NSString or
+  a subclass, render the format from the guest stack slots with the
+  printf renderer and send stringWithUTF8String: / initWithUTF8String:
+  to the same receiver. A guest implementation of the selector never
+  reaches the intercept because the bridge only handles native IMPs. The
+  x86_64 build of the same fixture is the ground truth; both logs are
+  identical.
+
+## 2026-11-24: messaging nil from arm64
+
+- The plain msgSend bridge looked up an IMP for a null receiver and
+  aborted with "no IMP for ... (receiver (nil))"; only the Super2 path
+  had a nil check. A nil receiver now returns zero: x0/x1 clear a
+  sixteen-byte integer struct return and d0-d3 clear an HFA return, so
+  object, integer and floating-point results read zero as they do on
+  x86_64.

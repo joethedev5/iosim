@@ -1584,6 +1584,11 @@ void *objc_getClass(const char *name)
     return NULL;
 }
 
+int objc_is_class_object(void *ptr)
+{
+    return ptr && find_class_entry(ptr) != NULL;
+}
+
 const char *class_getName(void *cls)
 {
     struct class_entry *ce = find_class_entry(cls);

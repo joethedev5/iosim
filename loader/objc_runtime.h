@@ -61,6 +61,11 @@ int   objc_opt_isKindOfClass(void *obj, void *cls);
 int   objc_opt_respondsToSelector(void *obj, void *sel);
 void *objc_opt_self(void *obj);
 void *objc_getClass(const char *name);
+
+/* Whether a pointer is a registered class object rather than an
+ * instance. Used by the arm64 message bridge to tell a class-method
+ * receiver from an instance receiver. */
+int objc_is_class_object(void *ptr);
 const char *class_getName(void *cls);
 const char *object_getClassName(void *obj);
 void *sel_registerName(const char *name);

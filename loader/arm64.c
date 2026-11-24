@@ -917,6 +917,70 @@ static size_t a64_render_format(struct a64_cpu *c, const char *fmt,
     return o;
 }
 
+
+/* The type encoding of a variadic method stops at its named arguments, so
+ * a native IMP called through the type-encoding bridge reads an empty
+ * va_list. NSString's format constructors are rendered from the guest's
+ * stack slots here and forwarded to the non-variadic UTF-8 constructor.
+ * The bridge calls this only for native IMPs, so a guest class that
+ * implements the selector keeps its own implementation. */
+static int a64_is_string_kind(void *cls)
+{
+    void *base = objc_getClass("NSString");
+    if (!base)
+        return 0;
+    for (int depth = 0; cls && depth < 64; depth++)
+    {
+        if (cls == base)
+            return 1;
+        cls = class_getSuperclass(cls);
+    }
+    return 0;
+}
+
+static int a64_native_format_msg(struct a64_cpu *c, void *sel, uint64_t *ret)
+{
+    const char *name = (const char *)sel;
+    if (!name || !c->x[0])
+        return 0;
+    void *receiver = (void *)(uintptr_t)c->x[0];
+    int is_class = 0;
+    if (strcmp(name, "stringWithFormat:") == 0)
+    {
+        if (!objc_is_class_object(receiver))
+            return 0;
+        is_class = 1;
+    }
+    else if (strcmp(name, "initWithFormat:") != 0)
+    {
+        return 0;
+    }
+    void *cls = is_class ? receiver : object_getClass(receiver);
+    if (!a64_is_string_kind(cls))
+        return 0;
+    char out[4096];
+    const char *fmt = a64_nsstring_cstr(c->x[2]);
+    a64_render_format(c, fmt, out, sizeof out, 1);
+    void *obj = objc_msgSend(
+        receiver,
+        sel_registerName(is_class ? "stringWithUTF8String:"
+                                  : "initWithUTF8String:"),
+        out);
+    *ret = (uint64_t)(uintptr_t)obj;
+    return 1;
+}
+
+/* Messaging nil returns zero. x0/x1 cover a sixteen-byte integer struct
+ * and d0-d3 cover an HFA of up to four floating-point fields; scalars use
+ * the first slot of the matching class. */
+static void a64_zero_message_result(struct a64_cpu *c)
+{
+    c->x[0] = 0;
+    c->x[1] = 0;
+    for (int i = 0; i < 4; i++)
+        c->d[i] = 0;
+}
+
 /* Runs one of the printf-family calls. Darwin arm64 passes anonymous
  * variadic arguments on the stack; the format's fixed position depends on
  * the function. NSLog's format is an NSString and may use %@. */
@@ -1698,7 +1762,7 @@ static int a64_dispatch_native(struct a64_cpu *c, uint64_t target,
         void *receiver = sup ? *(void **)sup : NULL;
         if (!receiver)
         {
-            c->x[0] = 0;
+            a64_zero_message_result(c);
             *pc_out = is_bl ? next : saved;
             return 0;
         }
@@ -1725,6 +1789,12 @@ static int a64_dispatch_native(struct a64_cpu *c, uint64_t target,
     if (r == 0)
     {
         void *sel = (void *)(uintptr_t)c->x[1];
+        if (!c->x[0])
+        {
+            a64_zero_message_result(c);
+            *pc_out = is_bl ? next : saved;
+            return 0;
+        }
         void *imp = objc_lookup_imp((void *)(uintptr_t)c->x[0], sel);
         if (!imp)
         {
@@ -1746,6 +1816,16 @@ static int a64_dispatch_native(struct a64_cpu *c, uint64_t target,
         if (c->trace)
             fprintf(stderr, "arm64 msgSend %s -> native imp %p\n",
                     sel ? (const char *)sel : "(null)", imp);
+        uint64_t fmt_ret;
+        if (a64_native_format_msg(c, sel, &fmt_ret))
+        {
+            if (c->trace)
+                fprintf(stderr, "arm64 msgSend %s -> rendered format\n",
+                        sel ? (const char *)sel : "(null)");
+            c->x[0] = fmt_ret;
+            *pc_out = is_bl ? next : saved;
+            return 0;
+        }
         if (a64_native_imp(c, imp) != 0)
             return -1;
         if (c->trace)

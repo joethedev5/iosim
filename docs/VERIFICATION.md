@@ -2301,6 +2301,43 @@ rendered lines (`fmt 0002.500`, `sign +7`, `left [42    ]`, `prec ab`,
 `llong -5`, `width [  3.14]`, `NSLog: nslog   2.2`) and repeats the
 fixture with `IOSIM_ARM64_NOJIT=1`, where the output is identical.
 
+### arm64: one source, two architectures
+
+The same sources are built for both architectures with
+`tools/build_app.sh` and their output is compared. The variadic fixture's
+stdout and stderr match the x86_64 build byte for byte, so the arm64
+printf gates implement the C library's conversions exactly for these
+formats. `demo/HelloSimApp.m` is built with `--arch arm64` and the
+default x86_64 target, run with `IOSIM_SCREENSHOT_PATH`, and the two PNG
+captures are compared; the full 1206x2622 frames are byte-identical. The
+launch lines are compared after replacing pointer values with a
+placeholder, since each build allocates the window at a different host
+address.
+
+### arm64: variadic Objective-C format methods
+
+`tests/arm64_format_msg.m` calls `+[NSString stringWithFormat:]` and
+`-[NSString initWithFormat:]` from arm64 code with an int and an object,
+an object with a float and a string, a long and a size, and a
+width/precision field. A variadic method's type encoding stops at its
+named arguments, so the native IMP would read an empty `va_list`; the
+message bridge renders the format from the guest's stack slots and
+forwards to `stringWithUTF8String:` or `initWithUTF8String:`. The suite
+checks `fmt1 42-x`, `fmt2 pi 3.14 ok`, `fmt3 123456789/7` and
+`fmt4   2.2|7   |`, the exit status and the interpreter run, then builds
+the same fixture for x86_64, where the native implementations read a real
+`va_list`, and requires the same log.
+
+### arm64: messages to nil
+
+`tests/arm64_nil.m` sends `UTF8String`, `value` and `ratio` to a nil
+receiver and prints `nil 1 0 0.0`. The bridge returns zero for a null
+receiver instead of looking up an IMP: x0/x1 clear a sixteen-byte integer
+return and d0-d3 an HFA return, so object, integer and floating-point
+results all read zero. The suite checks the line, the exit status and the
+interpreter run, and compares the log with the x86_64 build of the same
+source.
+
 ### arm64: AdvSIMD coverage
 
 `tests/arm64_neon.c` exercises float max/min/div/sqrt/abs, integer

@@ -2193,6 +2193,188 @@ check "[blocks2] cell beta" "$out_nj" \
     "the interpreter runs the same returning blocks"
 rm -f "$T/arm64blocks2.fifo"
 
+# ---------- 4f10ai. one source, two architectures ----------
+# The same sources built for both architectures are compared. The
+# variadic fixture's stdout and stderr must match the x86_64 build byte
+# for byte; HelloSimApp's two builds must render the same framebuffer,
+# captured through IOSIM_SCREENSHOT_PATH. Only the pointer values in the
+# UIKit launch line are expected to differ, so logs are compared after
+# replacing them with a placeholder.
+"$ROOT/tools/build_app.sh" --arch arm64 "$ROOT/tests/arm64_varargs.m" \
+    "$T/varargs_a64" >/dev/null
+"$ROOT/tools/build_app.sh" "$ROOT/tests/arm64_varargs.m" \
+    "$T/varargs_x64" >/dev/null
+if DYLD_ROOT_PATH="$ROOT/runtime" timeout 10 "$RUN" --arm64 $FW_ARGS \
+    "$T/varargs_a64" >"$T/varargs_a64.out" 2>"$T/varargs_a64.err"; then
+    rc_a=0
+else
+    rc_a=$?
+fi
+if DYLD_ROOT_PATH="$ROOT/runtime" timeout 10 "$RUN" \
+    "$T/varargs_x64" >"$T/varargs_x64.out" 2>"$T/varargs_x64.err"; then
+    rc_x=0
+else
+    rc_x=$?
+fi
+if [ "$rc_a" -eq 0 ] && [ "$rc_x" -eq 0 ] && \
+    cmp -s "$T/varargs_a64.out" "$T/varargs_x64.out" && \
+    cmp -s "$T/varargs_a64.err" "$T/varargs_x64.err"; then
+    echo "ok   the arm64 printf gates print the same log as the x86_64 build"
+else
+    echo "FAIL dual-architecture variadic log"; fails=$((fails+1))
+fi
+"$ROOT/tools/build_app.sh" --arch arm64 "$ROOT/demo/HelloSimApp.m" \
+    "$T/HelloSim_a64" >/dev/null
+"$ROOT/tools/build_app.sh" "$ROOT/demo/HelloSimApp.m" \
+    "$T/HelloSim_x64" >/dev/null
+if IOSIM_SCREENSHOT_PATH="$T/HelloSim_a64.png" \
+    DYLD_ROOT_PATH="$ROOT/runtime" timeout 15 "$RUN" --arm64 $FW_ARGS \
+    "$T/HelloSim_a64" >"$T/HelloSim_a64.log" 2>&1; then
+    rc_a=0
+else
+    rc_a=$?
+fi
+if IOSIM_SCREENSHOT_PATH="$T/HelloSim_x64.png" \
+    DYLD_ROOT_PATH="$ROOT/runtime" timeout 15 "$RUN" \
+    "$T/HelloSim_x64" >"$T/HelloSim_x64.log" 2>&1; then
+    rc_x=0
+else
+    rc_x=$?
+fi
+if [ "$rc_a" -eq 0 ] && [ "$rc_x" -eq 0 ] && \
+    cmp -s "$T/HelloSim_a64.png" "$T/HelloSim_x64.png"; then
+    echo "ok   the arm64 and x86_64 HelloSim builds render identical frames"
+else
+    echo "FAIL dual-architecture HelloSim frame"; fails=$((fails+1))
+fi
+if out="$(python3 - "$T/HelloSim_a64.log" "$T/HelloSim_x64.log" <<'PY'
+import re, sys
+
+def normalized(path):
+    with open(path, "rb") as f:
+        text = f.read()
+    # The capture line names the architecture's PNG; the rest must match.
+    text = re.sub(rb"HelloSim_(a64|x64)\.png", b"HelloSim.png", text)
+    return re.sub(rb"0x[0-9a-fA-F]+", b"0xADDR", text)
+
+if normalized(sys.argv[1]) != normalized(sys.argv[2]):
+    raise SystemExit("launch logs differ")
+print("ok   the two HelloSim builds log the same lines")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL dual-architecture HelloSim log"; echo "$out"
+    fails=$((fails+1))
+fi
+
+# ---------- 4f10aj. arm64 variadic Objective-C format methods ----------
+# NSString's format constructors are variadic methods: the type encoding
+# stops at the named arguments, so the native IMP would read an empty
+# va_list. The loader renders the format from the guest stack slots and
+# forwards to the non-variadic UTF-8 constructor. The x86_64 build of the
+# same fixture calls the native implementations with a real va_list and
+# prints the same four lines.
+"$CC" -target arm64-apple-ios18.0-simulator -ffreestanding \
+    -fobjc-runtime=ios-18.0 -fno-objc-arc -fblocks -O1 -I "$ROOT/demo" \
+    -c "$ROOT/tests/arm64_format_msg.m" -o "$T/arm64_format_msg.o"
+"$LD64" -arch arm64 -platform_version $PLATFORM -e _main \
+    -o "$T/arm64_format_msg" "$T/arm64_format_msg.o" -undefined dynamic_lookup
+if out="$(DYLD_ROOT_PATH="$ROOT/runtime" timeout 10 "$RUN" --arm64 \
+    $FW_ARGS "$T/arm64_format_msg" 2>&1)"; then
+    rc=0
+else
+    rc=$?
+fi
+check "fmt1 42-x" "$out" \
+    "stringWithFormat: formats an int and an object"
+check "fmt2 pi 3.14 ok" "$out" \
+    "stringWithFormat: formats an object, a float and a string"
+check "fmt3 123456789/7" "$out" \
+    "initWithFormat: formats a long and a size"
+check "fmt4   2.2|7   |" "$out" \
+    "format flags and widths survive the render"
+if [ "$rc" -eq 0 ]; then
+    echo "ok   the arm64 format message fixture exits zero"
+else
+    echo "FAIL arm64 format messages (exit $rc)"; fails=$((fails+1))
+fi
+if out_nj="$(IOSIM_ARM64_NOJIT=1 DYLD_ROOT_PATH="$ROOT/runtime" \
+    timeout 10 "$RUN" --arm64 $FW_ARGS "$T/arm64_format_msg" 2>&1)"; then
+    :
+fi
+if [ "$out" = "$out_nj" ]; then
+    echo "ok   the interpreter formats the same messages"
+else
+    echo "FAIL arm64 format messages under interpretation"; fails=$((fails+1))
+fi
+"$CC" -target x86_64-apple-ios18.0-simulator -ffreestanding \
+    -fobjc-runtime=ios-18.0 -fno-objc-arc -fblocks -O1 -I "$ROOT/demo" \
+    -c "$ROOT/tests/arm64_format_msg.m" -o "$T/format_msg_x64.o"
+"$LD64" -arch x86_64 -platform_version $PLATFORM -e _main \
+    -o "$T/format_msg_x64" "$T/format_msg_x64.o" -undefined dynamic_lookup
+if out_x="$(DYLD_ROOT_PATH="$ROOT/runtime" timeout 10 "$RUN" \
+    $FW_ARGS "$T/format_msg_x64" 2>&1)"; then
+    rc_x=0
+else
+    rc_x=$?
+fi
+if [ "$rc_x" -eq 0 ] && [ "$out" = "$out_x" ]; then
+    echo "ok   the arm64 format messages match the x86_64 build"
+else
+    echo "FAIL dual-architecture format messages"; echo "$out_x"
+    fails=$((fails+1))
+fi
+
+# ---------- 4f10ak. arm64 messages to nil ----------
+# A null receiver returns zero without an IMP lookup: x0/x1 and d0-d3
+# are cleared. The fixture messages nil for an object, an int and a
+# double, and the x86_64 build of the same source prints the same line.
+"$CC" -target arm64-apple-ios18.0-simulator -ffreestanding \
+    -fobjc-runtime=ios-18.0 -fno-objc-arc -fblocks -O1 -I "$ROOT/demo" \
+    -c "$ROOT/tests/arm64_nil.m" -o "$T/arm64_nil.o"
+"$LD64" -arch arm64 -platform_version $PLATFORM -e _main \
+    -o "$T/arm64_nil" "$T/arm64_nil.o" -undefined dynamic_lookup
+if out="$(DYLD_ROOT_PATH="$ROOT/runtime" timeout 10 "$RUN" --arm64 \
+    $FW_ARGS "$T/arm64_nil" 2>&1)"; then
+    rc=0
+else
+    rc=$?
+fi
+check "nil 1 0 0.0" "$out" \
+    "messaging nil returns zero for object, int and double"
+if [ "$rc" -eq 0 ]; then
+    echo "ok   the arm64 nil fixture exits zero"
+else
+    echo "FAIL arm64 nil messages (exit $rc)"; fails=$((fails+1))
+fi
+if out_nj="$(IOSIM_ARM64_NOJIT=1 DYLD_ROOT_PATH="$ROOT/runtime" \
+    timeout 10 "$RUN" --arm64 $FW_ARGS "$T/arm64_nil" 2>&1)"; then
+    :
+fi
+if [ "$out" = "$out_nj" ]; then
+    echo "ok   the interpreter returns the same zeros"
+else
+    echo "FAIL arm64 nil messages under interpretation"; fails=$((fails+1))
+fi
+"$CC" -target x86_64-apple-ios18.0-simulator -ffreestanding \
+    -fobjc-runtime=ios-18.0 -fno-objc-arc -fblocks -O1 -I "$ROOT/demo" \
+    -c "$ROOT/tests/arm64_nil.m" -o "$T/nil_x64.o"
+"$LD64" -arch x86_64 -platform_version $PLATFORM -e _main \
+    -o "$T/nil_x64" "$T/nil_x64.o" -undefined dynamic_lookup
+if out_x="$(DYLD_ROOT_PATH="$ROOT/runtime" timeout 10 "$RUN" \
+    $FW_ARGS "$T/nil_x64" 2>&1)"; then
+    rc_x=0
+else
+    rc_x=$?
+fi
+if [ "$rc_x" -eq 0 ] && [ "$out" = "$out_x" ]; then
+    echo "ok   the arm64 nil messages match the x86_64 build"
+else
+    echo "FAIL dual-architecture nil messages"; echo "$out_x"
+    fails=$((fails+1))
+fi
+
 # ---------- 4f11. CAAnimation completion and fill modes ----------
 rm -f "$T/arem.fifo"
 mkfifo "$T/arem.fifo"
