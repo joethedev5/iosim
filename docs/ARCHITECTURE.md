@@ -702,6 +702,17 @@ positional, abbreviated, short, full or spelled-out units with
 `maximumUnitCount`, approximation and time-remaining phrases; dates are
 differenced with `timeIntervalSinceDate:`.
 
+`NSDimension` units store a coefficient and offset to their base unit
+(meters, kilograms, kelvin, seconds, meters per second, liters), so a
+measurement converts with `base = value * coefficient + offset` and
+back out through the target unit. The length, mass, temperature,
+duration, speed and volume families expose their units as class
+methods and keep a registry for natural-scale selection.
+`NSMeasurementFormatter` keeps a unit style and options: without
+provided-unit it keeps a value already between 1 and 1000 in its own
+unit, otherwise picks the largest-coefficient family unit that lands
+in that range, or the smallest unit for very small values. The
+temperature-without-unit option prints only the number.
 `NSKeyedArchiver` builds the same keyed-archive structure Foundation uses: an
 XML plist with `$archiver`, `$version`, `$top` and a `$objects` table, where
 class descriptions record `$classname`/`$classes` and every object reference

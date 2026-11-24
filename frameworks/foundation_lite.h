@@ -1291,6 +1291,125 @@ enum {
 - (void)setCalendar:(NSCalendar *)calendar;
 @end
 
+@interface NSUnit : NSObject {
+@public
+    id _symbol;
+    id _name;
+    id _pluralName;
+}
+- (id)symbol;
+@end
+
+@interface NSDimension : NSUnit {
+@public
+    double _coefficient;
+    double _offset;
+    int _family;
+}
++ (id)baseUnit;
+@end
+
+@interface NSUnitLength : NSDimension
++ (id)meters;
++ (id)kilometers;
++ (id)centimeters;
++ (id)millimeters;
++ (id)miles;
++ (id)yards;
++ (id)feet;
++ (id)inches;
++ (id)nauticalMiles;
++ (NSArray *)iosimUnits;
+@end
+
+@interface NSUnitMass : NSDimension
++ (id)kilograms;
++ (id)grams;
++ (id)milligrams;
++ (id)pounds;
++ (id)ounces;
++ (id)stones;
++ (id)metricTons;
++ (NSArray *)iosimUnits;
+@end
+
+@interface NSUnitTemperature : NSDimension
++ (id)kelvin;
++ (id)celsius;
++ (id)fahrenheit;
++ (NSArray *)iosimUnits;
+@end
+
+@interface NSUnitDuration : NSDimension
++ (id)seconds;
++ (id)milliseconds;
++ (id)minutes;
++ (id)hours;
++ (id)days;
++ (NSArray *)iosimUnits;
+@end
+
+@interface NSUnitSpeed : NSDimension
++ (id)metersPerSecond;
++ (id)kilometersPerHour;
++ (id)milesPerHour;
++ (id)knots;
++ (NSArray *)iosimUnits;
+@end
+
+@interface NSUnitVolume : NSDimension
++ (id)liters;
++ (id)milliliters;
++ (id)gallons;
++ (id)quarts;
++ (id)pints;
++ (id)cups;
++ (id)fluidOunces;
++ (NSArray *)iosimUnits;
+@end
+
+@interface NSMeasurement : NSObject {
+@public
+    double _doubleValue;
+    NSUnit *_unit;
+}
+- (id)initWithDoubleValue:(double)value unit:(NSUnit *)unit;
+- (double)doubleValue;
+- (NSUnit *)unit;
+- (NSMeasurement *)measurementByConvertingToUnit:(NSUnit *)unit;
+- (BOOL)isEqualToMeasurement:(NSMeasurement *)other;
+- (NSMeasurement *)measurementByAddingMeasurement:(NSMeasurement *)other;
+- (NSMeasurement *)measurementBySubtractingMeasurement:(NSMeasurement *)other;
+@end
+
+enum {
+    NSFormattingUnitStyleShort = 1,
+    NSFormattingUnitStyleMedium = 2,
+    NSFormattingUnitStyleLong = 3
+};
+
+enum {
+    NSMeasurementFormatterUnitOptionsProvidedUnit = 1UL << 0,
+    NSMeasurementFormatterUnitOptionsNaturalScale = 1UL << 1,
+    NSMeasurementFormatterUnitOptionsTemperatureWithoutUnit = 1UL << 2
+};
+
+@interface NSMeasurementFormatter : NSObject {
+@public
+    long _unitStyle;
+    unsigned long _unitOptions;
+    id _numberFormatter;
+}
+- (long)unitStyle;
+- (void)setUnitStyle:(long)style;
+- (unsigned long)unitOptions;
+- (void)setUnitOptions:(unsigned long)options;
+- (NSNumberFormatter *)numberFormatter;
+- (void)setNumberFormatter:(NSNumberFormatter *)formatter;
+- (NSString *)stringFromMeasurement:(NSMeasurement *)measurement;
+- (NSString *)stringFromUnit:(NSUnit *)unit;
+@end
+
 @interface NSError : NSObject {
 @public
     id _domain;

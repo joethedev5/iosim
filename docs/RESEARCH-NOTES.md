@@ -1360,3 +1360,24 @@ components.
   two rows per column give five 90 pt columns plus four 10 pt gaps and 20 pt
   of insets, for a 510 pt content width. A 60 pt horizontal content offset
   shifts the rendered cells, confirmed from the captured framebuffer.
+
+## 2026-11-24: NSMeasurement units and formatting
+
+- `NSUnit` carries a symbol plus singular and plural names; `NSDimension`
+  adds a coefficient and offset to its base unit and a family id. Length
+  converts through meters, mass through kilograms, temperature through
+  kelvin (with an affine offset for Celsius and Fahrenheit), duration through
+  seconds, speed through meters per second and volume through liters.
+  Accessors return per-class singletons and register them in a per-family
+  list used by natural-scale formatting.
+- `NSMeasurement` converts by mapping through the base unit, compares two
+  compatible measurements after converting to the receiver's unit, and adds
+  or subtracts similarly. Incompatible dimensions return nil rather than
+  raising, matching the runtime's exception-free foundation subset.
+- `NSMeasurementFormatter` defaults to the medium style and natural scale.
+  Natural scale keeps an original value already between 1 and 1000,
+  otherwise chooses the largest-coefficient family unit landing in that
+  range, and falls back to the smallest unit for very small values. Short
+  style uses symbols; medium and long use singular for 1 and the plural
+  otherwise. Provided-unit skips scaling and the temperature-without-unit
+  option omits the unit text.

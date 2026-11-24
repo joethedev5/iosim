@@ -1273,6 +1273,18 @@ style reads `1 day, 1 hr, 1 min, 1 sec`, in full style
 `2 hr, 5 min`; `stringFromDate:toDate:` reads `1:01:01`; and
 `timeIntervalSinceDate:` reports 3661.
 
+### Foundation: measurement units
+
+`tests/measurement_test.m` converts 1.5 km to 1500 m, 1609.344 m to one
+mile, 32 °F to 0 °C, 300 K to 26.85 °C, 1.5 hours to 5400 seconds, 100 km/h
+to 27.7778 m/s and one US gallon to 3.7854 liters. Adding 50 cm to 1 m gives
+1.5 m, and 1000 m compares equal to 1 km but not to 1 mile. The formatter
+prints 1500 m as `1.5 kilometers` naturally and `1.5 km` in short style,
+keeps `1500 meters` with the provided-unit option, prints `kilometers` for
+the unit alone, `32 degrees Fahrenheit` for the temperature and `32` with
+the temperature-without-unit option, and natural-scales 0.02 m to
+`2 centimeters` while leaving 500 g as `500 grams`.
+
 ### UIKit: app bundle resources
 
 `demo/ResourceApp.m` is installed as a real `.app` with a 4 x 4 red `dot.png`

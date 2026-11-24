@@ -1234,6 +1234,89 @@ check "[dcf] dates 1:01:01" "$out" \
 check "[dcf] delta 3661" "$out" \
     "NSDate timeIntervalSinceDate: reports the signed interval"
 
+# ---------- 4g5. NSMeasurement units and formatting ----------
+"$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
+    -ffreestanding -O1 -I "$ROOT/frameworks" \
+    -c "$ROOT/tests/measurement_test.m" -o "$T/measurement.o"
+"$LD64" -arch x86_64 -platform_version $PLATFORM -e _main \
+    -o "$T/measurement" "$T/measurement.o" \
+    "$ROOT/runtime/System/Library/Frameworks/Foundation.framework/Foundation" \
+    -undefined dynamic_lookup
+out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/measurement" 2>&1)"
+check "[meas] done" "$out" \
+    "the measurement fixture converts, adds and formats"
+if report="$(python3 - "$out" <<'PY'
+import re
+import sys
+
+values = {}
+flags = {}
+for line in sys.argv[1].splitlines():
+    m = re.match(r'\[meas\] (km-m|m-mi|f-c|k-c|h-s|kmh-ms|gal-l|add) '
+                 r'([-0-9.]+)$', line)
+    if m:
+        values[m.group(1)] = float(m.group(2))
+    m = re.match(r'\[meas\] (equal|uneq) (\d)$', line)
+    if m:
+        flags[m.group(1)] = int(m.group(2))
+expected = {
+    'km-m': 1500.0,
+    'm-mi': 1.0,
+    'f-c': 0.0,
+    'k-c': 26.85,
+    'h-s': 5400.0,
+    'kmh-ms': 27.7778,
+    'gal-l': 3.7854,
+    'add': 1.5,
+}
+for key, want in expected.items():
+    if key not in values:
+        raise SystemExit('missing conversion %s' % key)
+    if abs(values[key] - want) > 0.02:
+        raise SystemExit('%s converted to %r, expected %r' %
+                         (key, values[key], want))
+if flags.get('equal') != 1 or flags.get('uneq') != 0:
+    raise SystemExit('measurement equality is wrong: %r' % (flags,))
+print("ok   measurements convert across metric and imperial units")
+PY
+)"; then
+    echo "$report"
+else
+    echo "FAIL measurement conversion"; echo "$report"; fails=$((fails+1))
+fi
+if report="$(python3 - "$out" <<'PY'
+import re
+import sys
+
+want = {
+    'nat': '1.5 kilometers',
+    'short': '1.5 km',
+    'provided': '1500 meters',
+    'unit': 'kilometers',
+    'temp': '32 degrees Fahrenheit',
+    'tempnounit': '32',
+    'small': '2 centimeters',
+    'grams': '500 grams',
+}
+seen = {}
+for line in sys.argv[1].splitlines():
+    m = re.match(r'\[meas\] ([a-z]+) (.*)$', line)
+    if m and m.group(1) in want:
+        seen[m.group(1)] = m.group(2)
+for key, text in want.items():
+    if key not in seen:
+        raise SystemExit('missing format %s: %r' % (key, seen))
+    if seen[key] != text:
+        raise SystemExit('%s formatted as %r, expected %r' %
+                         (key, seen[key], text))
+print("ok   measurement formats use natural scale, styles and options")
+PY
+)"; then
+    echo "$report"
+else
+    echo "FAIL measurement formatting"; echo "$report"; fails=$((fails+1))
+fi
+
 # ---------- 4h. NSOperationQueue block operations ----------
 "$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc -fblocks \
     -ffreestanding -O1 -I "$ROOT/frameworks" \

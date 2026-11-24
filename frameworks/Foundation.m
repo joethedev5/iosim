@@ -6418,6 +6418,616 @@ static void format_date_parts(struct date_parts *parts,
 - (void)setCalendar:(NSCalendar *)calendar { _calendar = calendar; }
 @end
 
+/* ------------------------------------------------------- measurements */
+
+static NSMutableArray *g_dimension_units[6];
+
+static id unit_create(Class cls, const char *symbol, const char *name,
+                      const char *plural, double coefficient, double offset,
+                      int family)
+{
+    NSDimension *unit = (NSDimension *)[[cls alloc] init];
+    unit->_symbol = [NSString stringWithUTF8String:symbol];
+    unit->_name = [NSString stringWithUTF8String:name];
+    unit->_pluralName = [NSString stringWithUTF8String:plural];
+    unit->_coefficient = coefficient;
+    unit->_offset = offset;
+    unit->_family = family;
+    if (family >= 0 && family < 6)
+    {
+        if (!g_dimension_units[family])
+            g_dimension_units[family] = [[NSMutableArray alloc] init];
+        [g_dimension_units[family] addObject:unit];
+    }
+    return unit;
+}
+
+@implementation NSUnit
+- (id)symbol { return _symbol; }
+@end
+
+@implementation NSDimension
++ (id)baseUnit { return nil; }
+@end
+
+@implementation NSUnitLength
++ (id)meters
+{
+    static NSUnitLength *unit;
+    if (!unit)
+        unit = (NSUnitLength *)unit_create([NSUnitLength class], "m",
+                                           "meter", "meters", 1.0, 0.0, 0);
+    return unit;
+}
++ (id)kilometers
+{
+    static NSUnitLength *unit;
+    if (!unit)
+        unit = (NSUnitLength *)unit_create([NSUnitLength class], "km",
+                                           "kilometer", "kilometers",
+                                           1000.0, 0.0, 0);
+    return unit;
+}
++ (id)centimeters
+{
+    static NSUnitLength *unit;
+    if (!unit)
+        unit = (NSUnitLength *)unit_create([NSUnitLength class], "cm",
+                                           "centimeter", "centimeters",
+                                           0.01, 0.0, 0);
+    return unit;
+}
++ (id)millimeters
+{
+    static NSUnitLength *unit;
+    if (!unit)
+        unit = (NSUnitLength *)unit_create([NSUnitLength class], "mm",
+                                           "millimeter", "millimeters",
+                                           0.001, 0.0, 0);
+    return unit;
+}
++ (id)miles
+{
+    static NSUnitLength *unit;
+    if (!unit)
+        unit = (NSUnitLength *)unit_create([NSUnitLength class], "mi",
+                                           "mile", "miles", 1609.344, 0.0,
+                                           0);
+    return unit;
+}
++ (id)yards
+{
+    static NSUnitLength *unit;
+    if (!unit)
+        unit = (NSUnitLength *)unit_create([NSUnitLength class], "yd",
+                                           "yard", "yards", 0.9144, 0.0,
+                                           0);
+    return unit;
+}
++ (id)feet
+{
+    static NSUnitLength *unit;
+    if (!unit)
+        unit = (NSUnitLength *)unit_create([NSUnitLength class], "ft",
+                                           "foot", "feet", 0.3048, 0.0, 0);
+    return unit;
+}
++ (id)inches
+{
+    static NSUnitLength *unit;
+    if (!unit)
+        unit = (NSUnitLength *)unit_create([NSUnitLength class], "in",
+                                           "inch", "inches", 0.0254, 0.0,
+                                           0);
+    return unit;
+}
++ (id)nauticalMiles
+{
+    static NSUnitLength *unit;
+    if (!unit)
+        unit = (NSUnitLength *)unit_create([NSUnitLength class], "nmi",
+                                           "nautical mile",
+                                           "nautical miles", 1852.0, 0.0, 0);
+    return unit;
+}
++ (NSArray *)iosimUnits
+{
+    return @[ [self meters], [self kilometers], [self centimeters],
+              [self millimeters], [self miles], [self yards], [self feet],
+              [self inches], [self nauticalMiles] ];
+}
+@end
+
+@implementation NSUnitMass
++ (id)kilograms
+{
+    static NSUnitMass *unit;
+    if (!unit)
+        unit = (NSUnitMass *)unit_create([NSUnitMass class], "kg",
+                                         "kilogram", "kilograms", 1.0, 0.0,
+                                         1);
+    return unit;
+}
++ (id)grams
+{
+    static NSUnitMass *unit;
+    if (!unit)
+        unit = (NSUnitMass *)unit_create([NSUnitMass class], "g", "gram",
+                                         "grams", 0.001, 0.0, 1);
+    return unit;
+}
++ (id)milligrams
+{
+    static NSUnitMass *unit;
+    if (!unit)
+        unit = (NSUnitMass *)unit_create([NSUnitMass class], "mg",
+                                         "milligram", "milligrams", 0.000001,
+                                         0.0, 1);
+    return unit;
+}
++ (id)pounds
+{
+    static NSUnitMass *unit;
+    if (!unit)
+        unit = (NSUnitMass *)unit_create([NSUnitMass class], "lb", "pound",
+                                         "pounds", 0.45359237, 0.0, 1);
+    return unit;
+}
++ (id)ounces
+{
+    static NSUnitMass *unit;
+    if (!unit)
+        unit = (NSUnitMass *)unit_create([NSUnitMass class], "oz", "ounce",
+                                         "ounces", 0.028349523125, 0.0, 1);
+    return unit;
+}
++ (id)stones
+{
+    static NSUnitMass *unit;
+    if (!unit)
+        unit = (NSUnitMass *)unit_create([NSUnitMass class], "st", "stone",
+                                         "stones", 6.35029318, 0.0, 1);
+    return unit;
+}
++ (id)metricTons
+{
+    static NSUnitMass *unit;
+    if (!unit)
+        unit = (NSUnitMass *)unit_create([NSUnitMass class], "t",
+                                         "metric ton", "metric tons",
+                                         1000.0, 0.0, 1);
+    return unit;
+}
++ (NSArray *)iosimUnits
+{
+    return @[ [self kilograms], [self grams], [self milligrams],
+              [self pounds], [self ounces], [self stones],
+              [self metricTons] ];
+}
+@end
+
+@implementation NSUnitTemperature
++ (id)kelvin
+{
+    static NSUnitTemperature *unit;
+    if (!unit)
+        unit = (NSUnitTemperature *)unit_create([NSUnitTemperature class],
+                                                "K", "kelvin", "kelvin", 1.0,
+                                                0.0, 2);
+    return unit;
+}
++ (id)celsius
+{
+    static NSUnitTemperature *unit;
+    if (!unit)
+        unit = (NSUnitTemperature *)unit_create([NSUnitTemperature class],
+                                                "°C", "degree Celsius",
+                                                "degrees Celsius", 1.0,
+                                                273.15, 2);
+    return unit;
+}
++ (id)fahrenheit
+{
+    static NSUnitTemperature *unit;
+    if (!unit)
+        unit = (NSUnitTemperature *)unit_create([NSUnitTemperature class],
+                                                "°F", "degree Fahrenheit",
+                                                "degrees Fahrenheit",
+                                                5.0 / 9.0, 255.372222222222, 2);
+    return unit;
+}
++ (NSArray *)iosimUnits
+{
+    return @[ [self kelvin], [self celsius], [self fahrenheit] ];
+}
+@end
+
+@implementation NSUnitDuration
++ (id)seconds
+{
+    static NSUnitDuration *unit;
+    if (!unit)
+        unit = (NSUnitDuration *)unit_create([NSUnitDuration class], "s",
+                                             "second", "seconds", 1.0, 0.0,
+                                             3);
+    return unit;
+}
++ (id)milliseconds
+{
+    static NSUnitDuration *unit;
+    if (!unit)
+        unit = (NSUnitDuration *)unit_create([NSUnitDuration class], "ms",
+                                             "millisecond", "milliseconds",
+                                             0.001, 0.0, 3);
+    return unit;
+}
++ (id)minutes
+{
+    static NSUnitDuration *unit;
+    if (!unit)
+        unit = (NSUnitDuration *)unit_create([NSUnitDuration class], "min",
+                                             "minute", "minutes", 60.0, 0.0,
+                                             3);
+    return unit;
+}
++ (id)hours
+{
+    static NSUnitDuration *unit;
+    if (!unit)
+        unit = (NSUnitDuration *)unit_create([NSUnitDuration class], "h",
+                                             "hour", "hours", 3600.0, 0.0,
+                                             3);
+    return unit;
+}
++ (id)days
+{
+    static NSUnitDuration *unit;
+    if (!unit)
+        unit = (NSUnitDuration *)unit_create([NSUnitDuration class], "d",
+                                             "day", "days", 86400.0, 0.0,
+                                             3);
+    return unit;
+}
++ (NSArray *)iosimUnits
+{
+    return @[ [self seconds], [self milliseconds], [self minutes],
+              [self hours], [self days] ];
+}
+@end
+
+@implementation NSUnitSpeed
++ (id)metersPerSecond
+{
+    static NSUnitSpeed *unit;
+    if (!unit)
+        unit = (NSUnitSpeed *)unit_create([NSUnitSpeed class], "m/s",
+                                          "meter per second",
+                                          "meters per second", 1.0, 0.0, 4);
+    return unit;
+}
++ (id)kilometersPerHour
+{
+    static NSUnitSpeed *unit;
+    if (!unit)
+        unit = (NSUnitSpeed *)unit_create([NSUnitSpeed class], "km/h",
+                                          "kilometer per hour",
+                                          "kilometers per hour", 0.2777777777777778,
+                                          0.0, 4);
+    return unit;
+}
++ (id)milesPerHour
+{
+    static NSUnitSpeed *unit;
+    if (!unit)
+        unit = (NSUnitSpeed *)unit_create([NSUnitSpeed class], "mph",
+                                          "mile per hour",
+                                          "miles per hour", 0.44704, 0.0, 4);
+    return unit;
+}
++ (id)knots
+{
+    static NSUnitSpeed *unit;
+    if (!unit)
+        unit = (NSUnitSpeed *)unit_create([NSUnitSpeed class], "kn", "knot",
+                                          "knots", 0.5144444444444444, 0.0,
+                                          4);
+    return unit;
+}
++ (NSArray *)iosimUnits
+{
+    return @[ [self metersPerSecond], [self kilometersPerHour],
+              [self milesPerHour], [self knots] ];
+}
+@end
+
+@implementation NSUnitVolume
++ (id)liters
+{
+    static NSUnitVolume *unit;
+    if (!unit)
+        unit = (NSUnitVolume *)unit_create([NSUnitVolume class], "L",
+                                           "liter", "liters", 1.0, 0.0, 5);
+    return unit;
+}
++ (id)milliliters
+{
+    static NSUnitVolume *unit;
+    if (!unit)
+        unit = (NSUnitVolume *)unit_create([NSUnitVolume class], "mL",
+                                           "milliliter", "milliliters",
+                                           0.001, 0.0, 5);
+    return unit;
+}
++ (id)gallons
+{
+    static NSUnitVolume *unit;
+    if (!unit)
+        unit = (NSUnitVolume *)unit_create([NSUnitVolume class], "gal",
+                                           "gallon", "gallons",
+                                           3.785411784, 0.0, 5);
+    return unit;
+}
++ (id)quarts
+{
+    static NSUnitVolume *unit;
+    if (!unit)
+        unit = (NSUnitVolume *)unit_create([NSUnitVolume class], "qt",
+                                           "quart", "quarts",
+                                           0.946352946, 0.0, 5);
+    return unit;
+}
++ (id)pints
+{
+    static NSUnitVolume *unit;
+    if (!unit)
+        unit = (NSUnitVolume *)unit_create([NSUnitVolume class], "pt",
+                                           "pint", "pints",
+                                           0.473176473, 0.0, 5);
+    return unit;
+}
++ (id)cups
+{
+    static NSUnitVolume *unit;
+    if (!unit)
+        unit = (NSUnitVolume *)unit_create([NSUnitVolume class], "cup",
+                                           "cup", "cups",
+                                           0.2365882365, 0.0, 5);
+    return unit;
+}
++ (id)fluidOunces
+{
+    static NSUnitVolume *unit;
+    if (!unit)
+        unit = (NSUnitVolume *)unit_create([NSUnitVolume class], "fl oz",
+                                           "fluid ounce", "fluid ounces",
+                                           0.0295735295625, 0.0, 5);
+    return unit;
+}
++ (NSArray *)iosimUnits
+{
+    return @[ [self liters], [self milliliters], [self gallons],
+              [self quarts], [self pints], [self cups], [self fluidOunces] ];
+}
+@end
+
+@implementation NSMeasurement
+- (id)initWithDoubleValue:(double)value unit:(NSUnit *)unit
+{
+    self = [super init];
+    if (self)
+    {
+        _doubleValue = value;
+        _unit = unit;
+    }
+    return self;
+}
+- (double)doubleValue { return _doubleValue; }
+- (NSUnit *)unit { return _unit; }
+- (NSMeasurement *)measurementByConvertingToUnit:(NSUnit *)unit
+{
+    if (!unit || !_unit)
+        return nil;
+    if ([unit isKindOfClass:[NSDimension class]] &&
+        [_unit isKindOfClass:[NSDimension class]] &&
+        [unit class] == [_unit class])
+    {
+        NSDimension *from = (NSDimension *)_unit;
+        NSDimension *to = (NSDimension *)unit;
+        double base = _doubleValue * from->_coefficient + from->_offset;
+        double value = (base - to->_offset) / to->_coefficient;
+        return [[[NSMeasurement alloc] initWithDoubleValue:value
+                                                       unit:unit] autorelease];
+    }
+    return nil;
+}
+- (BOOL)isEqualToMeasurement:(NSMeasurement *)other
+{
+    if (!other)
+        return NO;
+    NSMeasurement *converted = [other measurementByConvertingToUnit:_unit];
+    if (!converted)
+        return NO;
+    double a = _doubleValue;
+    double b = [converted doubleValue];
+    double scale = 1.0 + (__builtin_fabs(a) > __builtin_fabs(b)
+                              ? __builtin_fabs(a) : __builtin_fabs(b));
+    return __builtin_fabs(a - b) <= 1e-9 * scale;
+}
+- (NSMeasurement *)measurementByAddingMeasurement:(NSMeasurement *)other
+{
+    NSMeasurement *converted = [other measurementByConvertingToUnit:_unit];
+    if (!converted)
+        return nil;
+    return [[[NSMeasurement alloc]
+        initWithDoubleValue:_doubleValue + [converted doubleValue]
+                       unit:_unit] autorelease];
+}
+- (NSMeasurement *)measurementBySubtractingMeasurement:(NSMeasurement *)other
+{
+    NSMeasurement *converted = [other measurementByConvertingToUnit:_unit];
+    if (!converted)
+        return nil;
+    return [[[NSMeasurement alloc]
+        initWithDoubleValue:_doubleValue - [converted doubleValue]
+                       unit:_unit] autorelease];
+}
+@end
+
+static id measurement_format_number(double value)
+{
+    char text[64];
+    double rounded = (double)(long long)value;
+    if (__builtin_fabs(value - rounded) < 1e-9 &&
+        __builtin_fabs(value) < 1e15)
+    {
+        snprintf(text, sizeof(text), "%lld", (long long)rounded);
+    }
+    else
+    {
+        snprintf(text, sizeof(text), "%.2f", value);
+        char *dot = strchr(text, '.');
+        if (dot)
+        {
+            char *end = text + strlen(text) - 1;
+            while (end > dot && *end == '0')
+                *end-- = 0;
+            if (end == dot)
+                *end = 0;
+        }
+    }
+    return [NSString stringWithUTF8String:text];
+}
+
+static id measurement_unit_text(NSUnit *unit, double value, long style)
+{
+    if (!unit)
+        return @"";
+    if (style == NSFormattingUnitStyleShort)
+        return [unit symbol];
+    if (__builtin_fabs(value - 1.0) < 1e-9)
+        return unit->_name;
+    return unit->_pluralName;
+}
+
+/* Chooses the unit whose coefficient is largest while the converted value
+ * stays at or above one in magnitude; for values below one in every unit,
+ * the smallest unit wins. Temperature keeps the measurement's unit. */
+static NSUnit *measurement_natural_unit(NSUnit *unit, double *value)
+{
+    if (![unit isKindOfClass:[NSDimension class]])
+        return unit;
+    NSDimension *dimension = (NSDimension *)unit;
+    if (dimension->_family == 2)
+        return unit;
+    double base = *value * dimension->_coefficient + dimension->_offset;
+    if (__builtin_fabs(base) < 1e-12)
+        return unit;
+    if (__builtin_fabs(*value) >= 1.0 && __builtin_fabs(*value) < 1000.0)
+        return unit;
+    NSArray *units = nil;
+    switch (dimension->_family)
+    {
+    case 0: units = [NSUnitLength iosimUnits]; break;
+    case 1: units = [NSUnitMass iosimUnits]; break;
+    case 2: units = [NSUnitTemperature iosimUnits]; break;
+    case 3: units = [NSUnitDuration iosimUnits]; break;
+    case 4: units = [NSUnitSpeed iosimUnits]; break;
+    case 5: units = [NSUnitVolume iosimUnits]; break;
+    default: break;
+    }
+    if (!units)
+        return unit;
+    NSUnit *best = unit;
+    double bestCoefficient = 0.0, bestValue = *value;
+    NSUnit *smallest = unit;
+    double smallestCoefficient = 0.0, smallestValue = *value;
+    for (unsigned long i = 0; i < [units count]; i++)
+    {
+        NSDimension *candidate =
+            (NSDimension *)[units objectAtIndex:i];
+        if (![candidate isKindOfClass:[NSDimension class]] ||
+            candidate->_coefficient <= 0)
+            continue;
+        double converted =
+            (base - candidate->_offset) / candidate->_coefficient;
+        if (candidate->_coefficient < smallestCoefficient ||
+            smallestCoefficient == 0.0)
+        {
+            smallest = candidate;
+            smallestCoefficient = candidate->_coefficient;
+            smallestValue = converted;
+        }
+        if (__builtin_fabs(converted) >= 1.0 &&
+            __builtin_fabs(converted) < 1000.0 &&
+            candidate->_coefficient > bestCoefficient)
+        {
+            best = candidate;
+            bestCoefficient = candidate->_coefficient;
+            bestValue = converted;
+        }
+    }
+    if (bestCoefficient > 0.0)
+    {
+        *value = bestValue;
+        return best;
+    }
+    *value = smallestValue;
+    return smallest;
+}
+
+@implementation NSMeasurementFormatter
+- (id)init
+{
+    self = [super init];
+    if (self)
+    {
+        _unitStyle = NSFormattingUnitStyleMedium;
+        _unitOptions = NSMeasurementFormatterUnitOptionsNaturalScale;
+    }
+    return self;
+}
+- (long)unitStyle { return _unitStyle; }
+- (void)setUnitStyle:(long)style { _unitStyle = style; }
+- (unsigned long)unitOptions { return _unitOptions; }
+- (void)setUnitOptions:(unsigned long)options { _unitOptions = options; }
+- (NSNumberFormatter *)numberFormatter
+{
+    return (NSNumberFormatter *)_numberFormatter;
+}
+- (void)setNumberFormatter:(NSNumberFormatter *)formatter
+{
+    _numberFormatter = formatter;
+}
+- (NSString *)stringFromMeasurement:(NSMeasurement *)measurement
+{
+    if (!measurement || ![measurement isKindOfClass:[NSMeasurement class]])
+        return @"";
+    NSUnit *unit = [measurement unit];
+    double value = [measurement doubleValue];
+    if (!(_unitOptions & NSMeasurementFormatterUnitOptionsProvidedUnit))
+        unit = measurement_natural_unit(unit, &value);
+    id number = _numberFormatter
+        ? (id)[(NSNumberFormatter *)_numberFormatter
+              stringFromNumber:[NSNumber numberWithDouble:value]]
+        : measurement_format_number(value);
+    if ((_unitOptions &
+         NSMeasurementFormatterUnitOptionsTemperatureWithoutUnit) &&
+        [unit isKindOfClass:[NSDimension class]] &&
+        ((NSDimension *)unit)->_family == 2)
+        return number;
+    id unitText = measurement_unit_text(unit, value, _unitStyle);
+    return [NSString stringWithFormat:@"%@ %@", number, unitText];
+}
+- (NSString *)stringFromUnit:(NSUnit *)unit
+{
+    if (!unit)
+        return @"";
+    if (_unitStyle == NSFormattingUnitStyleShort)
+        return [unit symbol];
+    return unit->_pluralName;
+}
+@end
+
 @implementation NSError
 + (id)errorWithDomain:(id)domain code:(long)code userInfo:(id)userInfo
 {
