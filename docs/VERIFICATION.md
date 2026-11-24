@@ -1864,6 +1864,15 @@ frame reads red line pixels centered at 600.5 px and green line pixels at
 599.5 px, both on the label's 600 px center line, and the green line starts
 57 px below the red line's last glyph row, matching the 10 pt spacing.
 
+### UIKit: attributed text views
+
+`tests/textview_attributed_test.m` puts `Red Blue Green` into a 20 pt
+UITextView with red, blue and green runs and an underline on the blue run.
+The frame reads the runs left to right, and the blue run's 128 px wide row
+is its underline, which extends 8 px below the red run's baseline. The text
+view keeps its base font metrics, so this color pass does not disturb
+selection or caret geometry.
+
 ### Page view controllers
 
 `tests/pageview_test.m` installs a scroll-style horizontal page controller as a

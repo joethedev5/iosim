@@ -1498,6 +1498,93 @@ else
     echo "FAIL paragraph line spacing"; echo "$report"; fails=$((fails+1))
 fi
 
+# ---------- 4f21. Attributed text in UITextView ----------
+rm -f "$T/tvattr.fifo"
+mkfifo "$T/tvattr.fifo"
+"$ROOT/tools/build_app.sh" "$ROOT/tests/textview_attributed_test.m" \
+    "$T/textview_attributed_test" >/dev/null
+out="$(IOSIM_EVENT_FIFO="$T/tvattr.fifo" IOSIM_TEST_PNG="$T/tvattr.png" \
+    DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/textview_attributed_test" 2>&1)"
+rm -f "$T/tvattr.fifo"
+check "[tvattr] ready" "$out" \
+    "the attributed text view fixture starts"
+check "[tvattr] done" "$out" \
+    "the attributed text view fixture draws its text"
+if report="$(python3 - "$ROOT/tools" "$T/tvattr.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+stats = {name: {'n': 0, 'minx': 10 ** 9, 'maxx': -1}
+         for name in ('red', 'blue', 'green')}
+for yy in range(560, 1000):
+    for xx in range(40, 1160):
+        c = pngpixel.px(rows, bpp, xx, yy)
+        r, g, b = (c >> 16) & 255, (c >> 8) & 255, c & 255
+        if r > 180 and g < 80 and b < 80:
+            key = 'red'
+        elif b > 180 and r < 80 and g < 80:
+            key = 'blue'
+        elif g > 150 and r < 80 and b < 80:
+            key = 'green'
+        else:
+            continue
+        s = stats[key]
+        s['n'] += 1
+        s['minx'] = min(s['minx'], xx)
+        s['maxx'] = max(s['maxx'], xx)
+for name in ('red', 'blue', 'green'):
+    if stats[name]['n'] < 200:
+        raise SystemExit('%s run has only %d pixels' %
+                         (name, stats[name]['n']))
+if not (stats['red']['maxx'] < stats['blue']['minx'] <
+        stats['green']['minx']):
+    raise SystemExit('run order is not red, blue, green: %r' % stats)
+print("ok   UITextView draws per-run colors in order")
+PY
+)"; then
+    echo "$report"
+else
+    echo "FAIL text view attributed colors"; echo "$report"; fails=$((fails+1))
+fi
+if report="$(python3 - "$ROOT/tools" "$T/tvattr.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+blue = {'minx': 10 ** 9, 'maxx': -1, 'maxy': -1, 'maxrow': 0}
+red_bottom = -1
+for yy in range(560, 1000):
+    count = 0
+    for xx in range(40, 1160):
+        c = pngpixel.px(rows, bpp, xx, yy)
+        r, g, b = (c >> 16) & 255, (c >> 8) & 255, c & 255
+        if r > 180 and g < 80 and b < 80 and yy > red_bottom:
+            red_bottom = yy
+        if b > 180 and r < 80 and g < 80:
+            count += 1
+            blue['minx'] = min(blue['minx'], xx)
+            blue['maxx'] = max(blue['maxx'], xx)
+            blue['maxy'] = max(blue['maxy'], yy)
+    blue['maxrow'] = max(blue['maxrow'], count)
+width = blue['maxx'] - blue['minx']
+if width < 100:
+    raise SystemExit('blue run is only %d pixels wide' % width)
+if blue['maxrow'] < width * 0.85:
+    raise SystemExit('no underline row: widest blue row %d of %d' %
+                     (blue['maxrow'], width))
+if blue['maxy'] < red_bottom + 4:
+    raise SystemExit('underline does not sit below the glyph baseline')
+print("ok   UITextView draws the underlined run")
+PY
+)"; then
+    echo "$report"
+else
+    echo "FAIL text view underline"; echo "$report"; fails=$((fails+1))
+fi
+
 # ---------- 4g. NSCalendar components ----------
 "$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
     -ffreestanding -O1 -I "$ROOT/frameworks" \

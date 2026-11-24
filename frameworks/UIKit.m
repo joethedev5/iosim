@@ -21580,7 +21580,7 @@ static int attributed_draw_range(NSAttributedString *attributed,
                                  unsigned long end, int x, int lineTop,
                                  int lineHeight, int baseline, double scale,
                                  double basePoints, int baseStyle,
-                                 unsigned baseColor)
+                                 unsigned baseColor, int runFonts)
 {
     unsigned long length = [attributed length];
     int cursor = x;
@@ -21602,7 +21602,7 @@ static int attributed_draw_range(NSAttributedString *attributed,
         int style = baseStyle;
         id font = attributes ? [attributes objectForKey:NSFontAttributeName]
                              : nil;
-        if (font && [font isKindOfClass:[UIFont class]])
+        if (runFonts && font && [font isKindOfClass:[UIFont class]])
         {
             points = ((UIFont *)font)->_size;
             style = ((UIFont *)font)->_bold ? IOSIM_FONT_BOLD
@@ -21739,7 +21739,8 @@ static int label_draw_attributed_label(UILabel *label, int x, int y, int w,
             tx = x + w - lineWidth;
         if (attributed_draw_range(attributed, bytes, starts[i], ends[i], tx,
                                   cursorY, lineHeight, cursorY + ascent,
-                                  scale, basePoints, baseStyle, baseColor) < 0)
+                                  scale, basePoints, baseStyle, baseColor,
+                                  1) < 0)
             return 0;
         cursorY += lineHeight + spacing[i];
     }
@@ -22670,6 +22671,26 @@ static void render_view(UIView *view, double originX, double originY,
         unsigned long selection_start = selection.location;
         unsigned long selection_end = selection.location + selection.length;
 
+        NSAttributedString *editorAttributed = nil;
+        const char *editorBytes = 0;
+        if ([editor->_attributedText isKindOfClass:[NSAttributedString class]])
+        {
+            NSAttributedString *candidate =
+                (NSAttributedString *)editor->_attributedText;
+            id candidateString = [candidate string];
+            const char *candidateBytes =
+                candidateString &&
+                        [candidateString isKindOfClass:[NSString class]]
+                    ? [candidateString UTF8String] : 0;
+            if (candidateBytes && text &&
+                strlen(candidateBytes) == [candidate length] &&
+                strlen(text) == [candidate length])
+            {
+                editorAttributed = candidate;
+                editorBytes = candidateBytes;
+            }
+        }
+
         unsigned long line_start = 0;
         for (int i = 0; i < n; i++)
         {
@@ -22703,15 +22724,31 @@ static void render_view(UIView *view, double originX, double originY,
 
         int caretX = x + inset;
         int caretBaseline = y + inset + ascent;
+        unsigned long draw_start = 0;
         for (int i = 0; i < n; i++)
         {
             int tx = x + inset;
             int baseline = y + inset + i * lineHeight + ascent;
-            iosim_fb_font_text(tx, baseline, lines[i], style, points, scale,
-                               color);
+            int line_length = (int)strlen(lines[i]);
+            int drawn = 0;
+            if (editorAttributed)
+            {
+                unsigned long draw_end =
+                    draw_start + (unsigned long)line_length;
+                if (draw_end <= [editorAttributed length] &&
+                    attributed_draw_range(
+                        editorAttributed, editorBytes, draw_start, draw_end,
+                        tx, y + inset + i * lineHeight, lineHeight, baseline,
+                        scale, points, style, color, 0) >= 0)
+                    drawn = 1;
+            }
+            if (!drawn)
+                iosim_fb_font_text(tx, baseline, lines[i], style, points,
+                                   scale, color);
             caretX = tx + iosim_fb_font_text_width(lines[i], style, points,
                                                    scale);
             caretBaseline = baseline;
+            draw_start += (unsigned long)line_length + 1;
         }
         if (selection.length > 0 || selection.location != text_length)
         {

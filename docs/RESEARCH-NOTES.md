@@ -1461,3 +1461,16 @@ components.
   line spacing and a left-aligned label. Red and green pixels center at
   600.5 and 599.5 px, and the 57 px gap matches two line heights plus the
   spacing.
+
+## 2026-11-24: Attributed text in UITextView
+
+- The UITextView renderer walks each wrapped line's source byte range and
+  calls the shared run compositor with `runFonts` disabled, so runs keep
+  their foreground/background colors and underlines but use the text view's
+  base font. The plain-text line layout, selection highlight widths and
+  caret offsets therefore remain exact.
+- Line offsets follow the existing `line_start = line_end + 1` bookkeeping
+  used by the selection code; attributed drawing only starts when the
+  attributed string is ASCII and its length matches the editor text.
+- The fixture shows red, blue and green runs in order; the blue underline
+  spans its 128 px run and sits 8 px below the red baseline.
