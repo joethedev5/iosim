@@ -1316,3 +1316,28 @@ components.
 - Orthogonal scrolling behaviors are recorded but not acted on: groups still
   stack vertically, and the collection view only scrolls vertically. That is
   the main documented gap of this subset.
+
+## 2026-11-24: CGContext blend modes
+
+- `CGContextSetBlendMode` records a `CGBlendMode` in the saved graphics
+  state. Every fill and stroke calls `cg_apply_opacity`, which now also
+  installs the mode into the loader's framebuffer; gradients do the same
+  before their per-pixel loop. Text and image blits reset the mode to
+  Normal so a previous fill cannot tint them, and a new context starts in
+  Normal.
+- The framebuffer keeps `fb_blend_mode` and routes rect fills, polygon and
+  ellipse fills, stroked polylines, round/squircle fills and gradients
+  through `fb_blend_color`. Normal mode preserves the previous pixel math
+  exactly; other modes compute the PDF blend function and lerp it over the
+  destination by the effective coverage.
+- The separable modes (multiply through exclusion) and the non-separable
+  hue/saturation/color/luminosity set use the PDF definitions with
+  clip-color, set-luminosity and set-saturation helpers. Clear and SourceOut
+  fade the destination, DestinationOver/Atop leave it, DestinationIn/Out and
+  XOR scale it, Copy behaves as source-over on the opaque framebuffer, and
+  PlusLighter/PlusDarker clamp the sum.
+- The test fills a 50% gray field with red under each mode and reads the
+  framebuffer PNG: multiply/darken read 128,0,0, screen/lighten/plus-lighter
+  read 255,128,128, difference reads 127,128,128, copy reads pure red, clear
+  and destination-out read black, and a path-filled multiply box matches the
+  rect-filled one.

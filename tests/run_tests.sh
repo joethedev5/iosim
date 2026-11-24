@@ -955,6 +955,52 @@ else
     echo "FAIL compositional rendering"; echo "$out"; fails=$((fails+1))
 fi
 
+# ---------- 4f14. CoreGraphics blend modes ----------
+rm -f "$T/blend.fifo"
+mkfifo "$T/blend.fifo"
+"$ROOT/tools/build_app.sh" "$ROOT/tests/blend_mode_test.m" \
+    "$T/blend_mode_test" >/dev/null
+out="$(IOSIM_EVENT_FIFO="$T/blend.fifo" IOSIM_TEST_PNG="$T/blend.png" \
+    DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/blend_mode_test" 2>&1)"
+rm -f "$T/blend.fifo"
+check "[blend] ready" "$out" \
+    "the blend mode fixture starts"
+check "[blend] done" "$out" \
+    "the blend mode fixture draws its boxes"
+if out="$(python3 - "$ROOT/tools" "$T/blend.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+samples = [
+    ('multiply', 54, 142, (128, 0, 0)),
+    ('screen', 106, 142, (255, 128, 128)),
+    ('darken', 158, 142, (128, 0, 0)),
+    ('lighten', 210, 142, (255, 128, 128)),
+    ('difference', 262, 142, (127, 128, 128)),
+    ('pluslighter', 314, 142, (255, 128, 128)),
+    ('copy', 54, 212, (255, 0, 0)),
+    ('clear', 106, 212, (0, 0, 0)),
+    ('destout', 158, 212, (0, 0, 0)),
+    ('plusdarker', 210, 212, (128, 0, 0)),
+    ('pathmultiply', 262, 212, (128, 0, 0)),
+]
+for name, x, y, want in samples:
+    c = pngpixel.px(rows, bpp, x * 3, y * 3)
+    got = ((c >> 16) & 255, (c >> 8) & 255, c & 255)
+    for a, b in zip(got, want):
+        if abs(a - b) > 4:
+            raise SystemExit('%s pixel at %d,%d is %r, expected %r' %
+                             (name, x, y, got, want))
+print("ok   blend modes composite fills and paths channel-wise")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL blend modes"; echo "$out"; fails=$((fails+1))
+fi
+
 # ---------- 4g. NSCalendar components ----------
 "$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
     -ffreestanding -O1 -I "$ROOT/frameworks" \

@@ -23,6 +23,7 @@ extern void iosim_fb_stroke_polyline(const double *xs, const double *ys,
 extern void iosim_fb_fill_polygon(const double *xs, const double *ys,
                                   int count, unsigned color);
 extern void iosim_fb_set_opacity(double opacity);
+extern void iosim_fb_set_blend_mode(int mode);
 extern int iosim_fb_push_clip(int x, int y, int w, int h);
 extern void iosim_fb_pop_clip(void);
 extern int iosim_fb_push_clip_polygon(const double *xs, const double *ys,
@@ -115,6 +116,7 @@ struct cg_state {
     double tx, ty;
     double sx, sy;
     double alpha;
+    int blend_mode;
     struct CGColor fill;
     struct CGColor stroke;
     double line_width;
@@ -170,6 +172,7 @@ static void cg_apply_opacity(CGContextRef context, struct CGColor color)
 {
     iosim_fb_set_opacity(context->base_alpha * context->state.alpha *
                          cg_clamp(color.a));
+    iosim_fb_set_blend_mode(context->state.blend_mode);
 }
 
 static void cg_transform(CGContextRef context, double x, double y,
@@ -206,6 +209,7 @@ CGContextRef iosim_cg_begin_view(int x, int y, int w, int h, double scale,
     context->state.stroke.a = 1;
     context->state.line_width = 1.0;
     context->state.miter_limit = 10.0;
+    iosim_fb_set_blend_mode(kCGBlendModeNormal);
     context->previous = g_current_context;
     g_current_context = context;
     return context;
@@ -279,6 +283,7 @@ CGContextRef iosim_cg_begin_image(int w, int h, double scale)
     context->state.stroke.a = 1;
     context->state.line_width = 1.0;
     context->state.miter_limit = 10.0;
+    iosim_fb_set_blend_mode(kCGBlendModeNormal);
     context->previous = g_current_context;
     g_current_context = context;
     return context;
@@ -349,6 +354,7 @@ void iosim_cg_end_image(CGContextRef context)
     if (g_current_context == context)
         g_current_context = context->previous;
     iosim_fb_set_opacity(1.0);
+    iosim_fb_set_blend_mode(kCGBlendModeNormal);
     free(context);
 }
 
@@ -368,6 +374,7 @@ void iosim_cg_draw_image(CGContextRef context, const unsigned char *rgba,
     if (pw <= 0 || ph <= 0)
         return;
     iosim_fb_set_opacity(context->base_alpha * context->state.alpha);
+    iosim_fb_set_blend_mode(kCGBlendModeNormal);
     iosim_fb_blit_rgba_scaled(px, py, pw, ph, rgba, w, h, w * 4);
 }
 
@@ -388,6 +395,7 @@ void iosim_cg_end_view(CGContextRef context)
     if (g_current_context == context)
         g_current_context = context->previous;
     iosim_fb_set_opacity(1.0);
+    iosim_fb_set_blend_mode(kCGBlendModeNormal);
     free(context);
 }
 
@@ -507,6 +515,24 @@ void CGContextSetAlpha(CGContextRef context, double alpha)
         context = g_current_context;
     if (context)
         context->state.alpha = cg_clamp(alpha);
+}
+
+void CGContextSetBlendMode(CGContextRef context, int mode)
+{
+    if (!context)
+        context = g_current_context;
+    if (!context)
+        return;
+    if (mode < kCGBlendModeNormal || mode > kCGBlendModePlusLighter)
+        mode = kCGBlendModeNormal;
+    context->state.blend_mode = mode;
+}
+
+int CGContextGetBlendMode(CGContextRef context)
+{
+    if (!context)
+        context = g_current_context;
+    return context ? context->state.blend_mode : kCGBlendModeNormal;
 }
 
 void CGContextFillRect(CGContextRef context, CGRect rect)
@@ -1018,6 +1044,7 @@ void iosim_cg_draw_text(CGContextRef context, const char *text, double x,
     double px, py;
     cg_transform(context, x, baseline, &px, &py);
     iosim_fb_set_opacity(context->base_alpha * context->state.alpha);
+    iosim_fb_set_blend_mode(kCGBlendModeNormal);
     iosim_fb_font_text((int)(px + 0.5), (int)(py + 0.5), text,
                        bold ? IOSIM_FONT_SEMIBOLD : IOSIM_FONT_REGULAR,
                        size_pt, context->scale, color);
@@ -1326,10 +1353,12 @@ void CGContextDrawLinearGradient(CGContextRef context, CGGradientRef gradientRef
     cg_transform(context, start.x, start.y, &ax, &ay);
     cg_transform(context, end.x, end.y, &bx, &by);
     iosim_fb_set_opacity(context->base_alpha * context->state.alpha);
+    iosim_fb_set_blend_mode(context->state.blend_mode);
     iosim_fb_fill_gradient_stops_alpha(
         context->x, context->y, context->w, context->h, colors, alphas,
         gradient->locations, (int)gradient->count, ax, ay, bx, by);
     iosim_fb_set_opacity(1.0);
+    iosim_fb_set_blend_mode(kCGBlendModeNormal);
     free(colors);
     free(alphas);
 }

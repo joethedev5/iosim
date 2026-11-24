@@ -10,8 +10,261 @@
 #include <sys/stat.h>
 #include <zlib.h>
 
+/* Mirrors CGBlendMode from frameworks/coregraphics_lite.h; the loader does
+ * not include framework headers. */
+enum {
+    kCGBlendModeNormal = 0,
+    kCGBlendModeMultiply = 1,
+    kCGBlendModeScreen = 2,
+    kCGBlendModeOverlay = 3,
+    kCGBlendModeDarken = 4,
+    kCGBlendModeLighten = 5,
+    kCGBlendModeColorDodge = 6,
+    kCGBlendModeColorBurn = 7,
+    kCGBlendModeHardLight = 8,
+    kCGBlendModeSoftLight = 9,
+    kCGBlendModeDifference = 10,
+    kCGBlendModeExclusion = 11,
+    kCGBlendModeHue = 12,
+    kCGBlendModeSaturation = 13,
+    kCGBlendModeColor = 14,
+    kCGBlendModeLuminosity = 15,
+    kCGBlendModeClear = 16,
+    kCGBlendModeCopy = 17,
+    kCGBlendModeSourceIn = 18,
+    kCGBlendModeSourceOut = 19,
+    kCGBlendModeSourceAtop = 20,
+    kCGBlendModeDestinationOver = 21,
+    kCGBlendModeDestinationIn = 22,
+    kCGBlendModeDestinationOut = 23,
+    kCGBlendModeDestinationAtop = 24,
+    kCGBlendModeXOR = 25,
+    kCGBlendModePlusDarker = 26,
+    kCGBlendModePlusLighter = 27
+};
+
 static uint32_t *fb_pixels;
 static double fb_opacity = 1.0;
+static int fb_blend_mode;
+
+void iosim_fb_set_blend_mode(int mode)
+{
+    fb_blend_mode = mode;
+}
+
+/* PDF blend functions used by CGBlendMode. All colour channels are
+ * normalized to 0..1; the caller lerps the blended result over the
+ * destination by the source alpha. */
+static double fb_blend_lum(double r, double g, double b)
+{
+    return 0.3 * r + 0.59 * g + 0.11 * b;
+}
+
+static double fb_blend_sat(double r, double g, double b)
+{
+    double max = r > g ? r : g;
+    if (b > max) max = b;
+    double min = r < g ? r : g;
+    if (b < min) min = b;
+    return max - min;
+}
+
+static void fb_blend_clip(double *r, double *g, double *b)
+{
+    double l = fb_blend_lum(*r, *g, *b);
+    double n = *r < *g ? *r : *g;
+    if (*b < n) n = *b;
+    double x = *r > *g ? *r : *g;
+    if (*b > x) x = *b;
+    if (n < 0)
+    {
+        double d = l - n;
+        if (d > 0)
+        {
+            *r = l + (*r - l) * l / d;
+            *g = l + (*g - l) * l / d;
+            *b = l + (*b - l) * l / d;
+        }
+    }
+    if (x > 1)
+    {
+        double d = x - l;
+        if (d > 0)
+        {
+            *r = l + (*r - l) * (1 - l) / d;
+            *g = l + (*g - l) * (1 - l) / d;
+            *b = l + (*b - l) * (1 - l) / d;
+        }
+    }
+}
+
+static void fb_blend_set_lum(double *r, double *g, double *b, double l)
+{
+    double d = l - fb_blend_lum(*r, *g, *b);
+    *r += d;
+    *g += d;
+    *b += d;
+    fb_blend_clip(r, g, b);
+}
+
+static void fb_blend_set_sat(double *r, double *g, double *b, double s)
+{
+    double *low = r, *mid = g, *high = b;
+    if (*low > *mid) { double *t = low; low = mid; mid = t; }
+    if (*mid > *high) { double *t = mid; mid = high; high = t; }
+    if (*low > *mid) { double *t = low; low = mid; mid = t; }
+    if (*high > *low)
+    {
+        *mid = (*mid - *low) * s / (*high - *low);
+        *high = s;
+    }
+    else
+    {
+        *mid = 0;
+        *high = 0;
+    }
+    *low = 0;
+}
+
+static double fb_blend_channel(int mode, double s, double d)
+{
+    switch (mode)
+    {
+    case kCGBlendModeMultiply:
+        return s * d;
+    case kCGBlendModeScreen:
+        return s + d - s * d;
+    case kCGBlendModeOverlay:
+        return d <= 0.5 ? 2.0 * s * d : 1.0 - 2.0 * (1.0 - s) * (1.0 - d);
+    case kCGBlendModeDarken:
+        return s < d ? s : d;
+    case kCGBlendModeLighten:
+        return s > d ? s : d;
+    case kCGBlendModeColorDodge:
+        if (d >= 0.999) return 1.0;
+        return s / (1.0 - d) > 1.0 ? 1.0 : s / (1.0 - d);
+    case kCGBlendModeColorBurn:
+        if (d <= 0.001) return 0.0;
+        return 1.0 - ((1.0 - s) / d > 1.0 ? 1.0 : (1.0 - s) / d);
+    case kCGBlendModeHardLight:
+        return s <= 0.5 ? 2.0 * s * d
+                        : 1.0 - 2.0 * (1.0 - s) * (1.0 - d);
+    case kCGBlendModeSoftLight:
+    {
+        if (s <= 0.5)
+            return d - (1.0 - 2.0 * s) * d * (1.0 - d);
+        double g = d <= 0.25 ? ((16.0 * d - 12.0) * d + 4.0) * d
+                             : __builtin_sqrt(d);
+        return d + (2.0 * s - 1.0) * (g - d);
+    }
+    case kCGBlendModeDifference:
+        return s > d ? s - d : d - s;
+    case kCGBlendModeExclusion:
+        return s + d - 2.0 * s * d;
+    default:
+        return s;
+    }
+}
+
+static void fb_blend_color(int mode, uint32_t src, uint32_t dst, double f,
+                           unsigned *out_r, unsigned *out_g, unsigned *out_b)
+{
+    double s[3] = { ((src >> 16) & 0xFF) / 255.0,
+                    ((src >> 8) & 0xFF) / 255.0,
+                    (src & 0xFF) / 255.0 };
+    double d[3] = { ((dst >> 16) & 0xFF) / 255.0,
+                    ((dst >> 8) & 0xFF) / 255.0,
+                    (dst & 0xFF) / 255.0 };
+    double out[3];
+    if (mode >= kCGBlendModeHue && mode <= kCGBlendModeLuminosity)
+    {
+        double r0 = s[0], g0 = s[1], b0 = s[2];
+        double r1 = d[0], g1 = d[1], b1 = d[2];
+        if (mode == kCGBlendModeHue)
+        {
+            fb_blend_set_sat(&r0, &g0, &b0, fb_blend_sat(r1, g1, b1));
+            fb_blend_set_lum(&r0, &g0, &b0, fb_blend_lum(r1, g1, b1));
+        }
+        else if (mode == kCGBlendModeSaturation)
+        {
+            fb_blend_set_sat(&r1, &g1, &b1, fb_blend_sat(r0, g0, b0));
+            fb_blend_set_lum(&r1, &g1, &b1, fb_blend_lum(d[0], d[1], d[2]));
+        }
+        else if (mode == kCGBlendModeColor)
+        {
+            fb_blend_set_lum(&r0, &g0, &b0, fb_blend_lum(r1, g1, b1));
+        }
+        else
+        {
+            fb_blend_set_lum(&r1, &g1, &b1, fb_blend_lum(r0, g0, b0));
+        }
+        if (mode == kCGBlendModeSaturation || mode == kCGBlendModeLuminosity)
+        {
+            out[0] = r1;
+            out[1] = g1;
+            out[2] = b1;
+        }
+        else
+        {
+            out[0] = r0;
+            out[1] = g0;
+            out[2] = b0;
+        }
+        for (int i = 0; i < 3; i++)
+            out[i] = d[i] + (out[i] - d[i]) * f;
+    }
+    else if (mode == kCGBlendModeClear || mode == kCGBlendModeSourceOut)
+    {
+        for (int i = 0; i < 3; i++)
+            out[i] = d[i] * (1.0 - f);
+    }
+    else if (mode == kCGBlendModeDestinationOver ||
+             mode == kCGBlendModeDestinationAtop)
+    {
+        out[0] = d[0];
+        out[1] = d[1];
+        out[2] = d[2];
+    }
+    else if (mode == kCGBlendModeDestinationIn)
+    {
+        for (int i = 0; i < 3; i++)
+            out[i] = d[i] * f;
+    }
+    else if (mode == kCGBlendModeDestinationOut || mode == kCGBlendModeXOR)
+    {
+        for (int i = 0; i < 3; i++)
+            out[i] = d[i] * (1.0 - f);
+    }
+    else if (mode == kCGBlendModePlusDarker)
+    {
+        for (int i = 0; i < 3; i++)
+        {
+            double b = d[i] + s[i] - 1.0;
+            if (b < 0) b = 0;
+            out[i] = d[i] + (b - d[i]) * f;
+        }
+    }
+    else if (mode == kCGBlendModePlusLighter)
+    {
+        for (int i = 0; i < 3; i++)
+        {
+            double b = d[i] + s[i];
+            if (b > 1) b = 1;
+            out[i] = d[i] + (b - d[i]) * f;
+        }
+    }
+    else
+    {
+        for (int i = 0; i < 3; i++)
+        {
+            double v = d[i] + (fb_blend_channel(mode, s[i], d[i]) - d[i]) * f;
+            out[i] = v < 0 ? 0 : (v > 1 ? 1 : v);
+        }
+    }
+    *out_r = (unsigned)(out[0] * 255.0 + 0.5);
+    *out_g = (unsigned)(out[1] * 255.0 + 0.5);
+    *out_b = (unsigned)(out[2] * 255.0 + 0.5);
+}
 
 /* Offscreen targets store premultiplied ARGB so the result can be
  * composited with an arbitrary affine transform. In the normal (screen)
@@ -995,15 +1248,22 @@ void iosim_fb_fill_rect(int x, int y, int w, int h, uint32_t color)
                 int cov = fb_mask_coverage(xx, yy);
                 if (!cov)
                     continue;
-                if (cov == 255)
+                if (cov == 255 && !fb_blend_mode)
                 {
                     row[xx] = fb_full(color);
                     continue;
                 }
                 uint32_t dst = row[xx];
-                unsigned r = (fr * cov + ((dst >> 16) & 0xFF) * (255 - cov) + 127) / 255;
-                unsigned g = (fg * cov + ((dst >> 8) & 0xFF) * (255 - cov) + 127) / 255;
-                unsigned b = (fb * cov + (dst & 0xFF) * (255 - cov) + 127) / 255;
+                unsigned r, g, b;
+                if (fb_blend_mode)
+                    fb_blend_color(fb_blend_mode, color, dst,
+                                   cov / 255.0, &r, &g, &b);
+                else
+                {
+                    r = (fr * cov + ((dst >> 16) & 0xFF) * (255 - cov) + 127) / 255;
+                    g = (fg * cov + ((dst >> 8) & 0xFF) * (255 - cov) + 127) / 255;
+                    b = (fb * cov + (dst & 0xFF) * (255 - cov) + 127) / 255;
+                }
                 row[xx] = fb_pack(dst, r, g, b, cov);
             }
         }
@@ -1019,9 +1279,16 @@ void iosim_fb_fill_rect(int x, int y, int w, int h, uint32_t color)
             if (!fa)
                 continue;
             uint32_t dst = row[xx];
-            unsigned r = (fr * fa + ((dst >> 16) & 0xFF) * (255 - fa) + 127) / 255;
-            unsigned g = (fg * fa + ((dst >> 8) & 0xFF) * (255 - fa) + 127) / 255;
-            unsigned b = (fb * fa + (dst & 0xFF) * (255 - fa) + 127) / 255;
+            unsigned r, g, b;
+            if (fb_blend_mode)
+                fb_blend_color(fb_blend_mode, color, dst, fa / 255.0,
+                               &r, &g, &b);
+            else
+            {
+                r = (fr * fa + ((dst >> 16) & 0xFF) * (255 - fa) + 127) / 255;
+                g = (fg * fa + ((dst >> 8) & 0xFF) * (255 - fa) + 127) / 255;
+                b = (fb * fa + (dst & 0xFF) * (255 - fa) + 127) / 255;
+            }
             row[xx] = fb_pack(dst, r, g, b, fa);
         }
     }
@@ -2006,16 +2273,22 @@ static void fb_blend_pixel(int x, int y, uint32_t color, double coverage)
     if (coverage <= 0)
         return;
     uint32_t *row = fb_pixels + (size_t)y * fb_width;
-    if (coverage >= 0.999)
+    if (!fb_blend_mode && coverage >= 0.999)
     {
         row[x] = fb_full(color);
         return;
     }
     unsigned a = (unsigned)(coverage * 255.0 + 0.5);
     uint32_t dst = row[x];
-    unsigned r = (((color >> 16) & 0xFF) * a + ((dst >> 16) & 0xFF) * (255 - a) + 127) / 255;
-    unsigned g = (((color >> 8) & 0xFF) * a + ((dst >> 8) & 0xFF) * (255 - a) + 127) / 255;
-    unsigned b = ((color & 0xFF) * a + (dst & 0xFF) * (255 - a) + 127) / 255;
+    unsigned r, g, b;
+    if (fb_blend_mode)
+        fb_blend_color(fb_blend_mode, color, dst, coverage, &r, &g, &b);
+    else
+    {
+        r = (((color >> 16) & 0xFF) * a + ((dst >> 16) & 0xFF) * (255 - a) + 127) / 255;
+        g = (((color >> 8) & 0xFF) * a + ((dst >> 8) & 0xFF) * (255 - a) + 127) / 255;
+        b = ((color & 0xFF) * a + (dst & 0xFF) * (255 - a) + 127) / 255;
+    }
     row[x] = fb_pack(dst, r, g, b, a);
 }
 

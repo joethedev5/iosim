@@ -580,6 +580,16 @@ frame shows the rendered red field, yellow chip and black rounded corner, and
 the fixture prints `ok   drawViewHierarchyInRect captures a rounded
 hierarchy`.
 
+### Graphics: CGContext blend modes
+
+`tests/blend_mode_test.m` fills a 360x240 view with 50% gray and paints red
+boxes under different `CGContextSetBlendMode` values. The captured frame
+reads (128,0,0) for multiply and darken, (255,128,128) for screen, lighten
+and plus-lighter, (127,128,128) for difference, pure red for copy, black for
+clear and destination-out, and (128,0,0) for plus-darker. A path-filled box
+under multiply matches the rect-filled one. The suite samples those eleven
+points with a tolerance of four levels per channel.
+
 ### Graphics: rounded subtree clipping
 
 `tests/rounded_clip_test.m` stacks three cards. The first clips to bounds

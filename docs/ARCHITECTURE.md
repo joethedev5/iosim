@@ -421,7 +421,14 @@ and dashed strokes are split by walking the pattern along the arc length. `iosim
 scale and draws through the loader's framebuffer primitives, so clipping and
 view alpha apply. The renderer calls `drawRect:` for every view after its
 background and before its sublayers; plain `UIView` implements a no-op and
-custom subclasses can paint immediately. `UIGraphicsBeginImageContextWithOptions`
+`CGContextSetBlendMode` stores a `CGBlendMode` in the graphics state and
+applies it through the framebuffer's shape compositor: the PDF separable
+and non-separable blend functions compute a blended colour that is then
+lerped over the destination by the source coverage. Clear and SourceOut
+fade the destination, DestinationIn/Out and XOR scale it, and
+PlusLighter/PlusDarker clamp the sum. Text and image blits stay
+source-over and reset the mode so a fill cannot leak into them.
+`UIGraphicsBeginImageContextWithOptions`
 redirects the same CGContext into a loader offscreen framebuffer; the result
 is copied out as RGBA for `UIGraphicsGetImageFromCurrentImageContext`, and
 `UIImage drawInRect:` blits into whichever context is current. Mutable

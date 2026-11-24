@@ -63,6 +63,38 @@ void CGContextSetMiterLimit(CGContextRef context, double limit);
 void CGContextSetLineDash(CGContextRef context, double phase,
                           const double *lengths, unsigned long count);
 void CGContextSetAlpha(CGContextRef context, double alpha);
+enum {
+    kCGBlendModeNormal = 0,
+    kCGBlendModeMultiply = 1,
+    kCGBlendModeScreen = 2,
+    kCGBlendModeOverlay = 3,
+    kCGBlendModeDarken = 4,
+    kCGBlendModeLighten = 5,
+    kCGBlendModeColorDodge = 6,
+    kCGBlendModeColorBurn = 7,
+    kCGBlendModeHardLight = 8,
+    kCGBlendModeSoftLight = 9,
+    kCGBlendModeDifference = 10,
+    kCGBlendModeExclusion = 11,
+    kCGBlendModeHue = 12,
+    kCGBlendModeSaturation = 13,
+    kCGBlendModeColor = 14,
+    kCGBlendModeLuminosity = 15,
+    kCGBlendModeClear = 16,
+    kCGBlendModeCopy = 17,
+    kCGBlendModeSourceIn = 18,
+    kCGBlendModeSourceOut = 19,
+    kCGBlendModeSourceAtop = 20,
+    kCGBlendModeDestinationOver = 21,
+    kCGBlendModeDestinationIn = 22,
+    kCGBlendModeDestinationOut = 23,
+    kCGBlendModeDestinationAtop = 24,
+    kCGBlendModeXOR = 25,
+    kCGBlendModePlusDarker = 26,
+    kCGBlendModePlusLighter = 27
+};
+void CGContextSetBlendMode(CGContextRef context, int mode);
+int CGContextGetBlendMode(CGContextRef context);
 void CGContextFillRect(CGContextRef context, CGRect rect);
 void CGContextStrokeRect(CGContextRef context, CGRect rect);
 void CGContextFillEllipseInRect(CGContextRef context, CGRect rect);
