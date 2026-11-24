@@ -285,7 +285,11 @@ ivar_t { offset_ptr, name, type, alignment, size }
   followed up to four deep). A selector that is neither resolved nor
   forwarded goes to `-doesNotRecognizeSelector:`, which NSObject answers with
   the real runtime's `NSInvalidArgumentException` message before exiting.
-  `forwardInvocation:`/`NSInvocation` forwarding is not implemented.
+  Before that last step, the runtime builds an `NSInvocation` from the saved
+  trampoline frame when `-methodSignatureForSelector:` returns a signature,
+  delivers it to `-forwardInvocation:` and returns the invocation's return
+  value to the caller; struct arguments and struct returns still fall back
+  to `-doesNotRecognizeSelector:`.
 - `objc_alloc_init`, `objc_autoreleasePoolPush/Pop`, `objc_retain/release`,
   `objc_getClass`, `class_getName`, `object_getClassName`, `sel_registerName`
   and `sel_getName` are implemented.
@@ -314,7 +318,13 @@ ivar_t { offset_ptr, name, type, alignment, size }
   answers `-methodSignatureForSelector:` and
   `+instanceMethodSignatureForSelector:` from the runtime method type
   encodings and implements the default `-forwardInvocation:` by raising
-  `doesNotRecognizeSelector:`.
+  `doesNotRecognizeSelector:`. When resolution and a forwarding target both
+  fail, the `objc_msgSend` trampoline passes its saved register frame to the
+  runtime; `-methodSignatureForSelector:` decides whether the message is
+  forwardable, the runtime captures register and stack arguments into an
+  `NSInvocation`, calls `-forwardInvocation:`, and returns the invocation's
+  return value in `rax`/`xmm0` through a sentinel IMP path. Struct arguments
+  and struct returns fall back to `doesNotRecognizeSelector:`.
 
 ### 2.6 Darwin ABI shims
 
@@ -1740,11 +1750,11 @@ Python for iteration speed.
   slices).
 - The dyld shared cache is not parsed; each dylib is loaded from disk.
 - Class method dispatch covers the common path; dynamic resolution,
-  `-forwardingTargetForSelector:` and `-doesNotRecognizeSelector:` are
-  implemented, and `NSInvocation` exists, but the trampoline does not yet
-  deliver `-forwardInvocation:` and exceptions are pending. ARC-compiled
-  code uses the implemented entry points, but objects are never deallocated
-  so weak references do not zero.
+  `-forwardingTargetForSelector:`, `-forwardInvocation:` delivery and
+  `-doesNotRecognizeSelector:` are implemented, while struct-argument
+  forwarding and exceptions are pending. ARC-compiled code uses the
+  implemented entry points, but objects are never deallocated so weak
+  references do not zero.
   Associated objects are stored by
   the loader in a per-object list: assign and retain policies keep the given
   pointer, copy policies send `-copy`, setting nil removes one key and

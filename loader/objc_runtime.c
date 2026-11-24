@@ -763,7 +763,168 @@ void *objc_lookup_imp(void *obj, void *sel)
  * method must be invoked with, because -forwardingTargetForSelector: can
  * replace it. A null IMP with the original receiver means "return zero", as
  * for nil. */
-void *objc_msgSend_lookup(void *obj, void *sel, void **receiver_out)
+#define OBJC_FORWARDED_IMP ((void *)(uintptr_t)-1)
+
+/* Frame offsets of the argument registers saved by the objc_msgSend
+ * trampoline. frame points at the pushed r9 slot; the return address sits
+ * at 0xB0 and the caller's stack arguments start at 0xB8. */
+#define OBJC_FRAME_GP5 0x00
+#define OBJC_FRAME_GP4 0x08
+#define OBJC_FRAME_GP3 0x10
+#define OBJC_FRAME_GP2 0x18
+#define OBJC_FRAME_SSE0 0x30
+#define OBJC_FRAME_STACK 0xB8
+
+static const char *frame_skip_qualifiers(const char *p)
+{
+    while (*p && strchr("rnNoORVAg", *p))
+        p++;
+    return p;
+}
+
+/* Build an NSInvocation from the saved argument frame and deliver it to
+ * -forwardInvocation:. The guest's own -methodSignatureForSelector: decides
+ * whether the selector is forwardable; a nil signature means no. Struct and
+ * array arguments are not captured, and the caller then falls back to
+ * -doesNotRecognizeSelector:. */
+static int forward_invocation(void *obj, void *sel, void *frame,
+                              void *result_out)
+{
+    void *sig_sel = sel_registerName("methodSignatureForSelector:");
+    void *sig_imp = lookup_imp_internal(obj, sig_sel);
+    if (!sig_imp)
+        return 0;
+    void *sig = ((void *(*)(void *, void *, void *))sig_imp)(obj, sig_sel,
+                                                             sel);
+    if (!sig)
+        return 0;
+
+    void *inv_class = objc_getClass("NSInvocation");
+    if (!inv_class)
+        return 0;
+    void *make_sel = sel_registerName("invocationWithMethodSignature:");
+    void *make_imp = lookup_class_method(
+        (struct objc_class_min *)inv_class,
+        "invocationWithMethodSignature:");
+    if (!make_imp)
+        return 0;
+    void *inv = ((void *(*)(void *, void *, void *))make_imp)(
+        inv_class, make_sel, sig);
+    if (!inv)
+        return 0;
+
+    void *set_target_sel = sel_registerName("setTarget:");
+    void *set_target_imp = lookup_imp_internal(inv, set_target_sel);
+    if (set_target_imp)
+        ((void (*)(void *, void *, void *))set_target_imp)(inv,
+                                                           set_target_sel,
+                                                           obj);
+    void *set_selector_sel = sel_registerName("setSelector:");
+    void *set_selector_imp = lookup_imp_internal(inv, set_selector_sel);
+    if (set_selector_imp)
+        ((void (*)(void *, void *, void *))set_selector_imp)(inv,
+                                                             set_selector_sel,
+                                                             sel);
+
+    unsigned long nargs = 0;
+    {
+        void *count_sel = sel_registerName("numberOfArguments");
+        void *count_imp = lookup_imp_internal(sig, count_sel);
+        if (count_imp)
+            nargs = ((unsigned long (*)(void *, void *))count_imp)(sig,
+                                                                   count_sel);
+    }
+    const char *gp_slots[4] = {
+        (const char *)frame + OBJC_FRAME_GP2,
+        (const char *)frame + OBJC_FRAME_GP3,
+        (const char *)frame + OBJC_FRAME_GP4,
+        (const char *)frame + OBJC_FRAME_GP5,
+    };
+    unsigned long gp_used = 0, sse_used = 0, stack_used = 0;
+    for (unsigned long i = 2; i < nargs; i++)
+    {
+        const char *type = NULL;
+        {
+            void *type_sel = sel_registerName("getArgumentTypeAtIndex:");
+            void *type_imp = lookup_imp_internal(sig, type_sel);
+            if (type_imp)
+                type = ((const char *(*)(void *, void *, unsigned long))
+                            type_imp)(sig, type_sel, i);
+        }
+        if (!type)
+            return 0;
+        const char *tp = frame_skip_qualifiers(type);
+        if (*tp == '{' || *tp == '[' || *tp == '(')
+            return 0;
+        const void *src;
+        if (*tp == 'f' || *tp == 'd')
+        {
+            if (sse_used < 8)
+            {
+                src = (const char *)frame + OBJC_FRAME_SSE0 + 16 * sse_used;
+                sse_used++;
+            }
+            else
+            {
+                src = (const char *)frame + OBJC_FRAME_STACK + 8 * stack_used;
+                stack_used++;
+            }
+        }
+        else
+        {
+            if (gp_used < 4)
+            {
+                src = gp_slots[gp_used];
+                gp_used++;
+            }
+            else
+            {
+                src = (const char *)frame + OBJC_FRAME_STACK + 8 * stack_used;
+                stack_used++;
+            }
+        }
+        unsigned char value[8];
+        memcpy(value, src, sizeof(value));
+        void *arg_sel = sel_registerName("setArgument:atIndex:");
+        void *arg_imp = lookup_imp_internal(inv, arg_sel);
+        if (!arg_imp)
+            return 0;
+        ((void (*)(void *, void *, void *, unsigned long))arg_imp)(
+            inv, arg_sel, value, i);
+    }
+
+    void *forward_sel = sel_registerName("forwardInvocation:");
+    void *forward_imp = lookup_imp_internal(obj, forward_sel);
+    if (!forward_imp)
+        return 0;
+    memset(result_out, 0, 32);
+    ((void (*)(void *, void *, void *))forward_imp)(obj, forward_sel, inv);
+
+    const char *return_type = NULL;
+    {
+        void *rt_sel = sel_registerName("methodReturnType");
+        void *rt_imp = lookup_imp_internal(sig, rt_sel);
+        if (rt_imp)
+            return_type = ((const char *(*)(void *, void *))rt_imp)(
+                sig, rt_sel);
+    }
+    const char *rp = return_type ? frame_skip_qualifiers(return_type) : NULL;
+    void *ret_sel = sel_registerName("getReturnValue:");
+    void *ret_imp = lookup_imp_internal(inv, ret_sel);
+    if (ret_imp)
+    {
+        if (rp && (*rp == 'f' || *rp == 'd'))
+            ((void (*)(void *, void *, void *))ret_imp)(
+                inv, ret_sel, (char *)result_out + 8);
+        else
+            ((void (*)(void *, void *, void *))ret_imp)(
+                inv, ret_sel, result_out);
+    }
+    return 1;
+}
+
+void *objc_msgSend_lookup(void *obj, void *sel, void **receiver_out,
+                          void *frame, void *result_out)
 {
     if (receiver_out)
         *receiver_out = obj;
@@ -809,6 +970,15 @@ void *objc_msgSend_lookup(void *obj, void *sel, void **receiver_out)
                 break;
             cls = (struct objc_class_min *)(*(void **)obj);
         }
+    }
+
+    /* Stage 3: -forwardInvocation: with an NSInvocation built from the
+     * saved argument frame. The trampoline passes the frame and a result
+     * buffer and treats the sentinel IMP as "the invocation returned". */
+    if (!ce && frame && result_out)
+    {
+        if (forward_invocation(obj, sel, frame, result_out))
+            return OBJC_FORWARDED_IMP;
     }
 
     /* Stage 2: -doesNotRecognizeSelector:. NSObject answers it by

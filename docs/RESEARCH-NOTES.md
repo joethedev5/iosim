@@ -1937,3 +1937,16 @@ components.
   `doesNotRecognizeSelector:`.
 - Delivering `-forwardInvocation:` from the msgSend trampoline is the next
   step; the invocation object itself is complete for direct use.
+
+## 2026-11-24: forwardInvocation delivery
+
+- The objc_msgSend trampoline now passes its saved register frame and a
+  result buffer to `objc_msgSend_lookup`. When resolution and a
+  `-forwardingTargetForSelector:` target both fail, the runtime asks
+  `-methodSignatureForSelector:`; a non-nil signature is turned into an
+  NSInvocation with the captured arguments (four GP registers, eight SSE
+  registers, then stack slots), and the receiver's `-forwardInvocation:` is
+  called. `getReturnValue:` fills the result buffer, which the trampoline
+  loads into rax/xmm0 through a sentinel IMP check.
+- Struct and array arguments and struct returns are not captured and fall
+  back to doesNotRecognizeSelector:. Exceptions remain unsupported.

@@ -2083,6 +2083,16 @@ and returns 10.0; a third passes and returns an `NSString`; a void method
 runs and sets its flag. `retainArguments` flips `argumentsRetained`, and a
 missing selector yields no signature.
 
+### Objective-C runtime: forwardInvocation delivery
+
+`tests/forward_invocation_test.m` sends `addA:b:` and `greet` to a proxy
+that implements neither but returns signatures for both from
+`-methodSignatureForSelector:` and answers `-forwardInvocation:`. The proxy
+reads the two integer arguments back as 19 and 23, prints
+`args 19 23`, sets a return of 42, and the caller receives 42 through the
+original message send. For `greet` the proxy sets an NSString return, and the
+caller receives `proxy-greeting`.
+
 ### CoreAnimation: completion and fill modes
 
 `tests/animation_removal_test.m` starts three 0.5 s opacity animations from

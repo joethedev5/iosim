@@ -1169,6 +1169,25 @@ check "[inv] missing 0" "$out" \
     "a present selector yields a method signature"
 check "[inv] done" "$out" "the invocation fixture finishes"
 
+# ---------- 4f10k. forwardInvocation delivery ----------
+"$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
+    -ffreestanding -O1 -I "$ROOT/frameworks" \
+    -c "$ROOT/tests/forward_invocation_test.m" \
+    -o "$T/forward_invocation_test.o"
+"$LD64" -arch x86_64 -platform_version $PLATFORM -e _main \
+    -o "$T/forward_invocation_test" "$T/forward_invocation_test.o" \
+    "$ROOT/runtime/System/Library/Frameworks/Foundation.framework/Foundation" \
+    -undefined dynamic_lookup
+out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" \
+    "$T/forward_invocation_test" 2>&1)"
+check "[fwd2] args 19 23" "$out" \
+    "forwardInvocation: receives the integer arguments"
+check "[fwd2] return 42" "$out" \
+    "the invocation's return value reaches the original caller"
+check "[fwd2] object proxy-greeting" "$out" \
+    "an object return value reaches the original caller"
+check "[fwd2] done" "$out" "the forwarding fixture finishes"
+
 # ---------- 4f11. CAAnimation completion and fill modes ----------
 rm -f "$T/arem.fifo"
 mkfifo "$T/arem.fifo"

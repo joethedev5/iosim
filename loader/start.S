@@ -47,15 +47,19 @@ objc_msgSend:
     pushq %rcx
     pushq %r8
     pushq %r9
-    subq $8, %rsp
+    subq $0x28, %rsp           /* receiver + forwarded-result buffer */
     leaq (%rsp), %rdx          /* &receiver: forwarding may replace it */
+    leaq 0x28(%rsp), %rcx      /* saved argument registers */
+    leaq 8(%rsp), %r8          /* result of a forwarded message */
     callq objc_msgSend_lookup
     movq (%rsp), %r10
-    addq $8, %rsp
+    cmpq $-1, %rax             /* sentinel: -forwardInvocation: ran */
+    je 2f
     /* Messaging nil is a no-op that returns zero, exactly as on Darwin.
      * The C lookup reports that case with a null IMP. */
     testq %rax, %rax
     jz 1f
+    addq $0x28, %rsp
     popq %r9
     popq %r8
     popq %rcx
@@ -73,8 +77,14 @@ objc_msgSend:
     movdqu 0x70(%rsp), %xmm7
     addq $0x80, %rsp
     jmpq *%rax
+2:  /* forwarded: return the invocation's return value */
+    movq 8(%rsp), %rax
+    movdqu 16(%rsp), %xmm0
+    addq $0xD8, %rsp
+    pxor %xmm1, %xmm1
+    ret
 1:  /* nil receiver: discard the saved argument area and return zero */
-    addq $0xB0, %rsp
+    addq $0xD8, %rsp
     pxor %xmm0, %xmm0
     pxor %xmm1, %xmm1
     xorl %eax, %eax
