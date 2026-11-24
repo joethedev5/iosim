@@ -48,7 +48,9 @@ objc_msgSend:
     pushq %r8
     pushq %r9
     subq $8, %rsp
-    callq objc_lookup_imp
+    leaq (%rsp), %rdx          /* &receiver: forwarding may replace it */
+    callq objc_msgSend_lookup
+    movq (%rsp), %r10
     addq $8, %rsp
     /* Messaging nil is a no-op that returns zero, exactly as on Darwin.
      * The C lookup reports that case with a null IMP. */
@@ -60,6 +62,7 @@ objc_msgSend:
     popq %rdx
     popq %rsi
     popq %rdi
+    movq %r10, %rdi            /* receiver after forwardingTarget: */
     movdqu 0x00(%rsp), %xmm0
     movdqu 0x10(%rsp), %xmm1
     movdqu 0x20(%rsp), %xmm2

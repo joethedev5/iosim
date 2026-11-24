@@ -371,10 +371,39 @@ static void *lookup_category_method(const char *class_name, const char *sel,
     return NULL;
 }
 
+/* Methods added at runtime to classes that are already loaded (for example
+ * by +resolveInstanceMethod:). They are kept in an injection list instead of
+ * rewriting the image's read-only method lists; lookup checks the list for
+ * each class while walking the superclass chain. */
+struct injected_method {
+    struct method_min method;
+    void *cls;
+    int class_method;
+    struct injected_method *next;
+};
+#define MAX_INJECTED_METHODS 256
+static struct injected_method *g_injected_methods;
+static int g_ninjected_methods;
+
+static struct injected_method *find_injected_method(void *cls,
+                                                    const char *sel,
+                                                    int class_method)
+{
+    for (struct injected_method *m = g_injected_methods; m; m = m->next)
+        if (m->cls == cls && m->class_method == class_method &&
+            m->method.name && strcmp((const char *)m->method.name, sel) == 0)
+            return m;
+    return NULL;
+}
+
 static void *lookup_instance_method(struct objc_class_min *cls, const char *sel)
 {
     for (int depth = 0; cls && depth < 64; depth++)
     {
+        struct injected_method *injected =
+            find_injected_method(cls, sel, 0);
+        if (injected)
+            return injected->method.imp;
         struct class_ro_min *ro = class_ro(cls);
         void *imp = lookup_in_methods(ro ? ro->baseMethods : NULL, sel);
         if (imp)
@@ -391,6 +420,10 @@ static void *lookup_class_method(struct objc_class_min *cls, const char *sel)
 {
     for (int depth = 0; cls && depth < 64; depth++)
     {
+        struct injected_method *injected =
+            find_injected_method(cls, sel, 1);
+        if (injected)
+            return injected->method.imp;
         struct class_ro_min *ro = metaclass_ro(cls);
         void *imp = lookup_in_methods(ro ? ro->baseMethods : NULL, sel);
         if (imp)
@@ -401,6 +434,60 @@ static void *lookup_class_method(struct objc_class_min *cls, const char *sel)
         cls = (struct objc_class_min *)cls->superclass;
     }
     return NULL;
+}
+
+/* +resolveInstanceMethod: and +resolveClassMethod: get one chance per class
+ * and selector, like objc4. A YES answer is expected to have installed the
+ * method with class_addMethod; the lookup below picks it up. */
+#define MAX_RESOLVE_ATTEMPTS 2048
+struct resolve_attempt {
+    void *cls;
+    void *sel;
+    int class_method;
+};
+static struct resolve_attempt g_resolve_attempts[MAX_RESOLVE_ATTEMPTS];
+static int g_nresolve_attempts;
+
+static int resolve_attempted(void *cls, void *sel, int class_method)
+{
+    for (int i = 0; i < g_nresolve_attempts; i++)
+        if (g_resolve_attempts[i].cls == cls &&
+            g_resolve_attempts[i].sel == sel &&
+            g_resolve_attempts[i].class_method == class_method)
+            return 1;
+    return 0;
+}
+
+static void mark_resolve_attempted(void *cls, void *sel, int class_method)
+{
+    if (g_nresolve_attempts >= MAX_RESOLVE_ATTEMPTS)
+        return;
+    struct resolve_attempt *attempt =
+        &g_resolve_attempts[g_nresolve_attempts++];
+    attempt->cls = cls;
+    attempt->sel = sel;
+    attempt->class_method = class_method;
+}
+
+static void *resolve_method(void *cls, void *sel, int class_method)
+{
+    if (resolve_attempted(cls, sel, class_method))
+        return NULL;
+    mark_resolve_attempted(cls, sel, class_method);
+    const char *resolver_name =
+        class_method ? "resolveClassMethod:" : "resolveInstanceMethod:";
+    void *resolver = lookup_class_method((struct objc_class_min *)cls,
+                                         resolver_name);
+    if (!resolver)
+        return NULL;
+    int (*resolve_fn)(void *, void *, void *) = resolver;
+    if (!resolve_fn(cls, sel_registerName(resolver_name), sel))
+        return NULL;
+    return class_method
+               ? lookup_class_method((struct objc_class_min *)cls,
+                                     (const char *)sel)
+               : lookup_instance_method((struct objc_class_min *)cls,
+                                        (const char *)sel);
 }
 
 static struct class_entry *find_class_entry(void *ptr)
@@ -546,27 +633,22 @@ int iosim_objc_responds(void *obj, void *sel)
 {
     if (!obj || !sel)
         return 0;
+    const char *name = (const char *)sel;
     struct class_entry *ce = find_class_entry(obj);
     if (ce)
-        return lookup_class_method(ce->cls, (const char *)sel) != NULL;
-    return lookup_instance_method(
-               (struct objc_class_min *)iosim_objc_class_of(obj),
-               (const char *)sel) != NULL;
+        return lookup_class_method(ce->cls, name) != NULL ||
+               resolve_method((void *)ce->cls, sel, 1) != NULL;
+    struct objc_class_min *cls =
+        (struct objc_class_min *)iosim_objc_class_of(obj);
+    return lookup_instance_method(cls, name) != NULL ||
+           resolve_method((void *)cls, sel, 0) != NULL;
 }
 
-void *objc_lookup_imp(void *obj, void *sel)
+static void *lookup_imp_internal(void *obj, void *sel)
 {
-    if (!sel)
-    {
-        fprintf(stderr, "objc: nil selector\n");
-        _exit(1);
-    }
-    /* Objective-C messaging nil is a no-op returning zero. The trampolines
-     * treat a null IMP as that case and return without calling anything. */
-    if (!obj)
+    if (!obj || !sel)
         return NULL;
     const char *name = (const char *)sel;
-
     struct class_entry *ce = find_class_entry(obj);
     void *imp = NULL;
     struct objc_class_min *cls = NULL;
@@ -585,7 +667,29 @@ void *objc_lookup_imp(void *obj, void *sel)
                 (struct objc_class_min *)stringClass, name);
     }
     if (!imp)
+        imp = resolve_method(ce ? (void *)ce->cls : (void *)cls, sel,
+                             ce ? 1 : 0);
+    return imp;
+}
+
+void *objc_lookup_imp(void *obj, void *sel)
+{
+    if (!sel)
     {
+        fprintf(stderr, "objc: nil selector\n");
+        _exit(1);
+    }
+    /* Objective-C messaging nil is a no-op returning zero. The trampolines
+     * treat a null IMP as that case and return without calling anything. */
+    if (!obj)
+        return NULL;
+    const char *name = (const char *)sel;
+    void *imp = lookup_imp_internal(obj, sel);
+    if (!imp)
+    {
+        struct class_entry *ce = find_class_entry(obj);
+        struct objc_class_min *cls =
+            ce ? NULL : (struct objc_class_min *)(*(void **)obj);
         struct class_ro_min *ro = ce ? class_ro(ce->cls) : class_ro(cls);
         fprintf(stderr,
                 "objc: no IMP for '%s' on %p (class %p %s, %s receiver)\n",
@@ -596,6 +700,97 @@ void *objc_lookup_imp(void *obj, void *sel)
     if (getenv("IOSIM_OBJC_DEBUG"))
         fprintf(stderr, "objc: msgSend obj=%p sel=%s -> %p\n", obj, name, imp);
     return imp;
+}
+
+/* Lookup used by the objc_msgSend trampoline: on a miss it runs the two
+ * forwarding stages this runtime implements and reports the receiver the
+ * method must be invoked with, because -forwardingTargetForSelector: can
+ * replace it. A null IMP with the original receiver means "return zero", as
+ * for nil. */
+void *objc_msgSend_lookup(void *obj, void *sel, void **receiver_out)
+{
+    if (receiver_out)
+        *receiver_out = obj;
+    if (!sel)
+    {
+        fprintf(stderr, "objc: nil selector\n");
+        _exit(1);
+    }
+    if (!obj)
+        return NULL;
+    void *imp = lookup_imp_internal(obj, sel);
+    if (imp)
+        return imp;
+
+    /* Stage 1: an object may hand the message to another receiver. Chains
+     * are followed a few hops, exactly like resending the message. Class
+     * receivers do not take this path. */
+    struct class_entry *ce = find_class_entry(obj);
+    if (!ce)
+    {
+        struct objc_class_min *cls =
+            (struct objc_class_min *)(*(void **)obj);
+        for (int depth = 0; depth < 4; depth++)
+        {
+            void *forward = lookup_instance_method(
+                cls, "forwardingTargetForSelector:");
+            if (!forward)
+                break;
+            void *forward_sel =
+                sel_registerName("forwardingTargetForSelector:");
+            void *target = ((void *(*)(void *, void *, void *))forward)(
+                obj, forward_sel, sel);
+            if (!target || target == obj)
+                break;
+            obj = target;
+            if (receiver_out)
+                *receiver_out = obj;
+            imp = lookup_imp_internal(obj, sel);
+            if (imp)
+                return imp;
+            ce = find_class_entry(obj);
+            if (ce)
+                break;
+            cls = (struct objc_class_min *)(*(void **)obj);
+        }
+    }
+
+    /* Stage 2: -doesNotRecognizeSelector:. NSObject answers it by
+     * terminating with the real runtime's message; a custom override may
+     * return, in which case the send yields zero like a nil receiver. */
+    void *dnr = NULL;
+    if (ce)
+    {
+        dnr = lookup_class_method(ce->cls, "doesNotRecognizeSelector:");
+        if (!dnr)
+            dnr = lookup_instance_method(ce->cls,
+                                         "doesNotRecognizeSelector:");
+    }
+    else
+    {
+        struct objc_class_min *cls =
+            (struct objc_class_min *)(*(void **)obj);
+        dnr = lookup_instance_method(cls, "doesNotRecognizeSelector:");
+        if (!dnr)
+            dnr = lookup_class_method(cls, "doesNotRecognizeSelector:");
+    }
+    if (dnr)
+    {
+        ((void (*)(void *, void *, void *))dnr)(
+            obj, sel_registerName("doesNotRecognizeSelector:"), sel);
+        return NULL;
+    }
+    {
+        struct class_ro_min *ro =
+            ce ? class_ro(ce->cls)
+               : class_ro((struct objc_class_min *)(*(void **)obj));
+        fprintf(stderr,
+                "objc: no IMP for '%s' on %p (class %p %s, %s receiver)\n",
+                (const char *)sel, obj,
+                ce ? (void *)ce->cls : (void *)*(void **)obj,
+                ro ? ro_name(ro) : "?", ce ? "class" : "instance");
+        _exit(1);
+    }
 }
 
 /* Called by clang's fast-enumeration codegen when the mutations pointer of a
@@ -724,14 +919,58 @@ void objc_registerClassPair(void *cls)
 int class_addMethod(void *cls, void *sel, void *imp, const char *types)
 {
     struct dynamic_class *dc = find_dynamic_class(cls);
-    if (!dc || !sel || !imp)
+    if (!sel || !imp)
         return 0;
     const char *name = (const char *)sel;
-    for (uint32_t i = 0; i < dc->methods.count; i++)
-        if (dc->methods.methods[i].name &&
-            strcmp((const char *)dc->methods.methods[i].name, name) == 0)
+    if (dc)
+    {
+        for (uint32_t i = 0; i < dc->methods.count; i++)
+            if (dc->methods.methods[i].name &&
+                strcmp((const char *)dc->methods.methods[i].name, name) == 0)
+                return 0;
+        if (dc->methods.count >= DYNAMIC_METHODS)
             return 0;
-    if (dc->methods.count >= DYNAMIC_METHODS)
+        char *types_copy = NULL;
+        if (types)
+        {
+            size_t n = strlen(types) + 1;
+            types_copy = malloc(n);
+            if (types_copy)
+                memcpy(types_copy, types, n);
+        }
+        struct method_min *m = &dc->methods.methods[dc->methods.count++];
+        m->name = sel;
+        m->types = types_copy;
+        m->imp = imp;
+        if (getenv("IOSIM_OBJC_DEBUG"))
+            fprintf(stderr, "objc: class_addMethod %s %s imp=%p\n",
+                    dc->name, name, imp);
+        return 1;
+    }
+    /* A loaded class, or its metaclass for a class method. */
+    int class_method = 0;
+    struct class_entry *entry = find_class_entry(cls);
+    if (!entry)
+    {
+        for (int i = 0; i < g_nclasses; i++)
+            if (class_isa(g_classes[i].cls) == cls)
+            {
+                entry = &g_classes[i];
+                class_method = 1;
+                break;
+            }
+    }
+    if (!entry)
+        return 0;
+    struct class_ro_min *target_ro =
+        class_method ? metaclass_ro(entry->cls) : class_ro(entry->cls);
+    if (lookup_in_methods(target_ro ? target_ro->baseMethods : NULL, name))
+        return 0;
+    if (lookup_category_method(ro_name(target_ro), name, class_method))
+        return 0;
+    if (find_injected_method(entry->cls, name, class_method))
+        return 0;
+    if (g_ninjected_methods >= MAX_INJECTED_METHODS)
         return 0;
     char *types_copy = NULL;
     if (types)
@@ -741,13 +980,20 @@ int class_addMethod(void *cls, void *sel, void *imp, const char *types)
         if (types_copy)
             memcpy(types_copy, types, n);
     }
-    struct method_min *m = &dc->methods.methods[dc->methods.count++];
-    m->name = sel;
-    m->types = types_copy;
-    m->imp = imp;
+    struct injected_method *injected = calloc(1, sizeof(*injected));
+    if (!injected)
+        return 0;
+    injected->method.name = sel;
+    injected->method.types = types_copy;
+    injected->method.imp = imp;
+    injected->cls = entry->cls;
+    injected->class_method = class_method;
+    injected->next = g_injected_methods;
+    g_injected_methods = injected;
+    g_ninjected_methods++;
     if (getenv("IOSIM_OBJC_DEBUG"))
-        fprintf(stderr, "objc: class_addMethod %s %s imp=%p\n",
-                dc->name, name, imp);
+        fprintf(stderr, "objc: class_addMethod %s %s imp=%p (injected)\n",
+                entry->name, name, imp);
     return 1;
 }
 
@@ -759,6 +1005,10 @@ void *class_getInstanceMethod(void *cls, void *sel)
     for (int depth = 0; cls && depth < 64; depth++)
     {
         struct objc_class_min *c = cls;
+        struct injected_method *injected =
+            find_injected_method(cls, name, 0);
+        if (injected)
+            return &injected->method;
         struct class_ro_min *ro = class_ro(c);
         const struct method_min *m =
             lookup_method_entry(ro ? ro->baseMethods : NULL, name);

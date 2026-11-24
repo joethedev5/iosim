@@ -2034,6 +2034,20 @@ while a copy association snapshots a box at 11 so mutating the source to 13
 does not change the stored value, and a copied mutable string keeps `copy`
 while the source becomes `copy!`.
 
+### Objective-C runtime: dynamic resolution and forwarding
+
+`tests/message_forwarding_test.m` sends `magicValue` to a class whose
+`+resolveInstanceMethod:` installs it with `class_addMethod` on first use:
+the two sends return 42 and the resolver runs once. A class method installed
+the same way through `+resolveClassMethod:` and `class_addMethod` on the
+metaclass returns 77 twice. A forwarder that answers
+`-forwardingTargetForSelector:` with a backend object makes `compute` return
+123 and `greet` return `backend`, and a two-hop chain reaches the same
+backend. `respondsToSelector:` reports the resolved method, and a selector
+that is neither resolved nor forwarded reaches the fixture's
+`-doesNotRecognizeSelector:` override, which prints `dnr bogus` and returns
+control to the fixture.
+
 ### CoreAnimation: completion and fill modes
 
 `tests/animation_removal_test.m` starts three 0.5 s opacity animations from

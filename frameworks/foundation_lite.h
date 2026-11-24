@@ -76,6 +76,10 @@ __attribute__((objc_root_class))
 - (BOOL)isKindOfClass:(Class)cls;
 - (BOOL)isMemberOfClass:(Class)cls;
 - (BOOL)respondsToSelector:(SEL)sel;
++ (BOOL)resolveInstanceMethod:(SEL)sel;
++ (BOOL)resolveClassMethod:(SEL)sel;
+- (id)forwardingTargetForSelector:(SEL)sel;
+- (void)doesNotRecognizeSelector:(SEL)sel;
 - (BOOL)isEqual:(id)other;
 - (unsigned long)hash;
 - (id)description;

@@ -31,6 +31,10 @@ __attribute__((objc_root_class))
 - (id)retain;
 - (void)release;
 - (id)autorelease;
++ (BOOL)resolveInstanceMethod:(SEL)sel;
++ (BOOL)resolveClassMethod:(SEL)sel;
+- (id)forwardingTargetForSelector:(SEL)sel;
+- (void)doesNotRecognizeSelector:(SEL)sel;
 @end
 
 @class NSCharacterSet;

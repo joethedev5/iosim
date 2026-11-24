@@ -1860,3 +1860,23 @@ components.
   transformed centre.
 - The architecture note claiming such masks were not folded was stale and has
   been corrected.
+
+## 2026-11-24: Dynamic method resolution and forwarding targets
+
+- Selector lookup now gives `+resolveInstanceMethod:` and
+  `+resolveClassMethod:` one chance per class/selector pair (negative results
+  are remembered), then the `objc_msgSend` trampoline asks for a receiver
+  through the new `objc_msgSend_lookup`. A non-nil, different
+  `-forwardingTargetForSelector:` result replaces the receiver and lookup
+  continues on the target, following chains up to four hops.
+- `class_addMethod` now also accepts loaded classes: `class_addMethod(cls,
+  ...)` installs an instance method and `class_addMethod(object_getClass(cls),
+  ...)` a class method, both kept in an injection list that lookup checks
+  per class before the image method lists.
+- `-doesNotRecognizeSelector:` is called for a selector that survives both
+  stages. Foundation's NSObject implements it with the real runtime's
+  `NSInvalidArgumentException` termination message; NSObject also provides
+  the default NO resolvers and a nil forwarding target. A custom override may
+  return, in which case the send yields zero.
+- `forwardInvocation:`/`NSInvocation` forwarding remains unimplemented and
+  is documented as such.

@@ -276,6 +276,16 @@ ivar_t { offset_ptr, name, type, alignment, size }
   objc4: the lookup reports a null IMP and the trampoline returns with
   zeroed `rax`, `xmm0` and `xmm1` instead of jumping. Responder-chain
   forwarding and optional-delegate calls therefore terminate cleanly.
+- Selector lookup triggers `+resolveInstanceMethod:` / `+resolveClassMethod:`
+  once per class and selector. A resolver installs the method with
+  `class_addMethod`, which for loaded classes keeps an injection list that
+  lookup consults before the image's read-only method lists. The
+  `objc_msgSend` trampoline also receives the receiver separately, so a
+  `-forwardingTargetForSelector:` result re-targets the send (chains are
+  followed up to four deep). A selector that is neither resolved nor
+  forwarded goes to `-doesNotRecognizeSelector:`, which NSObject answers with
+  the real runtime's `NSInvalidArgumentException` message before exiting.
+  `forwardInvocation:`/`NSInvocation` forwarding is not implemented.
 - `objc_alloc_init`, `objc_autoreleasePoolPush/Pop`, `objc_retain/release`,
   `objc_getClass`, `class_getName`, `object_getClassName`, `sel_registerName`
   and `sel_getName` are implemented.
@@ -1703,7 +1713,9 @@ Python for iteration speed.
 - arm64 binaries are rejected (fat containers are accepted only for x86_64
   slices).
 - The dyld shared cache is not parsed; each dylib is loaded from disk.
-- Class method dispatch covers the common path; message forwarding, ARC
+- Class method dispatch covers the common path; dynamic resolution,
+  `-forwardingTargetForSelector:` and `-doesNotRecognizeSelector:` are
+  implemented, while `forwardInvocation:`/`NSInvocation` forwarding, ARC
   entry points and exceptions are pending. Associated objects are stored by
   the loader in a per-object list: assign and retain policies keep the given
   pointer, copy policies send `-copy`, setting nil removes one key and

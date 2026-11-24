@@ -1065,6 +1065,31 @@ else
     echo "FAIL transformed masks"; echo "$out"; fails=$((fails+1))
 fi
 
+# ---------- 4f10g. Dynamic resolution and forwarding ----------
+"$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
+    -ffreestanding -O1 -I "$ROOT/frameworks" \
+    -c "$ROOT/tests/message_forwarding_test.m" \
+    -o "$T/message_forwarding_test.o"
+"$LD64" -arch x86_64 -platform_version $PLATFORM -e _main \
+    -o "$T/message_forwarding_test" "$T/message_forwarding_test.o" \
+    "$ROOT/runtime/System/Library/Frameworks/Foundation.framework/Foundation" \
+    -undefined dynamic_lookup
+out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" \
+    "$T/message_forwarding_test" 2>&1)"
+check "[fwd] resolve 42 42 calls 1" "$out" \
+    "resolveInstanceMethod: installs a missing instance method once"
+check "[fwd] class resolve 77 77" "$out" \
+    "resolveClassMethod: installs a missing class method"
+check "[fwd] target 123 backend" "$out" \
+    "forwardingTargetForSelector: re-targets the send"
+check "[fwd] chain 123" "$out" \
+    "forwarding targets chain to the final implementation"
+check "[fwd] responds 1" "$out" \
+    "respondsToSelector: sees the resolved method"
+check "[fwd] dnr bogus" "$out" \
+    "an unresolved selector reaches doesNotRecognizeSelector:"
+check "[fwd] done" "$out" "the forwarding fixture finishes"
+
 # ---------- 4f11. CAAnimation completion and fill modes ----------
 rm -f "$T/arem.fifo"
 mkfifo "$T/arem.fifo"

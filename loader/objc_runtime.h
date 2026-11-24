@@ -9,6 +9,7 @@ void iosim_objc_register_image(struct iosim_image *img);
 void iosim_objc_dump(void);
 
 void *objc_lookup_imp(void *obj, void *sel);
+void *objc_msgSend_lookup(void *obj, void *sel, void **receiver_out);
 void *objc_msgSend(void *self, void *sel, ...);
 void *objc_msgSendSuper2(void *super_ptr, void *sel, ...);
 void *objc_msgSend_stret(void *stret_addr, void *self, void *sel, ...);

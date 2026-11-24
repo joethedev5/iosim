@@ -136,6 +136,9 @@ struct cf_constant_string {
 extern void *objc_getClass(const char *name);
 extern const char *class_getName(void *cls);
 extern char *getenv(const char *name);
+extern int fprintf(void *stream, const char *fmt, ...);
+extern void *stderr;
+extern void _exit(int status);
 
 static NSTimer *g_timers[64];
 static int g_timer_count;
@@ -759,6 +762,22 @@ static void kvc_operator_unique_add(NSMutableArray *array, id value)
 - (BOOL)isKindOfClass:(Class)cls { return (BOOL)iosim_objc_is_kind_of(self, cls); }
 - (BOOL)isMemberOfClass:(Class)cls { return iosim_objc_class_of(self) == cls; }
 - (BOOL)respondsToSelector:(SEL)sel { return (BOOL)iosim_objc_responds(self, sel); }
+/* Forwarding hooks. Resolution is consulted once per class and selector;
+ * the default answers NO. The default forwarding target is nil, and an
+ * unrecognized selector terminates with the message real NSObject prints. */
++ (BOOL)resolveInstanceMethod:(SEL)sel { (void)sel; return NO; }
++ (BOOL)resolveClassMethod:(SEL)sel { (void)sel; return NO; }
+- (id)forwardingTargetForSelector:(SEL)sel { (void)sel; return nil; }
+- (void)doesNotRecognizeSelector:(SEL)sel
+{
+    fprintf(stderr,
+            "*** Terminating app due to uncaught exception "
+            "'NSInvalidArgumentException', reason: "
+            "'-[%s %s]: unrecognized selector sent to instance %p'\n",
+            class_getName(iosim_objc_class_of(self)), (const char *)sel,
+            self);
+    _exit(1);
+}
 - (BOOL)isEqual:(id)other { return self == other; }
 - (unsigned long)hash { return (unsigned long)(long)self; }
 - (id)description { return [NSString stringWithUTF8String:"<NSObject>"]; }
