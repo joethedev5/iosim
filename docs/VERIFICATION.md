@@ -558,6 +558,15 @@ rounded corner. The fixture reports `[snap] size 100.0 80.0` and prints
 `ok   a view snapshot keeps old colors and rounded corners` after checking
 those five pixels.
 
+### Graphics: drawing a hierarchy into an image
+
+`tests/hierarchy_draw_test.m` calls `drawViewHierarchyInRect:` on a rounded
+red view with a yellow chip from inside a `UIGraphicsImageRenderer` action
+block, reports `[hd] drew 1`, and displays the resulting image. The captured
+frame shows the rendered red field, yellow chip and black rounded corner, and
+the fixture prints `ok   drawViewHierarchyInRect captures a rounded
+hierarchy`.
+
 ### Graphics: rounded subtree clipping
 
 `tests/rounded_clip_test.m` stacks three cards. The first clips to bounds

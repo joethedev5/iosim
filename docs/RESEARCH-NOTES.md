@@ -1110,3 +1110,15 @@ components.
   into the pixels; changing the source afterwards does not affect it.
 - The `afterScreenUpdates` argument is accepted but ignored: the snapshot is
   taken from the current model state rather than waiting for a commit.
+
+## 2026-11-24: Drawing a hierarchy into an image context
+
+- `drawViewHierarchyInRect:afterScreenUpdates:` reuses the snapshot
+  offscreen pass, converts the pixels to a CGImage and calls
+  `CGContextDrawImage` on `iosim_cg_current()`. Without a current image or
+  view context it returns NO.
+- The draw happens while the image context is current; the nested offscreen
+  pass saves and restores that context's buffer, clip, opacity and masks, so
+  the destination context is intact when the image is drawn into it. The
+  destination rectangle can be any size, letting CoreGraphics scale the
+  captured hierarchy.

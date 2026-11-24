@@ -1004,6 +1004,10 @@ decoded with libpng in `loader/image.c`.
 - `CAShapeLayer` stores a `UIBezierPath` (via `CGPath`) and draws its fill and
   stroke; `CAGradientLayer` interpolates up to two color stops; `UIImageView`
   blits a decoded image with aspect-fit or centered content modes.
+- `drawViewHierarchyInRect:afterScreenUpdates:` uses the same offscreen pass
+  and then draws the resulting image into the current Core Graphics context
+  with `CGContextDrawImage`, so it composes with `UIGraphicsImageRenderer`.
+  It returns NO when no context is current.
 - `snapshotViewAfterScreenUpdates:` renders the receiver's subtree into an
   offscreen of its bounds at the screen scale, converts the pixels into a
   `UIImage` and returns a non-interactive `UIImageView` with the same

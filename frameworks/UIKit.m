@@ -1439,6 +1439,8 @@ typedef enum {
 - (BOOL)pointInside:(CGPoint)point;
 - (UIView *)hitTest:(CGPoint)point;
 - (UIView *)snapshotViewAfterScreenUpdates:(BOOL)afterUpdates;
+- (BOOL)drawViewHierarchyInRect:(CGRect)rect
+             afterScreenUpdates:(BOOL)afterUpdates;
 - (id)superview;
 - (UIWindow *)window;
 - (CGAffineTransform)transform;
@@ -26145,6 +26147,56 @@ static void app_enter_background(id sceneDelegate, id scene,
     snapshot.layer.contentsScale = scale;
     snapshot.userInteractionEnabled = NO;
     return snapshot;
+}
+- (BOOL)drawViewHierarchyInRect:(CGRect)rect
+             afterScreenUpdates:(BOOL)afterUpdates
+{
+    (void)afterUpdates;
+    CGContextRef context = iosim_cg_current();
+    if (!context)
+        return NO;
+    CGRect frame = [self frame];
+    double scale = [[UIScreen mainScreen] scale];
+    if (scale <= 0)
+        scale = 1.0;
+    int w = (int)(frame.size.width * scale + 0.5);
+    int h = (int)(frame.size.height * scale + 0.5);
+    if (w <= 0 || h <= 0)
+        return NO;
+    void *state = iosim_fb_begin_offscreen((unsigned)w, (unsigned)h);
+    if (!state)
+        return NO;
+    render_view(self, -frame.origin.x, -frame.origin.y, scale, 1.0);
+    int bw = 0, bh = 0;
+    unsigned *buf = iosim_fb_end_offscreen(state, &bw, &bh);
+    if (!buf || bw <= 0 || bh <= 0)
+    {
+        if (buf)
+            iosim_fb_free_offscreen(buf);
+        return NO;
+    }
+    unsigned char *rgba = malloc((unsigned long)bw * (unsigned long)bh * 4);
+    if (!rgba)
+    {
+        iosim_fb_free_offscreen(buf);
+        return NO;
+    }
+    for (int i = 0; i < bw * bh; i++)
+    {
+        unsigned pixel = buf[i];
+        rgba[i * 4 + 0] = (unsigned char)((pixel >> 16) & 255);
+        rgba[i * 4 + 1] = (unsigned char)((pixel >> 8) & 255);
+        rgba[i * 4 + 2] = (unsigned char)(pixel & 255);
+        rgba[i * 4 + 3] = (unsigned char)((pixel >> 24) & 255);
+    }
+    iosim_fb_free_offscreen(buf);
+    CGImageRef image = CGImageCreateWithRGBA(rgba, bw, bh);
+    free(rgba);
+    if (!image)
+        return NO;
+    CGContextDrawImage(context, rect, image);
+    CGImageRelease(image);
+    return YES;
 }
 @end
 
