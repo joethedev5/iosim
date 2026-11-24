@@ -1723,8 +1723,11 @@ particles are spread around the emitter rather than stacked at its origin.
 future and `fillMode = @"backwards"` samples 1.0 before its start, about 0.75
 midway and 0.0 after it ends; the fixture commits the layer's model opacity
 to 0 after adding the animation, so the default-removed animation falls back
-to 0.0 when its active span ends. An `autoreverses` fade samples about 0.5 at
-quarter and three-quarter time and 1.0 after completion. A `speed = 2` fade
+to 0.0 when its active span ends. An `autoreverses` fade runs forward over
+its one-second duration and back over a second second: each sample is checked
+against the opacity implied by its measured elapsed time (0.75 at quarter
+time, 0.25 at three-quarter time, 0.15 again partway through the reverse pass)
+and the fourth sample after two seconds reads the start value 1.0. A `speed = 2` fade
 samples about 0.4 at 0.3 s, and a `timeOffset = 0.5` fade samples the same.
 The fixture also requires `[CATransaction animationDuration]` to be 0.50, its
 completion block to run, `performWithoutAnimation:` to complete its inner

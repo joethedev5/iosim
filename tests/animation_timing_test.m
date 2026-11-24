@@ -11,6 +11,7 @@ extern int fflush(void *stream);
     CALayer *_reverse;
     CALayer *_speed;
     CALayer *_offset;
+    double _reverseStart;
 }
 @end
 
@@ -51,6 +52,7 @@ extern int fflush(void *stream);
     reverse.toValue = [NSNumber numberWithDouble:0.0];
     reverse.duration = 1.0;
     reverse.autoreverses = YES;
+    _reverseStart = CACurrentMediaTime();
     [_reverse addAnimation:reverse forKey:@"reverse"];
 
     _speed = [self boxAtX:280];
@@ -103,6 +105,8 @@ extern int fflush(void *stream);
         selector:@selector(checkReverseMid:) userInfo:nil repeats:NO];
     [NSTimer scheduledTimerWithTimeInterval:1.15 target:self
         selector:@selector(checkReverseDone:) userInfo:nil repeats:NO];
+    [NSTimer scheduledTimerWithTimeInterval:2.3 target:self
+        selector:@selector(checkReverseEnd:) userInfo:nil repeats:NO];
     [NSTimer scheduledTimerWithTimeInterval:0.3 target:self
         selector:@selector(checkSpeed:) userInfo:nil repeats:NO];
     [NSTimer scheduledTimerWithTimeInterval:0.1 target:self
@@ -135,19 +139,33 @@ extern int fflush(void *stream);
 - (void)checkReverseEarly:(NSTimer *)timer
 {
     (void)timer;
-    printf("[timing] reverse %.2f\n", [[_reverse presentationLayer] opacity]);
+    printf("[timing] reverse %.2f %.2f\n",
+           [[_reverse presentationLayer] opacity],
+           CACurrentMediaTime() - _reverseStart);
     fflush(0);
 }
 - (void)checkReverseMid:(NSTimer *)timer
 {
     (void)timer;
-    printf("[timing] reverse %.2f\n", [[_reverse presentationLayer] opacity]);
+    printf("[timing] reverse %.2f %.2f\n",
+           [[_reverse presentationLayer] opacity],
+           CACurrentMediaTime() - _reverseStart);
     fflush(0);
 }
 - (void)checkReverseDone:(NSTimer *)timer
 {
     (void)timer;
-    printf("[timing] reverse %.2f\n", [[_reverse presentationLayer] opacity]);
+    printf("[timing] reverse %.2f %.2f\n",
+           [[_reverse presentationLayer] opacity],
+           CACurrentMediaTime() - _reverseStart);
+    fflush(0);
+}
+- (void)checkReverseEnd:(NSTimer *)timer
+{
+    (void)timer;
+    printf("[timing] reverse %.2f %.2f\n",
+           [[_reverse presentationLayer] opacity],
+           CACurrentMediaTime() - _reverseStart);
     fflush(0);
 }
 - (void)checkSpeed:(NSTimer *)timer

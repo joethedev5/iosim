@@ -4265,6 +4265,8 @@ static void anim_delegate_add(CALayer *layer, CAAnimation *animation, id key,
     double repeat = animation->_repeatCount;
     event->infinite = repeat < 0;
     double span = animation->_duration > 0 ? animation->_duration : 0.25;
+    if (animation->_autoreverses)
+        span *= 2.0;
     event->stopDue = event->startDue + span * (repeat > 1 ? repeat : 1);
 }
 
@@ -4502,7 +4504,10 @@ static int anim_delegates_pending(void)
     entry->infinite = anim->_repeatCount < 0;
     if (entry->duration <= 0)
         entry->duration = 0.25;
-    animation_mark_active(entry->delay + entry->duration, entry->repeatCount);
+    animation_mark_active(entry->delay + entry->duration *
+                                           (entry->autoreverses ? 2.0
+                                                               : 1.0),
+                          entry->repeatCount);
     anim_delegate_add(self, anim, key, entry->delay);
 }
 - (void)removeAnimationForKey:(id)key
@@ -19731,7 +19736,8 @@ static int layer_progress(struct layer_anim *anim, double *outT)
         elapsed = 0;
     }
     double duration = anim->duration > 0 ? anim->duration : 0.25;
-    double t = elapsed / duration;
+    double cycle = duration * (anim->autoreverses ? 2.0 : 1.0);
+    double t = elapsed / cycle;
     double repeat = anim->repeatCount;
     if (repeat < 0)
         t = t - (long)t;
@@ -19739,7 +19745,7 @@ static int layer_progress(struct layer_anim *anim, double *outT)
         t = 1.0;
     else if (t >= 1.0)
         t = 1.0;
-    if (repeat >= 0 && elapsed >= duration * (repeat > 1 ? repeat : 1.0))
+    if (repeat >= 0 && elapsed >= cycle * (repeat > 1 ? repeat : 1.0))
     {
         const char *fill =
             anim->fillMode ? iosim_string_cstr(anim->fillMode) : 0;
@@ -20024,8 +20030,9 @@ static double layer_key_value(CALayer *layer, const char *key, double base)
         elapsed = 0;
     }
     double span = anim->duration > 0 ? anim->duration : 0.25;
+    double cycle = span * (anim->autoreverses ? 2.0 : 1.0);
     double reps = anim->repeatCount;
-    if (reps >= 0 && elapsed >= span * (reps > 1 ? reps : 1.0))
+    if (reps >= 0 && elapsed >= cycle * (reps > 1 ? reps : 1.0))
     {
         const char *fill =
             anim->fillMode ? iosim_string_cstr(anim->fillMode) : 0;
@@ -20038,7 +20045,7 @@ static double layer_key_value(CALayer *layer, const char *key, double base)
             return base;
         }
     }
-    double t = elapsed / anim->duration;
+    double t = elapsed / cycle;
     double repeat = anim->repeatCount;
     int finished = 0;
     if (repeat < 0)

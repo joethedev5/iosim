@@ -1156,7 +1156,8 @@ decoded with libpng in `loader/image.c`.
   settling duration derived from the damping ratio and natural frequency.
   `CAAnimation` also honors `beginTime` (an absolute media time that becomes
   a start delay), `speed`, `timeOffset`, `autoreverses` (a triangular sweep
-  that ends at the start value) and a backwards/both `fillMode` that shows the
+  whose reverse pass adds a second duration, so the animation ends at the
+  start value after 2 x duration) and a backwards/both `fillMode` that shows the
   start value during the delay. `CACurrentMediaTime` returns the runtime
   clock. `CATransaction` tracks begin/commit nesting and runs its completion
   block on the outermost commit; `UIView performWithoutAnimation:` and

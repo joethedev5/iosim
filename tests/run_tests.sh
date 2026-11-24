@@ -7222,7 +7222,7 @@ if wait_log "[timing] ready"; then
 else
     echo "FAIL timing launch"; fails=$((fails+1))
 fi
-sleep 2.0
+sleep 3.5
 if out="$(python3 - "$SBLOG" <<'TIMINGLOG'
 import sys
 text = open(sys.argv[1], errors="replace").read()
@@ -7241,12 +7241,30 @@ if len(fill) != 3:
     raise SystemExit("expected three fill samples, got %r" % (fill,))
 if not (fill[0] > 0.9 and 0.55 < fill[1] < 0.9 and fill[2] < 0.1):
     raise SystemExit("fillMode backwards samples are wrong: %r" % (fill,))
-reverse = values("reverse")
-if len(reverse) != 3:
-    raise SystemExit("expected three reverse samples, got %r" % (reverse,))
-if not (0.3 < reverse[0] < 0.7 and 0.3 < reverse[1] < 0.7 and
-        reverse[2] > 0.9):
-    raise SystemExit("autoreverse samples are wrong: %r" % (reverse,))
+reverse = []
+prefix = "[timing] reverse "
+for line in text.splitlines():
+    if not line.startswith(prefix):
+        continue
+    parts = line[len(prefix):].split()
+    if len(parts) == 2:
+        try:
+            reverse.append((float(parts[0]), float(parts[1])))
+        except ValueError:
+            pass
+if len(reverse) != 4:
+    raise SystemExit("expected four reverse samples, got %r" % (reverse,))
+for value, elapsed in reverse:
+    if elapsed < 1.0:
+        expected = 1.0 - elapsed
+    elif elapsed < 2.0:
+        expected = elapsed - 1.0
+    else:
+        expected = 1.0
+    if abs(value - expected) > 0.12:
+        raise SystemExit(
+            "autoreverse sample %.2f at %.2f s is not %.2f" %
+            (value, elapsed, expected))
 speed = values("speed")
 if len(speed) != 1 or not 0.2 < speed[0] < 0.55:
     raise SystemExit("speed sample is wrong: %r" % (speed,))

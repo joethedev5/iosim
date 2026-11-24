@@ -1505,3 +1505,17 @@ components.
 - The fixture repeats a GET through the loopback counter server: the second
   response repeats the first body, clearing the cache or asking for a reload
   advances the server counter.
+
+## 2026-11-24: autoreverse spans two durations
+
+- `autoreverses` previously folded the return pass into the same `duration`
+  as the forward pass, halving both. Core Animation's `duration` covers the
+  forward pass only; with autoreverses the total cycle is twice the
+  duration, repeated by `repeatCount`, and the delegate stop fires at the end
+  of the reverse pass. `layer_progress`, the scalar `layer_key_value` path,
+  the delegate schedule and the active-animation window now all use the
+  doubled cycle.
+- The timing fixture samples the reverse fade four times and the suite now
+  derives the expected opacity from each sample's measured elapsed time
+  instead of fixed timer positions, then requires a fourth sample after the
+  full two-second cycle at the start value.
