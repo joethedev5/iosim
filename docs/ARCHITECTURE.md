@@ -289,6 +289,13 @@ ivar_t { offset_ptr, name, type, alignment, size }
 - `objc_alloc_init`, `objc_autoreleasePoolPush/Pop`, `objc_retain/release`,
   `objc_getClass`, `class_getName`, `object_getClassName`, `sel_registerName`
   and `sel_getName` are implemented.
+- ARC entry points are implemented: `objc_storeStrong`, the weak family
+  (`objc_initWeak`, `objc_storeWeak`, `objc_loadWeak`,
+  `objc_loadWeakRetained`, `objc_destroyWeak`, `objc_copyWeak`,
+  `objc_moveWeak`), `objc_retainBlock`, and the autoreleased-return family.
+  Retain and release stay no-ops, so objects are never deallocated and weak
+  slots clear only when assigned nil. The ObjC personality declines
+  unwinding and a resumed unwind aborts; exceptions remain unsupported.
 
 ### 2.6 Darwin ABI shims
 
@@ -1715,8 +1722,10 @@ Python for iteration speed.
 - The dyld shared cache is not parsed; each dylib is loaded from disk.
 - Class method dispatch covers the common path; dynamic resolution,
   `-forwardingTargetForSelector:` and `-doesNotRecognizeSelector:` are
-  implemented, while `forwardInvocation:`/`NSInvocation` forwarding, ARC
-  entry points and exceptions are pending. Associated objects are stored by
+  implemented, while `forwardInvocation:`/`NSInvocation` forwarding and
+  exceptions are pending. ARC-compiled code uses the implemented entry
+  points, but objects are never deallocated so weak references do not zero.
+  Associated objects are stored by
   the loader in a per-object list: assign and retain policies keep the given
   pointer, copy policies send `-copy`, setting nil removes one key and
   `objc_removeAssociatedObjects` drops every key for one object.

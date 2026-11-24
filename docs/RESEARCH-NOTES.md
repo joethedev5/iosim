@@ -1880,3 +1880,24 @@ components.
   return, in which case the send yields zero.
 - `forwardInvocation:`/`NSInvocation` forwarding remains unimplemented and
   is documented as such.
+
+## 2026-11-24: ARC entry points
+
+- The runtime exports the ownership entry points ARC codegen uses:
+  `objc_retainAutoreleasedReturnValue`, `objc_autoreleaseReturnValue`,
+  `objc_claimAutoreleasedReturnValue`,
+  `objc_unsafeClaimAutoreleasedReturnValue`, `objc_retainAutorelease`,
+  `objc_retainAutoreleaseReturnValue`, `objc_retainBlock`,
+  `objc_storeStrong`, the weak family and `objc_opt_isKindOfClass` /
+  `objc_opt_respondsToSelector` / `objc_opt_self`. Retain and release remain
+  no-ops, so the weak family stores plain pointers and a slot clears only
+  when assigned nil.
+- `Foundation-lite` object-pointer ivars and fields carry
+  `__unsafe_unretained` so the header compiles under ARC.
+- ARC code carries DWARF unwind metadata for `@autoreleasepool` cleanup; the
+  loader resolves `__objc_personality_v0` to a personality that returns
+  `_URC_CONTINUE_UNWIND` and `__Unwind_Resume` to a reporter that aborts.
+  Exceptions themselves remain unsupported.
+- `tests/arc_test.m` compiles with `-fobjc-arc` and covers strong and weak
+  properties, an autoreleased return, a `__block` capture shared by two
+  blocks, and `__bridge` casts.

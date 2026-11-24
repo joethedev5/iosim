@@ -2048,6 +2048,17 @@ that is neither resolved nor forwarded reaches the fixture's
 `-doesNotRecognizeSelector:` override, which prints `dnr bogus` and returns
 control to the fixture.
 
+### Objective-C runtime: ARC entry points
+
+`tests/arc_test.m` is compiled with `-fobjc-arc`. It sets a strong property
+and reads it back, takes a `__weak` local and sets a weak property, assigns
+nil to the weak property and observes it cleared, returns an autoreleased
+string through a method (which the ARC caller retains with
+`objc_retainAutoreleasedReturnValue`), mutates a `__block` capture from one
+block and reads it from a second, and round-trips the object through
+`__bridge` casts. All values print as expected, so the entry points ARC
+codegen references resolve and behave.
+
 ### CoreAnimation: completion and fill modes
 
 `tests/animation_removal_test.m` starts three 0.5 s opacity animations from

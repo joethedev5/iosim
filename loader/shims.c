@@ -920,6 +920,9 @@ static int shim_kill(int pid, int sig)
 /* ---------- table ---------- */
 
 int shim_pthread_main_np(void);
+int shim_objc_personality(int version, int actions, unsigned long long exclass,
+                          void *exception, void *context);
+void shim_unwind_resume(void *exception);
 
 #define SHIM(fn) { #fn, (void *)(uintptr_t)&shim_##fn }
 #define SHIM_ALIAS(nm, fn) { nm, (void *)(uintptr_t)&shim_##fn }
@@ -1081,6 +1084,8 @@ static const struct iosim_shim shims[] = {
     SHIM_DIRECT(_Block_release),
     SHIM_DIRECT(_Block_object_assign),
     SHIM_DIRECT(_Block_object_dispose),
+    SHIM_ALIAS("_Unwind_Resume", unwind_resume),
+    SHIM_ALIAS("_objc_personality_v0", objc_personality),
     SHIM_DIRECT(iosim_now),
     SHIM_DIRECT(iosim_wall_time),
     SHIM_DIRECT(usleep),
@@ -1126,8 +1131,24 @@ static const struct iosim_shim shims[] = {
     SHIM_DIRECT(objc_release),
     SHIM_DIRECT(objc_autoreleasePoolPush),
     SHIM_DIRECT(objc_autoreleasePoolPop),
-    SHIM_DIRECT(objc_retain),
-    SHIM_DIRECT(objc_release),
+    SHIM_DIRECT(objc_retainAutoreleasedReturnValue),
+    SHIM_DIRECT(objc_autoreleaseReturnValue),
+    SHIM_DIRECT(objc_claimAutoreleasedReturnValue),
+    SHIM_DIRECT(objc_unsafeClaimAutoreleasedReturnValue),
+    SHIM_DIRECT(objc_retainAutorelease),
+    SHIM_DIRECT(objc_retainAutoreleaseReturnValue),
+    SHIM_DIRECT(objc_retainBlock),
+    SHIM_DIRECT(objc_storeStrong),
+    SHIM_DIRECT(objc_storeWeak),
+    SHIM_DIRECT(objc_loadWeak),
+    SHIM_DIRECT(objc_loadWeakRetained),
+    SHIM_DIRECT(objc_initWeak),
+    SHIM_DIRECT(objc_destroyWeak),
+    SHIM_DIRECT(objc_moveWeak),
+    SHIM_DIRECT(objc_copyWeak),
+    SHIM_DIRECT(objc_opt_isKindOfClass),
+    SHIM_DIRECT(objc_opt_respondsToSelector),
+    SHIM_DIRECT(objc_opt_self),
     SHIM_DIRECT(objc_getClass),
     SHIM_DIRECT(class_getName),
     SHIM_DIRECT(object_getClassName),
@@ -1426,4 +1447,25 @@ void _Block_release(void *block)
         b->descriptor->dispose)
         b->descriptor->dispose(b);
     free(b);
+}
+
+/* ARC-compiled code carries unwind metadata for @autoreleasepool cleanup.
+ * This runtime has no exception unwinding: the ObjC personality declines
+ * every frame and a resumed unwind reports the unsupported operation. */
+int shim_objc_personality(int version, int actions, unsigned long long exclass,
+                          void *exception, void *context)
+{
+    (void)version;
+    (void)actions;
+    (void)exclass;
+    (void)exception;
+    (void)context;
+    return 8; /* _URC_CONTINUE_UNWIND */
+}
+
+void shim_unwind_resume(void *exception)
+{
+    (void)exception;
+    fprintf(stderr, "iosim: exception unwinding is not supported\n");
+    abort();
 }

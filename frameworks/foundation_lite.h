@@ -21,7 +21,7 @@ static inline NSRange NSMakeRange(unsigned long location,
 
 typedef struct {
     unsigned long state;
-    id *itemsPtr;
+    id __unsafe_unretained *itemsPtr;
     unsigned long *mutationsPtr;
     unsigned long extra[5];
 } NSFastEnumerationState;
@@ -426,7 +426,7 @@ enum {
 
 @interface NSArray : NSObject <NSFastEnumeration> {
 @public
-    id *_items;
+    id __unsafe_unretained *_items;
     unsigned long _count;
 }
 + (id)array;
@@ -467,7 +467,7 @@ enum {
 
 @interface NSSet : NSObject <NSFastEnumeration> {
 @public
-    id *_items;
+    id __unsafe_unretained *_items;
     unsigned long _count;
 }
 + (id)set;
@@ -502,7 +502,7 @@ enum {
 
 @interface NSOrderedSet : NSObject <NSFastEnumeration> {
 @public
-    id *_items;
+    id __unsafe_unretained *_items;
     unsigned long _count;
 }
 + (id)orderedSet;
@@ -537,8 +537,8 @@ enum {
 
 @interface NSDictionary : NSObject <NSFastEnumeration> {
 @public
-    id *_keys;
-    id *_values;
+    id __unsafe_unretained *_keys;
+    id __unsafe_unretained *_values;
     unsigned long _count;
 }
 + (id)dictionary;
@@ -1868,7 +1868,7 @@ enum {
     id _objects;
     id _top;
     id _current;
-    id *_resolved;
+    id __unsafe_unretained *_resolved;
     unsigned char *_state;
     unsigned long _objectCount;
 }

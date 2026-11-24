@@ -865,6 +865,86 @@ void objc_autoreleasePoolPop(void *pool)
 void *objc_retain(void *obj) { return obj; }
 void objc_release(void *obj) { (void)obj; }
 
+/* ARC entry points. Objects are never freed by this runtime and retain and
+ * release are no-ops, so the ownership-family calls preserve identity. The
+ * weak family stores and loads the pointer in place; a slot is cleared only
+ * when it is assigned nil, because there is no deallocation to observe. */
+extern void *_Block_copy(void *block);
+
+void *objc_retainAutoreleasedReturnValue(void *obj) { return obj; }
+void *objc_autoreleaseReturnValue(void *obj) { return obj; }
+void *objc_claimAutoreleasedReturnValue(void *obj) { return obj; }
+void *objc_unsafeClaimAutoreleasedReturnValue(void *obj) { return obj; }
+void *objc_retainAutorelease(void *obj) { return obj; }
+void *objc_retainAutoreleaseReturnValue(void *obj) { return obj; }
+void *objc_retainBlock(void *block)
+{
+    return block ? _Block_copy(block) : NULL;
+}
+
+void objc_storeStrong(void **location, void *obj)
+{
+    if (location)
+        *location = obj;
+}
+
+void *objc_storeWeak(void **location, void *obj)
+{
+    if (location)
+        *location = obj;
+    return obj;
+}
+
+void *objc_loadWeak(void **location)
+{
+    return location ? *location : NULL;
+}
+
+void *objc_loadWeakRetained(void **location)
+{
+    return location ? *location : NULL;
+}
+
+void *objc_initWeak(void **location, void *obj)
+{
+    if (location)
+        *location = obj;
+    return location;
+}
+
+void objc_destroyWeak(void **location)
+{
+    if (location)
+        *location = NULL;
+}
+
+void objc_moveWeak(void **dest, void **src)
+{
+    if (dest && src)
+    {
+        *dest = *src;
+        *src = NULL;
+    }
+}
+
+void objc_copyWeak(void **dest, void **src)
+{
+    if (dest && src)
+        *dest = *src;
+}
+
+int objc_opt_isKindOfClass(void *obj, void *cls)
+{
+    return iosim_objc_is_kind_of(obj, cls);
+}
+
+int objc_opt_respondsToSelector(void *obj, void *sel)
+{
+    return iosim_objc_responds(obj, sel);
+}
+
+void *objc_opt_self(void *obj) { return obj; }
+
 /* --------------------------------------------------- dynamic class creation */
 
 static struct dynamic_class *find_dynamic_class(void *cls)

@@ -1090,6 +1090,29 @@ check "[fwd] dnr bogus" "$out" \
     "an unresolved selector reaches doesNotRecognizeSelector:"
 check "[fwd] done" "$out" "the forwarding fixture finishes"
 
+# ---------- 4f10h. ARC entry points ----------
+"$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fobjc-arc -fblocks \
+    -ffreestanding -O1 -I "$ROOT/frameworks" \
+    -c "$ROOT/tests/arc_test.m" -o "$T/arc_test.o"
+"$LD64" -arch x86_64 -platform_version $PLATFORM -e _main \
+    -o "$T/arc_test" "$T/arc_test.o" \
+    "$ROOT/runtime/System/Library/Frameworks/Foundation.framework/Foundation" \
+    -undefined dynamic_lookup
+out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/arc_test" 2>&1)"
+check "[arc] strong arc" "$out" \
+    "an ARC strong property stores through objc_storeStrong"
+check "[arc] weak 1 1" "$out" \
+    "ARC weak locals and properties load the stored object"
+check "[arc] weak cleared 1" "$out" \
+    "assigning nil clears an ARC weak slot"
+check "[arc] tag tag-arc" "$out" \
+    "an autoreleased return survives objc_retainAutoreleasedReturnValue"
+check "[arc] block 2 42" "$out" \
+    "an ARC block mutates a byref capture that a second block reads"
+check "[arc] bridge 1" "$out" \
+    "__bridge casts preserve object identity"
+check "[arc] done" "$out" "the ARC fixture finishes"
+
 # ---------- 4f11. CAAnimation completion and fill modes ----------
 rm -f "$T/arem.fifo"
 mkfifo "$T/arem.fifo"

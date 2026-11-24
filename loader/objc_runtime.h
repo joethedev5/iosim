@@ -31,6 +31,27 @@ void *objc_autorelease(void *obj);
 void  objc_autoreleasePoolPop(void *pool);
 void *objc_retain(void *obj);
 void  objc_release(void *obj);
+
+/* ARC entry points; retain and release are no-ops, so ownership-preserving
+ * calls return their argument and weak slots are plain pointers. */
+void *objc_retainAutoreleasedReturnValue(void *obj);
+void *objc_autoreleaseReturnValue(void *obj);
+void *objc_claimAutoreleasedReturnValue(void *obj);
+void *objc_unsafeClaimAutoreleasedReturnValue(void *obj);
+void *objc_retainAutorelease(void *obj);
+void *objc_retainAutoreleaseReturnValue(void *obj);
+void *objc_retainBlock(void *block);
+void  objc_storeStrong(void **location, void *obj);
+void *objc_storeWeak(void **location, void *obj);
+void *objc_loadWeak(void **location);
+void *objc_loadWeakRetained(void **location);
+void *objc_initWeak(void **location, void *obj);
+void  objc_destroyWeak(void **location);
+void  objc_moveWeak(void **dest, void **src);
+void  objc_copyWeak(void **dest, void **src);
+int   objc_opt_isKindOfClass(void *obj, void *cls);
+int   objc_opt_respondsToSelector(void *obj, void *sel);
+void *objc_opt_self(void *obj);
 void *objc_getClass(const char *name);
 const char *class_getName(void *cls);
 const char *object_getClassName(void *obj);
