@@ -1750,7 +1750,10 @@ Python for iteration speed.
   translation.
 - No code signing, entitlements, sandbox or AMFI emulation.
 - arm64 binaries are rejected (fat containers are accepted only for x86_64
-  slices).
+  slices). A design for running arm64 application code without emulating the
+  system — translate app methods lazily at ObjC dispatch while framework
+  calls stay native x86_64 — is in `docs/ARM64-TRANSLATION.md`; it is a plan,
+  not an implementation.
 - The dyld shared cache is not parsed; each dylib is loaded from disk.
 - Class method dispatch covers the common path; dynamic resolution,
   `-forwardingTargetForSelector:`, `-forwardInvocation:` delivery and

@@ -279,6 +279,9 @@ tests/             end-to-end tests
   symbolicating its x86_64 kernel, including the XNU trap and syscall tables.
 - [`docs/METAL-SHADER-CONVERTER.md`](docs/METAL-SHADER-CONVERTER.md) — running
   Apple's x86_64 Metal Shader Converter natively, from DXIL to a `.metallib`.
+- [`docs/ARM64-TRANSLATION.md`](docs/ARM64-TRANSLATION.md) — design for
+  running arm64 app images by translating only app code at ObjC dispatch,
+  while every framework call stays native x86_64.
 - [`docs/RESEARCH-NOTES.md`](docs/RESEARCH-NOTES.md) — running notes for
   artifacts, measurements and open directions.
 - [`docs/ZIG.md`](docs/ZIG.md) — optional Zig guest toolchain and the
