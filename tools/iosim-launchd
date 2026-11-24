@@ -58,10 +58,10 @@ def stop_springboard():
 # ----------------------------------------------------------- launchd jobs
 #
 # A device's Library/LaunchDaemons holds job plists shaped like the real
-# launchd ones: Label, ProgramArguments, MachServices, RunAtLoad, KeepAlive
-# and EnvironmentVariables. RunAtLoad jobs start when launchd starts or when
-# the job is loaded; a MachServices name that is looked up starts its job on
-# demand. Every job is a normal guest process under the loader, so it gets the
+# launchd ones: Label, ProgramArguments, MachServices, RunAtLoad, KeepAlive,
+# StartInterval and EnvironmentVariables. RunAtLoad jobs start when launchd
+# starts or when the job is loaded; a MachServices name that is looked up
+# starts its job on demand; StartInterval jobs start again on their period. Every job is a normal guest process under the loader, so it gets the
 # device environment and can register its own Mach service.
 
 def pid_alive(pid):
@@ -163,13 +163,15 @@ def parse_job(path):
         "machServices": services,
         "runAtLoad": bool(pl.get("RunAtLoad", False)),
         "keepAlive": pl.get("KeepAlive") is True,
+        "startInterval": int(pl.get("StartInterval", 0) or 0),
         "environment": {str(k): str(v) for k, v in env.items()},
         "sockets": sockets,
         "listeners": {},
         "socketPaths": [],
         "proc": None,
         "pid": 0,
-        "lastStart": 0.0,
+        "lastStart": (time.monotonic()
+                      if int(pl.get("StartInterval", 0) or 0) > 0 else 0.0),
     }
 
 
@@ -222,8 +224,7 @@ def scan_jobs(device_dir):
 
 
 def prune_jobs():
-    for job in jobs.values():
-        was_running = bool(job["pid"])
+    for job in list(jobs.values()):
         proc = job.get("proc")
         if proc is not None:
             # poll() also reaps the child, so a finished job is really gone
@@ -234,8 +235,14 @@ def prune_jobs():
             job["pid"] = 0
         elif job["pid"] and not pid_alive(job["pid"]):
             job["pid"] = 0
-        if was_running and not job["pid"] and job["keepAlive"] and \
-                time.monotonic() - job.get("lastStart", 0.0) > 1.0:
+        if job["pid"]:
+            continue
+        now = time.monotonic()
+        since = now - job.get("lastStart", 0.0)
+        if job["keepAlive"] and since > 1.0:
+            start_job(job)
+        elif job.get("startInterval", 0) > 0 and \
+                since >= job["startInterval"]:
             start_job(job)
 
 
@@ -259,6 +266,37 @@ def load_job_into_runtime(path):
     if job["runAtLoad"]:
         start_job(job)
     return {"ok": True, "label": job["label"]}
+
+
+def unload_job(label):
+    job = jobs.pop(label, None)
+    if job is None:
+        return {"ok": False, "error": "unknown job"}
+    pid = job.get("pid", 0)
+    if pid:
+        try:
+            os.killpg(pid, signal.SIGCONT)
+            os.killpg(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+    proc = job.get("proc")
+    if proc is not None:
+        try:
+            proc.wait(timeout=2.0)
+        except Exception:
+            pass
+    for listener in job.get("listeners", {}).values():
+        try:
+            listener.close()
+        except OSError:
+            pass
+    for sock_path in job.get("socketPaths", []):
+        try:
+            os.unlink(sock_path)
+        except FileNotFoundError:
+            pass
+    print(f"launchd_sim: job {label} unloaded", flush=True)
+    return {"ok": True, "label": label}
 
 
 def job_for_service(name):
@@ -443,6 +481,7 @@ def main():
             ready, _, _ = select.select(rlist, [], [], 0.5)
         except InterruptedError:
             continue
+        prune_jobs()
         if not ready:
             continue
         for listener, job in listener_jobs:
@@ -494,6 +533,8 @@ def main():
                     resp = load_job_into_runtime(str(req.get("path", "")))
                 except Exception as exc:
                     resp = {"ok": False, "error": str(exc)}
+            elif cmd == "job_unload":
+                resp = unload_job(str(req.get("label", "")))
             elif cmd == "job_list":
                 prune_jobs()
                 resp = {"ok": True,

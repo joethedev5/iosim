@@ -616,6 +616,29 @@ def cmd_launchd_load(args):
     return 0
 
 
+def cmd_launchd_unload(args):
+    label = args.label
+    with StateLock():
+        state = load_state()
+        udid, dev = find_device(state, args.device)
+        plist = device_dir(udid) / "Library" / "LaunchDaemons" / f"{label}.plist"
+        try:
+            plist.unlink()
+        except FileNotFoundError:
+            pass
+    if dev["state"] == "Booted":
+        try:
+            resp = launchd_request(udid, {"cmd": "job_unload",
+                                          "label": label})
+        except OSError as exc:
+            die(f"launchd request failed: {exc}")
+        if not resp.get("ok"):
+            die(f"launchd job unload failed: "
+                f"{resp.get('error', 'unknown error')}")
+    print(f"unloaded {label}")
+    return 0
+
+
 def cmd_getenv(args):
     state = load_state()
     udid, dev = find_device(state, args.device)
@@ -932,6 +955,12 @@ def main():
     p.add_argument("device")
     p.add_argument("plist")
     p.set_defaults(func=cmd_launchd_load)
+
+    p = sub.add_parser("launchd-unload",
+                       help="unload and remove a LaunchDaemon job")
+    p.add_argument("device")
+    p.add_argument("label")
+    p.set_defaults(func=cmd_launchd_unload)
 
     p = sub.add_parser("getenv")
     p.add_argument("device")

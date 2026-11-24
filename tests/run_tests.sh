@@ -3877,6 +3877,43 @@ out="$("$ROOT/tools/iosimctl" spawn "$UDID" "$T/launchd_job" client \
 check "launchd client: reply kind=pong seq=42" "$out" \
     "the RunAtLoad job's Mach service answers a client"
 
+# A StartInterval job repeats without RunAtLoad and stops when unloaded.
+python3 - "$T/launchd_job" "$T/interval.plist" com.iosim.launchd.interval <<'PY'
+import plistlib, sys
+binary, out, label = sys.argv[1:4]
+with open(out, "wb") as f:
+    plistlib.dump({
+        "Label": label,
+        "ProgramArguments": [binary, "interval"],
+        "StartInterval": 1,
+    }, f)
+PY
+"$ROOT/tools/iosimctl" launchd-load "$UDID" "$T/interval.plist" >/dev/null
+ILOG="$IOSIM_HOME/Devices/$UDID/logs/com.iosim.launchd.interval.log"
+i=0
+while [ "$i" -lt 60 ]; do
+    n=$(grep -c "launchd job: interval" "$ILOG" 2>/dev/null || true)
+    [ "${n:-0}" -ge 2 ] && break
+    sleep 0.1
+    i=$((i+1))
+done
+n=$(grep -c "launchd job: interval" "$ILOG" 2>/dev/null || true)
+if [ "${n:-0}" -ge 2 ]; then
+    echo "ok   a StartInterval job repeats without RunAtLoad"
+else
+    echo "FAIL StartInterval job"; cat "$ILOG" 2>/dev/null || true; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" launchd-unload "$UDID" com.iosim.launchd.interval >/dev/null
+before=$n
+sleep 1.4
+n_after=$(grep -c "launchd job: interval" "$ILOG" 2>/dev/null || true)
+if [ "${n_after:-0}" -eq "${before:-0}" ]; then
+    echo "ok   unloading a StartInterval job stops its repeats"
+else
+    echo "FAIL StartInterval unload"; fails=$((fails+1))
+fi
+
+
 # ---------- 13. Control Center ----------
 # A downward drag from the top-right corner opens the glass panel over the
 # home screen; connectivity controls toggle on tap; a swipe up closes it.

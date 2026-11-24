@@ -1548,3 +1548,17 @@ components.
   keeps-presented on the sort actions so the moved checkmark is visible. The
   fixture also drives every step from framebuffer state, like the submenu
   timeline.
+
+## 2026-11-24: launchd StartInterval jobs
+
+- `parse_job` reads `StartInterval` and initializes the job's `lastStart` at
+  load time, so the first launch happens one interval later. `prune_jobs`,
+  now called every main-loop iteration, starts an idle job once the interval
+  since its previous start has passed, in addition to restarting KeepAlive
+  jobs. A running job is not overlapped: the next launch waits for its exit.
+- `iosimctl launchd-unload <device> <label>` sends a `job_unload` request and
+  removes the installed plist; launchd_sim terminates the job's process
+  group, closes its listeners and unlinks its sockets.
+- `tests/launchd_job_test.c interval` prints one line and exits; the suite
+  loads a plist with `StartInterval = 1` and no RunAtLoad, waits for two log
+  lines, unloads the job and verifies the count stops growing.

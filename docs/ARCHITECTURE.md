@@ -935,8 +935,10 @@ transport and the bootstrap namespace are shared across the device.
   with no live registration starts the owning job and reports `starting`; the
   guest-side lookup retries across that window, then connects to the service
   socket once the job registers it (also retrying while the socket binds).
-  Dead jobs are pruned, KeepAlive jobs are restarted, and shutdown terminates
-  every job. A job's `Sockets` dictionary is honored: launchd_sim binds each
+  Dead jobs are pruned, KeepAlive jobs are restarted, StartInterval jobs
+  start again on their period once the previous process has exited, and
+  shutdown terminates every job. `iosimctl launchd-unload` stops a job,
+  closes its listeners and removes the installed plist. A job's `Sockets` dictionary is honored: launchd_sim binds each
   `SockPathName` (stream or datagram) when the job is loaded, keeps the
   listener, and starts the job when a connection makes it readable. The job
   inherits the listening descriptors and `IOSIM_ACTIVATED_SOCKET_FDS` names

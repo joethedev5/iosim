@@ -5,6 +5,8 @@
  *                                    exits
  *   launchd_job_test client <service> sends one request with a reply handler
  *                                    and prints the reply
+ *   launchd_job_test interval         prints one line and exits, so a
+ *                                    StartInterval plist repeats it
  *
  * The job is installed as a LaunchDaemon plist with MachServices = <service>
  * and RunAtLoad = false, so the service only starts when a client looks the
@@ -119,6 +121,12 @@ int main(int argc, char **argv)
         run_client(argv[2]);
         return 0;
     }
-    printf("usage: launchd_job_test job|client <service>\n");
+    if (argc > 1 && strcmp(argv[1], "interval") == 0)
+    {
+        printf("launchd job: interval\n");
+        fflush(0);
+        return 0;
+    }
+    printf("usage: launchd_job_test job|client <service> | interval\n");
     return 2;
 }

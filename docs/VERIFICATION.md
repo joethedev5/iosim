@@ -1458,7 +1458,10 @@ name=com.iosim.launchd.echo`, receives `kind=ping seq=41`, replies, and
 exits. The client prints `launchd client: reply kind=pong seq=42`. The
 RunAtLoad job is already serving when launchd loads it and answers the same
 exchange. This exercises the plist job model, on-demand MachServices
-naming, and the XPC reply transport together.
+naming, and the XPC reply transport together. A third plist with
+`StartInterval = 1` and no RunAtLoad starts by itself: the job's log gains
+two `launchd job: interval` lines about a second apart. After
+`iosimctl launchd-unload`, the line count stays put.
 
 ### Services: launchd socket activation
 
