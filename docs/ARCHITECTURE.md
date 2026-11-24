@@ -1535,7 +1535,13 @@ Python for iteration speed.
 `UIViewPropertyAnimator` is a thin state machine over the existing UIView
 animation engine: `startAnimation` schedules the animation blocks and a
 completion, `finishAnimationAtPosition:` settles immediately, and pause/stop
-only change the reported state. Block copy promotes `__block` storage to a
+only change the reported state.
+A `UICubicTimingParameters` object feeds its control points into the
+engine's cubic-Bezier solver, and `UISpringTimingParameters` supplies a
+damping ratio and initial velocity to the spring path. `initWithDuration:timingParameters:` and
+`continueAnimationWithTimingParameters:durationFactor:` reuse those same
+per-view easing fields, so timing-parameter animators and block-based
+animations share one interpolation engine. Block copy promotes `__block` storage to a
 refcounted heap byref, so asynchronous blocks keep their captured state after
 the creating frame returns.
 Custom modal transitions are a small context object plus delegate dispatch:

@@ -1349,6 +1349,8 @@ typedef enum {
     BOOL _animSpring;
     double _animDamping;
     double _animVelocity;
+    BOOL _animCubic;
+    double _animC1x, _animC1y, _animC2x, _animC2y;
     id _superview;
     BOOL _needsLayout;
     CGAffineTransform _transform;
@@ -1571,6 +1573,48 @@ typedef enum {
     UIViewAnimationCurveLinear = 3
 } UIViewAnimationCurve;
 
+@interface UICubicTimingParameters : NSObject {
+@public
+    long _curve;
+    int _custom;
+    CGPoint _point1;
+    CGPoint _point2;
+}
+- (id)init;
+- (id)initWithAnimationCurve:(long)curve;
+- (id)initWithControlPoint1:(CGPoint)point1
+              controlPoint2:(CGPoint)point2;
+- (long)animationCurve;
+- (CGPoint)controlPoint1;
+- (CGPoint)controlPoint2;
+- (id)cubicTimingParameters;
+- (id)springTimingParameters;
+@end
+
+@interface UISpringTimingParameters : NSObject {
+@public
+    double _mass;
+    double _stiffness;
+    double _damping;
+    double _dampingRatio;
+    CGVector _initialVelocity;
+}
+- (id)init;
+- (id)initWithDampingRatio:(double)ratio;
+- (id)initWithDampingRatio:(double)ratio
+           initialVelocity:(CGVector)velocity;
+- (id)initWithMass:(double)mass stiffness:(double)stiffness
+           damping:(double)damping;
+- (id)initWithMass:(double)mass stiffness:(double)stiffness
+           damping:(double)damping initialVelocity:(CGVector)velocity;
+- (double)mass;
+- (double)stiffness;
+- (double)damping;
+- (double)dampingRatio;
+- (CGVector)initialVelocity;
+- (double)settlingDuration;
+@end
+
 @interface UIViewPropertyAnimator : NSObject {
 @public
     double _duration;
@@ -1584,6 +1628,12 @@ typedef enum {
     long _state;
     id _animations;
     id _completions;
+    id _timingParameters;
+    BOOL _springTiming;
+    double _timingDamping;
+    double _timingVelocity;
+    BOOL _cubicTiming;
+    double _timingC1x, _timingC1y, _timingC2x, _timingC2y;
 }
 - (id)initWithDuration:(double)duration
                  curve:(long)curve
@@ -1595,6 +1645,10 @@ typedef enum {
          controlPoint1:(CGPoint)point1
          controlPoint2:(CGPoint)point2
             animations:(void (^)(void))animations;
+- (id)initWithDuration:(double)duration
+      timingParameters:(id)parameters;
+- (id)timingParameters;
+- (void)iosimApplyTimingParameters:(id)parameters;
 - (double)duration;
 - (double)fractionComplete;
 - (void)setFractionComplete:(double)fraction;
@@ -5930,6 +5984,8 @@ static int g_animateCurve;
 static BOOL g_animateSpring;
 static double g_animateDamping;
 static double g_animateVelocity;
+static BOOL g_animateCubic;
+static double g_animateC1x, g_animateC1y, g_animateC2x, g_animateC2y;
 static double g_animActiveUntil;
 static int g_animInfiniteCount;
 
@@ -6835,6 +6891,11 @@ static void ui_trait_children(UIView *view, int oldParent, int newParent)
         _animSpring = g_animateSpring;
         _animDamping = g_animateDamping;
         _animVelocity = g_animateVelocity;
+        _animCubic = g_animateCubic;
+        _animC1x = g_animateC1x;
+        _animC1y = g_animateC1y;
+        _animC2x = g_animateC2x;
+        _animC2y = g_animateC2y;
         _animatingFrame = YES;
         animation_mark_active(g_animDuration + g_animateDelay,
                               g_animateInfinite ? -1 : 0);
@@ -7228,6 +7289,11 @@ static CGPoint window_point_for_view(UIView *view, CGPoint point)
         _animSpring = g_animateSpring;
         _animDamping = g_animateDamping;
         _animVelocity = g_animateVelocity;
+        _animCubic = g_animateCubic;
+        _animC1x = g_animateC1x;
+        _animC1y = g_animateC1y;
+        _animC2x = g_animateC2x;
+        _animC2y = g_animateC2y;
         _animatingAlpha = YES;
         animation_mark_active(g_animDuration + g_animateDelay,
                               g_animateInfinite ? -1 : 0);
@@ -7264,6 +7330,11 @@ static CGPoint window_point_for_view(UIView *view, CGPoint point)
         _animSpring = g_animateSpring;
         _animDamping = g_animateDamping;
         _animVelocity = g_animateVelocity;
+        _animCubic = g_animateCubic;
+        _animC1x = g_animateC1x;
+        _animC1y = g_animateC1y;
+        _animC2x = g_animateC2x;
+        _animC2y = g_animateC2y;
         _animatingTransform = YES;
         animation_mark_active(g_animDuration + g_animateDelay,
                               g_animateInfinite ? -1 : 0);
@@ -7688,6 +7759,11 @@ static CGPoint window_point_for_view(UIView *view, CGPoint point)
     g_animateSpring = NO;
     g_animateDamping = 0.0;
     g_animateVelocity = 0.0;
+    g_animateCubic = NO;
+    g_animateC1x = 0.0;
+    g_animateC1y = 0.0;
+    g_animateC2x = 0.0;
+    g_animateC2y = 0.0;
     if (!repeat && completion)
         animation_add_completion(delay + duration, completion);
 }
@@ -7728,8 +7804,138 @@ static CGPoint window_point_for_view(UIView *view, CGPoint point)
     g_animateSpring = NO;
     g_animateDamping = 0.0;
     g_animateVelocity = 0.0;
+    g_animateCubic = NO;
+    g_animateC1x = 0.0;
+    g_animateC1y = 0.0;
+    g_animateC2x = 0.0;
+    g_animateC2y = 0.0;
     if (!repeat && completion)
         animation_add_completion(delay + duration, completion);
+}
+@end
+
+static void cubic_points_for_curve(long curve, CGPoint *point1,
+                                   CGPoint *point2)
+{
+    if (curve == UIViewAnimationCurveEaseIn)
+    {
+        *point1 = CGPointMake(0.42, 0.0);
+        *point2 = CGPointMake(1.0, 1.0);
+    }
+    else if (curve == UIViewAnimationCurveEaseOut)
+    {
+        *point1 = CGPointMake(0.0, 0.0);
+        *point2 = CGPointMake(0.58, 1.0);
+    }
+    else if (curve == UIViewAnimationCurveLinear)
+    {
+        *point1 = CGPointMake(0.0, 0.0);
+        *point2 = CGPointMake(1.0, 1.0);
+    }
+    else
+    {
+        *point1 = CGPointMake(0.42, 0.0);
+        *point2 = CGPointMake(0.58, 1.0);
+    }
+}
+
+@implementation UICubicTimingParameters
+- (id)init
+{
+    return [self initWithAnimationCurve:UIViewAnimationCurveEaseInOut];
+}
+- (id)initWithAnimationCurve:(long)curve
+{
+    self = [super init];
+    if (self)
+    {
+        _curve = curve;
+        _custom = 0;
+        cubic_points_for_curve(curve, &_point1, &_point2);
+    }
+    return self;
+}
+- (id)initWithControlPoint1:(CGPoint)point1
+              controlPoint2:(CGPoint)point2
+{
+    self = [super init];
+    if (self)
+    {
+        _curve = UIViewAnimationCurveEaseInOut;
+        _custom = 1;
+        _point1 = point1;
+        _point2 = point2;
+    }
+    return self;
+}
+- (long)animationCurve { return _curve; }
+- (CGPoint)controlPoint1 { return _point1; }
+- (CGPoint)controlPoint2 { return _point2; }
+- (id)cubicTimingParameters { return self; }
+- (id)springTimingParameters { return nil; }
+@end
+
+@implementation UISpringTimingParameters
+- (id)init
+{
+    return [self initWithDampingRatio:1.0];
+}
+- (id)initWithDampingRatio:(double)ratio
+{
+    return [self initWithDampingRatio:ratio
+                      initialVelocity:CGVectorMake(0.0, 0.0)];
+}
+- (id)initWithDampingRatio:(double)ratio
+           initialVelocity:(CGVector)velocity
+{
+    self = [super init];
+    if (self)
+    {
+        _dampingRatio = ratio;
+        _mass = 1.0;
+        _stiffness = 100.0;
+        _damping = 2.0 * ratio * __builtin_sqrt(100.0);
+        _initialVelocity = velocity;
+    }
+    return self;
+}
+- (id)initWithMass:(double)mass stiffness:(double)stiffness
+           damping:(double)damping
+{
+    return [self initWithMass:mass stiffness:stiffness damping:damping
+              initialVelocity:CGVectorMake(0.0, 0.0)];
+}
+- (id)initWithMass:(double)mass stiffness:(double)stiffness
+           damping:(double)damping initialVelocity:(CGVector)velocity
+{
+    self = [super init];
+    if (self)
+    {
+        _mass = mass > 0 ? mass : 1.0;
+        _stiffness = stiffness > 0 ? stiffness : 100.0;
+        _damping = damping > 0 ? damping : 10.0;
+        _dampingRatio =
+            _damping / (2.0 * __builtin_sqrt(_stiffness * _mass));
+        _initialVelocity = velocity;
+    }
+    return self;
+}
+- (double)mass { return _mass; }
+- (double)stiffness { return _stiffness; }
+- (double)damping { return _damping; }
+- (double)dampingRatio { return _dampingRatio; }
+- (CGVector)initialVelocity { return _initialVelocity; }
+- (double)settlingDuration
+{
+    double w0 = __builtin_sqrt(_stiffness / _mass);
+    if (w0 <= 0.0)
+        return 0.0;
+    double zeta = _dampingRatio;
+    if (zeta <= 0.0)
+        zeta = 0.01;
+    if (zeta < 1.0)
+        return 6.90775527898 / (zeta * w0);
+    return 7.0 / w0;
 }
 @end
 
@@ -7757,21 +7963,65 @@ static CGPoint window_point_for_view(UIView *view, CGPoint point)
           dampingRatio:(double)ratio
             animations:(void (^)(void))animations
 {
-    (void)ratio;
-    return [self initWithDuration:duration
-                            curve:UIViewAnimationCurveEaseInOut
-                       animations:animations];
+    UISpringTimingParameters *parameters =
+        [[UISpringTimingParameters alloc] initWithDampingRatio:ratio];
+    id animator = [self initWithDuration:duration
+                       timingParameters:parameters];
+    [animator addAnimations:animations];
+    return animator;
 }
 - (id)initWithDuration:(double)duration
          controlPoint1:(CGPoint)point1
          controlPoint2:(CGPoint)point2
             animations:(void (^)(void))animations
 {
-    (void)point1;
-    (void)point2;
-    return [self initWithDuration:duration
+    UICubicTimingParameters *parameters =
+        [[UICubicTimingParameters alloc] initWithControlPoint1:point1
+                                                controlPoint2:point2];
+    id animator = [self initWithDuration:duration
+                       timingParameters:parameters];
+    [animator addAnimations:animations];
+    return animator;
+}
+- (id)initWithDuration:(double)duration
+      timingParameters:(id)parameters
+{
+    self = [self initWithDuration:duration
                             curve:UIViewAnimationCurveEaseInOut
-                       animations:animations];
+                       animations:nil];
+    if (self)
+        [self iosimApplyTimingParameters:parameters];
+    return self;
+}
+- (id)timingParameters { return _timingParameters; }
+- (void)iosimApplyTimingParameters:(id)parameters
+{
+    _timingParameters = parameters;
+    _springTiming = NO;
+    _cubicTiming = NO;
+    if ([parameters isKindOfClass:[UISpringTimingParameters class]])
+    {
+        UISpringTimingParameters *spring =
+            (UISpringTimingParameters *)parameters;
+        _springTiming = YES;
+        _timingDamping = spring->_dampingRatio;
+        /* The view engine carries one scalar velocity. Prefer the
+         * horizontal component, which is what frame-width moves use, and
+         * fall back to the vertical component for vertical moves. */
+        _timingVelocity = spring->_initialVelocity.dx != 0.0
+            ? spring->_initialVelocity.dx
+            : spring->_initialVelocity.dy;
+    }
+    else if ([parameters isKindOfClass:[UICubicTimingParameters class]])
+    {
+        UICubicTimingParameters *cubic =
+            (UICubicTimingParameters *)parameters;
+        _cubicTiming = YES;
+        _timingC1x = cubic->_point1.x;
+        _timingC1y = cubic->_point1.y;
+        _timingC2x = cubic->_point2.x;
+        _timingC2y = cubic->_point2.y;
+    }
 }
 - (double)duration { return _duration; }
 - (double)fractionComplete { return _fractionComplete; }
@@ -7864,14 +8114,42 @@ static CGPoint window_point_for_view(UIView *view, CGPoint point)
         return;
     }
     void (^run)(void) = ^{ [self runAnimations]; };
-    [UIView animateWithDuration:_duration
-                          delay:delay
-                        options:0
-                     animations:run
-                     completion:^(BOOL finished) {
+    void (^finish)(BOOL) = ^(BOOL finished) {
         [self completeWithPosition:finished
             ? UIViewAnimatingPositionEnd : UIViewAnimatingPositionCurrent];
-    }];
+    };
+    if (_springTiming)
+        [UIView animateWithDuration:_duration
+                              delay:delay
+             usingSpringWithDamping:_timingDamping
+              initialSpringVelocity:_timingVelocity
+                            options:0
+                         animations:run
+                         completion:finish];
+    else if (_cubicTiming)
+    {
+        g_animateCubic = YES;
+        g_animateC1x = _timingC1x;
+        g_animateC1y = _timingC1y;
+        g_animateC2x = _timingC2x;
+        g_animateC2y = _timingC2y;
+        [UIView animateWithDuration:_duration
+                              delay:delay
+                            options:0
+                         animations:run
+                         completion:finish];
+        g_animateCubic = NO;
+        g_animateC1x = 0.0;
+        g_animateC1y = 0.0;
+        g_animateC2x = 0.0;
+        g_animateC2y = 0.0;
+    }
+    else
+        [UIView animateWithDuration:_duration
+                              delay:delay
+                            options:0
+                         animations:run
+                         completion:finish];
 }
 - (void)pauseAnimation
 {
@@ -7895,8 +8173,10 @@ static CGPoint window_point_for_view(UIView *view, CGPoint point)
 - (void)continueAnimationWithTimingParameters:(id)parameters
                                 durationFactor:(double)factor
 {
-    (void)parameters;
-    (void)factor;
+    if (parameters)
+        [self iosimApplyTimingParameters:parameters];
+    if (factor > 0.0)
+        _duration *= factor;
 }
 @end
 
@@ -17800,6 +18080,35 @@ static double curve_value(double t, int curve)
     return t * t * (3.0 - 2.0 * t);
 }
 
+/* Cubic Bezier easing through (0,0), the two control points and (1,1).
+ * Bisection solves the x polynomial, then the y polynomial is evaluated. */
+static double cubic_bezier_value(double t, double x1, double y1, double x2,
+                                 double y2)
+{
+    if (t <= 0.0)
+        return 0.0;
+    if (t >= 1.0)
+        return 1.0;
+    if (x1 < 0.0) x1 = 0.0;
+    if (x1 > 1.0) x1 = 1.0;
+    if (x2 < 0.0) x2 = 0.0;
+    if (x2 > 1.0) x2 = 1.0;
+    double low = 0.0, high = 1.0;
+    for (int i = 0; i < 24; i++)
+    {
+        double u = (low + high) / 2.0;
+        double x = 3.0 * (1.0 - u) * (1.0 - u) * u * x1 +
+                   3.0 * (1.0 - u) * u * u * x2 + u * u * u;
+        if (x < t)
+            low = u;
+        else
+            high = u;
+    }
+    double u = (low + high) / 2.0;
+    return 3.0 * (1.0 - u) * (1.0 - u) * u * y1 +
+           3.0 * (1.0 - u) * u * u * y2 + u * u * u;
+}
+
 /* Damped spring response from 0 to 1 over normalized time t. The damping
  * ratio is clamped to (0, 1]; initialSpringVelocity is UIKit's fraction of
  * the animation distance per second. The natural frequency is fixed so the
@@ -17832,6 +18141,9 @@ static double view_animation_ease(UIView *view, double local)
     if (view->_animSpring)
         return spring_value(local, view->_animDamping,
                             view->_animVelocity, view->_animDuration);
+    if (view->_animCubic)
+        return cubic_bezier_value(local, view->_animC1x, view->_animC1y,
+                                  view->_animC2x, view->_animC2y);
     return curve_value(local, view->_animCurve);
 }
 

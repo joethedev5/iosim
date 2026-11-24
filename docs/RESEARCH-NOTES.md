@@ -1270,3 +1270,26 @@ components.
   and `removed`; substring checks distinguish backward fill before the start
   from forward fill after the end.
 
+## 2026-11-24: UIViewPropertyAnimator timing parameters
+
+- `UICubicTimingParameters` stores either an animation-curve preset or two
+  custom control points; `cubicTimingParameters` returns itself and
+  `springTimingParameters` returns nil. The control points feed the same
+  bisection cubic-Bezier solver used by `CAMediaTimingFunction`.
+- `UISpringTimingParameters` stores mass, stiffness, damping and damping
+  ratio. `initWithDampingRatio:` uses the UIKit defaults mass 1 and stiffness
+  100 (natural frequency 10), deriving damping `2*zeta*sqrt(k*m)`. Its
+  `settlingDuration` is `ln(1000)/(zeta*w0)` for an underdamped spring and
+  `7/w0` otherwise.
+- `UIViewPropertyAnimator initWithDuration:timingParameters:]` records the
+  parameter object. `startAnimation` routes spring parameters through
+  `animateWithDuration:...usingSpringWithDamping:initialSpringVelocity:` and
+  cubic parameters through the global cubic control-point fields that
+  `setFrame:`/`setAlpha:`/`setTransform:` copy into each view's animation
+  state. The vector initial velocity prefers dx and falls back to dy because
+  the view engine carries one scalar velocity.
+- `initWithDuration:dampingRatio:animations:` and
+  `initWithDuration:controlPoint1:controlPoint2:animations:` now build the
+  corresponding parameter object instead of ignoring their arguments.
+  `continueAnimationWithTimingParameters:durationFactor:` swaps the timing
+  parameters and scales the animator's duration.

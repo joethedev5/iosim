@@ -1036,6 +1036,33 @@ enum {
     UIViewAnimationCurveLinear = 3
 };
 
+@interface UICubicTimingParameters : NSObject
+- (id)initWithAnimationCurve:(long)curve;
+- (id)initWithControlPoint1:(CGPoint)point1
+              controlPoint2:(CGPoint)point2;
+@property(readonly) long animationCurve;
+@property(readonly) CGPoint controlPoint1;
+@property(readonly) CGPoint controlPoint2;
+@property(readonly) id cubicTimingParameters;
+@property(readonly) id springTimingParameters;
+@end
+
+@interface UISpringTimingParameters : NSObject
+- (id)initWithDampingRatio:(double)ratio;
+- (id)initWithDampingRatio:(double)ratio
+           initialVelocity:(CGVector)velocity;
+- (id)initWithMass:(double)mass stiffness:(double)stiffness
+           damping:(double)damping;
+- (id)initWithMass:(double)mass stiffness:(double)stiffness
+           damping:(double)damping initialVelocity:(CGVector)velocity;
+@property(readonly) double mass;
+@property(readonly) double stiffness;
+@property(readonly) double damping;
+@property(readonly) double dampingRatio;
+@property(readonly) CGVector initialVelocity;
+@property(readonly) double settlingDuration;
+@end
+
 @interface UIViewPropertyAnimator : NSObject
 - (id)initWithDuration:(double)duration
                  curve:(long)curve
@@ -1047,6 +1074,9 @@ enum {
          controlPoint1:(CGPoint)point1
          controlPoint2:(CGPoint)point2
             animations:(void (^)(void))animations;
+- (id)initWithDuration:(double)duration
+      timingParameters:(id)parameters;
+@property(readonly) id timingParameters;
 @property(readonly) double duration;
 @property double fractionComplete;
 @property(getter=isReversed) BOOL reversed;

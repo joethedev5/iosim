@@ -1694,6 +1694,22 @@ the forwards animation still reads 0.25 and remains attached; the unfilled
 animation is back at 1.00 but still attached. The suite checks those values
 and the (0,1,1) membership flags.
 
+### UIViewPropertyAnimator timing parameters
+
+`tests/property_animator_test.m` builds two animators over one-second frame
+moves from x=40 to x=240. The first takes `UICubicTimingParameters` with
+control points (0.42, 0) and (0.58, 1); the second takes
+`UISpringTimingParameters` with damping ratio 0.5 initialized through
+`initWithDuration:timingParameters:`. The fixture prints `[pram] timing
+0.58 0.50 1.38`, confirming the control point, the damping ratio and the
+computed settling duration `ln(1000)/(zeta*10)`. At 0.25 s the cubic
+animator is at about x=67 and the spring at about x=250: the Bezier eases
+slowly below the linear midpoint, while the underdamped spring overshoots
+the target before settling. At 1.2 s both presentation frames report 240.0
+and both animator states are inactive. The suite checks the printed
+parameters, the mid-sample ranges and separation, and the settled end
+state.
+
 ### CoreAnimation: keyframe calculation modes
 
 `tests/keyframe_modes_test.m` starts five 2 s opacity keyframe animations at

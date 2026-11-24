@@ -197,6 +197,7 @@ static inline BOOL CATransform3DIsIdentity(CATransform3D t)
 
 typedef struct { double x; double y; } CGPoint;
 typedef struct { double width; double height; } CGSize;
+typedef struct { double dx; double dy; } CGVector;
 typedef struct { CGPoint origin; CGSize size; } CGRect;
 
 static inline CGPoint CGPointMake(double x, double y)
@@ -213,6 +214,14 @@ static inline CGSize CGSizeMake(double width, double height)
     s.width = width;
     s.height = height;
     return s;
+}
+
+static inline CGVector CGVectorMake(double dx, double dy)
+{
+    CGVector v;
+    v.dx = dx;
+    v.dy = dy;
+    return v;
 }
 
 static inline CGRect CGRectMake(double x, double y, double width, double height)

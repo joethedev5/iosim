@@ -779,6 +779,65 @@ else
     echo "FAIL animation completion"; echo "$out"; fails=$((fails+1))
 fi
 
+# ---------- 4f12. UIViewPropertyAnimator timing parameters ----------
+rm -f "$T/pram.fifo"
+mkfifo "$T/pram.fifo"
+"$ROOT/tools/build_app.sh" "$ROOT/tests/property_animator_test.m" \
+    "$T/property_animator_test" >/dev/null
+out="$(IOSIM_EVENT_FIFO="$T/pram.fifo" DYLD_ROOT_PATH="$ROOT/runtime" \
+    "$RUN" "$T/property_animator_test" 2>&1)"
+rm -f "$T/pram.fifo"
+check "[pram] ready" "$out" \
+    "the property animator timing fixture starts"
+check "[pram] done" "$out" \
+    "the property animator fixture samples both animators"
+if out="$(python3 - "$out" <<'PY'
+import re
+import sys
+
+vals = {}
+for line in sys.argv[1].splitlines():
+    m = re.match(r'\[pram\] timing ([-0-9.]+) ([-0-9.]+) ([-0-9.]+)$', line)
+    if m:
+        vals['timing'] = tuple(float(m.group(i)) for i in (1, 2, 3))
+    m = re.match(r'\[pram\] mid ([-0-9.]+) ([-0-9.]+)$', line)
+    if m:
+        vals['mid'] = (float(m.group(1)), float(m.group(2)))
+    m = re.match(r'\[pram\] end ([-0-9.]+) ([-0-9.]+) (\d+) (\d+)$', line)
+    if m:
+        vals['end'] = (float(m.group(1)), float(m.group(2)),
+                       int(m.group(3)), int(m.group(4)))
+for name in ('timing', 'mid', 'end'):
+    if name not in vals:
+        raise SystemExit('missing %s sample: %r' % (name, vals))
+x2, ratio, settling = vals['timing']
+if abs(x2 - 0.58) > 0.02 or abs(ratio - 0.5) > 0.02:
+    raise SystemExit('timing parameters are off: %r' % (vals['timing'],))
+if not 1.30 <= settling <= 1.45:
+    raise SystemExit('spring settling duration is off: %.2f' % settling)
+cubic, spring = vals['mid']
+if not 55.0 <= cubic <= 85.0:
+    raise SystemExit('cubic Bezier did not ease slowly: %.1f' % cubic)
+if not 241.0 <= spring <= 275.0:
+    raise SystemExit('spring animator did not overshoot: %.1f' % spring)
+if spring < cubic + 100.0:
+    raise SystemExit('animator mid samples did not separate: %.1f %.1f' %
+                     (cubic, spring))
+end_cubic, end_spring, state_cubic, state_spring = vals['end']
+if not (239.0 <= end_cubic <= 241.0 and 239.0 <= end_spring <= 241.0):
+    raise SystemExit('animators did not reach the target: %r' %
+                     (vals['end'],))
+if state_cubic != 0 or state_spring != 0:
+    raise SystemExit('animators did not return to inactive: %r' %
+                     (vals['end'],))
+print("ok   property animators honor cubic and spring timing parameters")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL property animator timing"; echo "$out"; fails=$((fails+1))
+fi
+
 # ---------- 4g. NSCalendar components ----------
 "$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
     -ffreestanding -O1 -I "$ROOT/frameworks" \
