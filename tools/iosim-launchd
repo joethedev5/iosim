@@ -142,6 +142,12 @@ def parse_job(path):
     mach = pl.get("MachServices") or {}
     services = [str(k) for k in mach.keys()] if isinstance(mach, dict) else []
     env = pl.get("EnvironmentVariables") or {}
+    try:
+        throttle = float(pl.get("ThrottleInterval", 10) or 10)
+    except (TypeError, ValueError):
+        throttle = 10.0
+    if throttle < 1.0:
+        throttle = 1.0
     sockets_cfg = pl.get("Sockets") or {}
     sockets = []
     if isinstance(sockets_cfg, dict):
@@ -164,6 +170,7 @@ def parse_job(path):
         "runAtLoad": bool(pl.get("RunAtLoad", False)),
         "keepAlive": pl.get("KeepAlive") is True,
         "startInterval": int(pl.get("StartInterval", 0) or 0),
+        "throttleInterval": throttle,
         "environment": {str(k): str(v) for k, v in env.items()},
         "sockets": sockets,
         "listeners": {},
@@ -239,7 +246,9 @@ def prune_jobs():
             continue
         now = time.monotonic()
         since = now - job.get("lastStart", 0.0)
-        if job["keepAlive"] and since > 1.0:
+        # launchd restarts a KeepAlive job no sooner than ThrottleInterval
+        # after its previous start; the default is ten seconds.
+        if job["keepAlive"] and since >= job["throttleInterval"]:
             start_job(job)
         elif job.get("startInterval", 0) > 0 and \
                 since >= job["startInterval"]:

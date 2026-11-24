@@ -1588,7 +1588,13 @@ exchange. This exercises the plist job model, on-demand MachServices
 naming, and the XPC reply transport together. A third plist with
 `StartInterval = 1` and no RunAtLoad starts by itself: the job's log gains
 two `launchd job: interval` lines about a second apart. After
-`iosimctl launchd-unload`, the line count stays put.
+`iosimctl launchd-unload`, the line count stays put. A KeepAlive plist with
+`ThrottleInterval = 2` and no RunAtLoad also starts by itself and restarts
+after each exit: the suite polls the log, records when each of three
+`launchd job: keepalive` lines arrives and requires consecutive gaps of at
+least 1.6 s, so the restart is throttled rather than the old one-second
+retry; after `iosimctl launchd-unload` no further line appears within
+2.5 s.
 
 ### Services: launchd socket activation
 

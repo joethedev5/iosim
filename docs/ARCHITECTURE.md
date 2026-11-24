@@ -1018,9 +1018,10 @@ transport and the bootstrap namespace are shared across the device.
   with no live registration starts the owning job and reports `starting`; the
   guest-side lookup retries across that window, then connects to the service
   socket once the job registers it (also retrying while the socket binds).
-  Dead jobs are pruned, KeepAlive jobs are restarted, StartInterval jobs
-  start again on their period once the previous process has exited, and
-  shutdown terminates every job. `iosimctl launchd-unload` stops a job,
+  Dead jobs are pruned; KeepAlive jobs restart no sooner than their
+  `ThrottleInterval` (ten seconds by default), StartInterval jobs start again
+  on their period once the previous process has exited, and shutdown
+  terminates every job. `iosimctl launchd-unload` stops a job,
   closes its listeners and removes the installed plist. A job's `Sockets` dictionary is honored: launchd_sim binds each
   `SockPathName` (stream or datagram) when the job is loaded, keeps the
   listener, and starts the job when a connection makes it readable. The job
@@ -1664,8 +1665,9 @@ Python for iteration speed.
 - Mach messages, the bootstrap namespace and serialized XPC dictionaries cross
   guest processes through launchd-owned names and abstract Unix sockets.
   Mach port rights are per-service send sockets rather than general port right
-  transfer; launchd starts LaunchDaemon plists with boolean RunAtLoad and
-  KeepAlive but does not implement socket activation or job throttling.
+  transfer; launchd starts LaunchDaemon plists with RunAtLoad, KeepAlive
+  restart spacing (ThrottleInterval), StartInterval and `Sockets`-based socket
+  activation.
 - `libdispatch` covers main/global queues, groups, semaphores, timers and
   read/write/data sources. Foundation is a subset (strings, collections,
   sorting, predicates, scanner, regex, numbers, data, notifications, timers,
@@ -1674,7 +1676,8 @@ Python for iteration speed.
   OpenSSL build and verifies certificates through the system trust store;
   regexes are POSIX ERE with common ICU escapes translated, not
   full ICU syntax. `NSUserDefaults` persists XML property lists under
-  `$HOME/Library/Preferences`; binary property lists are not parsed.
+  `$HOME/Library/Preferences`; property lists parse and write in both XML and
+  binary forms.
 - Auto Layout is a relaxation solver over anchors and guides, not Cassowary;
   it does not cover every UIKit layout API or content-size class.
 - Text input is `UITextField` and `UITextView` with caret positioning,

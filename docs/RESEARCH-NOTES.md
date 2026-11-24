@@ -1784,3 +1784,14 @@ components.
   under the snapshots, so the real content does not leak through while a
   snapshot is edge-on. Cross-dissolve keeps the single fade, and the curl
   styles still fall back to it.
+
+## 2026-11-24: launchd KeepAlive throttling
+
+- `ThrottleInterval` is parsed for LaunchDaemon jobs (ten seconds by
+  default, with a one-second floor) and a KeepAlive job is restarted no
+  sooner than that interval after its previous start. The fixture starts and
+  exits immediately, the suite observes three starts at least 1.6 s apart,
+  and unloading the job stops further starts.
+- The known-limitations list no longer claims that socket activation, job
+  throttling or binary property-list parsing are absent; all three are
+  implemented and tested.

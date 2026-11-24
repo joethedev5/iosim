@@ -7,6 +7,8 @@
  *                                    and prints the reply
  *   launchd_job_test interval         prints one line and exits, so a
  *                                    StartInterval plist repeats it
+ *   launchd_job_test keepalive        prints one line and exits, so a
+ *                                    KeepAlive plist restarts it
  *
  * The job is installed as a LaunchDaemon plist with MachServices = <service>
  * and RunAtLoad = false, so the service only starts when a client looks the
@@ -124,6 +126,12 @@ int main(int argc, char **argv)
     if (argc > 1 && strcmp(argv[1], "interval") == 0)
     {
         printf("launchd job: interval\n");
+        fflush(0);
+        return 0;
+    }
+    if (argc > 1 && strcmp(argv[1], "keepalive") == 0)
+    {
+        printf("launchd job: keepalive\n");
         fflush(0);
         return 0;
     }

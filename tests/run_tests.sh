@@ -4731,6 +4731,65 @@ else
     echo "FAIL StartInterval unload"; fails=$((fails+1))
 fi
 
+# A KeepAlive job starts without RunAtLoad and restarts after each exit no
+# sooner than its ThrottleInterval; unloading it stops the restarts.
+python3 - "$T/launchd_job" "$T/keepalive.plist" \
+    com.iosim.launchd.keepalive <<'PY'
+import plistlib, sys
+binary, out, label = sys.argv[1:4]
+with open(out, "wb") as f:
+    plistlib.dump({
+        "Label": label,
+        "ProgramArguments": [binary, "keepalive"],
+        "KeepAlive": True,
+        "ThrottleInterval": 2,
+    }, f)
+PY
+"$ROOT/tools/iosimctl" launchd-load "$UDID" "$T/keepalive.plist" >/dev/null
+KLOG="$IOSIM_HOME/Devices/$UDID/logs/com.iosim.launchd.keepalive.log"
+if out="$(python3 - "$KLOG" <<'PY'
+import sys
+import time
+
+path = sys.argv[1]
+stamps = []
+seen = 0
+deadline = time.monotonic() + 9.0
+while time.monotonic() < deadline and len(stamps) < 3:
+    try:
+        with open(path) as f:
+            n = sum(1 for line in f if "launchd job: keepalive" in line)
+    except FileNotFoundError:
+        n = 0
+    if n > seen:
+        stamps.extend([time.monotonic()] * (n - seen))
+        seen = n
+    time.sleep(0.05)
+if len(stamps) < 3:
+    raise SystemExit("only %d starts observed" % len(stamps))
+gaps = [b - a for a, b in zip(stamps, stamps[1:])]
+if any(g < 1.6 for g in gaps):
+    raise SystemExit("restarts are not throttled: %r" % (gaps,))
+if any(g > 4.5 for g in gaps):
+    raise SystemExit("restarts are too slow: %r" % (gaps,))
+print("ok   a KeepAlive job restarts no sooner than ThrottleInterval")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL KeepAlive throttle"; echo "$out"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" launchd-unload "$UDID" \
+    com.iosim.launchd.keepalive >/dev/null
+before=$(grep -c "launchd job: keepalive" "$KLOG" 2>/dev/null || true)
+sleep 2.5
+after=$(grep -c "launchd job: keepalive" "$KLOG" 2>/dev/null || true)
+if [ "${after:-0}" -eq "${before:-0}" ]; then
+    echo "ok   unloading a KeepAlive job stops its restarts"
+else
+    echo "FAIL KeepAlive unload"; fails=$((fails+1))
+fi
+
 
 # ---------- 13. Control Center ----------
 # A downward drag from the top-right corner opens the glass panel over the
