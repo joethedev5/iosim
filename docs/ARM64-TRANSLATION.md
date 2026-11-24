@@ -1,6 +1,6 @@
 # Running arm64 app binaries
 
-Status: **milestones 0-2 implemented in a first form.** The loader accepts
+Status: **milestones 0-4 implemented in a first form.** The loader accepts
 arm64 images (`--arm64`), registers their Objective-C metadata, and runs
 them on the scalar interpreter with native framework calls (the
 type-encoding message bridge, `objc_msgSendSuper2`, a generic C shim gate,
@@ -214,6 +214,38 @@ JIT-page translation, and the on-disk translation cache.
 for x86_64 and arm64; logs and framebuffer captures are compared. The arm64
 translation sections stay feature-gated so a tree without the translator
 still passes today's suite.
+
+## Current limitations
+
+The design boundary is deliberate, but these are the edges a working app
+can still hit today.
+
+- The decoder covers the scalar integer and floating-point core, LSE and
+  exclusive atomics, and a broad AdvSIMD set, but not SVE/SME, the
+  crypto extensions or every system instruction. An unknown encoding
+  stops the guest at that instruction and reports the pc and encoding.
+- Only the main arm64 executable is translated. An embedded arm64
+  framework or dylib is not loaded; app code reaches the system through
+  the native x86_64 runtime, and only through forms the loader bridges:
+  Objective-C dispatch, C shims, blocks and the registered callbacks.
+- Native code calls arm64 blocks with at most four integer-sized
+  arguments and reads a scalar or object result. Block signatures that
+  take or return floating-point, vector or struct values are not
+  bridged.
+- The variadic gates cover printf, fprintf, sprintf, snprintf and NSLog;
+  another variadic C function needs a fixed-arity shim, and positional
+  format arguments are not interpreted.
+- arm64 images have no thread-local storage setup and no exception
+  unwinding: the Objective-C personality declines every frame and a
+  resumed unwind terminates the guest.
+- arm64 entry points must be `_main`-style; the CRT entry points are not
+  started.
+- The guest runs inside the loader's process with the loader's
+  privileges. There is no code signing, sandbox or fault isolation; the
+  decoder fails closed on unknown encodings, but a hostile image can
+  still import any symbol the host process exports.
+- Translation is lazy per basic block with a persistent cache, not an
+  optimizing JIT, and every framework call crosses a bridge.
 
 ## Fixture plan
 
