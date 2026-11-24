@@ -3730,6 +3730,138 @@ id UICollectionElementKindSectionFooter = @"UICollectionElementKindSectionFooter
 - (void)setFooterReferenceSize:(CGSize)size;
 @end
 
+enum {
+    UICollectionLayoutSectionOrthogonalScrollingBehaviorNone = 0,
+    UICollectionLayoutSectionOrthogonalScrollingBehaviorContinuous = 1,
+    UICollectionLayoutSectionOrthogonalScrollingBehaviorContinuousGroupLeadingBoundary = 2,
+    UICollectionLayoutSectionOrthogonalScrollingBehaviorPaging = 3,
+    UICollectionLayoutSectionOrthogonalScrollingBehaviorGroupPaging = 4,
+    UICollectionLayoutSectionOrthogonalScrollingBehaviorGroupPagingCentered = 5
+};
+
+@interface NSCollectionLayoutDimension : NSObject {
+@public
+    double _dimension;
+    BOOL _fractional;
+    BOOL _absolute;
+    BOOL _estimated;
+}
++ (id)fractionalWidthDimension:(double)fraction;
++ (id)fractionalHeightDimension:(double)fraction;
++ (id)absoluteDimension:(double)value;
++ (id)estimatedDimension:(double)value;
+- (double)dimension;
+- (BOOL)isFractional;
+- (BOOL)isAbsolute;
+- (BOOL)isEstimated;
+@end
+
+@interface NSCollectionLayoutSize : NSObject {
+@public
+    NSCollectionLayoutDimension *_widthDimension;
+    NSCollectionLayoutDimension *_heightDimension;
+}
++ (id)sizeWithWidthDimension:(NSCollectionLayoutDimension *)width
+             heightDimension:(NSCollectionLayoutDimension *)height;
+- (NSCollectionLayoutDimension *)widthDimension;
+- (NSCollectionLayoutDimension *)heightDimension;
+@end
+
+@interface NSCollectionLayoutSpacing : NSObject {
+@public
+    double _spacing;
+    BOOL _fixed;
+}
++ (id)fixedSpacing:(double)spacing;
++ (id)flexibleSpacing:(double)spacing;
+- (double)spacing;
+- (BOOL)isFixed;
+- (BOOL)isFlexible;
+@end
+
+@interface NSCollectionLayoutEdgeSpacing : NSObject {
+@public
+    id _leading;
+    id _top;
+    id _trailing;
+    id _bottom;
+}
++ (id)spacingForLeading:(id)leading
+                    top:(id)top
+               trailing:(id)trailing
+                 bottom:(id)bottom;
+- (id)leading;
+- (id)top;
+- (id)trailing;
+- (id)bottom;
+@end
+
+@interface NSCollectionLayoutItem : NSObject {
+@public
+    NSCollectionLayoutSize *_layoutSize;
+    UIEdgeInsets _contentInsets;
+    id _edgeSpacing;
+}
++ (id)itemWithLayoutSize:(NSCollectionLayoutSize *)size;
+- (NSCollectionLayoutSize *)layoutSize;
+- (void)setLayoutSize:(NSCollectionLayoutSize *)size;
+- (UIEdgeInsets)contentInsets;
+- (void)setContentInsets:(UIEdgeInsets)insets;
+- (id)edgeSpacing;
+- (void)setEdgeSpacing:(id)spacing;
+@end
+
+@interface NSCollectionLayoutGroup : NSCollectionLayoutItem {
+@public
+    id _subitems;
+    long _axis;
+    id _interItemSpacing;
+    BOOL _repeating;
+}
++ (id)horizontalGroupWithLayoutSize:(NSCollectionLayoutSize *)size
+                           subitems:(NSArray *)subitems;
++ (id)verticalGroupWithLayoutSize:(NSCollectionLayoutSize *)size
+                         subitems:(NSArray *)subitems;
++ (id)horizontalGroupWithLayoutSize:(NSCollectionLayoutSize *)size
+                  repeatingSubitem:(NSCollectionLayoutItem *)item
+                              count:(long)count;
++ (id)verticalGroupWithLayoutSize:(NSCollectionLayoutSize *)size
+                repeatingSubitem:(NSCollectionLayoutItem *)item
+                            count:(long)count;
+- (NSArray *)subitems;
+- (id)interItemSpacing;
+- (void)setInterItemSpacing:(id)spacing;
+@end
+
+@interface NSCollectionLayoutSection : NSObject {
+@public
+    NSCollectionLayoutGroup *_group;
+    double _interGroupSpacing;
+    UIEdgeInsets _contentInsets;
+    long _orthogonalScrollingBehavior;
+}
++ (id)sectionWithGroup:(NSCollectionLayoutGroup *)group;
+- (NSCollectionLayoutGroup *)group;
+- (void)setGroup:(NSCollectionLayoutGroup *)group;
+- (double)interGroupSpacing;
+- (void)setInterGroupSpacing:(double)spacing;
+- (UIEdgeInsets)contentInsets;
+- (void)setContentInsets:(UIEdgeInsets)insets;
+- (long)orthogonalScrollingBehavior;
+- (void)setOrthogonalScrollingBehavior:(long)behavior;
+@end
+
+@interface UICollectionViewCompositionalLayout : UICollectionViewLayout {
+@public
+    id _section;
+    id _sectionProvider;
+}
+- (id)initWithSection:(NSCollectionLayoutSection *)section;
+- (id)initWithSectionProvider:(id)provider;
+- (id)initWithSection:(NSCollectionLayoutSection *)section
+        configuration:(id)configuration;
+@end
+
 @interface UICollectionReusableView : UIView {
 @public
     id _reuseIdentifier;
@@ -15134,6 +15266,207 @@ static int table_can_edit_row(UITableView *table, long section, long row)
 - (void)setFooterReferenceSize:(CGSize)size { _footerReferenceSize = size; }
 @end
 
+@implementation NSCollectionLayoutDimension
++ (id)fractionalWidthDimension:(double)fraction
+{
+    NSCollectionLayoutDimension *dimension =
+        [[NSCollectionLayoutDimension alloc] init];
+    dimension->_dimension = fraction;
+    dimension->_fractional = YES;
+    return dimension;
+}
++ (id)fractionalHeightDimension:(double)fraction
+{
+    return [self fractionalWidthDimension:fraction];
+}
++ (id)absoluteDimension:(double)value
+{
+    NSCollectionLayoutDimension *dimension =
+        [[NSCollectionLayoutDimension alloc] init];
+    dimension->_dimension = value;
+    dimension->_absolute = YES;
+    return dimension;
+}
++ (id)estimatedDimension:(double)value
+{
+    NSCollectionLayoutDimension *dimension =
+        [[NSCollectionLayoutDimension alloc] init];
+    dimension->_dimension = value;
+    dimension->_estimated = YES;
+    return dimension;
+}
+- (double)dimension { return _dimension; }
+- (BOOL)isFractional { return _fractional; }
+- (BOOL)isAbsolute { return _absolute; }
+- (BOOL)isEstimated { return _estimated; }
+@end
+
+@implementation NSCollectionLayoutSize
++ (id)sizeWithWidthDimension:(NSCollectionLayoutDimension *)width
+             heightDimension:(NSCollectionLayoutDimension *)height
+{
+    NSCollectionLayoutSize *size = [[NSCollectionLayoutSize alloc] init];
+    size->_widthDimension = width;
+    size->_heightDimension = height;
+    return size;
+}
+- (NSCollectionLayoutDimension *)widthDimension { return _widthDimension; }
+- (NSCollectionLayoutDimension *)heightDimension { return _heightDimension; }
+@end
+
+@implementation NSCollectionLayoutSpacing
++ (id)fixedSpacing:(double)spacing
+{
+    NSCollectionLayoutSpacing *result =
+        [[NSCollectionLayoutSpacing alloc] init];
+    result->_spacing = spacing;
+    result->_fixed = YES;
+    return result;
+}
++ (id)flexibleSpacing:(double)spacing
+{
+    NSCollectionLayoutSpacing *result =
+        [[NSCollectionLayoutSpacing alloc] init];
+    result->_spacing = spacing;
+    return result;
+}
+- (double)spacing { return _spacing; }
+- (BOOL)isFixed { return _fixed; }
+- (BOOL)isFlexible { return !_fixed; }
+@end
+
+@implementation NSCollectionLayoutEdgeSpacing
++ (id)spacingForLeading:(id)leading
+                    top:(id)top
+               trailing:(id)trailing
+                 bottom:(id)bottom
+{
+    NSCollectionLayoutEdgeSpacing *spacing =
+        [[NSCollectionLayoutEdgeSpacing alloc] init];
+    spacing->_leading = leading;
+    spacing->_top = top;
+    spacing->_trailing = trailing;
+    spacing->_bottom = bottom;
+    return spacing;
+}
+- (id)leading { return _leading; }
+- (id)top { return _top; }
+- (id)trailing { return _trailing; }
+- (id)bottom { return _bottom; }
+@end
+
+@implementation NSCollectionLayoutItem
++ (id)itemWithLayoutSize:(NSCollectionLayoutSize *)size
+{
+    NSCollectionLayoutItem *item = [[NSCollectionLayoutItem alloc] init];
+    item->_layoutSize = size;
+    return item;
+}
+- (NSCollectionLayoutSize *)layoutSize { return _layoutSize; }
+- (void)setLayoutSize:(NSCollectionLayoutSize *)size
+{
+    _layoutSize = size;
+}
+- (UIEdgeInsets)contentInsets { return _contentInsets; }
+- (void)setContentInsets:(UIEdgeInsets)insets { _contentInsets = insets; }
+- (id)edgeSpacing { return _edgeSpacing; }
+- (void)setEdgeSpacing:(id)spacing { _edgeSpacing = spacing; }
+@end
+
+@implementation NSCollectionLayoutGroup
++ (id)horizontalGroupWithLayoutSize:(NSCollectionLayoutSize *)size
+                           subitems:(NSArray *)subitems
+{
+    NSCollectionLayoutGroup *group = [[NSCollectionLayoutGroup alloc] init];
+    group->_layoutSize = size;
+    group->_subitems = subitems;
+    group->_axis = 0;
+    return group;
+}
++ (id)verticalGroupWithLayoutSize:(NSCollectionLayoutSize *)size
+                         subitems:(NSArray *)subitems
+{
+    NSCollectionLayoutGroup *group = [[NSCollectionLayoutGroup alloc] init];
+    group->_layoutSize = size;
+    group->_subitems = subitems;
+    group->_axis = 1;
+    return group;
+}
++ (id)horizontalGroupWithLayoutSize:(NSCollectionLayoutSize *)size
+                  repeatingSubitem:(NSCollectionLayoutItem *)item
+                              count:(long)count
+{
+    NSMutableArray *subitems = [NSMutableArray array];
+    long copies = count > 0 ? count : 0;
+    for (long i = 0; i < copies; i++)
+        [subitems addObject:item];
+    NSCollectionLayoutGroup *group =
+        [self horizontalGroupWithLayoutSize:size subitems:subitems];
+    group->_repeating = YES;
+    return group;
+}
++ (id)verticalGroupWithLayoutSize:(NSCollectionLayoutSize *)size
+                repeatingSubitem:(NSCollectionLayoutItem *)item
+                            count:(long)count
+{
+    NSMutableArray *subitems = [NSMutableArray array];
+    long copies = count > 0 ? count : 0;
+    for (long i = 0; i < copies; i++)
+        [subitems addObject:item];
+    NSCollectionLayoutGroup *group =
+        [self verticalGroupWithLayoutSize:size subitems:subitems];
+    group->_repeating = YES;
+    return group;
+}
+- (NSArray *)subitems { return _subitems; }
+- (id)interItemSpacing { return _interItemSpacing; }
+- (void)setInterItemSpacing:(id)spacing { _interItemSpacing = spacing; }
+@end
+
+@implementation NSCollectionLayoutSection
++ (id)sectionWithGroup:(NSCollectionLayoutGroup *)group
+{
+    NSCollectionLayoutSection *section =
+        [[NSCollectionLayoutSection alloc] init];
+    section->_group = group;
+    return section;
+}
+- (NSCollectionLayoutGroup *)group { return _group; }
+- (void)setGroup:(NSCollectionLayoutGroup *)group { _group = group; }
+- (double)interGroupSpacing { return _interGroupSpacing; }
+- (void)setInterGroupSpacing:(double)spacing { _interGroupSpacing = spacing; }
+- (UIEdgeInsets)contentInsets { return _contentInsets; }
+- (void)setContentInsets:(UIEdgeInsets)insets { _contentInsets = insets; }
+- (long)orthogonalScrollingBehavior { return _orthogonalScrollingBehavior; }
+- (void)setOrthogonalScrollingBehavior:(long)behavior
+{
+    _orthogonalScrollingBehavior = behavior;
+}
+@end
+
+@implementation UICollectionViewCompositionalLayout
+- (id)initWithSection:(NSCollectionLayoutSection *)section
+{
+    self = [super init];
+    if (self)
+        _section = section;
+    return self;
+}
+- (id)initWithSectionProvider:(id)provider
+{
+    self = [super init];
+    if (self)
+        _sectionProvider = provider;
+    return self;
+}
+- (id)initWithSection:(NSCollectionLayoutSection *)section
+        configuration:(id)configuration
+{
+    (void)configuration;
+    return [self initWithSection:section];
+}
+@end
+
 @implementation UICollectionReusableView
 - (id)reuseIdentifier { return _reuseIdentifier; }
 - (void)prepareForReuse { }
@@ -15260,6 +15593,187 @@ static int collection_columns(double width, double itemW, double interitem,
     if (columns < 1)
         columns = 1;
     return columns;
+}
+
+struct cl_frame_context {
+    CGRect *frames;
+    long count;
+    long capacity;
+};
+
+static double cl_spacing_value(id spacing)
+{
+    if (!spacing ||
+        ![spacing isKindOfClass:[NSCollectionLayoutSpacing class]])
+        return 0.0;
+    return ((NSCollectionLayoutSpacing *)spacing)->_spacing;
+}
+
+static CGSize cl_resolve_size(NSCollectionLayoutSize *size, CGSize parent)
+{
+    CGSize out = parent;
+    if (size && size->_widthDimension)
+    {
+        NSCollectionLayoutDimension *width = size->_widthDimension;
+        out.width = width->_fractional ? width->_dimension * parent.width
+                                       : width->_dimension;
+    }
+    if (size && size->_heightDimension)
+    {
+        NSCollectionLayoutDimension *height = size->_heightDimension;
+        out.height = height->_fractional ? height->_dimension * parent.height
+                                         : height->_dimension;
+    }
+    if (out.width < 0)
+        out.width = 0;
+    if (out.height < 0)
+        out.height = 0;
+    return out;
+}
+
+static long cl_leaf_count(NSCollectionLayoutItem *item)
+{
+    if (!item || ![item isKindOfClass:[NSCollectionLayoutGroup class]])
+        return 1;
+    NSCollectionLayoutGroup *group = (NSCollectionLayoutGroup *)item;
+    long total = 0;
+    for (unsigned long i = 0; i < [group->_subitems count]; i++)
+        total += cl_leaf_count([group->_subitems objectAtIndex:i]);
+    return total;
+}
+
+static void cl_place_item(NSCollectionLayoutItem *item, CGRect bounds,
+                          struct cl_frame_context *context);
+
+static void cl_place_children(NSCollectionLayoutGroup *group, CGRect bounds,
+                              struct cl_frame_context *context)
+{
+    unsigned long count = [group->_subitems count];
+    if (count == 0)
+        return;
+    double spacing = cl_spacing_value(group->_interItemSpacing);
+    if (group->_repeating)
+    {
+        double slot = group->_axis == 0
+            ? (bounds.size.width - spacing * (double)(count - 1)) /
+                  (double)count
+            : (bounds.size.height - spacing * (double)(count - 1)) /
+                  (double)count;
+        if (slot < 0)
+            slot = 0;
+        for (unsigned long i = 0; i < count; i++)
+        {
+            CGRect slotFrame = group->_axis == 0
+                ? CGRectMake(bounds.origin.x + (double)i * (slot + spacing),
+                             bounds.origin.y, slot, bounds.size.height)
+                : CGRectMake(bounds.origin.x,
+                             bounds.origin.y + (double)i * (slot + spacing),
+                             bounds.size.width, slot);
+            cl_place_item([group->_subitems objectAtIndex:i], slotFrame,
+                          context);
+        }
+        return;
+    }
+    if (group->_axis == 0)
+    {
+        double x = bounds.origin.x;
+        for (unsigned long i = 0; i < count; i++)
+        {
+            NSCollectionLayoutItem *item =
+                (NSCollectionLayoutItem *)[group->_subitems
+                    objectAtIndex:i];
+            CGSize size = cl_resolve_size(item->_layoutSize, bounds.size);
+            CGRect frame = CGRectMake(x,
+                bounds.origin.y + (bounds.size.height - size.height) / 2.0,
+                size.width, size.height);
+            cl_place_item(item, frame, context);
+            x += size.width + spacing;
+        }
+    }
+    else
+    {
+        double y = bounds.origin.y;
+        for (unsigned long i = 0; i < count; i++)
+        {
+            NSCollectionLayoutItem *item =
+                (NSCollectionLayoutItem *)[group->_subitems
+                    objectAtIndex:i];
+            CGSize size = cl_resolve_size(item->_layoutSize, bounds.size);
+            CGRect frame = CGRectMake(
+                bounds.origin.x + (bounds.size.width - size.width) / 2.0, y,
+                size.width, size.height);
+            cl_place_item(item, frame, context);
+            y += size.height + spacing;
+        }
+    }
+}
+
+static void cl_place_item(NSCollectionLayoutItem *item, CGRect bounds,
+                          struct cl_frame_context *context)
+{
+    if (!item)
+        return;
+    if ([item isKindOfClass:[NSCollectionLayoutGroup class]])
+    {
+        cl_place_children((NSCollectionLayoutGroup *)item, bounds, context);
+        return;
+    }
+    UIEdgeInsets insets = item->_contentInsets;
+    CGRect frame = CGRectMake(
+        bounds.origin.x + insets.left, bounds.origin.y + insets.top,
+        bounds.size.width - insets.left - insets.right,
+        bounds.size.height - insets.top - insets.bottom);
+    if (frame.size.width < 0)
+        frame.size.width = 0;
+    if (frame.size.height < 0)
+        frame.size.height = 0;
+    if (context->count < context->capacity)
+        context->frames[context->count] = frame;
+    context->count++;
+}
+
+/* Lays out one section's items from the section's group and returns the
+ * cursor below the section. Frame order matches data-source item order. */
+static double cl_place_section(UICollectionViewCompositionalLayout *layout,
+                               long sectionIndex, double width, double height,
+                               double cursor, long itemCount, CGRect *frames,
+                               long capacity)
+{
+    id resolved = 0;
+    if (layout->_sectionProvider)
+        resolved = ((id (^)(long))layout->_sectionProvider)(sectionIndex);
+    else
+        resolved = layout->_section;
+    if (!resolved || ![resolved isKindOfClass:[NSCollectionLayoutSection class]])
+        return cursor;
+    NSCollectionLayoutSection *section = (NSCollectionLayoutSection *)resolved;
+    UIEdgeInsets insets = section->_contentInsets;
+    if (!section->_group)
+        return cursor + insets.top + insets.bottom;
+    double innerWidth = width - insets.left - insets.right;
+    if (innerWidth < 0)
+        innerWidth = 0;
+    CGSize groupSize = cl_resolve_size(section->_group->_layoutSize,
+                                       CGSizeMake(innerWidth, height));
+    long leaves = cl_leaf_count((NSCollectionLayoutItem *)section->_group);
+    if (leaves < 1)
+        leaves = 1;
+    long groups = (itemCount + leaves - 1) / leaves;
+    struct cl_frame_context context;
+    context.frames = frames;
+    context.count = 0;
+    context.capacity = capacity;
+    double y = cursor + insets.top;
+    for (long g = 0; g < groups; g++)
+    {
+        CGRect bounds = CGRectMake(insets.left, y, groupSize.width,
+                                   groupSize.height);
+        cl_place_children(section->_group, bounds, &context);
+        y += groupSize.height + section->_interGroupSpacing;
+    }
+    if (groups > 0)
+        y -= section->_interGroupSpacing;
+    return y + insets.bottom;
 }
 
 @implementation UICollectionView
@@ -15409,6 +15923,57 @@ static int collection_columns(double width, double itemW, double interitem,
     }
     [_supplementaryViews removeAllObjects];
 
+    UICollectionViewCompositionalLayout *compositional =
+        _collectionLayout &&
+                [_collectionLayout isKindOfClass:
+                    [UICollectionViewCompositionalLayout class]]
+            ? (UICollectionViewCompositionalLayout *)_collectionLayout
+            : nil;
+    if (compositional)
+    {
+        long sectionCount = collection_sections(self);
+        double cursor = 0;
+        for (long section = 0; section < sectionCount; section++)
+        {
+            long count = collection_items_in_section(self, section);
+            CGRect *frames = count > 0
+                ? malloc((unsigned long)count * sizeof(CGRect)) : 0;
+            cursor = cl_place_section(compositional, section,
+                                      _frame.size.width, _frame.size.height,
+                                      cursor, count, frames, count);
+            for (long i = 0; i < count; i++)
+            {
+                NSIndexPath *path =
+                    [NSIndexPath indexPathForRow:i inSection:section];
+                UICollectionViewCell *cell = nil;
+                if (_dataSource && [_dataSource respondsToSelector:
+                        @selector(collectionView:cellForItemAtIndexPath:)])
+                {
+                    SEL sel =
+                        @selector(collectionView:cellForItemAtIndexPath:);
+                    cell = (UICollectionViewCell *)((id (*)(id, void *, id, id))
+                        objc_msgSend)(_dataSource, (void *)sel, self, path);
+                }
+                if (cell)
+                {
+                    [cell setFrame:frames ? frames[i]
+                                        : CGRectMake(0, 0, 0, 0)];
+                    [cell setSelected:(section == _selectedSection &&
+                                      i == _selectedItem)
+                             animated:NO];
+                    [self addSubview:cell];
+                    [_cells addObject:cell];
+                }
+                else
+                    [_cells addObject:[NSNull null]];
+            }
+            if (frames)
+                free(frames);
+        }
+        _contentSize = CGSizeMake(_frame.size.width, cursor);
+        return;
+    }
+
     double itemW, itemH, interitem, line, left, right, top, bottom;
     collection_metrics(self, &itemW, &itemH, &interitem, &line,
                        &left, &right, &top, &bottom);
@@ -15500,8 +16065,83 @@ static long collection_flat_index(UICollectionView *collectionView,
         flat += collection_items_in_section(collectionView, s);
     return flat;
 }
+
+static void collection_select_item(UICollectionView *collectionView,
+                                   long section, long item)
+{
+    long previousSection = collectionView->_selectedSection;
+    long previousItem = collectionView->_selectedItem;
+    collectionView->_selectedSection = section;
+    collectionView->_selectedItem = item;
+    if (previousSection >= 0)
+    {
+        long previous = collection_flat_index(collectionView, previousSection,
+                                              previousItem);
+        if (previous >= 0 && previous < (long)[collectionView->_cells count])
+        {
+            id cell =
+                [collectionView->_cells objectAtIndex:(unsigned long)previous];
+            if ([cell isKindOfClass:[UICollectionViewCell class]])
+                [(UICollectionViewCell *)cell setSelected:NO animated:NO];
+        }
+    }
+    long flat = collection_flat_index(collectionView, section, item);
+    if (flat >= 0 && flat < (long)[collectionView->_cells count])
+    {
+        id cell = [collectionView->_cells objectAtIndex:(unsigned long)flat];
+        if ([cell isKindOfClass:[UICollectionViewCell class]])
+            [(UICollectionViewCell *)cell setSelected:YES animated:NO];
+    }
+    if (collectionView->_delegate &&
+        [collectionView->_delegate respondsToSelector:
+            @selector(collectionView:didSelectItemAtIndexPath:)])
+    {
+        NSIndexPath *path = [NSIndexPath indexPathForRow:item inSection:section];
+        SEL sel = @selector(collectionView:didSelectItemAtIndexPath:);
+        ((void (*)(id, void *, id, id))objc_msgSend)(
+            collectionView->_delegate, (void *)sel, collectionView, path);
+    }
+}
 - (void)handleTapAtPoint:(CGPoint)point
 {
+    UICollectionViewCompositionalLayout *compositional =
+        _collectionLayout &&
+                [_collectionLayout isKindOfClass:
+                    [UICollectionViewCompositionalLayout class]]
+            ? (UICollectionViewCompositionalLayout *)_collectionLayout
+            : nil;
+    if (compositional)
+    {
+        long sectionCount = collection_sections(self);
+        double cursor = 0;
+        for (long section = 0; section < sectionCount; section++)
+        {
+            long count = collection_items_in_section(self, section);
+            CGRect *frames = count > 0
+                ? malloc((unsigned long)count * sizeof(CGRect)) : 0;
+            cursor = cl_place_section(compositional, section,
+                                      _frame.size.width, _frame.size.height,
+                                      cursor, count, frames, count);
+            if (!frames)
+                continue;
+            for (long i = 0; i < count; i++)
+            {
+                CGRect frame = frames[i];
+                if (point.x >= frame.origin.x &&
+                    point.x < frame.origin.x + frame.size.width &&
+                    point.y >= frame.origin.y &&
+                    point.y < frame.origin.y + frame.size.height)
+                {
+                    free(frames);
+                    collection_select_item(self, section, i);
+                    return;
+                }
+            }
+            if (frames)
+                free(frames);
+        }
+        return;
+    }
     double itemW, itemH, interitem, line, left, right, top, bottom;
     collection_metrics(self, &itemW, &itemH, &interitem, &line,
                        &left, &right, &top, &bottom);

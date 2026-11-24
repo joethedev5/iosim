@@ -190,6 +190,19 @@ classes. The data source returns them from
 subviews (header, two cells, footer). The suite checks all three lines, so
 supplementary registration, dequeue, placement and content sizing agree.
 
+### UIKit: compositional collection layouts
+
+`tests/collection_compositional_test.m` builds three collections on the
+402 pt-wide screen. A repeating horizontal group of two 176x80 items with
+10 pt inter-item spacing and 20/15 pt section insets places item frames at
+(20,15), (206,15), (20,105) and (206,375) with a 470 pt content height; the
+tap at (100,145) reports section 0 item 2. A nested layout (two vertical
+groups of two 181x100 items) reaches (201,325) for item 7 with a 440 pt
+content height. A section provider runs the two-column section twice, so its
+second section starts at y=470 and item 19 is (206,845), for a 940 pt content
+height. Captured pixels are white at cell centers and black at the 10 pt gap
+between the two columns, so rendering uses the same frames as hit-testing.
+
 ### UIKit: split-view columns
 
 `tests/foundation_extra_test.m` lays out a 1024 pt double-column split view and

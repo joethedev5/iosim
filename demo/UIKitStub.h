@@ -2360,6 +2360,94 @@ extern id UICollectionElementKindSectionFooter;
 @property CGSize footerReferenceSize;
 @end
 
+enum {
+    UICollectionLayoutSectionOrthogonalScrollingBehaviorNone = 0,
+    UICollectionLayoutSectionOrthogonalScrollingBehaviorContinuous = 1,
+    UICollectionLayoutSectionOrthogonalScrollingBehaviorContinuousGroupLeadingBoundary = 2,
+    UICollectionLayoutSectionOrthogonalScrollingBehaviorPaging = 3,
+    UICollectionLayoutSectionOrthogonalScrollingBehaviorGroupPaging = 4,
+    UICollectionLayoutSectionOrthogonalScrollingBehaviorGroupPagingCentered = 5
+};
+
+@interface NSCollectionLayoutDimension : NSObject
++ (id)fractionalWidthDimension:(double)fraction;
++ (id)fractionalHeightDimension:(double)fraction;
++ (id)absoluteDimension:(double)value;
++ (id)estimatedDimension:(double)value;
+- (double)dimension;
+- (BOOL)isFractional;
+- (BOOL)isAbsolute;
+- (BOOL)isEstimated;
+@end
+
+@interface NSCollectionLayoutSize : NSObject
++ (id)sizeWithWidthDimension:(id)widthDimension
+             heightDimension:(id)heightDimension;
+- (id)widthDimension;
+- (id)heightDimension;
+@end
+
+@interface NSCollectionLayoutSpacing : NSObject
++ (id)fixedSpacing:(double)spacing;
++ (id)flexibleSpacing:(double)spacing;
+- (double)spacing;
+- (BOOL)isFixed;
+- (BOOL)isFlexible;
+@end
+
+@interface NSCollectionLayoutEdgeSpacing : NSObject
++ (id)spacingForLeading:(id)leading
+                    top:(id)top
+               trailing:(id)trailing
+                 bottom:(id)bottom;
+- (id)leading;
+- (id)top;
+- (id)trailing;
+- (id)bottom;
+@end
+
+@interface NSCollectionLayoutItem : NSObject
++ (id)itemWithLayoutSize:(id)layoutSize;
+- (id)layoutSize;
+- (void)setLayoutSize:(id)layoutSize;
+- (UIEdgeInsets)contentInsets;
+- (void)setContentInsets:(UIEdgeInsets)insets;
+- (id)edgeSpacing;
+- (void)setEdgeSpacing:(id)spacing;
+@end
+
+@interface NSCollectionLayoutGroup : NSCollectionLayoutItem
++ (id)horizontalGroupWithLayoutSize:(id)size subitems:(NSArray *)subitems;
++ (id)verticalGroupWithLayoutSize:(id)size subitems:(NSArray *)subitems;
++ (id)horizontalGroupWithLayoutSize:(id)size
+                  repeatingSubitem:(id)item
+                              count:(long)count;
++ (id)verticalGroupWithLayoutSize:(id)size
+                repeatingSubitem:(id)item
+                            count:(long)count;
+- (NSArray *)subitems;
+- (id)interItemSpacing;
+- (void)setInterItemSpacing:(id)spacing;
+@end
+
+@interface NSCollectionLayoutSection : NSObject
++ (id)sectionWithGroup:(id)group;
+- (id)group;
+- (void)setGroup:(id)group;
+- (double)interGroupSpacing;
+- (void)setInterGroupSpacing:(double)spacing;
+- (UIEdgeInsets)contentInsets;
+- (void)setContentInsets:(UIEdgeInsets)insets;
+- (long)orthogonalScrollingBehavior;
+- (void)setOrthogonalScrollingBehavior:(long)behavior;
+@end
+
+@interface UICollectionViewCompositionalLayout : UICollectionViewLayout
+- (id)initWithSection:(id)section;
+- (id)initWithSectionProvider:(id)provider;
+- (id)initWithSection:(id)section configuration:(id)configuration;
+@end
+
 @interface UICollectionReusableView : UIView
 @property(readonly) id reuseIdentifier;
 - (void)prepareForReuse;
@@ -2389,6 +2477,7 @@ extern id UICollectionElementKindSectionFooter;
                          withReuseIdentifier:(id)identifier
                                 forIndexPath:(NSIndexPath *)indexPath;
 - (void)reloadData;
+- (void)handleTapAtPoint:(CGPoint)point;
 @property(nonatomic, retain) id prefetchDataSource;
 @property(nonatomic, retain) id dragDelegate;
 @property(nonatomic, retain) id dropDelegate;

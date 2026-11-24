@@ -1532,6 +1532,16 @@ Python for iteration speed.
   its icon), with no memory-pressure termination policy. Stock system apps are display icons
   without executables, and a directly launched app alongside a running
   SpringBoard is not coordinated through launchd.
+`UICollectionViewCompositionalLayout` resolves sizes against the section's
+content width and the collection view's height: fractional dimensions are
+fractions of the parent slot, absolute ones are points. A group lays its
+subitems out along its axis (a repeating group divides the axis into equal
+slots first), recursing into nested groups; leaf items are inset by their
+content insets. `reloadData` and `handleTapAtPoint:` both call the same
+`cl_place_section` traversal, so rendered cell frames and hit-testing always
+agree. Section providers are invoked per section index; orthogonal scrolling
+behavior is recorded but sections still stack vertically.
+
 `UIViewPropertyAnimator` is a thin state machine over the existing UIView
 animation engine: `startAnimation` schedules the animation blocks and a
 completion, `finishAnimationAtPosition:` settles immediately, and pause/stop

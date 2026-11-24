@@ -1293,3 +1293,26 @@ components.
   corresponding parameter object instead of ignoring their arguments.
   `continueAnimationWithTimingParameters:durationFactor:` swaps the timing
   parameters and scales the animator's duration.
+
+## 2026-11-24: UICollectionView compositional layouts
+
+- The layout object graph mirrors UIKit's: `NSCollectionLayoutDimension`
+  (fractional, absolute, estimated), `NSCollectionLayoutSize`,
+  `NSCollectionLayoutItem`, `NSCollectionLayoutGroup` and
+  `NSCollectionLayoutSection`. Spacing objects (fixed/flexible) and edge
+  spacing are stored; edge spacing is accepted but not applied yet.
+- Size resolution: fractional dimensions are fractions of the parent slot,
+  absolute ones are points. A section group resolves against the section's
+  content width and the collection view's height. A repeating group divides
+  its main axis into equal slots (minus fixed spacing) before placing copies;
+  a plain group places explicitly sized subitems sequentially and centers
+  them on the cross axis. Nested groups recurse and leaf items apply their
+  content insets.
+- `cl_place_section` returns the cursor below a section and fills leaf frames
+  in data-source order. `reloadData` and `handleTapAtPoint:` both use it, so
+  rendered cells and hit-testing cannot diverge. Section providers are
+  invoked with the section index; `initWithSection:` reuses one section
+  object for every section.
+- Orthogonal scrolling behaviors are recorded but not acted on: groups still
+  stack vertically, and the collection view only scrolls vertically. That is
+  the main documented gap of this subset.

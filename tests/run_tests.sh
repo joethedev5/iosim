@@ -838,6 +838,123 @@ else
     echo "FAIL property animator timing"; echo "$out"; fails=$((fails+1))
 fi
 
+# ---------- 4f13. UICollectionView compositional layout ----------
+rm -f "$T/comp.fifo"
+mkfifo "$T/comp.fifo"
+"$ROOT/tools/build_app.sh" "$ROOT/tests/collection_compositional_test.m" \
+    "$T/collection_compositional_test" >/dev/null
+out="$(IOSIM_EVENT_FIFO="$T/comp.fifo" IOSIM_TEST_PNG="$T/comp.png" \
+    DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/collection_compositional_test" \
+    2>&1)"
+rm -f "$T/comp.fifo"
+check "[comp] ready" "$out" \
+    "the compositional layout fixture starts"
+check "[comp] done" "$out" \
+    "the compositional layout fixture lays out its sections"
+if out="$(python3 - "$out" <<'PY'
+import re
+import sys
+
+frames = {}
+sizes = {}
+tap = None
+tapstate = None
+for line in sys.argv[1].splitlines():
+    m = re.match(
+        r'\[comp\] (simple|nested|provider) (\d+) '
+        r'([-0-9.]+) ([-0-9.]+) ([-0-9.]+) ([-0-9.]+)$', line)
+    if m:
+        frames[(m.group(1), int(m.group(2)))] = tuple(
+            float(m.group(i)) for i in (3, 4, 5, 6))
+        continue
+    m = re.match(r'\[comp\] (simple|nested|provider) size '
+                 r'([-0-9.]+) ([-0-9.]+)$', line)
+    if m:
+        sizes[m.group(1)] = (float(m.group(2)), float(m.group(3)))
+        continue
+    m = re.match(r'\[comp\] tap (\d+) (\d+)$', line)
+    if m:
+        tap = (int(m.group(1)), int(m.group(2)))
+    m = re.match(r'\[comp\] tapstate (\d+) (\d+)$', line)
+    if m:
+        tapstate = (int(m.group(1)), int(m.group(2)))
+
+expected = {
+    ('simple', 0): (20.0, 15.0, 176.0, 80.0),
+    ('simple', 1): (206.0, 15.0, 176.0, 80.0),
+    ('simple', 2): (20.0, 105.0, 176.0, 80.0),
+    ('simple', 9): (206.0, 375.0, 176.0, 80.0),
+    ('nested', 0): (20.0, 15.0, 181.0, 100.0),
+    ('nested', 1): (20.0, 115.0, 181.0, 100.0),
+    ('nested', 2): (201.0, 15.0, 181.0, 100.0),
+    ('nested', 3): (201.0, 115.0, 181.0, 100.0),
+    ('nested', 7): (201.0, 325.0, 181.0, 100.0),
+    ('provider', 0): (20.0, 15.0, 176.0, 80.0),
+    ('provider', 10): (20.0, 485.0, 176.0, 80.0),
+    ('provider', 19): (206.0, 845.0, 176.0, 80.0),
+}
+for key, want in expected.items():
+    if key not in frames:
+        raise SystemExit('missing frame %r' % (key,))
+    got = frames[key]
+    for a, b in zip(got, want):
+        if abs(a - b) > 0.6:
+            raise SystemExit('frame %r is %r, expected %r' %
+                             (key, got, want))
+expected_sizes = {
+    'simple': (402.0, 470.0),
+    'nested': (402.0, 440.0),
+    'provider': (402.0, 940.0),
+}
+for name, want in expected_sizes.items():
+    if name not in sizes:
+        raise SystemExit('missing content size for %s' % name)
+    got = sizes[name]
+    for a, b in zip(got, want):
+        if abs(a - b) > 0.6:
+            raise SystemExit('content size %s is %r, expected %r' %
+                             (name, got, want))
+if tap != (0, 2) or tapstate != (0, 2):
+    raise SystemExit('tap hit-testing disagrees: %r %r' % (tap, tapstate))
+print("ok   compositional groups, sections and hit-testing share one layout")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL compositional layout"; echo "$out"; fails=$((fails+1))
+fi
+if out="$(python3 - "$ROOT/tools" "$T/comp.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+samples = [
+    ('cell', 100, 150, True),
+    ('gap', 200, 150, False),
+    ('cell', 250, 150, True),
+    ('nested', 100, 700, True),
+    ('nested', 300, 700, True),
+]
+for name, x, y, expect_white in samples:
+    c = pngpixel.px(rows, bpp, x * 3, y * 3)
+    r, g, b = (c >> 16) & 255, (c >> 8) & 255, c & 255
+    white = r > 200 and g > 200 and b > 200
+    dark = r < 60 and g < 60 and b < 60
+    if expect_white and not white:
+        raise SystemExit('%s sample at %d,%d is not white: %06x' %
+                         (name, x, y, c))
+    if not expect_white and not dark:
+        raise SystemExit('%s sample at %d,%d is not black: %06x' %
+                         (name, x, y, c))
+print("ok   the renderer draws compositional cells at the computed frames")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL compositional rendering"; echo "$out"; fails=$((fails+1))
+fi
+
 # ---------- 4g. NSCalendar components ----------
 "$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
     -ffreestanding -O1 -I "$ROOT/frameworks" \
