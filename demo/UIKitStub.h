@@ -1692,6 +1692,12 @@ enum {
     UIMenuElementAttributesHidden = 1 << 2,
     UIMenuElementAttributesKeepsMenuPresented = 1 << 3
 };
+
+enum {
+    UIMenuElementStateOff = 0,
+    UIMenuElementStateOn = 1,
+    UIMenuElementStateMixed = 2
+};
 enum {
     UIMenuOptionsDisplayInline = 1 << 0,
     UIMenuOptionsDestructive = 1 << 1,

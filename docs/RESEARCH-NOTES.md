@@ -1534,3 +1534,17 @@ components.
 - The fixture's plain-view menu gained a Share submenu with Copy Link and
   Email. The suite captures the root card, the opened page, the card after
   the return row and the restored view after Email.
+
+## 2026-11-24: context menu action state
+
+- `UIMenuElementStateOff/On/Mixed` now exist. An action in the on state draws
+  a trailing checkmark in its row, and the title's ellipsis width reserves
+  space for it.
+- `UIMenuElementAttributesKeepsMenuPresented` actions run their handler
+  without calling `context_menu_dismiss`, so the redraw shows state changes
+  such as a toggled checkmark while the page stays presented.
+- A page carrying `UIMenuOptionsSingleSelection` clears the state of its
+  actions and checks the tapped one before the handler runs; the fixture sets
+  keeps-presented on the sort actions so the moved checkmark is visible. The
+  fixture also drives every step from framebuffer state, like the submenu
+  timeline.

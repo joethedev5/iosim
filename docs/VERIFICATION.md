@@ -487,6 +487,17 @@ row (left chevron at about (96,521)) and Copy Link/Email actions below the
 root rows, tapping the return row restores the root card, and tapping Email
 prints `[menu] email` and restores the green background and orange view.
 
+### Context menu action state
+
+`tests/menu_state_test.m` raises a menu with a Pin action and a Sort
+single-selection submenu. Pin carries `UIMenuElementAttributesKeepsMenuPresented`
+and toggles its own state; the captures show its row checkmark appearing at
+about (300,521) after the first tap and gone after the second, with the menu
+still presented. Sort Name starts checked; tapping Sort Date prints
+`[state] sort date name=0 date=1` and the capture moves the checkmark from the
+Sort Name row to the Sort Date row without dismissing. The back row restores
+the root card and an outside tap dismisses to the green background.
+
 ### Action sheets
 
 `tests/alert_sheet_test.m` presents a `UIAlertControllerStyleActionSheet`

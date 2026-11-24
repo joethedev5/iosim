@@ -1585,6 +1585,90 @@ else
     echo "FAIL text view underline"; echo "$report"; fails=$((fails+1))
 fi
 
+# ---------- 4f22. Context menu action state ----------
+rm -f "$T/state.fifo"
+mkfifo "$T/state.fifo"
+"$ROOT/tools/build_app.sh" "$ROOT/tests/menu_state_test.m" \
+    "$T/menu_state_test" >/dev/null
+out="$(IOSIM_EVENT_FIFO="$T/state.fifo" \
+    IOSIM_TEST_PNG_STATE="$T/state.png" \
+    IOSIM_TEST_PNG_PINON="$T/state_pinon.png" \
+    IOSIM_TEST_PNG_PINOFF="$T/state_pinoff.png" \
+    IOSIM_TEST_PNG_SORT="$T/state_sort.png" \
+    IOSIM_TEST_PNG_SORT2="$T/state_sort2.png" \
+    IOSIM_TEST_PNG_BACK="$T/state_back.png" \
+    IOSIM_TEST_PNG_END="$T/state_end.png" \
+    DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" \
+    "$T/menu_state_test" 2>&1)"
+check "[state] pin 1" "$out" "a keeps-presented action stays in the menu"
+check "[state] pin 0" "$out" "the action toggles its state without dismissing"
+check "[state] sort date name=0 date=1" "$out" \
+    "a single-selection menu moves its checkmark to the chosen action"
+check "[state] png written" "$out" "the menu state fixture captures every phase"
+if out="$(python3 - "$ROOT/tools" "$T" <<'STATEPNG'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+
+def loader(path):
+    w, h, bpp, rows = pngpixel.load(path)
+    def read(x, y):
+        return pngpixel.px(rows, bpp, x * 3, y * 3)
+    return read
+
+def rgb(read, x, y):
+    c = read(x, y)
+    return ((c >> 16) & 255, (c >> 8) & 255, c & 255)
+
+def light(c):
+    return c[0] > 110 and c[1] > 110 and c[2] > 110
+
+def any_light(read, x0, y0, x1, y1):
+    for yy in range(y0, y1):
+        for xx in range(x0, x1):
+            if light(rgb(read, xx, yy)):
+                return True
+    return False
+
+def green(c):
+    return abs(c[0] - 26) < 25 and abs(c[1] - 204) < 25 and abs(c[2] - 77) < 25
+
+root = sys.argv[2]
+state = loader(root + "/state.png")
+pinon = loader(root + "/state_pinon.png")
+pinoff = loader(root + "/state_pinoff.png")
+sort = loader(root + "/state_sort.png")
+sort2 = loader(root + "/state_sort2.png")
+back = loader(root + "/state_back.png")
+end = loader(root + "/state_end.png")
+if any_light(state, 288, 506, 316, 536):
+    raise SystemExit("the Pin action starts checked")
+if not any_light(state, 286, 552, 320, 582):
+    raise SystemExit("the Sort row has no chevron")
+if not any_light(pinon, 288, 506, 316, 536):
+    raise SystemExit("tapping Pin did not draw its checkmark")
+if any_light(pinoff, 288, 506, 316, 536):
+    raise SystemExit("tapping Pin again did not clear its checkmark")
+if not any_light(sort, 288, 552, 316, 582):
+    raise SystemExit("the selected sort action has no checkmark")
+if any_light(sort, 288, 598, 316, 628):
+    raise SystemExit("the unselected sort action is checked")
+if not any_light(sort2, 288, 598, 316, 628):
+    raise SystemExit("the sort checkmark did not move")
+if any_light(sort2, 288, 552, 316, 582):
+    raise SystemExit("the previous sort action kept its checkmark")
+if not any_light(back, 286, 552, 320, 582):
+    raise SystemExit("the back row did not restore the root menu")
+if not green(rgb(end, 10, 300)):
+    raise SystemExit("the menu did not dismiss")
+print("ok   action checkmarks follow state and single-selection pages")
+STATEPNG
+)"; then
+    echo "$out"
+else
+    echo "FAIL menu action state"; echo "$out"; fails=$((fails+1))
+fi
+
 # ---------- 4g. NSCalendar components ----------
 "$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
     -ffreestanding -O1 -I "$ROOT/frameworks" \

@@ -1352,7 +1352,11 @@ above the submenu's actions, which lengthens the card; tapping the return row
 pops back and restores the previous rows. Tap routing uses the draw-time row
 rectangles, runs the action handler and dismisses; a tap outside or a new
 touch dismisses without running anything. The lift that ends the opening long
-press keeps the menu open.
+press keeps the menu open. An action whose state is on draws a trailing
+checkmark. `UIMenuElementAttributesKeepsMenuPresented` actions run their
+handler without dismissing, so the redraw reflects any state they changed,
+and a page with `UIMenuOptionsSingleSelection` clears the state of its other
+actions and checks the tapped one before the handler runs.
 
 Standard controls render with the measured iOS 26 design. `UISwitch` paints
 a 63 x 28 pt capsule with a 36.3 x 23.3 pt white knob; `UISlider` uses a

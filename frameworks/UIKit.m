@@ -2403,6 +2403,12 @@ enum {
 };
 
 enum {
+    UIMenuElementStateOff = 0,
+    UIMenuElementStateOn = 1,
+    UIMenuElementStateMixed = 2
+};
+
+enum {
     UIMenuOptionsDisplayInline = 1 << 0,
     UIMenuOptionsDestructive = 1 << 1,
     UIMenuOptionsSingleSelection = 1 << 2,
@@ -17708,7 +17714,24 @@ static int context_menu_handle_tap(int px, int py)
             return 1;
         if (action->_attributes & UIMenuElementAttributesDisabled)
             return 1;
+        UIMenu *page = g_ctx.menuStack[g_ctx.menuDepth];
+        if (page && (page->_options & UIMenuOptionsSingleSelection))
+        {
+            for (int j = 0; j < g_ctx.entryCount; j++)
+            {
+                UIAction *other = g_ctx.entries[j].action;
+                if (other)
+                    other->_state = UIMenuElementStateOff;
+            }
+            action->_state = UIMenuElementStateOn;
+        }
         void (^handler)(UIAction *) = action->_handler;
+        if (action->_attributes & UIMenuElementAttributesKeepsMenuPresented)
+        {
+            if (handler)
+                handler(action);
+            return 1;
+        }
         context_menu_dismiss();
         if (handler)
             handler(action);
@@ -28657,6 +28680,20 @@ static void ctx_clear_preview_corners(unsigned *bg, int fbW, int fbH,
     free(current);
 }
 
+static void ctx_draw_check(int cx, int cy, double scale, unsigned color)
+{
+    int thickness = (int)(2 * scale + 0.5);
+    if (thickness < 1)
+        thickness = 1;
+    int left = cx - (int)(7 * scale + 0.5);
+    int mid = cx - (int)(2 * scale + 0.5);
+    int right = cx + (int)(8 * scale + 0.5);
+    int bottom = cy + (int)(5 * scale + 0.5);
+    int top = cy - (int)(6 * scale + 0.5);
+    iosim_fb_draw_line(left, cy, mid, bottom, thickness, color);
+    iosim_fb_draw_line(mid, bottom, right, top, thickness, color);
+}
+
 static void ctx_draw_chevron(int cx, int cy, double scale, int pointsLeft,
                              unsigned color)
 {
@@ -28836,16 +28873,21 @@ static void draw_context_menu(int fbW, int fbH, double scale)
             color = 0xff453a;
         else if (action->_attributes & UIMenuElementAttributesDisabled)
             color = 0x7c7c82;
+        int checked = action->_state == UIMenuElementStateOn;
+        int trailing = (int)((checked ? 44 : 16) * scale + 0.5);
         char title[192];
         share_text_ellipsis(iosim_string_cstr(action->_title),
                             IOSIM_FONT_REGULAR, 17, scale,
-                            mx + mw - (int)(16 * scale + 0.5) - titleX,
+                            mx + mw - trailing - titleX,
                             title, sizeof(title));
         int asc = 0, desc = 0, lh = 0;
         iosim_fb_font_metrics(IOSIM_FONT_REGULAR, 17, scale, &asc, &desc,
                               &lh);
         iosim_fb_font_text(titleX, rowY + rowH / 2 - lh / 2 + asc, title,
                            IOSIM_FONT_REGULAR, 17, scale, color);
+        if (checked)
+            ctx_draw_check(mx + mw - (int)(26 * scale + 0.5),
+                           rowY + rowH / 2, scale, color);
         if (g_ctx.rowCount < CTX_MAX_ENTRIES)
         {
             g_ctx.rowRects[g_ctx.rowCount][0] = mx;
