@@ -1916,3 +1916,24 @@ components.
   resolution, and `class_copyMethodList` returns the class's own methods plus
   category and injected methods.
 - NSObject gains `+instancesRespondToSelector:`.
+
+## 2026-11-24: NSMethodSignature and NSInvocation
+
+- `NSMethodSignature` parses a compiler method type encoding into the return
+  type and a list of argument type strings and sizes, skipping frame-offset
+  digits and handling object, block, pointer, qualifier, bitfield, array and
+  struct tokens.
+- `NSInvocation` stores arguments by index (0 target, 1 selector) and the
+  return value, with `retainArguments`, `getArgument:atIndex:` and
+  `getReturnValue:`/`setReturnValue:`.
+- `frameworks/invoke_x86_64.s` provides `iosim_dynamic_invoke`, which loads
+  rdx/rcx/r8/r9 and xmm0..7 from the invocation's storage, calls the
+  implementation and stores rax plus the 16 bytes of xmm0 for the return.
+  Struct/array arguments, more than four integer or eight floating arguments
+  (stack arguments) and struct returns are rejected with a diagnostic.
+- NSObject answers `-methodSignatureForSelector:` and
+  `+instanceMethodSignatureForSelector:` from runtime type encodings and
+  implements the default `-forwardInvocation:` by forwarding to
+  `doesNotRecognizeSelector:`.
+- Delivering `-forwardInvocation:` from the msgSend trampoline is the next
+  step; the invocation object itself is complete for direct use.

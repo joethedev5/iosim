@@ -2073,6 +2073,16 @@ runtime-added override. Exchanging `classValue` and `classOther` through
 `class_respondsToSelector`/`instancesRespondToSelector` report 1, 1 and 0
 for a missing selector.
 
+### Foundation: method signatures and invocations
+
+`tests/ns_invocation_test.m` asks for the signature of `addA:b:` and sees
+four arguments typed `@`, `:` and two integers with an `i` return. It builds
+an invocation, sets target, selector and both integer arguments, invokes it
+and reads 42 back; a second invocation passes a double in an SSE register
+and returns 10.0; a third passes and returns an `NSString`; a void method
+runs and sets its flag. `retainArguments` flips `argumentsRetained`, and a
+missing selector yields no signature.
+
 ### CoreAnimation: completion and fill modes
 
 `tests/animation_removal_test.m` starts three 0.5 s opacity animations from

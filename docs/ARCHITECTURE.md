@@ -304,6 +304,17 @@ ivar_t { offset_ptr, name, type, alignment, size }
   `class_copyMethodList` (own methods plus category and runtime-injected
   ones) are implemented, and NSObject answers
   `+instancesRespondToSelector:`.
+- `NSMethodSignature` parses the compiler's method type encoding into
+  per-argument type strings and sizes; `NSInvocation` stores arguments and
+  the return value by index (0 is the target, 1 the selector).
+  `frameworks/invoke_x86_64.s` loads up to four integer argument registers
+  and eight SSE registers from the invocation's storage and calls the
+  implementation, capturing `rax` and `xmm0` for the return value. Struct
+  arguments, stack arguments and struct returns are rejected. NSObject
+  answers `-methodSignatureForSelector:` and
+  `+instanceMethodSignatureForSelector:` from the runtime method type
+  encodings and implements the default `-forwardInvocation:` by raising
+  `doesNotRecognizeSelector:`.
 
 ### 2.6 Darwin ABI shims
 
@@ -1730,9 +1741,10 @@ Python for iteration speed.
 - The dyld shared cache is not parsed; each dylib is loaded from disk.
 - Class method dispatch covers the common path; dynamic resolution,
   `-forwardingTargetForSelector:` and `-doesNotRecognizeSelector:` are
-  implemented, while `forwardInvocation:`/`NSInvocation` forwarding and
-  exceptions are pending. ARC-compiled code uses the implemented entry
-  points, but objects are never deallocated so weak references do not zero.
+  implemented, and `NSInvocation` exists, but the trampoline does not yet
+  deliver `-forwardInvocation:` and exceptions are pending. ARC-compiled
+  code uses the implemented entry points, but objects are never deallocated
+  so weak references do not zero.
   Associated objects are stored by
   the loader in a per-object list: assign and retain policies keep the given
   pointer, copy policies send `-copy`, setting nil removes one key and

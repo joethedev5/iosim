@@ -39,9 +39,13 @@ build_dylib() {
     -dylib -install_name "$install" -o "$out" "$obj" "$@" -undefined dynamic_lookup
 }
 
+"$CC" -target "$SDK_TARGET" -ffreestanding -fPIC \
+  -c "$ROOT/frameworks/invoke_x86_64.s" -o "$B/invoke_x86_64.o"
+
 build_dylib "$ROOT/frameworks/Foundation.m" \
   "$OUT/System/Library/Frameworks/Foundation.framework/Foundation" \
-  /System/Library/Frameworks/Foundation.framework/Foundation ""
+  /System/Library/Frameworks/Foundation.framework/Foundation "" \
+  "$B/invoke_x86_64.o"
 
 "$CC" -target "$SDK_TARGET" -ffreestanding -fPIC -c "$ROOT/frameworks/protocol_export.s" -o "$B/protocol_export.o"
 

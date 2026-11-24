@@ -35,6 +35,8 @@ typedef struct {
 @class NSString;
 @class NSArray;
 @class NSDictionary;
+@class NSMethodSignature;
+@class NSInvocation;
 
 typedef unsigned long NSKeyValueObservingOptions;
 enum {
@@ -81,6 +83,9 @@ __attribute__((objc_root_class))
 + (BOOL)resolveClassMethod:(SEL)sel;
 - (id)forwardingTargetForSelector:(SEL)sel;
 - (void)doesNotRecognizeSelector:(SEL)sel;
+- (NSMethodSignature *)methodSignatureForSelector:(SEL)sel;
++ (NSMethodSignature *)instanceMethodSignatureForSelector:(SEL)sel;
+- (void)forwardInvocation:(NSInvocation *)invocation;
 - (BOOL)isEqual:(id)other;
 - (unsigned long)hash;
 - (id)description;
@@ -114,6 +119,54 @@ __attribute__((objc_root_class))
 - (void)willChangeValueForKey:(NSString *)key;
 - (void)didChangeValueForKey:(NSString *)key;
 + (BOOL)automaticallyNotifiesObserversForKey:(NSString *)key;
+@end
+
+/* Method signatures and invocations. Type encodings use the compiler's
+ * method encoding; arguments are stored per index, with index 0 the target
+ * and index 1 the selector. invoke supports register arguments (up to four
+ * integer/pointer arguments and eight floating ones) and register returns;
+ * struct and stack arguments are rejected. */
+@interface NSMethodSignature : NSObject {
+@public
+    char *_types;
+    char *_arg_types[32];
+    unsigned long _arg_sizes[32];
+    unsigned long _arg_count;
+    char *_return_type;
+    unsigned long _return_size;
+    unsigned long _frame_length;
+}
++ (NSMethodSignature *)signatureWithObjCTypes:(const char *)types;
+- (unsigned long)numberOfArguments;
+- (const char *)getArgumentTypeAtIndex:(unsigned long)index;
+- (unsigned long)frameLength;
+- (const char *)methodReturnType;
+- (unsigned long)methodReturnLength;
+@end
+
+@interface NSInvocation : NSObject {
+@public
+    NSMethodSignature *_signature;
+    id _target;
+    SEL _selector;
+    void *_args[32];
+    void *_ret;
+    int _retain_arguments;
+}
++ (NSInvocation *)invocationWithMethodSignature:(NSMethodSignature *)signature;
+- (NSMethodSignature *)methodSignature;
+- (void)retainArguments;
+- (BOOL)argumentsRetained;
+- (void)getArgument:(void *)buffer atIndex:(unsigned long)index;
+- (void)setArgument:(void *)buffer atIndex:(unsigned long)index;
+- (void)getReturnValue:(void *)buffer;
+- (void)setReturnValue:(void *)buffer;
+- (void)invoke;
+- (void)invokeWithTarget:(id)target;
+- (id)target;
+- (void)setTarget:(id)target;
+- (SEL)selector;
+- (void)setSelector:(SEL)selector;
 @end
 
 @class NSString;

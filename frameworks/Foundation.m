@@ -783,6 +783,23 @@ static void kvc_operator_unique_add(NSMutableArray *array, id value)
             self);
     _exit(1);
 }
+- (NSMethodSignature *)methodSignatureForSelector:(SEL)sel
+{
+    void *method = class_getInstanceMethod(iosim_objc_class_of(self), sel);
+    const char *types = method ? method_getTypeEncoding(method) : 0;
+    return types ? [NSMethodSignature signatureWithObjCTypes:types] : nil;
+}
++ (NSMethodSignature *)instanceMethodSignatureForSelector:(SEL)sel
+{
+    void *method = class_getInstanceMethod(self, sel);
+    const char *types = method ? method_getTypeEncoding(method) : 0;
+    return types ? [NSMethodSignature signatureWithObjCTypes:types] : nil;
+}
+- (void)forwardInvocation:(NSInvocation *)invocation
+{
+    [self doesNotRecognizeSelector:
+              invocation ? [invocation selector] : 0];
+}
 - (BOOL)isEqual:(id)other { return self == other; }
 - (unsigned long)hash { return (unsigned long)(long)self; }
 - (id)description { return [NSString stringWithUTF8String:"<NSObject>"]; }
@@ -11631,5 +11648,330 @@ extern long dispatch_group_wait(void *group, unsigned long long timeout);
 {
     for (unsigned long i = 0; i < [(NSArray *)_operations count]; i++)
         [(NSOperation *)[(NSArray *)_operations objectAtIndex:i] cancel];
+}
+@end
+
+/* ------------------------------------------------------- method signatures */
+
+static const char *iosim_skip_type_qualifiers(const char *p)
+{
+    while (*p && strchr("rnNoORVAg", *p))
+        p++;
+    return p;
+}
+
+/* Consume one type encoding, copy it into a fresh string and report its byte
+ * size; frame-offset digits after the type are skipped. Struct and array
+ * sizes are left at zero because invoke does not support them. */
+static const char *iosim_parse_type_token(const char *p, char **token,
+                                          unsigned long *size)
+{
+    const char *start = p;
+    p = iosim_skip_type_qualifiers(p);
+    char c = *p;
+    if (c == '^')
+    {
+        p++;
+        char *inner = 0;
+        unsigned long inner_size = 0;
+        p = iosim_parse_type_token(p, &inner, &inner_size);
+        free(inner);
+        *size = 8;
+    }
+    else if (c == '@')
+    {
+        p++;
+        if (*p == '?')
+            p++;
+        else if (*p == '"')
+        {
+            p++;
+            while (*p && *p != '"')
+                p++;
+            if (*p)
+                p++;
+        }
+        *size = 8;
+    }
+    else if (c == '{' || c == '[')
+    {
+        int depth = 1;
+        char close = c == '{' ? '}' : ']';
+        p++;
+        while (*p && depth)
+        {
+            if (*p == c)
+                depth++;
+            else if (*p == close)
+                depth--;
+            p++;
+        }
+        *size = 0;
+    }
+    else if (c == 'b')
+    {
+        p++;
+        while (*p >= '0' && *p <= '9')
+            p++;
+        *size = 1;
+    }
+    else
+    {
+        if (c == 'c' || c == 'C' || c == 'B')
+            *size = 1;
+        else if (c == 's' || c == 'S')
+            *size = 2;
+        else if (c == 'i' || c == 'I' || c == 'f')
+            *size = 4;
+        else if (c == 'l' || c == 'L' || c == 'q' || c == 'Q' || c == 'd')
+            *size = 8;
+        else if (c == '#' || c == ':' || c == '*' || c == '?' || c == '%')
+            *size = 8;
+        else
+            *size = 0;
+        if (*p)
+            p++;
+    }
+    unsigned long length = (unsigned long)(p - start);
+    char *copy = malloc(length + 1);
+    if (copy)
+    {
+        memcpy(copy, start, length);
+        copy[length] = 0;
+    }
+    *token = copy;
+    while (*p >= '0' && *p <= '9')
+        p++;
+    return p;
+}
+
+@implementation NSMethodSignature
++ (NSMethodSignature *)signatureWithObjCTypes:(const char *)types
+{
+    if (!types)
+        return nil;
+    NSMethodSignature *signature = [[self alloc] init];
+    if (!signature)
+        return nil;
+    unsigned long n = strlen(types) + 1;
+    signature->_types = malloc(n);
+    if (signature->_types)
+        memcpy(signature->_types, types, n);
+    const char *p = types;
+    p = iosim_parse_type_token(p, &signature->_return_type,
+                               &signature->_return_size);
+    while (*p && signature->_arg_count < 32)
+    {
+        char *token = 0;
+        unsigned long size = 0;
+        p = iosim_parse_type_token(p, &token, &size);
+        if (!token)
+            break;
+        signature->_arg_types[signature->_arg_count] = token;
+        signature->_arg_sizes[signature->_arg_count] = size;
+        signature->_arg_count++;
+    }
+    signature->_frame_length = 16 + 8 * signature->_arg_count;
+    return signature;
+}
+- (unsigned long)numberOfArguments { return _arg_count; }
+- (const char *)getArgumentTypeAtIndex:(unsigned long)index
+{
+    return index < _arg_count ? _arg_types[index] : 0;
+}
+- (unsigned long)frameLength { return _frame_length; }
+- (const char *)methodReturnType { return _return_type; }
+- (unsigned long)methodReturnLength { return _return_size; }
+@end
+
+/* --------------------------------------------------------------- invocation */
+
+extern void iosim_dynamic_invoke(void *imp, void *self, void *sel,
+                                 void *gp, void *sse, void *retbuf);
+
+@implementation NSInvocation
++ (NSInvocation *)invocationWithMethodSignature:(NSMethodSignature *)signature
+{
+    if (!signature)
+        return nil;
+    NSInvocation *invocation = [[self alloc] init];
+    if (!invocation)
+        return nil;
+    invocation->_signature = signature;
+    unsigned long size = signature->_return_size ? signature->_return_size : 1;
+    invocation->_ret = calloc(1, size);
+    return invocation;
+}
+- (NSMethodSignature *)methodSignature { return _signature; }
+- (id)target { return _target; }
+- (void)setTarget:(id)target { _target = target; }
+- (SEL)selector { return _selector; }
+- (void)setSelector:(SEL)selector { _selector = selector; }
+- (void)retainArguments
+{
+    _retain_arguments = 1;
+    for (unsigned long i = 2; i < _signature->_arg_count; i++)
+    {
+        const char *type =
+            iosim_skip_type_qualifiers(_signature->_arg_types[i]);
+        if (type && (*type == '@' || *type == '#'))
+        {
+            id value = nil;
+            if (_args[i])
+                memcpy(&value, _args[i], sizeof(value));
+            if (value)
+                [value retain];
+        }
+    }
+}
+- (BOOL)argumentsRetained { return _retain_arguments ? YES : NO; }
+- (void)setArgument:(void *)buffer atIndex:(unsigned long)index
+{
+    if (!buffer || !_signature || index >= _signature->_arg_count)
+        return;
+    if (index == 0)
+    {
+        _target = *(id *)buffer;
+        return;
+    }
+    if (index == 1)
+    {
+        _selector = *(SEL *)buffer;
+        return;
+    }
+    unsigned long size = _signature->_arg_sizes[index];
+    if (size == 0)
+        size = sizeof(void *);
+    if (!_args[index])
+        _args[index] = calloc(1, size);
+    if (_args[index])
+        memcpy(_args[index], buffer, size);
+}
+- (void)getArgument:(void *)buffer atIndex:(unsigned long)index
+{
+    if (!buffer || !_signature || index >= _signature->_arg_count)
+        return;
+    if (index == 0)
+    {
+        memcpy(buffer, &_target, sizeof(id));
+        return;
+    }
+    if (index == 1)
+    {
+        memcpy(buffer, &_selector, sizeof(SEL));
+        return;
+    }
+    unsigned long size = _signature->_arg_sizes[index];
+    if (size == 0)
+        size = sizeof(void *);
+    if (_args[index])
+        memcpy(buffer, _args[index], size);
+    else
+        memset(buffer, 0, size);
+}
+- (void)getReturnValue:(void *)buffer
+{
+    if (!buffer || !_signature || _signature->_return_size == 0)
+        return;
+    memcpy(buffer, _ret, _signature->_return_size);
+}
+- (void)setReturnValue:(void *)buffer
+{
+    if (!buffer || !_signature || _signature->_return_size == 0)
+        return;
+    memcpy(_ret, buffer, _signature->_return_size);
+}
+- (void)invoke
+{
+    if (!_signature)
+        return;
+    id target = _target;
+    if (!target)
+    {
+        if (_ret && _signature->_return_size)
+            memset(_ret, 0, _signature->_return_size);
+        return;
+    }
+    void *imp = class_getMethodImplementation(iosim_objc_class_of(target),
+                                              _selector);
+    if (!imp)
+    {
+        [target doesNotRecognizeSelector:_selector];
+        return;
+    }
+    unsigned long gp[4] = {0, 0, 0, 0};
+    unsigned char sse[128];
+    unsigned char retbuf[32];
+    memset(sse, 0, sizeof(sse));
+    memset(retbuf, 0, sizeof(retbuf));
+    unsigned long gp_used = 0, sse_used = 0;
+    int supported = 1;
+    for (unsigned long i = 2; i < _signature->_arg_count; i++)
+    {
+        const char *type =
+            iosim_skip_type_qualifiers(_signature->_arg_types[i]);
+        if (!type || *type == '{' || *type == '[' || *type == '(')
+        {
+            supported = 0;
+            break;
+        }
+        unsigned char value[8];
+        memset(value, 0, sizeof(value));
+        unsigned long size = _signature->_arg_sizes[i];
+        if (size > 8)
+            size = 8;
+        if (_args[i])
+            memcpy(value, _args[i], size);
+        if (*type == 'f' || *type == 'd')
+        {
+            if (sse_used >= 8)
+            {
+                supported = 0;
+                break;
+            }
+            memcpy(sse + sse_used * 16, value, 8);
+            sse_used++;
+        }
+        else
+        {
+            if (gp_used >= 4)
+            {
+                supported = 0;
+                break;
+            }
+            memcpy(&gp[gp_used], value, 8);
+            gp_used++;
+        }
+    }
+    const char *return_type =
+        iosim_skip_type_qualifiers(_signature->_return_type);
+    int return_float = 0;
+    if (!return_type)
+        supported = 0;
+    else if (return_type[0] == 'f' || return_type[0] == 'd')
+        return_float = 1;
+    else if (return_type[0] == '{' || return_type[0] == '[' ||
+             return_type[0] == '(')
+        supported = 0;
+    if (!supported)
+    {
+        fprintf(stderr,
+                "iosim: NSInvocation cannot invoke a signature with struct "
+                "or stack arguments (%s)\n",
+                _signature->_return_type ? _signature->_return_type : "?");
+        return;
+    }
+    iosim_dynamic_invoke(imp, target, _selector, gp, sse, retbuf);
+    if (!_ret || _signature->_return_size == 0)
+        return;
+    if (return_float)
+        memcpy(_ret, retbuf + 8, _signature->_return_size);
+    else
+        memcpy(_ret, retbuf, _signature->_return_size);
+}
+- (void)invokeWithTarget:(id)target
+{
+    _target = target;
+    [self invoke];
 }
 @end

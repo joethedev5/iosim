@@ -1144,6 +1144,31 @@ check "[sw] responds 1 1 0" "$out" \
     "class_respondsToSelector and instancesRespondToSelector report matches"
 check "[sw] done" "$out" "the swizzle fixture finishes"
 
+# ---------- 4f10j. NSMethodSignature and NSInvocation ----------
+"$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
+    -ffreestanding -O1 -I "$ROOT/frameworks" \
+    -c "$ROOT/tests/ns_invocation_test.m" -o "$T/ns_invocation_test.o"
+"$LD64" -arch x86_64 -platform_version $PLATFORM -e _main \
+    -o "$T/ns_invocation_test" "$T/ns_invocation_test.o" \
+    "$ROOT/runtime/System/Library/Frameworks/Foundation.framework/Foundation" \
+    -undefined dynamic_lookup
+out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/ns_invocation_test" 2>&1)"
+check "[inv] sig 4 @ : i" "$out" \
+    "methodSignatureForSelector: exposes the argument and return types"
+check "[inv] add 42" "$out" \
+    "NSInvocation invokes an integer method with two arguments"
+check "[inv] double 10.0" "$out" \
+    "NSInvocation passes and returns a double"
+check "[inv] echo hello" "$out" \
+    "NSInvocation passes and returns an object"
+check "[inv] void 1" "$out" \
+    "NSInvocation invokes a void method"
+check "[inv] retained 1" "$out" \
+    "retainArguments marks the invocation's arguments retained"
+check "[inv] missing 0" "$out" \
+    "a present selector yields a method signature"
+check "[inv] done" "$out" "the invocation fixture finishes"
+
 # ---------- 4f11. CAAnimation completion and fill modes ----------
 rm -f "$T/arem.fifo"
 mkfifo "$T/arem.fifo"

@@ -2,6 +2,9 @@
 #define IOSIM_UIKIT_STUB_H
 
 #include "../frameworks/objc_lite.h"
+
+@class NSMethodSignature;
+@class NSInvocation;
 #include "../frameworks/coregraphics_lite.h"
 
 double CACurrentMediaTime(void);
@@ -36,6 +39,9 @@ __attribute__((objc_root_class))
 + (BOOL)resolveClassMethod:(SEL)sel;
 - (id)forwardingTargetForSelector:(SEL)sel;
 - (void)doesNotRecognizeSelector:(SEL)sel;
+- (NSMethodSignature *)methodSignatureForSelector:(SEL)sel;
++ (NSMethodSignature *)instanceMethodSignatureForSelector:(SEL)sel;
+- (void)forwardInvocation:(NSInvocation *)invocation;
 @end
 
 @class NSCharacterSet;
