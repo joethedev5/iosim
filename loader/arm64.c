@@ -27,6 +27,15 @@
 
 extern void iosim_arm64_native_invoke(void *imp, void *self, void *sel,
                                       void *gp, void *sse, void *retbuf);
+extern void iosim_arm64_native_invoke_stret(void *imp, void *ret, void *self,
+                                            void *sel, void *gp, void *sse);
+extern void iosim_arm64_native_invoke_stack(void *imp, void *self, void *sel,
+                                           void *gp, void *sse, void *args,
+                                           uint64_t args_size, void *retbuf);
+extern void iosim_arm64_native_invoke_stack_stret(void *imp, void *ret,
+                                                 void *self, void *sel,
+                                                 void *gp, void *sse,
+                                                 void *args, uint64_t size);
 
 #define A64_STACK_SIZE (8u * 1024 * 1024)
 #define A64_RETURN_SENTINEL 0ull
@@ -756,7 +765,7 @@ static int a64_native_call(struct a64_cpu *c, uint64_t target, uint64_t *ret)
         uint64_t sse_args[8];
         for (int i = 0; i < 8; i++)
             sse_args[i] = c->d[i];
-        uint64_t retbuf[4] = {0, 0, 0, 0};
+        uint64_t retbuf[6] = {0, 0, 0, 0, 0, 0};
         iosim_arm64_native_invoke((void *)(uintptr_t)target,
                                   (void *)(uintptr_t)c->x[0],
                                   (void *)(uintptr_t)c->x[1], gp_args,
@@ -859,6 +868,195 @@ static const char *a64_skip_number(const char *p)
     return p;
 }
 
+/* Field metadata for an aggregate type encoding. The native bridge needs
+ * the total size, whether every leaf is floating point, and whether the
+ * leaves form a homogeneous floating-point aggregate (one to four fields
+ * of the same FP type), which arm64 returns in d0..d3. */
+struct a64_type_meta {
+    int size;
+    int all_sse;
+    int fp_count;
+    int fp_size; /* 0 = no FP leaf yet, -1 = mixed, 4 or 8 = homogeneous */
+    int ok;
+};
+
+static const char *a64_measure_type(const char *p, struct a64_type_meta *m,
+                                    int depth)
+{
+    if (depth > 16)
+    {
+        m->ok = 0;
+        return p;
+    }
+    p = a64_skip_qualifiers(p);
+    if (!*p)
+    {
+        m->ok = 0;
+        return p;
+    }
+    if (*p == '{' || *p == '(')
+    {
+        char close = *p == '{' ? '}' : ')';
+        p++;
+        while (*p && *p != '=' && *p != close)
+            p++;
+        struct a64_type_meta total;
+        memset(&total, 0, sizeof total);
+        total.all_sse = 1;
+        total.ok = 1;
+        if (*p == '=')
+        {
+            p++;
+            while (*p && *p != close)
+            {
+                struct a64_type_meta f;
+                memset(&f, 0, sizeof f);
+                f.ok = 1;
+                p = a64_measure_type(p, &f, depth + 1);
+                if (!f.ok)
+                {
+                    m->ok = 0;
+                    return p;
+                }
+                total.size += f.size;
+                if (!f.all_sse)
+                    total.all_sse = 0;
+                total.fp_count += f.fp_count;
+                if (f.fp_size == -1)
+                    total.fp_size = -1;
+                else if (f.fp_size != 0)
+                {
+                    if (total.fp_size == 0)
+                        total.fp_size = f.fp_size;
+                    else if (total.fp_size != f.fp_size)
+                        total.fp_size = -1;
+                }
+            }
+        }
+        if (*p == close)
+            p++;
+        *m = total;
+        return p;
+    }
+    if (*p == '[')
+    {
+        p++;
+        int n = 0;
+        while (*p >= '0' && *p <= '9')
+        {
+            n = n * 10 + (*p - '0');
+            p++;
+        }
+        struct a64_type_meta e;
+        memset(&e, 0, sizeof e);
+        e.ok = 1;
+        p = a64_measure_type(p, &e, depth + 1);
+        if (*p == ']')
+            p++;
+        if (!e.ok)
+        {
+            m->ok = 0;
+            return p;
+        }
+        if (n < 1)
+            n = 1;
+        m->size = e.size * n;
+        m->all_sse = e.all_sse;
+        m->fp_count = e.fp_count * n;
+        m->fp_size = e.fp_size;
+        m->ok = 1;
+        return p;
+    }
+    if (*p == '^')
+    {
+        struct a64_type_meta e;
+        memset(&e, 0, sizeof e);
+        e.ok = 1;
+        p = a64_measure_type(p + 1, &e, depth + 1);
+        m->size = 8;
+        m->all_sse = 0;
+        m->fp_count = 0;
+        m->fp_size = 0;
+        m->ok = e.ok;
+        return p;
+    }
+    if (*p == 'b')
+    {
+        p++;
+        int n = 0;
+        while (*p >= '0' && *p <= '9')
+        {
+            n = n * 10 + (*p - '0');
+            p++;
+        }
+        m->size = (n + 7) / 8;
+        m->all_sse = 0;
+        m->fp_count = 0;
+        m->fp_size = 0;
+        m->ok = 1;
+        return p;
+    }
+    if (*p == '@')
+    {
+        p++;
+        if (*p == '?')
+            p++;
+        else if (*p == '"')
+        {
+            p++;
+            while (*p && *p != '"')
+                p++;
+            if (*p)
+                p++;
+        }
+        m->size = 8;
+        m->all_sse = 0;
+        m->fp_count = 0;
+        m->fp_size = 0;
+        m->ok = 1;
+        return p;
+    }
+    if (*p == '"')
+    {
+        p++;
+        while (*p && *p != '"')
+            p++;
+        if (*p)
+            p++;
+        m->size = 8;
+        m->all_sse = 0;
+        m->fp_count = 0;
+        m->fp_size = 0;
+        m->ok = 1;
+        return p;
+    }
+    m->all_sse = 0;
+    m->fp_count = 0;
+    m->fp_size = 0;
+    m->ok = 1;
+    switch (*p)
+    {
+    case 'c': case 'C': case 'B':
+        m->size = 1; return p + 1;
+    case 's': case 'S':
+        m->size = 2; return p + 1;
+    case 'i': case 'I':
+        m->size = 4; return p + 1;
+    case 'l': case 'L': case 'q': case 'Q':
+        m->size = 8; return p + 1;
+    case 'f':
+        m->size = 4; m->all_sse = 1; m->fp_count = 1; m->fp_size = 4;
+        return p + 1;
+    case 'd':
+        m->size = 8; m->all_sse = 1; m->fp_count = 1; m->fp_size = 8;
+        return p + 1;
+    case 'v':
+        m->size = 0; return p + 1;
+    default:
+        m->size = 8; return p + 1;
+    }
+}
+
 /* Calls a native x86_64 IMP with arguments marshalled from the arm64
  * registers using the method's own type encoding. */
 static int a64_native_imp(struct a64_cpu *c, void *imp)
@@ -867,9 +1065,21 @@ static int a64_native_imp(struct a64_cpu *c, void *imp)
         (void *)(uintptr_t)c->x[0], (void *)(uintptr_t)c->x[1]);
     if (!types)
         return a64_fail(c, "no method types for native IMP", 0);
-    const char *p = a64_skip_qualifiers(types);
-    char rtc = *p;
-    p = a64_skip_type(p);
+    const char *ret_start = a64_skip_qualifiers(types);
+    char rtc = *ret_start;
+    struct a64_type_meta ret;
+    memset(&ret, 0, sizeof ret);
+    ret.ok = 1;
+    int ret_agg = (rtc == '{' || rtc == '(' || rtc == '[');
+    if (ret_agg)
+    {
+        a64_measure_type(ret_start, &ret, 0);
+        if (!ret.ok || ret.size <= 0)
+            return a64_fail(c, "unsupported aggregate return type", 0);
+    }
+    int ret_hfa = ret_agg && ret.all_sse && ret.fp_count >= 1 &&
+                  ret.fp_count <= 4 && ret.fp_size > 0;
+    const char *p = a64_skip_type(ret_start);
     p = a64_skip_number(p);
     p = a64_skip_type(p); /* self */
     p = a64_skip_number(p);
@@ -881,16 +1091,125 @@ static int a64_native_imp(struct a64_cpu *c, void *imp)
     int ngp = 0, nsse = 0;
     int agp = 2, asse = 0;
     unsigned long stack_off = 0;
+    unsigned char stack_args[1024];
+    size_t stack_len = 0;
     while (*p)
     {
         p = a64_skip_qualifiers(p);
+        const char *arg_start = p;
         char t = *p;
         p = a64_skip_type(p);
         p = a64_skip_number(p);
         if (!t || t == 'v')
             break;
         if (t == '{' || t == '(' || t == '[' || t == 'D')
-            return a64_fail(c, "aggregate method argument unsupported", 0);
+        {
+            /* Aggregates up to sixteen bytes map register-for-register.
+             * Larger ones are passed by reference on arm64 and by value
+             * on the x86 stack, so copy the caller's object into the
+             * x86 argument area. */
+            struct a64_type_meta am;
+            memset(&am, 0, sizeof am);
+            am.ok = 1;
+            a64_measure_type(arg_start, &am, 0);
+            if (!am.ok || am.size <= 0)
+                return a64_fail(c, "unsupported aggregate argument", 0);
+            int am_hfa = am.all_sse && am.fp_count >= 1 &&
+                         am.fp_count <= 4 && am.fp_size > 0;
+            if (am_hfa && am.size > 16)
+            {
+                /* An HFA of three or four doubles travels in d0..d3 on
+                 * arm64 and in memory on x86. */
+                size_t padded = ((size_t)am.size + 7) & ~(size_t)7;
+                if (stack_len + padded > sizeof stack_args)
+                    return a64_fail(c, "stack argument area overflow", 0);
+                if (asse + am.fp_count > 8)
+                    return a64_fail(c,
+                                    "aggregate argument on stack "
+                                    "unsupported", 0);
+                for (int i = 0; i < am.fp_count; i++)
+                    ((uint64_t *)(stack_args + stack_len))[i] = c->d[asse++];
+                memset(stack_args + stack_len + am.size, 0,
+                       padded - (size_t)am.size);
+                stack_len += padded;
+                continue;
+            }
+            if (am.size > 16)
+            {
+                uint64_t ptr;
+                if (agp < 8)
+                    ptr = c->x[agp++];
+                else
+                {
+                    ptr = a64_load(c, c->sp + stack_off, 8, 0);
+                    stack_off += 8;
+                }
+                if (!ptr)
+                    return a64_fail(c, "null aggregate argument", 0);
+                size_t padded = ((size_t)am.size + 7) & ~(size_t)7;
+                if (stack_len + padded > sizeof stack_args)
+                    return a64_fail(c, "stack argument area overflow", 0);
+                memcpy(stack_args + stack_len,
+                       (const void *)(uintptr_t)ptr, (size_t)am.size);
+                memset(stack_args + stack_len + am.size, 0,
+                       padded - (size_t)am.size);
+                stack_len += padded;
+                continue;
+            }
+            if (!am.all_sse || am.fp_count == 0 || am.fp_size <= 0)
+            {
+                if (am.fp_count != 0)
+                    return a64_fail(c, "mixed aggregate argument", 0);
+                int slots = (am.size + 7) / 8;
+                for (int i = 0; i < slots; i++)
+                {
+                    if (agp >= 8)
+                        return a64_fail(c,
+                                        "aggregate argument on stack "
+                                        "unsupported", 0);
+                    if (ngp >= 4)
+                        return a64_fail(c, "too many integer arguments", 0);
+                    gp_args[ngp++] = c->x[agp++];
+                }
+            }
+            else if (am.fp_size == 8)
+            {
+                for (int i = 0; i < am.fp_count; i++)
+                {
+                    if (asse >= 8)
+                        return a64_fail(c,
+                                        "aggregate argument on stack "
+                                        "unsupported", 0);
+                    if (nsse >= 8)
+                        return a64_fail(c, "too many SSE arguments", 0);
+                    sse_args[nsse++] = c->d[asse++];
+                }
+            }
+            else
+            {
+                for (int i = 0; i < am.fp_count; i += 2)
+                {
+                    if (asse >= 8)
+                        return a64_fail(c,
+                                        "aggregate argument on stack "
+                                        "unsupported", 0);
+                    uint64_t lo = c->d[asse++] & 0xffffffffu;
+                    uint64_t hi = 0;
+                    if (i + 1 < am.fp_count)
+                    {
+                        if (asse >= 8)
+                            return a64_fail(c,
+                                            "aggregate argument on stack "
+                                            "unsupported", 0);
+                        hi = c->d[asse++] & 0xffffffffu;
+                    }
+                    if (nsse >= 8)
+                        return a64_fail(c, "too many SSE arguments", 0);
+                    sse_args[nsse++] = lo | (hi << 32);
+                }
+            }
+            continue;
+        }
         int is_fp = (t == 'f' || t == 'd');
         uint64_t v;
         if (is_fp)
@@ -921,11 +1240,84 @@ static int a64_native_imp(struct a64_cpu *c, void *imp)
         }
     }
 
-    uint64_t retbuf[4] = {0, 0, 0, 0};
-    iosim_arm64_native_invoke(imp, (void *)(uintptr_t)c->x[0],
-                              (void *)(uintptr_t)c->x[1], gp_args, sse_args,
-                              retbuf);
-    if (rtc == 'f')
+    uint64_t retbuf[6] = {0, 0, 0, 0, 0, 0};
+    if (ret_agg && ret.size > 16)
+    {
+        if (ngp > 3)
+            return a64_fail(c, "too many integer arguments for struct return",
+                            0);
+        /* HFAs return in v0..v3 even when larger than sixteen bytes; x86
+         * uses a hidden buffer for those sizes. */
+        uint64_t tmp[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+        uint64_t buffer = ret_hfa ? (uint64_t)(uintptr_t)tmp : c->x[8];
+        if (!buffer)
+            return a64_fail(c, "null struct return buffer", 0);
+        if (stack_len)
+            iosim_arm64_native_invoke_stack_stret(
+                imp, (void *)(uintptr_t)buffer,
+                (void *)(uintptr_t)c->x[0], (void *)(uintptr_t)c->x[1],
+                gp_args, sse_args, stack_args, stack_len);
+        else
+            iosim_arm64_native_invoke_stret(imp, (void *)(uintptr_t)buffer,
+                                            (void *)(uintptr_t)c->x[0],
+                                            (void *)(uintptr_t)c->x[1],
+                                            gp_args, sse_args);
+        if (ret_hfa)
+        {
+            for (int i = 0; i < ret.fp_count; i++)
+                c->d[i] = ret.fp_size == 8
+                              ? tmp[i]
+                              : (tmp[i / 2] >> (32 * (i & 1))) & 0xffffffffu;
+            for (int i = 0; i < 4; i++)
+                c->dhi[i] = 0;
+        }
+        return 0;
+    }
+    if (stack_len)
+        iosim_arm64_native_invoke_stack(
+            imp, (void *)(uintptr_t)c->x[0], (void *)(uintptr_t)c->x[1],
+            gp_args, sse_args, stack_args, stack_len, retbuf);
+    else
+        iosim_arm64_native_invoke(imp, (void *)(uintptr_t)c->x[0],
+                                  (void *)(uintptr_t)c->x[1], gp_args,
+                                  sse_args, retbuf);
+    if (ret_agg)
+    {
+        if (ret_hfa)
+        {
+            for (int i = 0; i < ret.fp_count; i++)
+            {
+                uint64_t word = ret.fp_size == 8 ? (i < 1 ? retbuf[1]
+                                                          : retbuf[4])
+                                                 : (i < 2 ? retbuf[1]
+                                                          : retbuf[4]);
+                c->d[i] = ret.fp_size == 8
+                              ? word
+                              : (word >> (32 * (i & 1))) & 0xffffffffu;
+            }
+            for (int i = 0; i < 4; i++)
+                c->dhi[i] = 0;
+        }
+        else if (ret.all_sse && ret.fp_size == -1)
+        {
+            /* Mixed floating-point fields: arm64 uses integer registers. */
+            c->x[0] = retbuf[1];
+            c->x[1] = retbuf[4];
+        }
+        else if (ret.all_sse)
+        {
+            c->d[0] = retbuf[1];
+            c->d[1] = retbuf[4];
+            c->dhi[0] = 0;
+            c->dhi[1] = 0;
+        }
+        else
+        {
+            c->x[0] = retbuf[0];
+            c->x[1] = retbuf[3];
+        }
+    }
+    else if (rtc == 'f')
     {
         c->d[0] = retbuf[1] & 0xffffffffu;
     }
@@ -2239,6 +2631,38 @@ static int a64_run(struct a64_cpu *c)
             c->pc = next;
             continue;
         }
+        /* CCMP / CCMN: conditional integer compare (register or immediate).
+         * When the condition fails the NZCV immediate is installed. */
+        if ((insn & 0x3fe00410) == 0x3a400000)
+        {
+            int sf = (insn >> 31) & 1;
+            int bits = sf ? 64 : 32;
+            int is_ccmn = ((insn >> 30) & 1) == 0;
+            int is_imm = (insn >> 11) & 1;
+            int rm = (insn >> 16) & 31;
+            int cond = (insn >> 12) & 0xf;
+            int rn = (insn >> 5) & 31;
+            unsigned imm = insn & 0xf;
+            uint64_t a = rd_x(c, rn) & mask_for(bits);
+            if (a64_cond(c->nzcv, cond))
+            {
+                uint64_t b = is_imm ? (uint64_t)rm
+                                    : (rd_x(c, rm) & mask_for(bits));
+                if (is_ccmn)
+                    a64_add_flags(c, a, b, bits, 1);
+                else
+                    a64_sub_flags(c, a, b, bits, 1);
+            }
+            else
+            {
+                c->nzcv = ((imm & 8) ? A64_N : 0) |
+                          ((imm & 4) ? A64_Z : 0) |
+                          ((imm & 2) ? A64_C : 0) |
+                          ((imm & 1) ? A64_V : 0);
+            }
+            c->pc = next;
+            continue;
+        }
         /* FCCMP / FCCMPE: conditional floating-point compare. When the
          * condition fails the NZCV immediate is installed instead. */
         if ((insn & 0xff200c00) == 0x1e200400)
@@ -2285,8 +2709,8 @@ static int a64_run(struct a64_cpu *c)
             c->pc = next;
             continue;
         }
-        /* FCMP / FCMPE */
-        if ((insn & 0xff20fc0f) == 0x1e202000)
+        /* FCMP / FCMPE (bit 3 selects the zero operand) */
+        if ((insn & 0xff20fc07) == 0x1e202000)
         {
             int is_double = (insn >> 22) & 1;
             int rn = (insn >> 5) & 31;

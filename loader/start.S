@@ -203,7 +203,8 @@ objc_msgSend_stret:
  *
  * The arm64 bridge's call gate: calls a native x86_64 method with self and
  * sel, four further integer registers from gp[0..3] and xmm0..xmm7 from
- * sse[0..7]. retbuf receives rax at offset 0 and xmm0 at offset 8. */
+ * sse[0..7]. retbuf receives rax at 0, xmm0 at 8, rdx at 24 and xmm1 at
+ * 32, which covers scalar and small-aggregate results. */
 iosim_arm64_native_invoke:
     pushq %rbx
     movq %r9, %rbx
@@ -216,17 +217,168 @@ iosim_arm64_native_invoke:
     movq 8(%r10), %rcx
     movq 16(%r10), %r8
     movq 24(%r10), %r9
-    movdqu 0(%r11), %xmm0
-    movdqu 16(%r11), %xmm1
-    movdqu 32(%r11), %xmm2
-    movdqu 48(%r11), %xmm3
-    movdqu 64(%r11), %xmm4
-    movdqu 80(%r11), %xmm5
-    movdqu 96(%r11), %xmm6
-    movdqu 112(%r11), %xmm7
+    movq 0(%r11), %xmm0
+    movq 8(%r11), %xmm1
+    movq 16(%r11), %xmm2
+    movq 24(%r11), %xmm3
+    movq 32(%r11), %xmm4
+    movq 40(%r11), %xmm5
+    movq 48(%r11), %xmm6
+    movq 56(%r11), %xmm7
     callq *%rax
     movq %rax, 0(%rbx)
     movdqu %xmm0, 8(%rbx)
+    movq %rdx, 24(%rbx)
+    movdqu %xmm1, 32(%rbx)
     popq %rbx
     ret
     .size iosim_arm64_native_invoke, .-iosim_arm64_native_invoke
+
+    .text
+    .globl iosim_arm64_native_invoke_stret
+    .type iosim_arm64_native_invoke_stret, @function
+/* void iosim_arm64_native_invoke_stret(void *imp, void *ret, void *self,
+ *                                      void *sel, void *gp, void *sse)
+ *
+ * x86_64 large-aggregate convention: the hidden return buffer is the first
+ * argument, self and sel follow, then three further integer registers from
+ * gp[0..2] and xmm0..xmm7 from sse[0..7]. */
+iosim_arm64_native_invoke_stret:
+    pushq %rbx
+    movq %r9, %rbx
+    movq %r8, %r10
+    movq %rdi, %rax
+    movq %rsi, %rdi
+    movq %rdx, %rsi
+    movq %rcx, %rdx
+    movq 0(%r10), %rcx
+    movq 8(%r10), %r8
+    movq 16(%r10), %r9
+    movq 0(%rbx), %xmm0
+    movq 8(%rbx), %xmm1
+    movq 16(%rbx), %xmm2
+    movq 24(%rbx), %xmm3
+    movq 32(%rbx), %xmm4
+    movq 40(%rbx), %xmm5
+    movq 48(%rbx), %xmm6
+    movq 56(%rbx), %xmm7
+    callq *%rax
+    popq %rbx
+    ret
+    .size iosim_arm64_native_invoke_stret, .-iosim_arm64_native_invoke_stret
+
+    .text
+    .globl iosim_arm64_native_invoke_stack
+    .type iosim_arm64_native_invoke_stack, @function
+/* void iosim_arm64_native_invoke_stack(void *imp, void *self, void *sel,
+ *                                      void *gp, void *sse, void *args,
+ *                                      uint64_t args_size, void *retbuf)
+ *
+ * Calls a native method that takes memory-class aggregates by value. args
+ * holds the x86 stack argument area in call order; it is copied below the
+ * aligned stack pointer before the call. */
+iosim_arm64_native_invoke_stack:
+    pushq %rbx
+    pushq %r12
+    pushq %r13
+    pushq %r14
+    pushq %r15
+    movq 56(%rsp), %r14
+    movq 48(%rsp), %r13
+    movq %r9, %r12
+    movq %rdi, %rbx
+    movq %rcx, %r10
+    movq %r8, %r11
+    movq %rsi, %rax
+    movq %rdx, %r9
+    movq %r13, %r15
+    addq $15, %r15
+    andq $-16, %r15
+    subq %r15, %rsp
+    movq %rsp, %rdi
+    movq %r12, %rsi
+    movq %r13, %rcx
+    rep movsb
+    movq %rax, %rdi
+    movq %r9, %rsi
+    movq 0(%r10), %rdx
+    movq 8(%r10), %rcx
+    movq 16(%r10), %r8
+    movq 24(%r10), %r9
+    movq 0(%r11), %xmm0
+    movq 8(%r11), %xmm1
+    movq 16(%r11), %xmm2
+    movq 24(%r11), %xmm3
+    movq 32(%r11), %xmm4
+    movq 40(%r11), %xmm5
+    movq 48(%r11), %xmm6
+    movq 56(%r11), %xmm7
+    callq *%rbx
+    movq %rax, 0(%r14)
+    movdqu %xmm0, 8(%r14)
+    movq %rdx, 24(%r14)
+    movdqu %xmm1, 32(%r14)
+    addq %r15, %rsp
+    popq %r15
+    popq %r14
+    popq %r13
+    popq %r12
+    popq %rbx
+    ret
+    .size iosim_arm64_native_invoke_stack, .-iosim_arm64_native_invoke_stack
+
+    .text
+    .globl iosim_arm64_native_invoke_stack_stret
+    .type iosim_arm64_native_invoke_stack_stret, @function
+/* void iosim_arm64_native_invoke_stack_stret(void *imp, void *ret,
+ *                                            void *self, void *sel,
+ *                                            void *gp, void *sse,
+ *                                            void *args, uint64_t args_size)
+ *
+ * Memory-class return and stack arguments together: the hidden result
+ * pointer leads the x86 argument registers, leaving three GP slots. */
+iosim_arm64_native_invoke_stack_stret:
+    pushq %rbx
+    pushq %r12
+    pushq %r13
+    pushq %r14
+    pushq %r15
+    movq 48(%rsp), %r12
+    movq 56(%rsp), %r13
+    movq %rdi, %rbx
+    movq %r8, %r10
+    movq %r9, %r11
+    movq %rsi, %r14
+    movq %rdx, %rax
+    movq %rcx, %r9
+    movq %r13, %r15
+    addq $15, %r15
+    andq $-16, %r15
+    subq %r15, %rsp
+    movq %rsp, %rdi
+    movq %r12, %rsi
+    movq %r13, %rcx
+    rep movsb
+    movq %r14, %rdi
+    movq %rax, %rsi
+    movq %r9, %rdx
+    movq 0(%r10), %rcx
+    movq 8(%r10), %r8
+    movq 16(%r10), %r9
+    movq 0(%r11), %xmm0
+    movq 8(%r11), %xmm1
+    movq 16(%r11), %xmm2
+    movq 24(%r11), %xmm3
+    movq 32(%r11), %xmm4
+    movq 40(%r11), %xmm5
+    movq 48(%r11), %xmm6
+    movq 56(%r11), %xmm7
+    callq *%rbx
+    addq %r15, %rsp
+    popq %r15
+    popq %r14
+    popq %r13
+    popq %r12
+    popq %rbx
+    ret
+    .size iosim_arm64_native_invoke_stack_stret, .-iosim_arm64_native_invoke_stack_stret

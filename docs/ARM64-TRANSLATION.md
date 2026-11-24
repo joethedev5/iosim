@@ -13,8 +13,13 @@ inline form; `IOSIM_ARM64_NOJIT=1` selects the interpreter, and scalar
 native-to-guest ObjC message dispatches re-enter it through the reverse
 bridge. Atomics (LSE read-modify-write/CAS, LDAPR/LDAR/STLR, barriers and
 LDXR/STXR exclusives) and 128-bit SIMD literal loads are implemented.
-Broader NEON coverage, aggregate arguments and returns, persistent caches
-and JIT pages are the remaining work. This
+Aggregates cross the bridge in both directions: type encodings are
+measured recursively, sixteen-byte integer structs use GP registers,
+HFAs (up to four same-type fields) use d0-d3 even when larger than
+sixteen bytes, and other large structs pass by pointer and return
+through x8/hidden buffers, with stack arguments on a dedicated call
+gate. Broader NEON coverage, varargs beyond the printf gate, and
+persistent caches and JIT pages are the remaining work. This
 document records the method and the milestones that prove it.
 
 ## The constraint and the reframing
@@ -87,7 +92,10 @@ struct returns). The arm64 details that matter:
 
 - integer arguments in `x0`–`x7`, floating in `d0`–`d7`, the rest on the
   16-byte-aligned stack;
-- `x8` holds the address of an indirect (large struct) result;
+- `x8` holds the address of an indirect (large struct) result; HFAs
+  return in `d0`-`d3` instead, even above sixteen bytes, while x86_64
+  would use a hidden buffer, so oversized HFAs are copied through a
+  temporary;
 - `x29` frame pointer, `x30` link register, `sp` 16-byte aligned;
 - Darwin passes variadic arguments on the stack. A local probe with our
   `clang -target arm64-apple-ios18.0-simulator` emitted exactly that shape

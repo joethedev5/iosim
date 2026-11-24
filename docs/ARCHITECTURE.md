@@ -1782,9 +1782,13 @@ Python for iteration speed.
   trampoline also has a reverse bridge: when
   native x86_64 code sends to an arm64 IMP, the saved register frame is
   marshalled per the method type encoding and the IMP runs on a nested
-  interpreter context. Struct arguments and returns, stack arguments, full
-  NEON and persistent translation are still pending; `--inspect` stops
-  after mapping. The design is in `docs/ARM64-TRANSLATION.md`.
+  interpreter context. Aggregate arguments and returns are marshalled
+  from method type encodings in both directions: integer structs in GP
+  registers, HFAs in d0-d3 (stack-passed when larger than sixteen
+  bytes) and non-HFA large structs by pointer, with x8 or hidden-buffer
+  returns. Full NEON and persistent translation are still pending;
+  `--inspect` stops after mapping. The design is in
+  `docs/ARM64-TRANSLATION.md`.
 - The dyld shared cache is not parsed; each dylib is loaded from disk.
 - Class method dispatch covers the common path; dynamic resolution,
   `-forwardingTargetForSelector:`, `-forwardInvocation:` delivery and

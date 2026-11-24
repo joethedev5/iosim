@@ -2214,3 +2214,43 @@ components.
   into the next registers), so the call corrupts state and later sends see
   a bogus isa. Cross-bridge struct returns are the next milestone needed
   for real apps; guest-internal struct ABI already works.
+
+## 2026-11-24: cross-bridge aggregate ABI
+
+- The bridge measures an argument or return type from its encoding with a
+  recursive `a64_measure_type` (`{...}`, `(...)`, `[nT]`, `^`, `bN`, `@`,
+  quoted types, `c/C/B`, `s/S`, `i/I`, `l/L/q/Q`, `f`, `d`, `v`). A type
+  is an HFA when every leaf is the same floating-point type and it has
+  one to four fields. On arm64 an HFA returns in d0-d3 regardless of
+  size, while x86_64 returns anything over sixteen bytes through a
+  hidden pointer.
+- Returns: sixteen-byte integer aggregates come back in x0/x1 (rax/rdx);
+  HFA returns read d0/d1 for doubles and the two floats packed in each
+  of d0/d1 for float HFAs; non-HFA aggregates over sixteen bytes use a
+  native `..._stret` gate whose hidden pointer precedes self/selector;
+  HFAs over sixteen bytes are copied through a temporary buffer and then
+  unpacked into d0-d3.
+- Arguments: HFAs fill SSE slots from d registers (two floats per xmm),
+  large HFAs are copied to the stack gate as doubles, and non-HFA large
+  aggregates are copied from their pointer argument. A new
+  `iosim_arm64_native_invoke_stack` gate allocates a rounded stack area,
+  `rep movsb`s the blocks into place (the count is rcx, not rdx) and
+  calls with self and selector first.
+- The SSE gates previously loaded 16 bytes per slot with `movdqu`, which
+  packed d0/d1 into xmm0 and left xmm1 zero; CGPoint arguments and
+  returns lost their y field. Each slot is now loaded with `movq`.
+- The stack gate's args pointer arrives in r9, and the size and retbuf
+  words sit at 48/56 after the five pushes; the first version read the
+  count from the wrong slot and crashed with rsp near -0xe0.
+- `fcmp d8, #0.0` needed a mask without bit 3 (`0xff20fc07`), and
+  `ccmp`/`ccmn` gained a handler (`0x3fe00410 == 0x3a400000`) that
+  computes the flags or installs the immediate NZCV when the condition
+  fails.
+- `+[NSValue valueWithCGAffineTransform:]` and
+  `-[NSValue CGAffineTransformValue]` round-trip a forty-eight-byte
+  non-HFA transform on arm64 and x86_64; `tests/arm64_aggregate.m` also
+  covers NSRange, CGPoint and CGRect. The arm64 aggregate fixture exits
+  93 under the translator, the interpreter and the x86_64 build.
+- With aggregate returns in place, the arm64 `demo/HelloSimApp.m` build
+  runs through `UIApplicationMain` until the timeout with no bridge
+  errors; bringing up the device and framebuffer path is separate work.

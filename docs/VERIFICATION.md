@@ -2222,6 +2222,21 @@ native symbol map. The suite runs the fixture with Foundation, UIKit and
 QuartzCore preloaded, requires exit 64, and repeats the run with
 `IOSIM_ARM64_NOJIT=1`.
 
+### arm64: aggregates across the native bridge
+
+`tests/arm64_aggregate.m` sends messages whose arguments and returns are
+aggregates to native Foundation and UIKit. `-rangeOfString:` returns a
+sixteen-byte `NSRange` in x0/x1 and `-substringWithRange:` consumes one;
+`-setCenter:`/`-center` pass a sixteen-byte CGPoint HFA in d2/d3 and
+return one in d0/d1; `-initWithFrame:` takes a thirty-two-byte CGRect HFA
+on the stack and `-frame` returns one in d0-d3; and a forty-eight-byte
+CGAffineTransform (non-HFA) travels by pointer into
+`+[NSValue valueWithCGAffineTransform:]` and returns through the x8 result
+buffer from `-CGAffineTransformValue`. The fixture prints
+`sub=world range=6,5`, `center=12.5,34.5 frame=10,20,100,50` and
+`transform=1,2,3,4,5,6`, and exits 93 for the arm64 run, the x86_64 build
+and `IOSIM_ARM64_NOJIT=1`.
+
 ### SpringBoard: folder pagination
 
 A folder is rewritten to hold thirteen members across two pages.

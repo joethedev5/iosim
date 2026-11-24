@@ -1675,6 +1675,65 @@ else
     echo "FAIL arm64 framework calls interpreter (exit $rc_nj)"; fails=$((fails+1))
 fi
 
+# ---------- 4f10z. arm64 aggregates across the native bridge ----------
+# Native methods return an NSRange in x0/x1 and a CGRect HFA in d0-d3, take
+# a CGRect HFA on the stack and a CGAffineTransform by pointer, and hand a
+# forty-eight-byte transform back through the x8 result buffer. The x86_64
+# build and pure interpretation must agree with the translated run.
+"$CC" -target arm64-apple-ios18.0-simulator -fobjc-runtime=ios-18.0 \
+    -fno-objc-arc -ffreestanding -O1 \
+    -c "$ROOT/tests/arm64_aggregate.m" -o "$T/arm64_aggregate.o"
+"$LD64" -arch arm64 -platform_version $PLATFORM -e _main \
+    -o "$T/arm64_aggregate" "$T/arm64_aggregate.o" -undefined dynamic_lookup
+"$CC" -target x86_64-apple-ios18.0-simulator -fobjc-runtime=ios-18.0 \
+    -fno-objc-arc -ffreestanding -O1 \
+    -c "$ROOT/tests/arm64_aggregate.m" -o "$T/arm64_aggregate_x.o"
+"$LD64" -arch x86_64 -platform_version $PLATFORM -e _main \
+    -o "$T/arm64_aggregate_x" "$T/arm64_aggregate_x.o" \
+    -undefined dynamic_lookup
+if out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" --arm64 $FW_ARGS \
+    "$T/arm64_aggregate")"; then
+    rc_arm=0
+else
+    rc_arm=$?
+fi
+check "sub=world range=6,5" "$out" \
+    "an arm64 main receives an NSRange in x0/x1"
+check "center=12.5,34.5 frame=10,20,100,50" "$out" \
+    "arm64 passes a CGRect on the stack and receives one in d0-d3"
+check "transform=1,2,3,4,5,6" "$out" \
+    "arm64 passes a large struct by pointer and receives it through x8"
+if [ "$rc_arm" -eq 93 ]; then
+    echo "ok   the arm64 aggregate fixture returns 93"
+else
+    echo "FAIL arm64 aggregate ABI (exit $rc_arm)"; fails=$((fails+1))
+fi
+if out_x="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" $FW_ARGS \
+    "$T/arm64_aggregate_x")"; then
+    rc_x=0
+else
+    rc_x=$?
+fi
+check "transform=1,2,3,4,5,6" "$out_x" \
+    "the x86_64 aggregate fixture prints the same values"
+if [ "$rc_x" -eq 93 ]; then
+    echo "ok   the x86_64 aggregate fixture returns 93"
+else
+    echo "FAIL x86_64 aggregate ABI (exit $rc_x)"; fails=$((fails+1))
+fi
+if IOSIM_ARM64_NOJIT=1 DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" --arm64 \
+    $FW_ARGS "$T/arm64_aggregate" >/dev/null; then
+    rc_nj=0
+else
+    rc_nj=$?
+fi
+if [ "$rc_nj" -eq 93 ]; then
+    echo "ok   the arm64 aggregate fixture agrees with pure interpretation"
+else
+    echo "FAIL arm64 aggregate ABI interpreter (exit $rc_nj)"
+    fails=$((fails+1))
+fi
+
 # ---------- 4f11. CAAnimation completion and fill modes ----------
 rm -f "$T/arem.fifo"
 mkfifo "$T/arem.fifo"
