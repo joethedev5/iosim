@@ -45,8 +45,9 @@ compares, float max/min/div/sqrt/abs/neg, integer/float conversions,
 pairwise adds, horizontal reductions, element moves and zip/uzp/trn
 permutations; LD1/ST1 single-structure loads and stores cover one to
 four consecutive registers with no offset or a post-index. Interleaved
-LD2/LD3/LD4 structures and the remaining AdvSIMD rounding and narrowing
-families are the remaining work. This document records the method and
+LD2/LD3/LD4 structures, widening and narrowing arithmetic, saturating
+add/sub, TBL/TBX and EXT, floating-point rounding and compares, and
+pairwise floating-point operations are covered too. This document records the method and
 the milestones that prove it.
 
 ## The constraint and the reframing

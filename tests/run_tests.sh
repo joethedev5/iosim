@@ -2049,6 +2049,87 @@ check "[arm64anim] completion 1 50" "$out_nj" \
     "the interpreter runs the same framework block calls"
 rm -f "$T/arm64anim.fifo"
 
+# ---------- 4f10ag. arm64 widening, narrowing and structure loads ----------
+# Widening and narrowing arithmetic, saturating add/sub, table lookup,
+# byte extraction, FP rounding and compares, pairwise FP and interleaved
+# LD2/LD3/LD4, compared between the block translator and the pure
+# interpreter.
+"$CC" -target arm64-apple-ios18.0-simulator -ffreestanding -O0 \
+    -c "$ROOT/tests/arm64_neon2.c" -o "$T/arm64_neon2.o"
+"$LD64" -arch arm64 -platform_version $PLATFORM -e _main \
+    -o "$T/arm64_neon2" "$T/arm64_neon2.o" -undefined dynamic_lookup
+if out_j="$(DYLD_ROOT_PATH="$ROOT/runtime" timeout 15 "$RUN" --arm64 \
+    "$T/arm64_neon2" 2>&1)"; then
+    rc_j=0
+else
+    rc_j=$?
+fi
+if out_n="$(IOSIM_ARM64_NOJIT=1 DYLD_ROOT_PATH="$ROOT/runtime" timeout 15 \
+    "$RUN" --arm64 "$T/arm64_neon2" 2>&1)"; then
+    rc_n=0
+else
+    rc_n=$?
+fi
+check "waddl 11 22 33 44 55 66 77 88" "$out_j" \
+    "arm64 vector widening add"
+check "wsubl 9 18 27 36 45 54 63 72" "$out_j" \
+    "arm64 vector widening subtract"
+check "xtn 1 44 -1 -56 56 127 -128 127" "$out_j" \
+    "arm64 vector narrowing move"
+check "qxtn 1 127 -1 127 -128 127 127 -128" "$out_j" \
+    "arm64 saturating narrow keeps the range"
+check "uqadd 255 200 1 255" "$out_j" \
+    "arm64 vector saturating add"
+check "tbl2 160 10 0 0 40 40 0 0 20 30 50 60 70 80 90 100" "$out_j" \
+    "arm64 table lookup zeroes out-of-range indexes"
+check "rndn 2.0 2.0 -2.0 -2.0" "$out_j" \
+    "arm64 FP round to nearest even"
+check "rnda 2.0 3.0 -2.0 -3.0" "$out_j" \
+    "arm64 FP round ties away"
+check "fmaxp 1.0 3.0 1.0 2.0" "$out_j" \
+    "arm64 pairwise FP max"
+check "ld2a 1 3 5 7" "$out_j" \
+    "arm64 LD2 de-interleaves"
+check "ld4d 3 7 11 15 19 23 27 31" "$out_j" \
+    "arm64 LD4 de-interleaves"
+if [ "$rc_j" -eq 0 ] && [ "$rc_n" -eq 0 ] && [ "$out_j" = "$out_n" ]; then
+    echo "ok   the translator and interpreter agree on the second AdvSIMD set"
+else
+    echo "FAIL second AdvSIMD translation agreement (exit $rc_j, $rc_n)"
+    fails=$((fails+1))
+fi
+
+"$CC" -target arm64-apple-ios18.0-simulator -ffreestanding -O0 \
+    -c "$ROOT/tests/arm64_neon3.c" -o "$T/arm64_neon3.o"
+"$LD64" -arch arm64 -platform_version $PLATFORM -e _main \
+    -o "$T/arm64_neon3" "$T/arm64_neon3.o" -undefined dynamic_lookup
+if out3="$(DYLD_ROOT_PATH="$ROOT/runtime" timeout 15 "$RUN" --arm64 \
+    "$T/arm64_neon3" 2>&1)"; then
+    rc3=0
+else
+    rc3=$?
+fi
+if out3n="$(IOSIM_ARM64_NOJIT=1 DYLD_ROOT_PATH="$ROOT/runtime" timeout 15 \
+    "$RUN" --arm64 "$T/arm64_neon3" 2>&1)"; then
+    rc3n=0
+else
+    rc3n=$?
+fi
+check "s_saddl 11 22 33 44" "$out3" "arm64 widening add in 4S"
+check "narrow_4h 4464 -1 2 3" "$out3" \
+    "arm64 narrowing move truncates"
+check "tbl8b 80 10 90 0 40 40 20 30" "$out3" \
+    "arm64 8B table lookup uses 16-byte table registers"
+check "faddp2d 3.0 7.0" "$out3" "arm64 2D pairwise FP add"
+check "ld4b_d 4 8 12 16 20 24 28 32" "$out3" \
+    "arm64 8B LD4 de-interleaves"
+if [ "$rc3" -eq 0 ] && [ "$rc3n" -eq 0 ] && [ "$out3" = "$out3n" ]; then
+    echo "ok   the translator and interpreter agree on the size variants"
+else
+    echo "FAIL size-variant translation agreement (exit $rc3, $rc3n)"
+    fails=$((fails+1))
+fi
+
 # ---------- 4f11. CAAnimation completion and fill modes ----------
 rm -f "$T/arem.fifo"
 mkfifo "$T/arem.fifo"

@@ -2554,6 +2554,108 @@ static int a64_run(struct a64_cpu *c)
                 continue;
             }
         }
+        /* AdvSIMD shift left long (SSHLL/USHLL and their 2 forms). The
+         * shift amount is immh:immb minus the source element width. */
+        if ((insn & 0x0f00fc00) == 0x0f00a400)
+        {
+            int Q = (insn >> 30) & 1;
+            int U = (insn >> 29) & 1;
+            unsigned immh = (insn >> 19) & 0xf;
+            unsigned immb = (insn >> 16) & 7;
+            int rn = (insn >> 5) & 31;
+            int rd = insn & 31;
+            if (!immh || (immh & 8))
+                return a64_fail(c, "bad long shift", insn);
+            int h = 31 - __builtin_clz(immh);
+            int dbits = 16 << h;
+            int sbits = dbits >> 1;
+            unsigned imm = (immh << 3) | immb;
+            if ((int)imm < sbits)
+                return a64_fail(c, "bad long shift amount", insn);
+            int shift = (int)imm - sbits;
+            int slanes = 64 / sbits;
+            uint8_t a[16], r[16];
+            memcpy(a, &c->d[rn], 8);
+            memcpy(a + 8, &c->dhi[rn], 8);
+            memset(r, 0, sizeof r);
+            for (int i = 0; i < slanes; i++)
+            {
+                uint64_t v = a64_lane_get(a, Q ? slanes + i : i, sbits);
+                uint64_t out = U ? v << shift
+                                 : (uint64_t)a64_lane_signed(v, sbits) << shift;
+                a64_lane_put(r, i, dbits, out);
+            }
+            memcpy(&c->d[rd], r, 8);
+            memcpy(&c->dhi[rd], r + 8, 8);
+            c->pc = next;
+            continue;
+        }
+        /* AdvSIMD widening add/subtract (SADDL/UADDL/SADDW/... and 2). */
+        {
+            unsigned m = insn & 0xbfe0fc00;
+            int kind = 0;
+            if (m == 0x0e200000 || m == 0x0e600000 || m == 0x0ea00000)
+                kind = 1;
+            else if (m == 0x2e200000 || m == 0x2e600000 || m == 0x2ea00000)
+                kind = 2;
+            else if (m == 0x0e202000 || m == 0x0e602000 || m == 0x0ea02000)
+                kind = 3;
+            else if (m == 0x2e202000 || m == 0x2e602000 || m == 0x2ea02000)
+                kind = 4;
+            else if (m == 0x0e201000 || m == 0x0e601000 || m == 0x0ea01000)
+                kind = 5;
+            else if (m == 0x2e201000 || m == 0x2e601000 || m == 0x2ea01000)
+                kind = 6;
+            else if (m == 0x0e203000 || m == 0x0e603000 || m == 0x0ea03000)
+                kind = 7;
+            else if (m == 0x2e203000 || m == 0x2e603000 || m == 0x2ea03000)
+                kind = 8;
+            if (kind)
+            {
+                int Q = (insn >> 30) & 1;
+                int size = (insn >> 22) & 3;
+                if (size > 2)
+                    return a64_fail(c, "bad widening size", insn);
+                int dbits = 16 << size;
+                int sbits = dbits >> 1;
+                int rn = (insn >> 5) & 31;
+                int rm = (insn >> 16) & 31;
+                int rd = insn & 31;
+                int slanes = 64 / sbits;
+                int wide = kind >= 5;
+                uint8_t a[16], b[16], r[16];
+                memcpy(a, &c->d[rn], 8);
+                memcpy(a + 8, &c->dhi[rn], 8);
+                memcpy(b, &c->d[rm], 8);
+                memcpy(b + 8, &c->dhi[rm], 8);
+                memset(r, 0, sizeof r);
+                for (int i = 0; i < slanes; i++)
+                {
+                    uint64_t x = wide
+                        ? a64_lane_get(a, i, dbits)
+                        : a64_lane_get(a, Q ? slanes + i : i, sbits);
+                    uint64_t y = a64_lane_get(b, Q ? slanes + i : i, sbits);
+                    uint64_t v;
+                    if (kind == 1 || kind == 5)
+                        v = (uint64_t)(a64_lane_signed(x, wide ? dbits
+                                                              : sbits) +
+                                       a64_lane_signed(y, sbits));
+                    else if (kind == 3 || kind == 7)
+                        v = (uint64_t)(a64_lane_signed(x, wide ? dbits
+                                                              : sbits) -
+                                       a64_lane_signed(y, sbits));
+                    else if (kind == 2 || kind == 6)
+                        v = x + y;
+                    else
+                        v = x - y;
+                    a64_lane_put(r, i, dbits, v);
+                }
+                memcpy(&c->d[rd], r, 8);
+                memcpy(&c->dhi[rd], r + 8, 8);
+                c->pc = next;
+                continue;
+            }
+        }
         /* AdvSIMD integer add/sub/mul/mla for every element size. */
         {
             unsigned m = insn & 0xbfe0fc00;
@@ -2662,6 +2764,134 @@ static int a64_run(struct a64_cpu *c)
                 continue;
             }
         }
+        /* AdvSIMD narrowing moves (XTN/SQXTN/UQXTN and their 2 forms). */
+        {
+            unsigned m = insn & 0xbfe0fc00;
+            int kind = 0;
+            if (m == 0x0e202800 || m == 0x0e602800 || m == 0x0ea02800)
+                kind = 1;
+            else if (m == 0x0e204800 || m == 0x0e604800 || m == 0x0ea04800)
+                kind = 2;
+            else if (m == 0x2e204800 || m == 0x2e604800 || m == 0x2ea04800)
+                kind = 3;
+            if (kind)
+            {
+                int Q = (insn >> 30) & 1;
+                int size = (insn >> 22) & 3;
+                if (size > 2)
+                    return a64_fail(c, "bad narrowing move", insn);
+                int dbits = 8 << size;
+                int sbits = dbits << 1;
+                int rn = (insn >> 5) & 31;
+                int rd = insn & 31;
+                int lanes = 64 / dbits;
+                int lane0 = Q ? lanes : 0;
+                uint8_t a[16], r[16];
+                memcpy(a, &c->d[rn], 8);
+                memcpy(a + 8, &c->dhi[rn], 8);
+                memcpy(r, &c->d[rd], 8);
+                memcpy(r + 8, &c->dhi[rd], 8);
+                int64_t dmin = -(1ll << (dbits - 1));
+                int64_t dmax = (1ll << (dbits - 1)) - 1;
+                uint64_t dmask = (1ull << dbits) - 1;
+                for (int i = 0; i < lanes; i++)
+                {
+                    uint64_t v = a64_lane_get(a, i, sbits);
+                    uint64_t out;
+                    if (kind == 1)
+                        out = v & dmask;
+                    else
+                    {
+                        int64_t sv = a64_lane_signed(v, sbits);
+                        if (kind == 2)
+                        {
+                            if (sv < dmin)
+                                sv = dmin;
+                            if (sv > dmax)
+                                sv = dmax;
+                        }
+                        else
+                        {
+                            if (sv < 0)
+                                sv = 0;
+                            if ((uint64_t)sv > dmask)
+                                sv = (int64_t)dmask;
+                        }
+                        out = (uint64_t)sv & dmask;
+                    }
+                    a64_lane_put(r, lane0 + i, dbits, out);
+                }
+                memcpy(&c->d[rd], r, 8);
+                memcpy(&c->dhi[rd], r + 8, 8);
+                c->pc = next;
+                continue;
+            }
+        }
+        /* AdvSIMD saturating add/sub (SQADD/UQADD/SQSUB/UQSUB). */
+        {
+            unsigned m = insn & 0xbfe0fc00;
+            int kind = 0;
+            if (m == 0x0e200c00 || m == 0x0e600c00 ||
+                m == 0x0ea00c00 || m == 0x0ee00c00)
+                kind = 1;
+            else if (m == 0x2e200c00 || m == 0x2e600c00 ||
+                     m == 0x2ea00c00 || m == 0x2ee00c00)
+                kind = 2;
+            else if (m == 0x0e202c00 || m == 0x0e602c00 ||
+                     m == 0x0ea02c00 || m == 0x0ee02c00)
+                kind = 3;
+            else if (m == 0x2e202c00 || m == 0x2e602c00 ||
+                     m == 0x2ea02c00 || m == 0x2ee02c00)
+                kind = 4;
+            if (kind)
+            {
+                int Q = (insn >> 30) & 1;
+                int esize = 8 << ((insn >> 22) & 3);
+                int rn = (insn >> 5) & 31;
+                int rm = (insn >> 16) & 31;
+                int rd = insn & 31;
+                int lanes = (Q ? 128 : 64) / esize;
+                uint64_t umask = esize == 64 ? ~0ull : ((1ull << esize) - 1);
+                int64_t smax = esize == 64 ? INT64_MAX
+                                           : (1ll << (esize - 1)) - 1;
+                int64_t smin = esize == 64 ? INT64_MIN
+                                           : -(1ll << (esize - 1));
+                uint8_t a[16], b[16], r[16];
+                memcpy(a, &c->d[rn], 8);
+                memcpy(a + 8, &c->dhi[rn], 8);
+                memcpy(b, &c->d[rm], 8);
+                memcpy(b + 8, &c->dhi[rm], 8);
+                memset(r, 0, sizeof r);
+                for (int i = 0; i < lanes; i++)
+                {
+                    uint64_t x = a64_lane_get(a, i, esize);
+                    uint64_t y = a64_lane_get(b, i, esize);
+                    uint64_t v;
+                    if (kind == 1 || kind == 3)
+                    {
+                        __int128 wide = kind == 1
+                            ? (__int128)a64_lane_signed(x, esize) +
+                                  a64_lane_signed(y, esize)
+                            : (__int128)a64_lane_signed(x, esize) -
+                                  a64_lane_signed(y, esize);
+                        if (wide < smin)
+                            wide = smin;
+                        if (wide > smax)
+                            wide = smax;
+                        v = (uint64_t)(int64_t)wide;
+                    }
+                    else if (kind == 2)
+                        v = x > umask - y ? umask : x + y;
+                    else
+                        v = x > y ? x - y : 0;
+                    a64_lane_put(r, i, esize, v & umask);
+                }
+                memcpy(&c->d[rd], r, 8);
+                memcpy(&c->dhi[rd], r + 8, 8);
+                c->pc = next;
+                continue;
+            }
+        }
         /* AdvSIMD 4S floating-point max/min/divide. */
         if ((insn & 0xffe0fc00) == 0x4e20f400 ||
             (insn & 0xffe0fc00) == 0x4ea0f400 ||
@@ -2736,6 +2966,91 @@ static int a64_run(struct a64_cpu *c)
             }
             c->pc = next;
             continue;
+        }
+        /* AdvSIMD floating-point rounding (FRINTA/N/M/P/Z/X). */
+        {
+            unsigned m = insn & 0xfffffc00;
+            int kind = 0; /* 1 a, 2 n, 3 m, 4 p, 5 z, 6 x */
+            if (m == 0x6e218800 || m == 0x2e218800 || m == 0x6e618800)
+                kind = 1;
+            else if (m == 0x4e218800 || m == 0x0e218800 || m == 0x4e618800)
+                kind = 2;
+            else if (m == 0x4e219800 || m == 0x0e219800 || m == 0x4e619800)
+                kind = 3;
+            else if (m == 0x4ea18800 || m == 0x2ea18800 || m == 0x4ee18800)
+                kind = 4;
+            else if (m == 0x4ea19800 || m == 0x2ea19800 || m == 0x4ee19800)
+                kind = 5;
+            else if (m == 0x6e219800 || m == 0x2e219800 || m == 0x6e619800)
+                kind = 6;
+            if (kind)
+            {
+                int Q = (insn >> 30) & 1;
+                int size = (insn >> 22) & 3;
+                int rn = (insn >> 5) & 31;
+                int rd = insn & 31;
+                int esize, lanes;
+                /* FRINTP/Z encode 4S and 2D in size 2 and 3; the other
+                 * rounding modes use 0 and 1. */
+                int wide2d = (kind == 4 || kind == 5) ? 3 : 1;
+                if (size == wide2d - 1)
+                {
+                    esize = 32;
+                    lanes = Q ? 4 : 2;
+                }
+                else if (size == wide2d)
+                {
+                    if (!Q)
+                        return a64_fail(c, "bad float round", insn);
+                    esize = 64;
+                    lanes = 2;
+                }
+                else
+                    return a64_fail(c, "bad float round", insn);
+                uint8_t a[16], r[16];
+                memcpy(a, &c->d[rn], 8);
+                memcpy(a + 8, &c->dhi[rn], 8);
+                memset(r, 0, sizeof r);
+                for (int i = 0; i < lanes; i++)
+                {
+                    if (esize == 32)
+                    {
+                        float x, v;
+                        memcpy(&x, a + i * 4, 4);
+                        if (kind == 1)
+                            v = roundf(x);
+                        else if (kind == 2 || kind == 6)
+                            v = rintf(x);
+                        else if (kind == 3)
+                            v = floorf(x);
+                        else if (kind == 4)
+                            v = ceilf(x);
+                        else
+                            v = truncf(x);
+                        memcpy(r + i * 4, &v, 4);
+                    }
+                    else
+                    {
+                        double x, v;
+                        memcpy(&x, a + i * 8, 8);
+                        if (kind == 1)
+                            v = round(x);
+                        else if (kind == 2 || kind == 6)
+                            v = rint(x);
+                        else if (kind == 3)
+                            v = floor(x);
+                        else if (kind == 4)
+                            v = ceil(x);
+                        else
+                            v = trunc(x);
+                        memcpy(r + i * 8, &v, 8);
+                    }
+                }
+                memcpy(&c->d[rd], r, 8);
+                memcpy(&c->dhi[rd], r + 8, 8);
+                c->pc = next;
+                continue;
+            }
         }
         /* AdvSIMD vector conversions between integer and float (4S). */
         if ((insn & 0xfffffc00) == 0x4e21d800 ||
@@ -2848,6 +3163,180 @@ static int a64_run(struct a64_cpu *c)
             c->pc = next;
             continue;
         }
+        /* AdvSIMD floating-point compares (FCMEQ/FCMGT/FCMGE/ACGE/ACGT). */
+        {
+            unsigned m = insn & 0xbfe0fc00;
+            int kind = 0; /* 1 eq, 2 gt, 3 ge, 4 acge, 5 acgt */
+            if (m == 0x0e20e400 || m == 0x0e60e400)
+                kind = 1;
+            else if (m == 0x2ea0e400 || m == 0x2ee0e400)
+                kind = 2;
+            else if (m == 0x2e20e400 || m == 0x2e60e400)
+                kind = 3;
+            else if (m == 0x2e20ec00 || m == 0x2e60ec00)
+                kind = 4;
+            else if (m == 0x2ea0ec00 || m == 0x2ee0ec00)
+                kind = 5;
+            if (kind)
+            {
+                int Q = (insn >> 30) & 1;
+                int size = (insn >> 22) & 3;
+                int rn = (insn >> 5) & 31;
+                int rm = (insn >> 16) & 31;
+                int rd = insn & 31;
+                int esize, lanes;
+                /* FCMGT and FACGT use size 2 and 3 for 4S and 2D; the
+                 * equality and greater-or-equal forms use 0 and 1. */
+                int wide2d = (kind == 2 || kind == 5) ? 3 : 1;
+                if (size == wide2d - 1)
+                {
+                    esize = 32;
+                    lanes = Q ? 4 : 2;
+                }
+                else if (size == wide2d)
+                {
+                    if (!Q)
+                        return a64_fail(c, "bad float compare", insn);
+                    esize = 64;
+                    lanes = 2;
+                }
+                else
+                    return a64_fail(c, "bad float compare", insn);
+                uint8_t a[16], b[16], r[16];
+                memcpy(a, &c->d[rn], 8);
+                memcpy(a + 8, &c->dhi[rn], 8);
+                memcpy(b, &c->d[rm], 8);
+                memcpy(b + 8, &c->dhi[rm], 8);
+                memset(r, 0, sizeof r);
+                for (int i = 0; i < lanes; i++)
+                {
+                    int take;
+                    if (esize == 32)
+                    {
+                        float x, y;
+                        memcpy(&x, a + i * 4, 4);
+                        memcpy(&y, b + i * 4, 4);
+                        if (kind == 1)
+                            take = x == y;
+                        else if (kind == 2)
+                            take = x > y;
+                        else if (kind == 3)
+                            take = x >= y;
+                        else if (kind == 4)
+                            take = fabsf(x) >= fabsf(y);
+                        else
+                            take = fabsf(x) > fabsf(y);
+                        uint32_t ones = take ? 0xffffffffu : 0;
+                        memcpy(r + i * 4, &ones, 4);
+                    }
+                    else
+                    {
+                        double x, y;
+                        memcpy(&x, a + i * 8, 8);
+                        memcpy(&y, b + i * 8, 8);
+                        if (kind == 1)
+                            take = x == y;
+                        else if (kind == 2)
+                            take = x > y;
+                        else if (kind == 3)
+                            take = x >= y;
+                        else if (kind == 4)
+                            take = fabs(x) >= fabs(y);
+                        else
+                            take = fabs(x) > fabs(y);
+                        uint64_t ones = take ? ~0ull : 0;
+                        memcpy(r + i * 8, &ones, 8);
+                    }
+                }
+                memcpy(&c->d[rd], r, 8);
+                memcpy(&c->dhi[rd], r + 8, 8);
+                c->pc = next;
+                continue;
+            }
+        }
+        /* AdvSIMD floating-point compare against zero. */
+        {
+            unsigned m = insn & 0xbfe0fc00;
+            int kind = 0; /* 1 eq, 2 gt, 3 ge, 4 le, 5 lt */
+            if (m == 0x0ea0d800 || m == 0x0ee0d800)
+                kind = 1;
+            else if (m == 0x0ea0c800 || m == 0x0ee0c800)
+                kind = 2;
+            else if (m == 0x2ea0c800 || m == 0x2ee0c800)
+                kind = 3;
+            else if (m == 0x2ea0d800 || m == 0x2ee0d800)
+                kind = 4;
+            else if (m == 0x0ea0e800 || m == 0x0ee0e800)
+                kind = 5;
+            if (kind)
+            {
+                int Q = (insn >> 30) & 1;
+                int size = (insn >> 22) & 3;
+                int rn = (insn >> 5) & 31;
+                int rd = insn & 31;
+                int esize, lanes;
+                if (size == 2)
+                {
+                    esize = 32;
+                    lanes = Q ? 4 : 2;
+                }
+                else if (size == 3)
+                {
+                    if (!Q)
+                        return a64_fail(c, "bad float compare zero", insn);
+                    esize = 64;
+                    lanes = 2;
+                }
+                else
+                    return a64_fail(c, "bad float compare zero", insn);
+                uint8_t a[16], r[16];
+                memcpy(a, &c->d[rn], 8);
+                memcpy(a + 8, &c->dhi[rn], 8);
+                memset(r, 0, sizeof r);
+                for (int i = 0; i < lanes; i++)
+                {
+                    int take;
+                    if (esize == 32)
+                    {
+                        float x;
+                        memcpy(&x, a + i * 4, 4);
+                        if (kind == 1)
+                            take = x == 0.0f;
+                        else if (kind == 2)
+                            take = x > 0.0f;
+                        else if (kind == 3)
+                            take = x >= 0.0f;
+                        else if (kind == 4)
+                            take = x <= 0.0f;
+                        else
+                            take = x < 0.0f;
+                        uint32_t ones = take ? 0xffffffffu : 0;
+                        memcpy(r + i * 4, &ones, 4);
+                    }
+                    else
+                    {
+                        double x;
+                        memcpy(&x, a + i * 8, 8);
+                        if (kind == 1)
+                            take = x == 0.0;
+                        else if (kind == 2)
+                            take = x > 0.0;
+                        else if (kind == 3)
+                            take = x >= 0.0;
+                        else if (kind == 4)
+                            take = x <= 0.0;
+                        else
+                            take = x < 0.0;
+                        uint64_t ones = take ? ~0ull : 0;
+                        memcpy(r + i * 8, &ones, 8);
+                    }
+                }
+                memcpy(&c->d[rd], r, 8);
+                memcpy(&c->dhi[rd], r + 8, 8);
+                c->pc = next;
+                continue;
+            }
+        }
         /* AdvSIMD pairwise add (ADDP). */
         if ((insn & 0xbfe0fc00) == 0x0e20bc00 ||
             (insn & 0xbfe0fc00) == 0x0e60bc00 ||
@@ -2880,6 +3369,88 @@ static int a64_run(struct a64_cpu *c)
             memcpy(&c->dhi[rd], r + 8, 8);
             c->pc = next;
             continue;
+        }
+        /* AdvSIMD pairwise floating-point add/min/max. */
+        {
+            unsigned m = insn & 0xbfe0fc00;
+            int kind = 0; /* 1 addp, 2 maxp, 3 minp */
+            if (m == 0x2e20d400 || m == 0x2e60d400)
+                kind = 1;
+            else if (m == 0x2e20f400 || m == 0x2e60f400)
+                kind = 2;
+            else if (m == 0x2ea0f400 || m == 0x2ee0f400)
+                kind = 3;
+            if (kind)
+            {
+                int Q = (insn >> 30) & 1;
+                int size = (insn >> 22) & 3;
+                int rn = (insn >> 5) & 31;
+                int rm = (insn >> 16) & 31;
+                int rd = insn & 31;
+                int esize, lanes;
+                /* FMINP uses size 2 and 3 for 4S and 2D; FADDP and
+                 * FMAXP use 0 and 1. */
+                int wide2d = kind == 3 ? 3 : 1;
+                if (size == wide2d - 1)
+                {
+                    esize = 32;
+                    lanes = Q ? 4 : 2;
+                }
+                else if (size == wide2d)
+                {
+                    if (!Q)
+                        return a64_fail(c, "bad pairwise float", insn);
+                    esize = 64;
+                    lanes = 2;
+                }
+                else
+                    return a64_fail(c, "bad pairwise float", insn);
+                int half = lanes / 2;
+                uint8_t a[16], b[16], r[16];
+                memcpy(a, &c->d[rn], 8);
+                memcpy(a + 8, &c->dhi[rn], 8);
+                memcpy(b, &c->d[rm], 8);
+                memcpy(b + 8, &c->dhi[rm], 8);
+                memset(r, 0, sizeof r);
+                if (esize == 32)
+                {
+                    float fa[4] = {0, 0, 0, 0}, fb[4] = {0, 0, 0, 0};
+                    float fr[4] = {0, 0, 0, 0};
+                    memcpy(fa, a, (size_t)lanes * 4);
+                    memcpy(fb, b, (size_t)lanes * 4);
+                    for (int i = 0; i < half; i++)
+                    {
+                        float x = fa[2 * i], y = fa[2 * i + 1];
+                        fr[i] = kind == 1 ? x + y
+                               : kind == 2 ? (x > y ? x : y)
+                                           : (x < y ? x : y);
+                        x = fb[2 * i];
+                        y = fb[2 * i + 1];
+                        fr[half + i] = kind == 1 ? x + y
+                                       : kind == 2 ? (x > y ? x : y)
+                                                   : (x < y ? x : y);
+                    }
+                    memcpy(&c->d[rd], fr, 8);
+                    memcpy(&c->dhi[rd], fr + 2, 8);
+                }
+                else
+                {
+                    double da[2], db[2], dr[2];
+                    memcpy(da, a, 16);
+                    memcpy(db, b, 16);
+                    double x = da[0], y = da[1];
+                    dr[0] = kind == 1 ? x + y
+                            : kind == 2 ? (x > y ? x : y) : (x < y ? x : y);
+                    x = db[0];
+                    y = db[1];
+                    dr[1] = kind == 1 ? x + y
+                            : kind == 2 ? (x > y ? x : y) : (x < y ? x : y);
+                    memcpy(&c->d[rd], dr, 8);
+                    memcpy(&c->dhi[rd], dr + 1, 8);
+                }
+                c->pc = next;
+                continue;
+            }
         }
         /* AdvSIMD horizontal reductions for 4S vectors. */
         if ((insn & 0xfffffc00) == 0x4eb0a800 ||
@@ -2930,6 +3501,38 @@ static int a64_run(struct a64_cpu *c)
                 c->d[rd] = bits;
             }
             c->dhi[rd] = 0;
+            c->pc = next;
+            continue;
+        }
+        /* AdvSIMD element insert from another vector (MOV element).
+         * imm5 encodes the destination element, imm4 the source, both in
+         * the element's own width. */
+        if ((insn & 0xffe08400) == 0x6e000400 ||
+            (insn & 0xffe08400) == 0x2e000400)
+        {
+            int Q = (insn >> 30) & 1;
+            unsigned imm5 = (insn >> 16) & 31;
+            unsigned imm4 = (insn >> 11) & 0xf;
+            int rn = (insn >> 5) & 31;
+            int rd = insn & 31;
+            if (!imm5)
+                return a64_fail(c, "bad element insert", insn);
+            int lz = __builtin_ctz(imm5);
+            int esize = 8 << lz;
+            int index1 = (int)(imm5 >> (lz + 1));
+            int index2 = (int)(imm4 >> lz);
+            int lanes = (Q ? 128 : 64) / esize;
+            if (index1 >= lanes || index2 >= lanes)
+                return a64_fail(c, "bad element insert index", insn);
+            uint8_t src[16], dst[16];
+            memcpy(src, &c->d[rn], 8);
+            memcpy(src + 8, &c->dhi[rn], 8);
+            memcpy(dst, &c->d[rd], 8);
+            memcpy(dst + 8, &c->dhi[rd], 8);
+            a64_lane_put(dst, index1, esize,
+                         a64_lane_get(src, index2, esize));
+            memcpy(&c->d[rd], dst, 8);
+            memcpy(&c->dhi[rd], dst + 8, 8);
             c->pc = next;
             continue;
         }
@@ -3067,6 +3670,141 @@ static int a64_run(struct a64_cpu *c)
                 continue;
             }
         }
+        /* AdvSIMD table lookup (TBL/TBX). Bit 13 is part of the table
+         * length and bit 17 of Rm, so both are masked out. */
+        if ((insn & 0xffe09c00) == 0x4e000000 ||
+            (insn & 0xffe09c00) == 0x4e001000 ||
+            (insn & 0xffe09c00) == 0x0e000000 ||
+            (insn & 0xffe09c00) == 0x0e001000)
+        {
+            int tbx = ((insn & 0xffe09c00) & 0x1000) != 0;
+            int Q = (insn >> 30) & 1;
+            int len = (insn >> 13) & 3;
+            int nregs = len + 1;
+            int rm = (insn >> 16) & 31;
+            int rn = (insn >> 5) & 31;
+            int rd = insn & 31;
+            int bytes = Q ? 16 : 8;
+            uint8_t table[64], idx[16], r[16];
+            memset(table, 0, sizeof table);
+            for (int i = 0; i < nregs; i++)
+            {
+                int reg = (rn + i) & 31;
+                memcpy(table + i * 16, &c->d[reg], 8);
+                memcpy(table + i * 16 + 8, &c->dhi[reg], 8);
+            }
+            memset(idx, 0, sizeof idx);
+            memcpy(idx, &c->d[rm], 8);
+            if (bytes == 16)
+                memcpy(idx + 8, &c->dhi[rm], 8);
+            if (tbx)
+            {
+                memcpy(r, &c->d[rd], 8);
+                memcpy(r + 8, &c->dhi[rd], 8);
+            }
+            else
+                memset(r, 0, sizeof r);
+            for (int i = 0; i < bytes; i++)
+            {
+                int j = idx[i];
+                if (j < nregs * 16)
+                    r[i] = table[j];
+            }
+            if (bytes == 8)
+                memset(r + 8, 0, 8);
+            memcpy(&c->d[rd], r, 8);
+            memcpy(&c->dhi[rd], r + 8, 8);
+            c->pc = next;
+            continue;
+        }
+        /* AdvSIMD extract (EXT). */
+        if ((insn & 0xffe08400) == 0x6e000000 ||
+            (insn & 0xffe08400) == 0x2e000000)
+        {
+            int Q = (insn >> 30) & 1;
+            int imm = (insn >> 11) & 0xf;
+            int rm = (insn >> 16) & 31;
+            int rn = (insn >> 5) & 31;
+            int rd = insn & 31;
+            int bytes = Q ? 16 : 8;
+            if (imm >= bytes)
+                return a64_fail(c, "bad extract index", insn);
+            uint8_t a[16], b[16], r[16];
+            memcpy(a, &c->d[rn], 8);
+            memcpy(a + 8, &c->dhi[rn], 8);
+            memcpy(b, &c->d[rm], 8);
+            memcpy(b + 8, &c->dhi[rm], 8);
+            memset(r, 0, sizeof r);
+            for (int i = 0; i < bytes; i++)
+            {
+                int j = imm + i;
+                r[i] = j < bytes ? a[j] : b[j - bytes];
+            }
+            memcpy(&c->d[rd], r, 8);
+            memcpy(&c->dhi[rd], r + 8, 8);
+            c->pc = next;
+            continue;
+        }
+        /* AdvSIMD load/store one element to one lane (LD1/ST1). The
+         * element size and lane index share bits 15-10 with Q as the
+         * top index bit; the encodings are empirical for each size. */
+        if ((insn & 0xbf000000) == 0x0d000000 &&
+            ((insn >> 21) & 1) == 0)
+        {
+            int load = (insn >> 22) & 1;
+            int Q = (insn >> 30) & 1;
+            int post = (insn >> 23) & 1;
+            int rm = (insn >> 16) & 31;
+            int rn = (insn >> 5) & 31;
+            int rt = insn & 31;
+            unsigned f = (insn >> 10) & 0x3f;
+            int esize = 0, index = 0;
+            if ((f & 0x38) == 0x00)
+            {
+                esize = 8;
+                index = (Q << 3) | (int)(f & 7);
+            }
+            else if ((f & 0x38) == 0x10)
+            {
+                esize = 16;
+                index = (Q << 2) | (int)((f >> 1) & 3);
+            }
+            else if (f == 0x20 || f == 0x24)
+            {
+                esize = 32;
+                index = (Q << 1) | (int)((f >> 2) & 1);
+            }
+            else if (f == 0x21)
+            {
+                esize = 64;
+                index = Q;
+            }
+            if (esize)
+            {
+                int lanes = (Q ? 128 : 64) / esize;
+                if (index >= lanes)
+                    return a64_fail(c, "bad single lane", insn);
+                uint64_t addr = c->x[rn];
+                uint8_t lane[16];
+                memcpy(lane, &c->d[rt], 8);
+                memcpy(lane + 8, &c->dhi[rt], 8);
+                if (load)
+                {
+                    uint64_t v = a64_load(c, addr, esize / 8, 0);
+                    a64_lane_put(lane, index, esize, v);
+                    memcpy(&c->d[rt], lane, 8);
+                    memcpy(&c->dhi[rt], lane + 8, 8);
+                }
+                else
+                    a64_store(c, addr, a64_lane_get(lane, index, esize),
+                              esize / 8);
+                if (post)
+                    c->x[rn] += rm == 31 ? (uint64_t)(esize / 8)
+                                         : c->x[rm];
+                c->pc = next;
+                continue;
+            }
+        }
         /* AdvSIMD load-one-lane-replicate (LD1R). */
         {
             unsigned m = insn & 0xbfe0fc00;
@@ -3132,6 +3870,71 @@ static int a64_run(struct a64_cpu *c)
                             a64_store(c,
                                       addr + (uint64_t)i * regbytes + 8,
                                       c->dhi[r], 8);
+                    }
+                }
+                if (post)
+                    c->x[rn] += rm == 31
+                                    ? (uint64_t)nregs * (uint64_t)regbytes
+                                    : c->x[rm];
+                c->pc = next;
+                continue;
+            }
+        }
+        /* AdvSIMD multiple-structure load/store (LD2/LD3/LD4) with no
+         * offset or a post-index, de-interleaving on load and
+         * interleaving on store. */
+        if ((insn & 0xbf000000) == 0x0c000000 &&
+            ((insn >> 21) & 1) == 0)
+        {
+            unsigned opcode = (insn >> 12) & 0xf;
+            int nregs = opcode == 0x8 ? 2 : opcode == 0x4 ? 3 :
+                        opcode == 0x0 ? 4 : 0;
+            if (nregs)
+            {
+                int load = (insn >> 22) & 1;
+                int post = (insn >> 23) & 1;
+                int Q = (insn >> 30) & 1;
+                int rm = (insn >> 16) & 31;
+                int rn = (insn >> 5) & 31;
+                int rt = insn & 31;
+                int esize = 8 << ((insn >> 10) & 3);
+                int regbytes = Q ? 16 : 8;
+                if (esize == 64 && !Q)
+                    return a64_fail(c, "bad vector structure", insn);
+                int lanes = regbytes * 8 / esize;
+                uint64_t addr = c->x[rn];
+                for (int i = 0; i < nregs; i++)
+                {
+                    int r = rt + i;
+                    if (r > 31)
+                        return a64_fail(c, "bad vector list", insn);
+                    uint8_t dst[16];
+                    memset(dst, 0, sizeof dst);
+                    if (load)
+                    {
+                        for (int j = 0; j < lanes; j++)
+                        {
+                            uint64_t v = a64_load(
+                                c, addr + (uint64_t)(j * nregs + i) *
+                                              (uint64_t)(esize / 8),
+                                esize / 8, 0);
+                            a64_lane_put(dst, j, esize, v);
+                        }
+                        memcpy(&c->d[r], dst, 8);
+                        memcpy(&c->dhi[r], dst + 8, 8);
+                    }
+                    else
+                    {
+                        memcpy(dst, &c->d[r], 8);
+                        memcpy(dst + 8, &c->dhi[r], 8);
+                        for (int j = 0; j < lanes; j++)
+                        {
+                            uint64_t v = a64_lane_get(dst, j, esize);
+                            a64_store(c,
+                                      addr + (uint64_t)(j * nregs + i) *
+                                                 (uint64_t)(esize / 8),
+                                      v, esize / 8);
+                        }
                     }
                 }
                 if (post)

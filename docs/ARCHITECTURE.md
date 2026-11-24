@@ -1804,10 +1804,11 @@ Python for iteration speed.
   bytes) and non-HFA large structs by pointer, with x8 or hidden-buffer
   returns. The printf-family gates cover fprintf, sprintf, snprintf and
   NSLog with %@ objects, and AdvSIMD coverage spans shifts, integer
-  arithmetic in every lane size, min/max, compares, conversions,
-  reductions, element moves, zip/uzp/trn permutations and LD1/ST1
-  single-structure loads and stores; interleaved structures and the
-  remaining AdvSIMD families are still pending.
+  arithmetic in every lane size, widening and narrowing arithmetic,
+  saturating add/sub, min/max, compares, conversions, reductions,
+  element moves, zip/uzp/trn permutations, table lookup and extraction,
+  floating-point rounding, compares and pairwise operations, and
+  LD1/ST1/LD2/LD3/LD4 structure loads and stores.
   `--inspect` stops after mapping. The design is in
   `docs/ARM64-TRANSLATION.md`.
 - The dyld shared cache is not parsed; each dylib is loaded from disk.

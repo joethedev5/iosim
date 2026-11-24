@@ -2299,6 +2299,23 @@ checks selected result lines and compares the complete output of the
 block translator with the `IOSIM_ARM64_NOJIT=1` interpreter run; the two
 must be identical.
 
+### arm64: AdvSIMD widening, rounding and structures
+
+`tests/arm64_neon2.c` covers the second AdvSIMD set. Widening add and
+subtract, including the wide and 2 forms, are forced through inline
+assembly because the compiler lowers `vaddl` to SSHLL plus ADD;
+SSHLL/USHLL with explicit shift amounts, XTN/SQXTN/UQXTN, saturating
+SQADD/UQADD/SQSUB/UQSUB, TBL/TBX with out-of-range indexes, EXT,
+FRINTA/N/M/P/Z/X, the FP compares and their absolute forms,
+FADDP/FMAXP/FMINP, and LD2/LD3/LD4 de-interleaving with ST4
+interleaving are exercised from intrinsics. `tests/arm64_neon3.c`
+covers the other element sizes: widening to 4S and 2D, narrowing from
+4S and 2D, saturating 16-bit and 64-bit add/sub, 8B table lookups with
+out-of-range indexes and 8B extraction, 2S/2D rounding and compares,
+2D pairwise FP and 8B/2D de-interleaving. The suite checks sixteen
+result lines across the two fixtures and requires each translator's
+output to equal its `IOSIM_ARM64_NOJIT=1` interpreter run.
+
 ### arm64: an app bundle on the device path
 
 `tests/arm64_device_app.m` is a thin arm64 bundle with the same scene as

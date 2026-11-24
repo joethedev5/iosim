@@ -2410,3 +2410,32 @@ components.
 - A fixture with all three frameworks running arm64 blocks produces the
   same four lines with `IOSIM_ARM64_NOJIT=1`, and `exit(0)` from the
   animation completion terminates the loader with status zero.
+
+## 2026-11-24: widening, rounding and interleaved structures
+
+- clang lowers `vaddl` to SSHLL plus ADD rather than SADDL, so the
+  long-shift family is required for generated code. Its shift amount is
+  immh:immb minus the source element width (8, 16 or 32 bits), and the
+  destination width comes from the highest set bit of immh.
+- Base constants for mask-based decoders must be written with the Rm
+  field cleared. Encodings sampled with `v2` left bit 17 set in several
+  bases for SQADD, the FP compares and the pairwise FP operations, so
+  every instruction with a different Rm missed. The masks clear bits
+  20-16, so bases belong at `...0...` there.
+- The greater-than families (FCMGT, FACGT, FMINP, FRINTP/FRINTZ) encode
+  4S and 2D in size fields 2 and 3, while the equality and
+  greater-or-equal forms plus FADDP/FMAXP and FRINTA/N/X use 0 and 1.
+  Lane selection has to come from the matched opcode, not one size rule.
+- At -O0 the compiler materializes constants element by element
+  (MOV element, i.e. INS with a vector source) and loads them one lane
+  at a time with LD1 single-lane. Both are decoded now. Single-lane
+  size and index share bits 15-10, with Q as the top index bit:
+  8-bit lanes use bits 12-10, 16-bit use bit 14 and bits 12-11, 32-bit
+  bit 15 and bit 12, 64-bit bit 15 with Q as the index.
+- TBL's length sits in bits 14-13 and EXT's immediate in bits 14-11,
+  so a mask that keeps them rejects encodings whose register numbers set
+  the overlapping bit. TBL with Q=0 uses its own base and zeroes the
+  upper half; TBX keeps the destination element.
+- LD2/LD3/LD4 de-interleave with `Vr[i] = mem[nregs*i + r]`; stores
+  interleave with the inverse. The list mask must exclude the length
+  bits 15-14.
