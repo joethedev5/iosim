@@ -1221,6 +1221,17 @@ is a GET and `/final` returns its GET body, `redirected body`; `POST
 `GET /loop` redirects to itself and fails with
 `[redirect] loop error -1007` after ten hops.
 
+### Foundation: URLSession redirect delegate decisions
+
+`tests/urlsession_redirect_delegate_test.m` runs a delegate session against
+`tests/redirect_http_server.py`. For `GET /start` the delegate logs
+`[redirect-delegate] ask 302 /final` and returns the proposed request, so the
+task follows it and completes with
+`[redirect-delegate] final 200 1 15 redirected body /final`. For `GET /hop`
+it logs `[redirect-delegate] ask 301 /start` and returns nil, refusing the
+redirect; the completion then receives the 301 redirect response itself:
+`[redirect-delegate] refused 301 1 5 moved /hop`.
+
 ### Foundation: KVC collection operators
 
 `tests/kvc_operators_test.m` runs the operators over an array of boxed

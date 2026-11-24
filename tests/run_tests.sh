@@ -2485,6 +2485,46 @@ else
 fi
 kill "$REDIRECT_PID" 2>/dev/null || true
 
+# ---------- 4g10c. URLSession redirect delegate decisions ----------
+python3 -u "$ROOT/tests/redirect_http_server.py" > "$T/redirect2.log" 2>&1 &
+REDIRECT2_PID=$!
+REDIRECT2_PORT=""
+i=0
+while [ "$i" -lt 100 ]; do
+    REDIRECT2_PORT=$(sed -n 's/.*port \([0-9][0-9]*\).*/\1/p' "$T/redirect2.log" | head -1)
+    [ -n "$REDIRECT2_PORT" ] && break
+    i=$((i + 1))
+    sleep 0.05
+done
+if [ -z "$REDIRECT2_PORT" ]; then
+    echo "FAIL redirect delegate server did not start"
+    fails=$((fails + 1))
+    kill "$REDIRECT2_PID" 2>/dev/null || true
+else
+    "$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
+        -fblocks -ffreestanding -O1 -I "$ROOT/frameworks" \
+        -c "$ROOT/tests/urlsession_redirect_delegate_test.m" \
+        -o "$T/urlsession_redirect_delegate_test.o"
+    "$LD64" -arch x86_64 -platform_version $PLATFORM -e _main \
+        -o "$T/urlsession_redirect_delegate_test" \
+        "$T/urlsession_redirect_delegate_test.o" \
+        "$ROOT/runtime/System/Library/Frameworks/Foundation.framework/Foundation" \
+        -undefined dynamic_lookup
+    out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" \
+        "$T/urlsession_redirect_delegate_test" "$REDIRECT2_PORT" 2>&1)"
+    check "[redirect-delegate] ask 302 /final" "$out" \
+        "the redirect delegate sees the response and the proposed request"
+    check "[redirect-delegate] allow" "$out" \
+        "returning the proposed request lets the task follow the redirect"
+    check "[redirect-delegate] final 200 1 15 redirected body /final" "$out" \
+        "an allowed redirect completes on the final response"
+    check "[redirect-delegate] deny" "$out" \
+        "returning nil refuses the redirect"
+    check "[redirect-delegate] refused 301 1 5 moved /hop" "$out" \
+        "a refused redirect delivers the redirect response itself"
+fi
+kill "$REDIRECT2_PID" 2>/dev/null || true
+
 # ---------- 4g11. NSLock, NSRecursiveLock and NSCondition ----------
 "$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
     -ffreestanding -O1 -I "$ROOT/frameworks" \

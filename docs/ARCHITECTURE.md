@@ -359,8 +359,13 @@ Location is resolved against the current URL (absolute, scheme-relative,
 absolute-path and path-relative forms), a 303 rewrites the request to a
 body-less GET and a 307/308 keeps the method and body, and more than ten hops
 fail
-with `NSURLErrorHTTPTooManyRedirects`. The final response carries the final
-URL. For `https://` URLs
+with `NSURLErrorHTTPTooManyRedirects`. When the session has a delegate that
+implements `URLSession:task:willPerformHTTPRedirection:newRequest:
+completionHandler:`, the task asks it first: returning the proposed request
+follows the redirect with that URL, method, body and headers, returning nil
+delivers the redirect response itself, and a handler left uncalled makes the
+task follow automatically. The final response carries the final URL. For
+`https://` URLs
 the same client wraps the connected socket in OpenSSL with SNI and the
 system TLS stack. Certificate and hostname verification are enabled by
 default through the system trust store; tests that use a self-signed loopback

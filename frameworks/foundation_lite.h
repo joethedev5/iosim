@@ -928,6 +928,12 @@ typedef void *NSURLSessionDownloadCompletionHandler;
 @optional
 - (void)URLSession:(id)session task:(id)task
     didCompleteWithError:(id)error;
+#ifdef __BLOCKS__
+- (void)URLSession:(id)session task:(id)task
+    willPerformHTTPRedirection:(id)response
+                    newRequest:(id)request
+             completionHandler:(void (^)(id request))completionHandler;
+#endif
 @end
 
 @protocol NSURLSessionDataDelegate <NSURLSessionTaskDelegate>

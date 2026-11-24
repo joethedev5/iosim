@@ -8299,6 +8299,46 @@ static id url_redirect_headers(id currentHeaders, BOOL dropBody)
     return out;
 }
 
+/* Serializes a request's header dictionary plus the cookies stored for its
+ * URL, matching the header string a task sends on resume. */
+static id url_request_headers_string(NSURLRequest *request, NSURL *url)
+{
+    NSMutableString *raw = [NSMutableString string];
+    id headers = request ? [request allHTTPHeaderFields] : nil;
+    if (headers)
+    {
+        for (id key in headers)
+        {
+            [raw appendString:key];
+            [raw appendString:@": "];
+            [raw appendString:[headers objectForKey:key]];
+            [raw appendString:@"\r\n"];
+        }
+    }
+    NSHTTPCookieStorage *cookieStorage =
+        [NSHTTPCookieStorage sharedHTTPCookieStorage];
+    NSArray *cookies = [cookieStorage cookiesForURL:url];
+    if (cookies && [cookies count] > 0)
+    {
+        id fields = [NSHTTPCookie requestHeaderFieldsWithCookies:cookies];
+        id cookieHeader = fields ? [fields objectForKey:@"Cookie"] : nil;
+        if (cookieHeader)
+        {
+            [raw appendString:@"Cookie: "];
+            [raw appendString:cookieHeader];
+            [raw appendString:@"\r\n"];
+        }
+    }
+    return [raw length] ? raw : nil;
+}
+
+/* A redirect delegate's decision, written from the completion handler block.
+ * Heap-backed so a late asynchronous call cannot touch a dead stack frame. */
+struct url_redirect_decision {
+    volatile int called;
+    id request;
+};
+
 struct url_task_ctx {
     id task;
     id url;
@@ -8419,13 +8459,101 @@ static void url_task_main(void *raw)
                 status == 303 ||
                 ((status == 301 || status == 302) && currentMethod != nil &&
                  ![[currentMethod uppercaseString] isEqual:@"GET"]);
-            currentURL = nextURL;
-            currentHeaders = url_redirect_headers(currentHeaders, toGet);
-            if (toGet)
+            id session = task->_session;
+            id delegate = session ? ((NSURLSession *)session)->_delegate : nil;
+            if (delegate && [delegate respondsToSelector:
+                    @selector(URLSession:task:willPerformHTTPRedirection:
+                              newRequest:completionHandler:)])
             {
-                currentMethod = @"GET";
-                currentBody = 0;
-                currentBodyLength = 0;
+                NSHTTPURLResponse *redirect_response =
+                    [[NSHTTPURLResponse alloc] initWithURL:currentURL
+                                                 statusCode:status
+                                                   headers:response_headers];
+                NSMutableURLRequest *proposed =
+                    [[NSMutableURLRequest alloc] init];
+                [proposed setURL:nextURL];
+                [proposed setHTTPMethod:toGet ? @"GET" : currentMethod];
+                if (!toGet && currentBodyLength)
+                    [proposed setHTTPBody:
+                        [NSData dataWithBytes:currentBody
+                                       length:currentBodyLength]];
+                [proposed setAllHTTPHeaderFields:
+                    url_headers_from_raw(currentHeaders
+                        ? [currentHeaders UTF8String] : 0)];
+                struct url_redirect_decision *decision =
+                    calloc(1, sizeof(*decision));
+                void (^completion)(id) = ^(id request) {
+                    if (!decision->called)
+                    {
+                        decision->called = 1;
+                        decision->request = request;
+                    }
+                };
+                [(id<NSURLSessionTaskDelegate>)delegate
+                    URLSession:session
+                            task:task
+    willPerformHTTPRedirection:redirect_response
+                      newRequest:proposed
+               completionHandler:completion];
+                if (decision->called)
+                {
+                    id chosen = decision->request;
+                    if (!chosen)
+                    {
+                        /* The delegate refused the redirect: deliver the
+                         * redirect response itself. */
+                        data = [NSData dataWithBytes:bytes length:length];
+                        response = redirect_response;
+                        cookie_store_response_headers(raw_headers,
+                                                      currentURL);
+                        break;
+                    }
+                    NSURL *chosen_url = [chosen URL];
+                    id chosen_method = [chosen HTTPMethod];
+                    id chosen_body = [chosen HTTPBody];
+                    currentURL = chosen_url ? chosen_url : nextURL;
+                    if (chosen_method)
+                        currentMethod = chosen_method;
+                    else if (toGet)
+                        currentMethod = @"GET";
+                    if ([chosen_body isKindOfClass:[NSData class]])
+                    {
+                        currentBody = [chosen_body bytes];
+                        currentBodyLength = [chosen_body length];
+                    }
+                    else
+                    {
+                        currentBody = 0;
+                        currentBodyLength = 0;
+                    }
+                    currentHeaders =
+                        url_request_headers_string(chosen, currentURL);
+                }
+                else
+                {
+                    /* The handler was not called before the delegate
+                     * returned; follow the redirect automatically. */
+                    currentURL = nextURL;
+                    currentHeaders =
+                        url_redirect_headers(currentHeaders, toGet);
+                    if (toGet)
+                    {
+                        currentMethod = @"GET";
+                        currentBody = 0;
+                        currentBodyLength = 0;
+                    }
+                }
+            }
+            else
+            {
+                currentURL = nextURL;
+                currentHeaders = url_redirect_headers(currentHeaders, toGet);
+                if (toGet)
+                {
+                    currentMethod = @"GET";
+                    currentBody = 0;
+                    currentBodyLength = 0;
+                }
             }
             if (bytes)
             {

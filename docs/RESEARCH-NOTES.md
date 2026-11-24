@@ -1743,3 +1743,14 @@ components.
   307/308 keep the method and body. More than ten hops fail with
   NSURLErrorHTTPTooManyRedirects (-1007), and the final response carries the
   final URL.
+
+## 2026-11-24: URLSession redirect delegate decisions
+
+- A session delegate implementing
+  `URLSession:task:willPerformHTTPRedirection:newRequest:completionHandler:`
+  receives the redirect response and the proposed request. Returning that
+  request follows the redirect with its URL/method/body/headers; returning
+  nil delivers the redirect response itself.
+- The callback is expected to call its completion handler synchronously; if
+  it has not been called when the delegate method returns, the task follows
+  the redirect automatically.
