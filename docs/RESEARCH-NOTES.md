@@ -2329,3 +2329,37 @@ components.
 - `tests/arm64_struct` run twice against one cache directory: the first
   run prints `jit block` traces and writes the file, the second prints
   `jit cached` and no `jit block` lines with the same output and status.
+
+## 2026-11-24: an arm64 app bundle through the device path
+
+- The device manager starts an app with `iosim-run` and only
+  `--dylib-path <runtime>/System/Library/Frameworks`; it never passes
+  `--load-dylib`. A thin arm64 fixture linked with
+  `-undefined dynamic_lookup` carries no `LC_LOAD_DYLIB` entries, so
+  nothing loaded UIKit and its `UIApplicationMain`, class and method
+  symbols stayed unresolved.
+- `iosim_context_preload_frameworks` (context.c) now opens Foundation,
+  UIKit, QuartzCore and UserNotifications by appending their canonical
+  install names to `DYLD_ROOT_PATH`; missing files are skipped and
+  `find_loaded` checks the install name so an image loaded through a
+  load command is not duplicated. main.c calls it only for an arm64 main
+  with no explicit `--load-dylib` list; an explicit list stays
+  authoritative. Every existing arm64 fixture run without `--load-dylib`
+  now preloads the frameworks too, with unchanged output.
+- `tests/arm64_device_app.m` is a thin arm64 bundle with the dual-
+  architecture fixture's scene. It prints `[arm64device] ready` and
+  renders through native UIKit. A launch without `IOSIM_EVENT_FIFO`
+  renders one frame, presents and returns; a SpringBoard repaint queued
+  by the install can then overwrite the device framebuffer before a
+  screenshot. The suite waits 0.5 s for that repaint, gives the app its
+  own event-stream FIFO via `SIMCTL_CHILD_IOSIM_EVENT_FIFO` so it stays
+  foreground, waits for the framebuffer's mtime to pass a marker, then
+  copies and samples it: red (100,140), green (100,260), blue (100,380),
+  black (350,800) and at least 200 white label pixels.
+- The same bundle then launches from its SpringBoard icon (grid slot 7
+  on the otherwise empty device at 339.8333,222.1667). SpringBoard spawns
+  the loader with no `--dylib-path` at all, so this path depends on the
+  preload as well; the app's stdout goes to `springboard.log`, the
+  capture shows the same scene, and a `home` event suspends it. A manual
+  run of the same binary directly under `build/iosim-run` with only
+  `DYLD_ROOT_PATH` (no `--load-dylib`) produced a byte-identical PNG.

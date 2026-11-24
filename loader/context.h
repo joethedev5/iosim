@@ -31,6 +31,11 @@ struct iosim_image *iosim_context_load_dylib(struct iosim_context *ctx,
                                              const char *path,
                                              char *err, size_t errlen);
 
+/* Loads the standard app frameworks (Foundation, UIKit, QuartzCore,
+ * UserNotifications) from the simulator runtime root, for a thin arm64 main
+ * whose load commands do not name them. Missing frameworks are skipped. */
+void iosim_context_preload_frameworks(struct iosim_context *ctx);
+
 /* Applies fixups to every loaded image. */
 int iosim_context_apply_fixups(struct iosim_context *ctx,
                                char *err, size_t errlen);

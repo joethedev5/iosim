@@ -248,6 +248,39 @@ struct iosim_image *iosim_context_load_dylib(struct iosim_context *ctx,
     return load_one(ctx, use, 0, err, errlen);
 }
 
+void iosim_context_preload_frameworks(struct iosim_context *ctx)
+{
+    /* A thin arm64 fixture links with -undefined dynamic_lookup, so its
+     * load commands do not name the frameworks it imports. The device
+     * manager starts such an app with a framework search directory but no
+     * --load-dylib list; open the standard frameworks from the simulator
+     * runtime root so its imports resolve. An app that already loaded one
+     * (through a load command or an explicit list) is left alone, and
+     * frameworks missing from this runtime are skipped. */
+    static const char *const names[] = {
+        "/System/Library/Frameworks/Foundation.framework/Foundation",
+        "/System/Library/Frameworks/UIKit.framework/UIKit",
+        "/System/Library/Frameworks/QuartzCore.framework/QuartzCore",
+        "/System/Library/Frameworks/UserNotifications.framework/UserNotifications",
+    };
+    const char *root = getenv("DYLD_ROOT_PATH");
+    char err[512];
+
+    for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++)
+    {
+        if (find_loaded(ctx, names[i]))
+            continue;
+        char path[PATH_MAX];
+        if (root && *root)
+            snprintf(path, sizeof(path), "%s%s", root, names[i]);
+        else
+            snprintf(path, sizeof(path), "%s", names[i]);
+        if (!file_exists(path))
+            continue;
+        iosim_context_load_dylib(ctx, path, err, sizeof(err));
+    }
+}
+
 /* Records symbols an arm64 image imports from native framework images so
  * the arm64 call gate can call them by address. */
 static void note_arm64_native_symbol(struct iosim_image *img,

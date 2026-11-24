@@ -215,6 +215,14 @@ int main(int argc, char **argv)
         }
     }
 
+    /* A thin arm64 app is linked by name and carries no framework load
+     * commands, so the device manager's launch (which passes only a search
+     * directory) leaves its UIKit and Foundation imports unresolved. An
+     * explicit --load-dylib list is authoritative; otherwise load the
+     * standard frameworks the runtime provides. */
+    if (img->is_arm64 && npreload == 0)
+        iosim_context_preload_frameworks(&ctx);
+
     if (verbose)
     {
         for (int i = 0; i < ctx.nimages; i++)

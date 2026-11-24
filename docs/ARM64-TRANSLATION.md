@@ -25,7 +25,11 @@ a page drops the translations that started in it. Native code can call
 arm64 blocks back through the callback bridge, so libdispatch timers
 and queues run app blocks, and the call gate recognizes the loader's
 service symbols by address. A UIKit app compiled once for each
-architecture renders the same pixels. Translated image blocks can be
+architecture renders the same pixels. An app bundle whose executable is
+thin arm64 starts through the normal device-manager path too: a launch
+that names no frameworks gets Foundation, UIKit, QuartzCore and
+UserNotifications preloaded from the runtime root, and the scene renders
+into the device framebuffer. Translated image blocks can be
 persisted in a directory named by `IOSIM_ARM64_CACHE_DIR`, keyed by
 image UUID and image-relative pc, with guest addresses and helper calls
 recorded as fixups and rebound by slide when the file is loaded, so a

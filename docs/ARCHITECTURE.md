@@ -1757,7 +1757,10 @@ Python for iteration speed.
   `objc_msgSend`/`objc_msgSendSuper2`, and native x86_64 method IMPs
   reached through a type-encoding argument bridge. `--load-dylib` loads the
   x86 runtime frameworks for an arm64 main that was linked with dynamic
-  lookup. Plain C shims without a dedicated gate go through a generic
+  lookup; when a thin arm64 app is started with none (the device manager
+  passes only a framework search directory), the loader preloads
+  Foundation, UIKit, QuartzCore and UserNotifications from
+  `DYLD_ROOT_PATH`. Plain C shims without a dedicated gate go through a generic
   six-GP/eight-SSE call bridge, which covers the ARC entry points and the
   block runtime; block copy/dispose and byref keep/destroy helpers, which
   are arm64 function pointers, run on a nested interpreter context when the
@@ -1795,7 +1798,7 @@ Python for iteration speed.
   from method type encodings in both directions: integer structs in GP
   registers, HFAs in d0-d3 (stack-passed when larger than sixteen
   bytes) and non-HFA large structs by pointer, with x8 or hidden-buffer
-  returns. Full NEON and persistent translation are still pending;
+  returns. Full NEON and varargs beyond the printf gate are still pending;
   `--inspect` stops after mapping. The design is in
   `docs/ARM64-TRANSLATION.md`.
 - The dyld shared cache is not parsed; each dylib is loaded from disk.

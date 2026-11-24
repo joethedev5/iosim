@@ -4069,6 +4069,159 @@ else
     echo "FAIL SpringBoard home"; fails=$((fails+1))
 fi
 
+# A thin arm64 app bundle starts through the same device path as any app.
+# The launch passes a framework search directory but no --load-dylib, so
+# the loader preloads the standard frameworks from the runtime root; the
+# scene delegate, views and label are arm64 app code on the interpreter
+# and block translator while UIKit stays native, and the capture lands in
+# the device framebuffer. A dedicated device keeps the first device's app
+# list and icon layout untouched for the touch tests below.
+"$CC" -target arm64-apple-ios18.0-simulator -ffreestanding \
+    -fobjc-runtime=ios-18.0 -fno-objc-arc -fblocks -O1 -I "$ROOT/demo" \
+    -c "$ROOT/tests/arm64_device_app.m" -o "$T/arm64_device_app.o"
+"$LD64" -arch arm64 -platform_version $PLATFORM -e _main \
+    -o "$T/arm64_device_app" "$T/arm64_device_app.o" -undefined dynamic_lookup
+rm -rf "$T/Arm64Device.app"
+mkdir -p "$T/Arm64Device.app"
+cp "$T/arm64_device_app" "$T/Arm64Device.app/Arm64Device"
+python3 - "$T/Arm64Device.app/Info.plist" <<'PY'
+import plistlib, sys
+with open(sys.argv[1], "wb") as f:
+    plistlib.dump({
+        "CFBundleIdentifier": "com.iosim.arm64device",
+        "CFBundleExecutable": "Arm64Device",
+        "CFBundleName": "Arm64Device",
+        "CFBundlePackageType": "APPL",
+        "CFBundleVersion": "1",
+        "CFBundleShortVersionString": "1.0",
+    }, f)
+PY
+UDID_A64="$("$ROOT/tools/iosimctl" create "Arm64 iPhone" com.iosim.SimDeviceType.iPhone-18-Pro)"
+"$ROOT/tools/iosimctl" boot "$UDID_A64" >/dev/null
+"$ROOT/tools/iosimctl" install "$UDID_A64" "$T/Arm64Device.app" >/dev/null
+DLOG="$IOSIM_HOME/Devices/$UDID_A64/logs/launch-com.iosim.arm64device.log"
+# Let SpringBoard finish the repaint the install triggered, then keep the
+# app alive on its own event stream. A launch without one returns from
+# UIApplicationMain after a single frame, and a later SpringBoard repaint
+# could overwrite the device framebuffer before the screenshot.
+sleep 0.5
+A64FIFO="$T/arm64device.fifo"
+rm -f "$A64FIFO"
+mkfifo "$A64FIFO"
+rm -f "$T/a64fb.marker"
+touch "$T/a64fb.marker"
+A64FB="$IOSIM_HOME/Devices/$UDID_A64/data/var/run/framebuffer.png"
+launch_out="$(SIMCTL_CHILD_IOSIM_EVENT_FIFO="$A64FIFO" \
+    "$ROOT/tools/iosimctl" launch "$UDID_A64" com.iosim.arm64device)"
+a64pid="${launch_out##*: }"
+i=0
+while [ "$i" -lt 100 ]; do
+    if [ -f "$A64FB" ] && [ "$A64FB" -nt "$T/a64fb.marker" ]; then
+        break
+    fi
+    sleep 0.1
+    i=$((i+1))
+done
+if grep -Fq -- "[arm64device] ready" "$DLOG" 2>/dev/null; then
+    echo "ok   an arm64 app bundle runs through the device launch path"
+else
+    echo "FAIL arm64 device app launch"
+    tail -n 20 "$DLOG" 2>/dev/null || true
+    fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" io "$UDID_A64" screenshot "$T/arm64_device.png" >/dev/null
+if out="$(python3 - "$ROOT/tools" "$T/arm64_device.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+want = [(255, 0, 0), (0, 255, 0), (0, 0, 255), (0, 0, 0)]
+pts = []
+for x, y in ((100, 140), (100, 260), (100, 380), (350, 800)):
+    c = pngpixel.px(rows, bpp, x * 3, y * 3)
+    pts.append(((c >> 16) & 255, (c >> 8) & 255, c & 255))
+if pts != want:
+    raise SystemExit("device frame samples are %r" % (pts,))
+white = 0
+for yy in range(480 * 3, 528 * 3):
+    for xx in range(40 * 3, 360 * 3):
+        c = pngpixel.px(rows, bpp, xx, yy)
+        r, g, b = (c >> 16) & 255, (c >> 8) & 255, c & 255
+        if r > 200 and g > 200 and b > 200:
+            white += 1
+if white < 200:
+    raise SystemExit("label drew only %d white pixels" % white)
+print("ok   the arm64 app's device screenshot shows its scene")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL arm64 device screenshot"; echo "$out"; fails=$((fails+1))
+fi
+# SpringBoard launches the same arm64 bundle from its home-screen icon. The
+# only installed app on this device occupies grid slot 7 (row 1 column 3);
+# the child inherits the device event stream, renders, and suspends on home
+# like any other app. Its stdout goes to the SpringBoard log.
+A64SB="$IOSIM_HOME/Devices/$UDID_A64/logs/springboard.log"
+"$ROOT/tools/iosimctl" ui "$UDID_A64" tap 339.8333 222.1667 >/dev/null
+i=0
+while [ "$i" -lt 100 ]; do
+    if grep -Fq -- "[arm64device] ready" "$A64SB" 2>/dev/null; then
+        break
+    fi
+    sleep 0.1
+    i=$((i+1))
+done
+if grep -Fq -- "[SpringBoard] launching Arm64Device" "$A64SB" 2>/dev/null &&
+    grep -Fq -- "[arm64device] ready" "$A64SB" 2>/dev/null; then
+    echo "ok   SpringBoard launches the arm64 app from its icon"
+else
+    echo "FAIL arm64 SpringBoard launch"
+    tail -n 20 "$A64SB" 2>/dev/null || true
+    fails=$((fails+1))
+fi
+sleep 0.4
+"$ROOT/tools/iosimctl" io "$UDID_A64" screenshot "$T/arm64_device_sb.png" >/dev/null
+if out="$(python3 - "$ROOT/tools" "$T/arm64_device_sb.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+want = [(255, 0, 0), (0, 255, 0), (0, 0, 255), (0, 0, 0)]
+pts = []
+for x, y in ((100, 140), (100, 260), (100, 380), (350, 800)):
+    c = pngpixel.px(rows, bpp, x * 3, y * 3)
+    pts.append(((c >> 16) & 255, (c >> 8) & 255, c & 255))
+if pts != want:
+    raise SystemExit("SpringBoard frame samples are %r" % (pts,))
+print("ok   the SpringBoard-launched arm64 app renders the same scene")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL arm64 SpringBoard screenshot"; echo "$out"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID_A64" home >/dev/null
+i=0
+while [ "$i" -lt 100 ]; do
+    if grep -Fq -- "backgrounded by the system" "$A64SB" 2>/dev/null; then
+        break
+    fi
+    sleep 0.1
+    i=$((i+1))
+done
+if grep -Fq -- "backgrounded by the system" "$A64SB" 2>/dev/null; then
+    echo "ok   home backgrounds the arm64 app and returns to SpringBoard"
+else
+    echo "FAIL arm64 SpringBoard home"; fails=$((fails+1))
+fi
+kill "$a64pid" 2>/dev/null || true
+rm -f "$A64FIFO"
+"$ROOT/tools/iosimctl" uninstall "$UDID_A64" com.iosim.arm64device >/dev/null
+"$ROOT/tools/iosimctl" shutdown "$UDID_A64" >/dev/null
+
 # ---------- 7. UITouch delivery and control tracking ----------
 wait_log() {
     needle="$1"

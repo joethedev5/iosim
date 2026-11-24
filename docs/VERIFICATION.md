@@ -2276,6 +2276,29 @@ returns the same `p=50 t=12 v=4.0` output and exits 51. Guest addresses
 are rebased between runs and helper calls are rebound to the current
 loader.
 
+### arm64: an app bundle on the device path
+
+`tests/arm64_device_app.m` is a thin arm64 bundle with the same scene as
+the dual-architecture fixture: black window, red, green and blue views and
+a white label, built with `-undefined dynamic_lookup`. The suite creates a
+dedicated device, installs `Arm64Device.app` and starts it with
+`iosimctl launch`, which passes a framework search directory but no
+`--load-dylib`; the loader preloads Foundation, UIKit, QuartzCore and
+UserNotifications from `DYLD_ROOT_PATH`. The scene delegate, views and
+label are arm64 code running on the interpreter and block translator,
+native UIKit calls back through the reverse bridge, and the app prints
+`[arm64device] ready` and renders through native UIKit. The suite gives
+the app its own event-stream FIFO so it stays foreground, waits for the
+device framebuffer to change, then copies it with `iosimctl io
+screenshot`; it samples red at (100,140), green at (100,260), blue at
+(100,380) and black at (350,800) and requires at least 200 white label
+pixels. The same installed bundle then launches from its SpringBoard
+icon: SpringBoard spawns the loader with no `--dylib-path`, so this path
+depends on the preload as well; the app's output appears in
+`springboard.log`, the capture shows the same scene, and a home event
+suspends it like any other app. The app is uninstalled and its device
+shut down, leaving the first device's app list and icon layout untouched.
+
 ### SpringBoard: folder pagination
 
 A folder is rewritten to hold thirteen members across two pages.
