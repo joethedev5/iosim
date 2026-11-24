@@ -11,6 +11,11 @@ int iosim_dispatch_drain_main(void);
  * surface. Returns NULL when the name is not a service symbol. */
 void *iosim_services_lookup(const char *name);
 
+/* Reverse lookup used by the arm64 call gate: a guest can import a service
+ * function directly, and its address must be recognized as a plain native
+ * call. */
+int iosim_services_lookup_addr(void *addr, const char **name);
+
 /* Exported data symbols (Mach-O binds these by address). */
 extern uint32_t bootstrap_port_value;
 extern uint32_t mach_task_self_value;

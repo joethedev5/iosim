@@ -22,6 +22,7 @@
 #include <time.h>
 #include <unistd.h>
 #include "services.h"
+#include "arm64.h"
 
 #ifdef IOSIM_HAVE_OPENSSL
 #include <openssl/ssl.h>
@@ -41,12 +42,35 @@ struct block_layout {
     void *descriptor;
 };
 
+/* An arm64 image can hand a block to native libdispatch, UIKit or XPC.
+ * Its invoke pointer is then arm64 code, which the native caller cannot
+ * jump to; run it on the interpreter with the native-to-guest bridge.
+ * Returns 1 when the block was arm64 code and ran. The scalar result is
+ * published in retout when the caller wants it. */
+static int call_guest_block(void *block, const uint64_t *args, int nargs,
+                            uint64_t *retout)
+{
+    struct block_layout *b = block;
+    if (!b || !b->invoke || !iosim_arm64_is_guest_code(b->invoke))
+        return 0;
+    uint64_t gp[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+    uint64_t fp[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+    uint64_t ret[2] = {0, 0};
+    gp[0] = (uint64_t)(uintptr_t)block;
+    for (int i = 0; i < nargs && i + 1 < 8; i++)
+        gp[i + 1] = args[i];
+    iosim_arm64_call_guest_ret(b->invoke, gp, fp, ret);
+    if (retout)
+        *retout = ret[0];
+    return 1;
+}
+
 static void call_block(void *block)
 {
     if (!block)
         return;
     struct block_layout *b = block;
-    if (b->invoke)
+    if (b->invoke && !call_guest_block(block, NULL, 0, NULL))
         ((void (*)(void *))b->invoke)(block);
 }
 
@@ -56,7 +80,8 @@ static void call_block_arg(void *block, void *arg)
     if (!block)
         return;
     struct block_layout *b = block;
-    if (b->invoke)
+    uint64_t args[1] = {(uint64_t)(uintptr_t)arg};
+    if (b->invoke && !call_guest_block(block, args, 1, NULL))
         ((void (*)(void *, void *))b->invoke)(block, arg);
 }
 
@@ -594,7 +619,12 @@ void dispatch_apply(long iterations, void *queue, void *block)
     if (!block)
         return;
     for (long i = 0; i < iterations; i++)
-        ((void (*)(void *, long))((struct block_layout *)block)->invoke)(block, i);
+    {
+        uint64_t args[1] = {(uint64_t)i};
+        if (!call_guest_block(block, args, 1, NULL))
+            ((void (*)(void *, long))
+                 ((struct block_layout *)block)->invoke)(block, i);
+    }
 }
 
 typedef long dispatch_once_t;
@@ -637,6 +667,12 @@ int dispatch_data_apply(void *data, void *applier)
     struct block_layout *b = applier;
     if (!b->invoke)
         return 0;
+    uint64_t args[4] = {(uint64_t)(uintptr_t)data, 0,
+                        (uint64_t)(uintptr_t)d->buffer,
+                        (uint64_t)d->size};
+    uint64_t ret = 0;
+    if (call_guest_block(applier, args, 4, &ret))
+        return ret != 0;
     return ((int (*)(void *, void *, size_t, const void *, size_t))b->invoke)(
                applier, data, 0, d->buffer, d->size) != 0;
 }
@@ -3612,4 +3648,16 @@ void *iosim_services_lookup(const char *name)
         if (strcmp(service_symbols[i].name, name) == 0)
             return service_symbols[i].addr;
     return NULL;
+}
+
+int iosim_services_lookup_addr(void *addr, const char **name)
+{
+    if (!addr) return 0;
+    for (size_t i = 0; i < sizeof(service_symbols) / sizeof(service_symbols[0]); i++)
+        if (service_symbols[i].addr == addr)
+        {
+            if (name) *name = service_symbols[i].name;
+            return 1;
+        }
+    return 0;
 }

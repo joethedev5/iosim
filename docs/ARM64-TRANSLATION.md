@@ -21,10 +21,17 @@ through x8/hidden buffers, with stack arguments on a dedicated call
 gate. Runtime-generated code pages are translated as well: a guest mmap
 or mprotect that grants PROT_EXEC registers the range, so branches into
 it run through the interpreter and block translator, and re-protecting
-a page drops the translations that started in it. Broader NEON
-coverage, varargs beyond the printf gate, and a persistent translation
-cache are the remaining work. This document records the method and the
-milestones that prove it.
+a page drops the translations that started in it. Native code can call
+arm64 blocks back through the callback bridge, so libdispatch timers
+and queues run app blocks, and the call gate recognizes the loader's
+service symbols by address. A UIKit app compiled once for each
+architecture renders the same pixels. Translated image blocks can be
+persisted in a directory named by `IOSIM_ARM64_CACHE_DIR`, keyed by
+image UUID and image-relative pc, with guest addresses and helper calls
+recorded as fixups and rebound by slide when the file is loaded, so a
+second launch skips translation. Broader NEON coverage and varargs
+beyond the printf gate are the remaining work. This document records
+the method and the milestones that prove it.
 
 ## The constraint and the reframing
 

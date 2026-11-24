@@ -8,13 +8,16 @@
  * the lazy per-IMP cache from docs/ARM64-TRANSLATION.md. */
 #define _GNU_SOURCE
 #include "arm64_jit.h"
+#include "macho.h"
 
+#include <fcntl.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <unistd.h>
 
 #ifndef MAP_ANONYMOUS
 #define MAP_ANONYMOUS MAP_ANON
@@ -42,11 +45,28 @@ static int g_disabled;
 #define O_DHI(n) \
     ((int32_t)offsetof(struct a64_cpu, dhi) + 8 * (int32_t)(n))
 
+/* Every 64-bit immediate that holds an address is recorded so a block can
+ * be saved, reloaded in another process and patched: guest addresses move
+ * with the image slide, helper pointers with the loader's layout. Values
+ * that are plain constants (masks, floating-point bits) are not fixups. */
+#define JIT_FIX_GUEST 0
+#define JIT_FIX_HELPER 1
+#define JIT_MAX_FIX 512
+
+struct jit_fix {
+    uint32_t off;
+    uint16_t kind;
+    uint16_t index;
+};
+
 struct jc {
     uint8_t buf[JIT_MAX_BLOCK];
     size_t len;
     int full;
     int ended;
+    int cacheable;
+    int nfix;
+    struct jit_fix fix[JIT_MAX_FIX];
 };
 
 static void je8(struct jc *j, unsigned v)
@@ -88,6 +108,40 @@ static void em_mov_rcx_imm(struct jc *j, uint64_t v)
 static void em_mov_rdx_imm(struct jc *j, uint64_t v)
 {
     je8(j, 0x48); je8(j, 0xBA); je64(j, v);
+}
+
+static void jc_note_fix(struct jc *j, uint32_t off, uint16_t kind,
+                        uint16_t index)
+{
+    if (j->nfix >= JIT_MAX_FIX)
+    {
+        j->cacheable = 0;
+        return;
+    }
+    j->fix[j->nfix].off = off;
+    j->fix[j->nfix].kind = kind;
+    j->fix[j->nfix].index = index;
+    j->nfix++;
+}
+
+/* Address-carrying forms: identical instructions, but recorded so a cached
+ * block can be relocated. */
+static void em_mov_rax_addr(struct jc *j, uint64_t v)
+{
+    em_mov_rax_imm(j, v);
+    jc_note_fix(j, (uint32_t)(j->len - 8), JIT_FIX_GUEST, 0);
+}
+
+static void em_mov_rcx_addr(struct jc *j, uint64_t v)
+{
+    em_mov_rcx_imm(j, v);
+    jc_note_fix(j, (uint32_t)(j->len - 8), JIT_FIX_GUEST, 0);
+}
+
+static void em_mov_rdx_addr(struct jc *j, uint64_t v)
+{
+    em_mov_rdx_imm(j, v);
+    jc_note_fix(j, (uint32_t)(j->len - 8), JIT_FIX_GUEST, 0);
 }
 
 static void em_mov_rdi_rbx(struct jc *j)
@@ -321,7 +375,7 @@ static void em_end_pc_rdx(struct jc *j)
 
 static void em_end_pc_const(struct jc *j, uint64_t pc)
 {
-    em_mov_rdx_imm(j, pc);
+    em_mov_rdx_addr(j, pc);
     em_end_pc_rdx(j);
 }
 
@@ -332,11 +386,43 @@ static void em_end_pc_rax(struct jc *j)
     j->ended = 1;
 }
 
+/* Helpers called from translated code, in the order their pointers are
+ * cached. Append only: the index is part of the on-disk block format. */
+static void *const jit_helpers[] = {
+    (void *)a64t_cond,
+    (void *)a64t_addsub_flags,
+    (void *)a64t_bitfield_insn,
+    (void *)a64t_madd_insn,
+    (void *)a64t_div_insn,
+    (void *)a64t_csel_insn,
+    (void *)a64t_fp2_insn,
+    (void *)a64t_fp3_insn,
+    (void *)a64t_fp1_insn,
+    (void *)a64t_fcmp_insn,
+};
+
+#define JIT_NHELPERS ((int)(sizeof jit_helpers / sizeof jit_helpers[0]))
+
+static int jit_helper_index(void *fn)
+{
+    for (int i = 0; i < JIT_NHELPERS; i++)
+        if (jit_helpers[i] == fn)
+            return i;
+    return -1;
+}
+
 static void em_call(struct jc *j, void *fn)
 {
     /* Absolute indirect call: helper functions and the code arena can be
-     * more than 2 GB apart, which a rel32 call cannot reach. */
+     * more than 2 GB apart, which a rel32 call cannot reach. Known
+     * helpers are recorded so a cached block can rebind them later. */
     je8(j, 0x48); je8(j, 0xB8); je64(j, (uint64_t)(uintptr_t)fn);
+    int helper = jit_helper_index(fn);
+    if (helper >= 0)
+        jc_note_fix(j, (uint32_t)(j->len - 8), JIT_FIX_HELPER,
+                    (uint16_t)helper);
+    else
+        j->cacheable = 0;
     je8(j, 0xFF); je8(j, 0xD0);
 }
 
@@ -431,7 +517,7 @@ static int jit_emit_one(struct jc *j, uint32_t insn, uint64_t pc)
         int is_bl = (insn & 0x80000000) != 0;
         if (is_bl)
         {
-            em_mov_rax_imm(j, next);
+            em_mov_rax_addr(j, next);
             em_store_rax(j, O_X(30));
         }
         em_end_pc_const(j, target);
@@ -450,8 +536,8 @@ static int jit_emit_one(struct jc *j, uint32_t insn, uint64_t pc)
         em_mov_esi_imm(j, (uint32_t)cond);
         em_call(j, (void *)a64t_cond);
         em_test_eax(j);
-        em_mov_rdx_imm(j, target);
-        em_mov_rcx_imm(j, next);
+        em_mov_rdx_addr(j, target);
+        em_mov_rcx_addr(j, next);
         em_cmovz_rdx_rcx(j);   /* condition false -> next */
         em_end_pc_rdx(j);
         return 2;
@@ -472,8 +558,8 @@ static int jit_emit_one(struct jc *j, uint32_t insn, uint64_t pc)
             em_test_rax(j);
         else
             em_test_eax(j);
-        em_mov_rdx_imm(j, target);
-        em_mov_rcx_imm(j, next);
+        em_mov_rdx_addr(j, target);
+        em_mov_rcx_addr(j, next);
         if (nz)
             em_cmovz_rdx_rcx(j);  /* CBNZ: zero -> next */
         else
@@ -496,8 +582,8 @@ static int jit_emit_one(struct jc *j, uint32_t insn, uint64_t pc)
         uint64_t target = pc + (uint64_t)off;
         em_gpr_load(j, rt, 1);
         em_bt_rax(j, (unsigned)bit);
-        em_mov_rdx_imm(j, target);
-        em_mov_rcx_imm(j, next);
+        em_mov_rdx_addr(j, target);
+        em_mov_rcx_addr(j, next);
         if (op)
             em_cmovnc_rdx_rcx(j); /* TBNZ: bit clear -> next */
         else
@@ -515,7 +601,7 @@ static int jit_emit_one(struct jc *j, uint32_t insn, uint64_t pc)
         if (is_blr)
         {
             em_mov_rdx_rax(j);
-            em_mov_rax_imm(j, next);
+            em_mov_rax_addr(j, next);
             em_store_rax(j, O_X(30));
             em_mov_rax_rdx(j);
         }
@@ -568,7 +654,7 @@ static int jit_emit_one(struct jc *j, uint32_t insn, uint64_t pc)
         int rd = insn & 31;
         if (rd != 31)
         {
-            em_mov_rax_imm(j, base + (uint64_t)imm);
+            em_mov_rax_addr(j, base + (uint64_t)imm);
             em_gpr_store(j, rd, 1);
         }
         return 1;
@@ -730,7 +816,7 @@ static int jit_emit_one(struct jc *j, uint32_t insn, uint64_t pc)
         int rt = insn & 31;
         if (opc == 3)
             return 0;
-        em_mov_rax_imm(j, addr);
+        em_mov_rax_addr(j, addr);
         if (opc == 0)
         {
             em_load_mem_rcx(j, 4, 0);
@@ -1115,12 +1201,289 @@ static void em_store_gpr_rcx(struct jc *j, int rt)
         em_store_rcx(j, O_X(rt));
 }
 
+/* --- persistent cache -------------------------------------------------- */
+
+/* With IOSIM_ARM64_CACHE_DIR set, translated image blocks are appended to
+ * <dir>/<image uuid>.blocks. A later launch of the same image loads them,
+ * patches the guest addresses for the new slide and the helper pointers
+ * for this process, and skips translation entirely. Runtime-generated
+ * pages are never persisted. Bump the version whenever the emitter, the
+ * a64_cpu layout or the helper table changes. */
+#define A64_CACHE_VERSION 1u
+
+struct cache_header {
+    char magic[8];
+    uint32_t version;
+    uint32_t reserved;
+    uint8_t uuid[16];
+    int64_t slide;
+};
+
+struct cache_record {
+    uint64_t pc;
+    uint32_t len;
+    uint16_t nfix;
+    uint16_t pad;
+    int64_t slide;
+};
+
+struct cache_loaded {
+    uint64_t pc;
+    uint32_t len;
+    uint8_t *code;
+};
+
+static struct cache_loaded *g_loaded;
+static int g_nloaded;
+static int g_cap_loaded;
+static int g_cache_state; /* 0 = uninitialized, 1 = disabled, 2 = active */
+static int g_cache_fd = -1;
+/* Block keys are image-relative (guest pc minus the slide) so they match
+ * across launches; the slide differs under ASLR. */
+static int64_t g_cache_slide;
+
+static uint8_t *jit_arena_alloc(size_t size)
+{
+    if (!g_arena)
+    {
+        g_arena = mmap(NULL, JIT_ARENA_SIZE, PROT_READ | PROT_WRITE | PROT_EXEC,
+                       MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        if (g_arena == MAP_FAILED)
+        {
+            g_arena = NULL;
+            g_disabled = 1;
+            return NULL;
+        }
+        g_arena_used = 0;
+    }
+    if (g_arena_used + size > JIT_ARENA_SIZE)
+    {
+        g_disabled = 1;
+        return NULL;
+    }
+    uint8_t *dst = g_arena + g_arena_used;
+    g_arena_used += size;
+    return dst;
+}
+
+static int jit_cache_pc_ok(struct iosim_image *img, uint64_t pc)
+{
+    if ((pc & 3) != 0)
+        return 0;
+    for (int i = 0; i < img->nsegs; i++)
+    {
+        struct iosim_segment *s = &img->segs[i];
+        if (!(s->initprot & 4))
+            continue;
+        if (pc >= s->vmaddr && pc < s->vmaddr + s->vmsize)
+            return 1;
+    }
+    return 0;
+}
+
+static void jit_cache_store_loaded(uint64_t pc, uint8_t *code, uint32_t len)
+{
+    if (g_nloaded == g_cap_loaded)
+    {
+        int cap = g_cap_loaded ? g_cap_loaded * 2 : 64;
+        struct cache_loaded *nl =
+            realloc(g_loaded, (size_t)cap * sizeof *nl);
+        if (!nl)
+        {
+            free(code);
+            return;
+        }
+        g_loaded = nl;
+        g_cap_loaded = cap;
+    }
+    g_loaded[g_nloaded].pc = pc;
+    g_loaded[g_nloaded].len = len;
+    g_loaded[g_nloaded].code = code;
+    g_nloaded++;
+}
+
+static void jit_cache_init(struct a64_cpu *c)
+{
+    if (g_cache_state)
+        return;
+    g_cache_state = 1;
+    const char *dir = getenv("IOSIM_ARM64_CACHE_DIR");
+    if (!dir || !*dir || !c || !c->img || !c->img->has_uuid)
+        return;
+    char path[3072];
+    int n = snprintf(path, sizeof path, "%s/", dir);
+    for (int i = 0; i < 16 && n > 0 && n + 2 < (int)sizeof path; i++)
+        n += snprintf(path + n, sizeof path - (size_t)n, "%02x",
+                      c->img->uuid[i]);
+    if (n <= 0 || n >= (int)sizeof path - 8)
+        return;
+    snprintf(path + n, sizeof path - (size_t)n, ".blocks");
+    int fd = open(path, O_RDWR | O_CREAT | O_APPEND, 0644);
+    if (fd < 0)
+        return;
+    struct cache_header h;
+    ssize_t got = pread(fd, &h, sizeof h, 0);
+    int valid = got == (ssize_t)sizeof h &&
+                memcmp(h.magic, "IOSIMA64", 8) == 0 &&
+                h.version == A64_CACHE_VERSION &&
+                memcmp(h.uuid, c->img->uuid, 16) == 0;
+    if (!valid)
+    {
+        if (ftruncate(fd, 0) != 0)
+        {
+            close(fd);
+            return;
+        }
+        memset(&h, 0, sizeof h);
+        memcpy(h.magic, "IOSIMA64", 8);
+        h.version = A64_CACHE_VERSION;
+        memcpy(h.uuid, c->img->uuid, 16);
+        h.slide = c->img->slide;
+        if (write(fd, &h, sizeof h) != (ssize_t)sizeof h)
+        {
+            close(fd);
+            return;
+        }
+    }
+    else
+    {
+        off_t off = (off_t)sizeof h;
+        for (;;)
+        {
+            struct cache_record r;
+            if (pread(fd, &r, sizeof r, off) != (ssize_t)sizeof r)
+                break;
+            if (r.len == 0 || r.len > JIT_MAX_BLOCK || r.nfix > JIT_MAX_FIX ||
+                !jit_cache_pc_ok(c->img, r.pc))
+                break;
+            uint8_t *code = malloc(r.len);
+            if (!code)
+                break;
+            off_t foff = off + (off_t)sizeof r;
+            struct jit_fix *fixes = NULL;
+            size_t fixbytes = (size_t)r.nfix * sizeof(struct jit_fix);
+            if (fixbytes)
+            {
+                fixes = malloc(fixbytes);
+                if (!fixes || pread(fd, fixes, fixbytes, foff) !=
+                                  (ssize_t)fixbytes)
+                {
+                    free(fixes);
+                    free(code);
+                    break;
+                }
+                foff += (off_t)fixbytes;
+            }
+            if (pread(fd, code, r.len, foff) != (ssize_t)r.len)
+            {
+                free(fixes);
+                free(code);
+                break;
+            }
+            foff += (off_t)r.len;
+            int bad = 0;
+            for (int i = 0; i < r.nfix; i++)
+            {
+                struct jit_fix f = fixes[i];
+                if ((size_t)f.off + 8 > r.len)
+                {
+                    bad = 1;
+                    break;
+                }
+                uint64_t v;
+                memcpy(&v, code + f.off, 8);
+                if (f.kind == JIT_FIX_HELPER)
+                {
+                    if (f.index >= JIT_NHELPERS)
+                    {
+                        bad = 1;
+                        break;
+                    }
+                    v = (uint64_t)(uintptr_t)jit_helpers[f.index];
+                }
+                else
+                    v = v - (uint64_t)r.slide + (uint64_t)c->img->slide;
+                memcpy(code + f.off, &v, 8);
+            }
+            free(fixes);
+            if (bad)
+            {
+                free(code);
+                break;
+            }
+            jit_cache_store_loaded(r.pc, code, r.len);
+            off = foff;
+        }
+        /* A crash can leave a partial record; drop it so appends stay
+         * parseable. */
+        ftruncate(fd, off);
+    }
+    g_cache_fd = fd;
+    g_cache_slide = (int64_t)c->img->slide;
+    g_cache_state = 2;
+    if (getenv("IOSIM_ARM64_JIT_TRACE"))
+        fprintf(stderr, "jit cache %s valid=%d loaded=%d slide=%lld\n", path,
+                valid, g_nloaded, (long long)g_cache_slide);
+}
+
+static void jit_cache_append(struct jc *j, uint64_t pc, int64_t slide)
+{
+    if (g_cache_state != 2 || g_cache_fd < 0 || !j->cacheable)
+        return;
+    size_t fixbytes = (size_t)j->nfix * sizeof(struct jit_fix);
+    size_t need = sizeof(struct cache_record) + fixbytes + j->len;
+    if (need > (1u << 20))
+        return;
+    uint8_t *buf = malloc(need);
+    if (!buf)
+        return;
+    struct cache_record r;
+    memset(&r, 0, sizeof r);
+    r.pc = pc - (uint64_t)slide;
+    r.len = (uint32_t)j->len;
+    r.nfix = (uint16_t)j->nfix;
+    r.slide = slide;
+    memcpy(buf, &r, sizeof r);
+    memcpy(buf + sizeof r, j->fix, fixbytes);
+    memcpy(buf + sizeof r + fixbytes, j->buf, j->len);
+    ssize_t w = write(g_cache_fd, buf, need);
+    free(buf);
+    if (w != (ssize_t)need)
+    {
+        close(g_cache_fd);
+        g_cache_fd = -1;
+        g_cache_state = 1;
+    }
+}
+
+static a64_block_fn jit_cache_lookup(uint64_t pc)
+{
+    if (g_cache_state != 2)
+        return NULL;
+    uint64_t key = pc - (uint64_t)g_cache_slide;
+    for (int i = 0; i < g_nloaded; i++)
+    {
+        if (g_loaded[i].pc != key)
+            continue;
+        size_t size = ((size_t)g_loaded[i].len + 15) & ~(size_t)15;
+        uint8_t *dst = jit_arena_alloc(size);
+        if (!dst)
+            return NULL;
+        memcpy(dst, g_loaded[i].code, g_loaded[i].len);
+        if (getenv("IOSIM_ARM64_JIT_TRACE"))
+            fprintf(stderr, "jit cached 0x%llx\n", (unsigned long long)pc);
+        return (a64_block_fn)(void *)dst;
+    }
+    return NULL;
+}
+
 /* --- cache ------------------------------------------------------------ */
 
 static a64_block_fn jit_translate(struct a64_cpu *c, uint64_t pc)
 {
     struct jc j;
     memset(&j, 0, sizeof j);
+    j.cacheable = 1;
     em_prologue(&j);
     uint64_t p = pc;
     int emitted = 0;
@@ -1149,27 +1512,12 @@ static a64_block_fn jit_translate(struct a64_cpu *c, uint64_t pc)
         return NULL;
 
     size_t size = (j.len + 15) & ~(size_t)15;
-    if (!g_arena)
-    {
-        g_arena = mmap(NULL, JIT_ARENA_SIZE,
-                       PROT_READ | PROT_WRITE | PROT_EXEC,
-                       MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-        if (g_arena == MAP_FAILED)
-        {
-            g_arena = NULL;
-            g_disabled = 1;
-            return NULL;
-        }
-        g_arena_used = 0;
-    }
-    if (g_arena_used + size > JIT_ARENA_SIZE)
-    {
-        g_disabled = 1;
+    uint8_t *dst = jit_arena_alloc(size);
+    if (!dst)
         return NULL;
-    }
-    uint8_t *dst = g_arena + g_arena_used;
     memcpy(dst, j.buf, j.len);
-    g_arena_used += size;
+    if (j.cacheable && iosim_arm64_pc_is_static(c, pc) && c->img)
+        jit_cache_append(&j, pc, (int64_t)c->img->slide);
     return (a64_block_fn)(void *)dst;
 }
 
@@ -1180,7 +1528,10 @@ a64_block_fn a64_jit_lookup(struct a64_cpu *c, uint64_t pc)
     for (int i = 0; i < g_nblocks; i++)
         if (g_blocks[i].pc == pc)
             return g_blocks[i].fn;
-    a64_block_fn fn = jit_translate(c, pc);
+    jit_cache_init(c);
+    a64_block_fn fn = jit_cache_lookup(pc);
+    if (!fn)
+        fn = jit_translate(c, pc);
     if (!fn)
     {
         /* Negative entry so an untranslatable address is decoded once. */

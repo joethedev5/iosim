@@ -3515,6 +3515,11 @@ int iosim_arm64_is_guest_code(void *fn)
                   a64_exec_region_contains(addr));
 }
 
+int iosim_arm64_pc_is_static(struct a64_cpu *c, uint64_t pc)
+{
+    return c && c->img && image_contains(c->img, pc);
+}
+
 /* General native-to-guest call used by C callbacks (qsort comparators and
  * the like). Arguments are taken from the arm64 register conventions and
  * the scalar results are published in ret. */

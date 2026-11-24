@@ -73,7 +73,9 @@ int main(int argc, char **argv)
 
     static const char payload[] = "dispatch-data";
     void *data = dispatch_data_create(payload, sizeof(payload) - 1, 0, 0);
-    void (^applier)(void *, unsigned long, const void *, unsigned long) =
+    /* dispatch_data_apply reads the applier's bool result; a void block
+     * leaves an undefined value in the return register. */
+    int (^applier)(void *, unsigned long, const void *, unsigned long) =
         ^(void *region, unsigned long offset, const void *buffer,
           unsigned long size)
     {
@@ -81,6 +83,7 @@ int main(int argc, char **argv)
         (void)offset;
         (void)buffer;
         applied_size = (int)size;
+        return 1;
     };
     int applied = dispatch_data_apply(data, (void *)applier);
     printf("[lrt] data %lu %d %d\n", dispatch_data_get_size(data), applied,

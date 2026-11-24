@@ -1779,8 +1779,15 @@ Python for iteration speed.
   exclusives with a per-cpu monitor; 128-bit SIMD literal loads are
   modelled too. Executable pages the guest creates through `mmap` or
   `mprotect` are registered as guest code and translated on demand;
-  re-protecting a page drops the cached blocks that started in it. Native `qsort`/`bsearch` shims call an arm64 comparator
-  back through a general native-to-guest C call bridge. The message-send
+  re-protecting a page drops the cached blocks that started in it. With
+  `IOSIM_ARM64_CACHE_DIR` set, translated image blocks are persisted per
+  image UUID; guest addresses and helper calls are recorded as fixups and
+  rebound when the file is loaded.
+  Native libdispatch timers and queues invoke arm64 blocks back through
+  the native-to-guest bridge, and the call gate recognizes the loader's
+  service symbols by address. Native `qsort`/`bsearch`
+  shims call an arm64 comparator back through a general native-to-guest
+  C call bridge. The message-send
   trampoline also has a reverse bridge: when
   native x86_64 code sends to an arm64 IMP, the saved register frame is
   marshalled per the method type encoding and the IMP runs on a nested

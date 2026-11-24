@@ -1279,7 +1279,9 @@ int iosim_shim_lookup_addr(void *addr, const char **name)
             return 1;
         }
     }
-    return 0;
+    /* Service symbols (libdispatch, Mach, XPC) are resolved by name from
+     * the same table; the arm64 gate looks calls up by address. */
+    return iosim_services_lookup_addr(addr, name);
 }
 
 struct iosim_native_symbol {

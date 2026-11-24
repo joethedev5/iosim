@@ -1788,6 +1788,155 @@ else
     echo "FAIL JIT-page interpreter (exit $rc_nj)"; fails=$((fails+1))
 fi
 
+# ---------- 4f10ab. one UIKit source, two architectures ----------
+# The scene delegate, view hierarchy and delayed capture block are arm64
+# app code on the interpreter/translator; UIKit, QuartzCore and
+# libdispatch stay native x86_64 and call back through the reverse bridge
+# and the block bridge. The x86_64 build of the same source and the pure
+# interpreter must render the same pixels.
+rm -f "$T/arm64uikit.fifo"
+mkfifo "$T/arm64uikit.fifo"
+"$CC" -target arm64-apple-ios18.0-simulator -ffreestanding \
+    -fobjc-runtime=ios-18.0 -fno-objc-arc -fblocks -O1 -I "$ROOT/demo" \
+    -c "$ROOT/tests/arm64_uikit.m" -o "$T/arm64_uikit.o"
+"$LD64" -arch arm64 -platform_version $PLATFORM -e _main \
+    -o "$T/arm64_uikit" "$T/arm64_uikit.o" -undefined dynamic_lookup
+if out="$(IOSIM_EVENT_FIFO="$T/arm64uikit.fifo" \
+    IOSIM_TEST_PNG="$T/arm64_uikit.png" DYLD_ROOT_PATH="$ROOT/runtime" \
+    timeout 15 "$RUN" --arm64 $FW_ARGS "$T/arm64_uikit" 2>&1)"; then
+    rc=0
+else
+    rc=$?
+fi
+rm -f "$T/arm64uikit.fifo"
+check "[arm64uikit] ready" "$out" \
+    "an arm64 UIKit app runs its scene delegate and captures a frame"
+if [ "$rc" -eq 0 ]; then
+    echo "ok   the arm64 UIKit fixture exits after its capture"
+else
+    echo "FAIL arm64 UIKit app (exit $rc)"; fails=$((fails+1))
+fi
+rm -f "$T/arm64uikit_x.fifo"
+mkfifo "$T/arm64uikit_x.fifo"
+"$ROOT/tools/build_app.sh" "$ROOT/tests/arm64_uikit.m" \
+    "$T/arm64_uikit_x" >/dev/null
+if out_x="$(IOSIM_EVENT_FIFO="$T/arm64uikit_x.fifo" \
+    IOSIM_TEST_PNG="$T/arm64_uikit_x.png" DYLD_ROOT_PATH="$ROOT/runtime" \
+    timeout 15 "$RUN" "$T/arm64_uikit_x" 2>&1)"; then
+    rc_x=0
+else
+    rc_x=$?
+fi
+rm -f "$T/arm64uikit_x.fifo"
+check "[arm64uikit] ready" "$out_x" \
+    "the x86_64 build of the same fixture captures the same scene"
+if [ "$rc_x" -eq 0 ]; then
+    echo "ok   the x86_64 UIKit fixture exits after its capture"
+else
+    echo "FAIL x86_64 UIKit app (exit $rc_x)"; fails=$((fails+1))
+fi
+rm -f "$T/arm64uikit_nj.fifo"
+mkfifo "$T/arm64uikit_nj.fifo"
+if out_nj="$(IOSIM_ARM64_NOJIT=1 IOSIM_EVENT_FIFO="$T/arm64uikit_nj.fifo" \
+    IOSIM_TEST_PNG="$T/arm64_uikit_nj.png" DYLD_ROOT_PATH="$ROOT/runtime" \
+    timeout 15 "$RUN" --arm64 $FW_ARGS "$T/arm64_uikit" 2>&1)"; then
+    rc_nj=0
+else
+    rc_nj=$?
+fi
+rm -f "$T/arm64uikit_nj.fifo"
+if [ "$rc_nj" -eq 0 ]; then
+    echo "ok   the interpreted arm64 UIKit app exits after its capture"
+else
+    echo "FAIL interpreted arm64 UIKit app (exit $rc_nj)"; fails=$((fails+1))
+fi
+if python3 - "$ROOT/tools" "$T/arm64_uikit.png" "$T/arm64_uikit_x.png" \
+    "$T/arm64_uikit_nj.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+
+def sample(path):
+    w, h, bpp, rows = pngpixel.load(path)
+    pts = []
+    for x, y in ((100, 140), (100, 260), (100, 380), (350, 800)):
+        c = pngpixel.px(rows, bpp, x * 3, y * 3)
+        pts.append(((c >> 16) & 255, (c >> 8) & 255, c & 255))
+    white = 0
+    for yy in range(480 * 3, 528 * 3):
+        for xx in range(40 * 3, 360 * 3):
+            c = pngpixel.px(rows, bpp, xx, yy)
+            r, g, b = (c >> 16) & 255, (c >> 8) & 255, c & 255
+            if r > 200 and g > 200 and b > 200:
+                white += 1
+    return pts, white
+
+want = [(255, 0, 0), (0, 255, 0), (0, 0, 255), (0, 0, 0)]
+seen = {}
+for path, name in ((sys.argv[2], 'arm64'), (sys.argv[3], 'x86_64'),
+                   (sys.argv[4], 'arm64-interpreted')):
+    pts, white = sample(path)
+    if pts != want:
+        raise SystemExit('%s sample pixels are %r' % (name, pts))
+    if white < 200:
+        raise SystemExit('%s label drew only %d white pixels' %
+                         (name, white))
+    seen[name] = (pts, white)
+if not (seen['arm64'] == seen['x86_64'] == seen['arm64-interpreted']):
+    raise SystemExit('the three renders differ')
+print("ok   the arm64 app, its interpreter run and the x86_64 build "
+      "render the same scene")
+PY
+then
+    :
+else
+    echo "FAIL dual-architecture UIKit pixels"; fails=$((fails+1))
+fi
+
+# ---------- 4f10ac. persistent block cache ----------
+# With IOSIM_ARM64_CACHE_DIR set, translated image blocks are written to
+# <uuid>.blocks and a second launch loads them instead of decoding the
+# arm64 again; guest addresses and helper pointers are patched for the
+# new slide. Runtime-generated code pages are never cached.
+cache="$T/jitcache"
+rm -rf "$cache"
+mkdir -p "$cache"
+if out1="$(IOSIM_ARM64_CACHE_DIR="$cache" IOSIM_ARM64_JIT_TRACE=1 \
+    DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" --arm64 "$T/arm64_struct" 2>&1)"
+then
+    rc1=0
+else
+    rc1=$?
+fi
+n1=$(printf '%s\n' "$out1" | grep -c "jit block" 2>/dev/null || true)
+if out2="$(IOSIM_ARM64_CACHE_DIR="$cache" IOSIM_ARM64_JIT_TRACE=1 \
+    DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" --arm64 "$T/arm64_struct" 2>&1)"
+then
+    rc2=0
+else
+    rc2=$?
+fi
+n2=$(printf '%s\n' "$out2" | grep -c "jit block" 2>/dev/null || true)
+nc=$(printf '%s\n' "$out2" | grep -c "jit cached" 2>/dev/null || true)
+check "p=50 t=12 v=4.0" "$out2" \
+    "a cached second run prints the same values"
+if [ "$rc1" -eq 51 ] && [ "$rc2" -eq 51 ]; then
+    echo "ok   both cached runs return 51"
+else
+    echo "FAIL cached runs (exit $rc1, $rc2)"; fails=$((fails+1))
+fi
+if ls "$cache"/*.blocks >/dev/null 2>&1; then
+    echo "ok   the block cache file was written"
+else
+    echo "FAIL the block cache file is missing"; fails=$((fails+1))
+fi
+if [ "$n1" -gt 0 ] && [ "$n2" -eq 0 ] && [ "$nc" -gt 0 ]; then
+    echo "ok   the second launch loads blocks from the cache"
+else
+    echo "FAIL block cache (translated $n1 then $n2, cached $nc)"
+    fails=$((fails+1))
+fi
+
 # ---------- 4f11. CAAnimation completion and fill modes ----------
 rm -f "$T/arem.fifo"
 mkfifo "$T/arem.fifo"

@@ -2278,3 +2278,54 @@ components.
   `jit=61,127 mprotect=61 reprotect=62` and exits 96;
   `IOSIM_ARM64_JIT_TRACE` shows `jit block 0x<page>..`, which the suite
   greps.
+
+## 2026-11-24: an arm64 UIKit app renders through native frameworks
+
+- A guest that called a loader *service* symbol (`dispatch_time`,
+  `dispatch_after`, ...) was rejected: services resolve by name through
+  `iosim_lookup_shim`, but the arm64 call gate looked addresses up only
+  in the shim table. `iosim_services_lookup_addr` adds the reverse
+  lookup and `iosim_shim_lookup_addr` consults it.
+- Native code invoking an arm64 block (a `dispatch_after` timer, an XPC
+  handler, ...) jumped straight into arm64 code. `call_guest_block` in
+  services.c routes such blocks through `iosim_arm64_call_guest_ret`
+  with the block in x0 and up to seven further arguments; the x86 path
+  is unchanged. This covers dispatch timers, async and global queues,
+  `dispatch_apply` and `dispatch_data_apply`. Framework code that invokes
+  a block pointer directly (for example a UIKit animation completion)
+  would still jump into arm64 code; routing every native block call site
+  through the bridge is a separate step.
+- `tests/arm64_uikit.m` is a plain UIKit fixture built for both
+  architectures. The arm64 scene delegate builds the window, three
+  colored views and a label; UIView, UILabel and libdispatch stay
+  native; the delayed capture block runs back in the interpreter. The
+  arm64 translator, the arm64 interpreter (`IOSIM_ARM64_NOJIT`) and the
+  x86_64 build produced byte-identical PNGs (equal md5) in a manual
+  comparison; the suite asserts equal sample pixels and a white-pixel
+  count for the label.
+
+## 2026-11-24: persistent block cache
+
+- Translated blocks embed absolute immediates for guest addresses (branch
+  targets, literal addresses, return pcs) and helper pointers. The
+  translator now records every such immediate as a fixup (guest address or
+  helper index) while emitting; plain constants (masks, floating-point
+  bits) are not recorded. A block with an unknown helper call is marked
+  non-cacheable.
+- With `IOSIM_ARM64_CACHE_DIR` set, each translated image block is
+  appended to `<dir>/<uuid>.blocks`: a record holds the image-relative
+  pc, the emitted bytes, the emitting slide and the fixups. Keys are
+  relative to the slide so ASLR does not defeat matching. On the next
+  launch the file is loaded, guest fixups are rebased from the record's
+  slide to the current one, helper fixups are rebound to this process and
+  a hit is copied into the arena without decoding arm64. Runtime-
+  generated pages are never written.
+- The writer stores the fixup array before the code; the first loader
+  read them in the other order and silently dropped every record. A
+  truncated tail (from a killed process) is dropped on load before
+  appending; a record with an out-of-image pc or a bad fixup stops the
+  load at that point. The cache version constant covers emitter and
+  `a64_cpu` layout changes, and the helper table is append-only.
+- `tests/arm64_struct` run twice against one cache directory: the first
+  run prints `jit block` traces and writes the file, the second prints
+  `jit cached` and no `jit block` lines with the same output and status.

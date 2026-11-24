@@ -2251,6 +2251,31 @@ new value, proving cached translations are dropped. It prints
 `jit=61,127 mprotect=61 reprotect=62` and exits 96 under the translator,
 the traced run and `IOSIM_ARM64_NOJIT=1`.
 
+### arm64: one UIKit source, two architectures
+
+`tests/arm64_uikit.m` is an ordinary UIKit fixture: a scene delegate
+builds a window with three colored views and a label, and a
+`dispatch_after` block writes the framebuffer. Built for arm64, the
+delegate, the view setup and the block are app code on the
+interpreter/translator while UIKit, QuartzCore and libdispatch stay
+native x86_64; delegates are reached through the reverse bridge and the
+timer block through the native-to-guest block bridge. The suite builds
+the same source for x86_64 and also runs the arm64 binary with
+`IOSIM_ARM64_NOJIT=1`. All three captures show pure red, green and blue
+views on the black window and a white label; the suite compares sample
+pixels and the label's white count across the three runs. Each run
+prints `[arm64uikit] ready` and exits zero.
+
+### arm64: persistent translation cache
+
+`tests/arm64_struct` runs twice with `IOSIM_ARM64_CACHE_DIR` pointing at
+a fresh directory. The first run translates blocks (the JIT trace prints
+`jit block` lines) and appends them to `<image uuid>.blocks`; the second
+run prints `jit cached` for the same addresses and no `jit block` lines,
+returns the same `p=50 t=12 v=4.0` output and exits 51. Guest addresses
+are rebased between runs and helper calls are rebound to the current
+loader.
+
 ### SpringBoard: folder pagination
 
 A folder is rewritten to hold thirteen members across two pages.

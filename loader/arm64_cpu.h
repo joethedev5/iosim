@@ -51,4 +51,8 @@ void a64t_fcmp_insn(struct a64_cpu *c, uint32_t insn);
 /* True when pc lies in an executable segment of the current arm64 image. */
 int iosim_arm64_pc_in_image(struct a64_cpu *c, uint64_t pc);
 
+/* True when pc lies in the image proper rather than in a runtime-generated
+ * code page. Only image blocks are worth caching across launches. */
+int iosim_arm64_pc_is_static(struct a64_cpu *c, uint64_t pc);
+
 #endif
