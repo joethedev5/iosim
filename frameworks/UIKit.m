@@ -18380,6 +18380,7 @@ static void render_emitter(CAEmitterLayer *emitter, int x, int y, int w,
                            int h, double scale, double alpha, CGRect frame);
 static int g_render_offscreen;
 static UIView *g_no_transform_view;
+static UIView *g_no_round_clip_view;
 static CALayer *g_no_transform_layer;
 static int g_mask_render_depth;
 
@@ -18954,6 +18955,43 @@ static void render_view(UIView *view, double originX, double originY,
         h = (int)(h * sy + 0.5);
         x = (int)(cx - w / 2.0 + 0.5);
         y = (int)(cy - h / 2.0 + 0.5);
+    }
+
+    /* A clipping view with a corner radius renders its whole subtree into
+     * an offscreen, masks the four corners and composites the result. The
+     * guard stops the same view from entering the wrapper again. */
+    double clip_radius = view->_layer
+        ? layer_key_value(view->_layer, "cornerRadius",
+                          view->_layer->_cornerRadius)
+        : 0.0;
+    int clips = view->_clipsToBounds ||
+        (view->_layer && view->_layer->_masksToBounds) ||
+        [view isKindOfClass:[UIScrollView class]];
+    if (clips && clip_radius > 0 && w > 0 && h > 0 &&
+        view != g_no_round_clip_view)
+    {
+        void *state = iosim_fb_begin_offscreen((unsigned)w, (unsigned)h);
+        if (state)
+        {
+            UIView *saved = g_no_round_clip_view;
+            g_no_round_clip_view = view;
+            g_render_offscreen++;
+            render_view(view, -frame.origin.x, -frame.origin.y, scale,
+                        parentAlpha);
+            g_render_offscreen--;
+            g_no_round_clip_view = saved;
+            iosim_fb_mask_round_rect(0, 0, w, h,
+                                     (int)(clip_radius * scale + 0.5));
+            int bw = 0, bh = 0;
+            unsigned *buf = iosim_fb_end_offscreen(state, &bw, &bh);
+            if (buf)
+            {
+                iosim_fb_blit_affine(buf, bw, bh, 1.0, 0.0, 0.0, 1.0,
+                                     x, y, 1.0);
+                iosim_fb_free_offscreen(buf);
+            }
+            return;
+        }
     }
 
     int masked = 0;

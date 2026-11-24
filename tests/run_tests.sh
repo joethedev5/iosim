@@ -3711,6 +3711,48 @@ else
     echo "FAIL CAShapeLayer stroke trimming"; echo "$out"; fails=$((fails+1))
 fi
 
+"$ROOT/tools/build_app.sh" "$ROOT/tests/rounded_clip_test.m" \
+    "$T/rounded_clip_test" >/dev/null
+out="$(IOSIM_TEST_PNG="$T/rounded_clip.png" DYLD_ROOT_PATH="$ROOT/runtime" \
+    "$RUN" "$T/rounded_clip_test" 2>&1)"
+check "[rclip] png written" "$out" \
+    "the rounded clipping fixture captures a frame"
+if out="$(python3 - "$ROOT/tools" "$T/rounded_clip.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+
+def rgb(x, y):
+    c = pngpixel.px(rows, bpp, x * 3, y * 3)
+    return ((c >> 16) & 255, (c >> 8) & 255, c & 255)
+
+def near(c, r, g, b, slack=12):
+    return (abs(c[0] - r) <= slack and abs(c[1] - g) <= slack and
+            abs(c[2] - b) <= slack)
+
+checks = [
+    ((140, 160), near(rgb(140, 160), 255, 0, 0), "clipped center"),
+    ((42, 102), near(rgb(42, 102), 0, 0, 0), "clipped corner"),
+    ((60, 120), near(rgb(60, 120), 255, 0, 0), "clipped inside"),
+    ((140, 360), near(rgb(140, 360), 255, 230, 0), "masks center"),
+    ((42, 302), near(rgb(42, 302), 0, 0, 0), "masks corner"),
+    ((60, 320), near(rgb(60, 320), 255, 230, 0), "masks inside"),
+    ((42, 502), near(rgb(42, 502), 255, 128, 0), "unclipped corner"),
+    ((140, 560), near(rgb(140, 560), 255, 128, 0), "unclipped center"),
+]
+bad = [name for _pt, ok, name in checks if not ok]
+if bad:
+    raise SystemExit("rounded clipping failed: " + ", ".join(bad))
+print("ok   rounded clipping masks a subtree and respects clipsToBounds")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL rounded clipping"; echo "$out"; fails=$((fails+1))
+fi
+
 "$ROOT/tools/build_app.sh" "$ROOT/tests/draw_rect_test.m" \
     "$T/draw_rect_test" >/dev/null
 out="$(IOSIM_TEST_PNG="$T/draw_rect.png" DYLD_ROOT_PATH="$ROOT/runtime" \

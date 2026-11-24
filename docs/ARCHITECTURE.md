@@ -1004,6 +1004,13 @@ decoded with libpng in `loader/image.c`.
 - `CAShapeLayer` stores a `UIBezierPath` (via `CGPath`) and draws its fill and
   stroke; `CAGradientLayer` interpolates up to two color stops; `UIImageView`
   blits a decoded image with aspect-fit or centered content modes.
+- A view that clips to bounds and has a corner radius renders its whole
+  subtree into an offscreen pass, masks the four corners and composites the
+  result. The wrapper sits after the transform handling and skips itself for
+  the same view on the recursive render, so a transformed clipped view is
+  first rounded and then transformed. Content that overflows the rounded
+  edge is cut; a view with a corner radius but no clipping still lets its
+  subviews paint over the corners.
 - `CGContextAddArc`, `CGContextAddArcToPoint`, `CGPathAddArc` and
   `CGPathAddArcToPoint` tessellate arcs into line segments with a step count
   derived from the swept angle and radius. Angles follow the view coordinate

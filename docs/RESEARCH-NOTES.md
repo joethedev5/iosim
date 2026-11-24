@@ -1063,3 +1063,18 @@ components.
   removal does not call it.
 - There is no thread synchronization; real NSCache is thread-safe, but every
   current caller uses it from the main thread.
+
+## 2026-11-24: Rounded subtree clipping
+
+- `render_view` wraps a clipping view with a corner radius in an offscreen
+  pass: render the subtree at local coordinates, apply
+  `iosim_fb_mask_round_rect`, then blit the buffer back at the view's screen
+  origin. The wrapper is placed after the transform handling so a
+  transformed view is rounded first and transformed afterwards.
+- The recursive render passes the original parent alpha and the blit uses
+  opacity 1.0, so the subtree's alpha is applied exactly once. A per-view
+  guard pointer skips the wrapper on that recursive render, but child views
+  with their own clipped corners still take the wrapper.
+- `clipsToBounds`, `layer.masksToBounds` and scroll views all trigger the
+  clipping path. All four corners are rounded; `maskedCorners` selection is
+  still only stored, not rendered.

@@ -461,6 +461,7 @@ typedef enum {
 @property CGPoint anchorPoint;
 @property(nonatomic, retain) id contents;
 @property double cornerRadius;
+@property BOOL masksToBounds;
 @property double opacity;
 @property(nonatomic, retain) id backgroundColor;
 @property(nonatomic, retain) CALayer *mask;

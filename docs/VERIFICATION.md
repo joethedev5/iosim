@@ -548,6 +548,17 @@ The same synthetic tap path focuses a `UITextField` and the runtime keyboard
 accepts the next tap, verified by the text-input fixture. `ui swipe` emits a
 whole down/moves/up gesture in one command.
 
+### Graphics: rounded subtree clipping
+
+`tests/rounded_clip_test.m` stacks three cards. The first clips to bounds
+with a 20 pt corner radius and a red subview filling it: the center is red,
+the corner is black and a point inside the arc is red. The second sets
+`layer.masksToBounds` instead and behaves the same with a yellow subview. The
+third has a corner radius but does not clip, so its orange subview covers the
+corner and keeps the square silhouette. The fixture prints
+`ok   rounded clipping masks a subtree and respects clipsToBounds` after
+checking those eight pixels.
+
 ### Touch: multiple fingers
 
 `tests/multitouch_test.m` is a standalone app with two `TouchView`s at
