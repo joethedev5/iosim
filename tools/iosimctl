@@ -395,6 +395,33 @@ def cmd_delete(args):
     return 0
 
 
+def kill_device_processes(udid):
+    """End every guest process that belongs to a device.
+
+    launchd_sim exits at SIGTERM without taking its children with it, so a
+    plain shutdown used to leave SpringBoard and app processes running.
+    Every guest carries SIMULATOR_UDID in its environment, which is also how
+    the processes of one device are told apart from another's."""
+    needle = f"SIMULATOR_UDID={udid}".encode()
+    me = os.getpid()
+    for entry in os.listdir("/proc"):
+        if not entry.isdigit():
+            continue
+        pid = int(entry)
+        if pid == me:
+            continue
+        try:
+            with open(f"/proc/{pid}/environ", "rb") as f:
+                envi = f.read().split(b"\0")
+        except OSError:
+            continue
+        if needle in envi:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+
 def shutdown_one(udid, dev):
     pid = dev.get("launchdPid")
     if pid:
@@ -409,6 +436,7 @@ def shutdown_one(udid, dev):
                 break
             time.sleep(0.05)
         dev.pop("launchdPid", None)
+    kill_device_processes(udid)
     dev["state"] = "Shutdown"
 
 

@@ -1985,3 +1985,12 @@ components.
   `g_folder_page`, logs `folder page N of M` and repaints. The first
   placement after the search branch was dead code and the suite caught it
   (suite215: page 1 opened and drew, the swipe did nothing).
+
+## 2026-11-24: Shutdown cleanup
+
+- `iosimctl shutdown` only sent SIGTERM to launchd_sim, and launchd did not
+  terminate its children: SpringBoards and apps accumulated across suite
+  runs, some eventually zombifying. Shutdown now scans `/proc/*/environ`
+  for `SIMULATOR_UDID=<udid>` and SIGKILLs any remaining guest process.
+- The environment match identifies a device's processes exactly, so a
+  shutdown never touches another device's guests or the host harness.

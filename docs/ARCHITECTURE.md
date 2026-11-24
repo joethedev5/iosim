@@ -938,7 +938,9 @@ exist: `list`, `create`, `delete`, `boot`, `bootstatus`, `shutdown`, `erase`,
   runs through the loader with the device environment, `IOSIM_SHELL=1`, the
   event FIFO and a generated app manifest. SpringBoard renders the home screen
   into the device framebuffer; `io screenshot` waits for that frame. On
-  shutdown launchd terminates the SpringBoard process group.
+  shutdown `iosimctl` sends launchd_sim SIGTERM and then ends every remaining
+  guest process of the device, recognized by its `SIMULATOR_UDID`
+  environment, so no SpringBoard or app process outlives the shutdown.
 - `install` copies an `.app` into the device bundle container, records its
   `Info.plist` metadata and install order, rewrites the SpringBoard manifest,
   and sends an `apps` event so a running home screen reloads. `uninstall`
@@ -1743,8 +1745,9 @@ Python for iteration speed.
 - Auto Layout is a relaxation solver over anchors and guides, not Cassowary;
   it does not cover every UIKit layout API or content-size class.
 - Text input is `UITextField` and `UITextView` with caret positioning,
-  programmatic/double-tap selection and selected-range editing; selection
-  handles, drag selection and the full multitap gesture set are absent.
+  programmatic/double-tap selection, selected-range editing, drag selection
+  with draggable handles and a Copy/Paste edit menu; the full multitap
+  gesture set (for example triple-tap paragraph selection) is absent.
 - Darwin syscall differences are hidden by glibc for simple calls, but
   `stat`, `pthread`, `kqueue`, `mmap` flags and Mach traps need explicit
   translation.

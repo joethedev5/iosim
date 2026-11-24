@@ -2101,6 +2101,12 @@ confirms `isProxy` and `isKindOfClass:[NSProxy class]`, and sends an absent
 `-forwardInvocation:` receive the message and return 64 to the caller
 (`forwarded value`, `value 64`).
 
+### Device lifecycle: shutdown cleanup
+
+`tests/run_tests.sh` creates and boots a fresh device, finds at least one
+process whose environment carries `SIMULATOR_UDID=<udid>`, shuts the device
+down, and checks again that no such process remains.
+
 ### SpringBoard: folder pagination
 
 A folder is rewritten to hold thirteen members across two pages.

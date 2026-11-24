@@ -5789,6 +5789,63 @@ else
     echo "FAIL folder test cleanup"; fails=$((fails+1))
 fi
 
+# ---------- 14e. shutdown cleanup ----------
+# A shutdown ends the device's guest processes instead of leaving SpringBoard
+# and app processes behind; the environment of every process is checked for
+# the device's SIMULATOR_UDID before and after.
+CLEAN_UDID="$("$ROOT/tools/iosimctl" create "Cleanup iPhone" com.iosim.SimDeviceType.iPhone-18-Pro)"
+"$ROOT/tools/iosimctl" boot "$CLEAN_UDID" >/dev/null
+sleep 1
+if out="$(python3 - "$CLEAN_UDID" <<'PY'
+import os, sys
+needle = ("SIMULATOR_UDID=%s" % sys.argv[1]).encode()
+alive = 0
+for name in os.listdir("/proc"):
+    if not name.isdigit():
+        continue
+    try:
+        with open("/proc/%s/environ" % name, "rb") as f:
+            envi = f.read().split(b"\0")
+    except OSError:
+        continue
+    if needle in envi:
+        alive += 1
+if not alive:
+    raise SystemExit("no guest process was found after boot")
+print("ok   a booted device runs guest processes")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL shutdown boot"; echo "$out"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" shutdown "$CLEAN_UDID" >/dev/null
+sleep 0.3
+if out="$(python3 - "$CLEAN_UDID" <<'PY'
+import os, sys
+needle = ("SIMULATOR_UDID=%s" % sys.argv[1]).encode()
+left = []
+for name in os.listdir("/proc"):
+    if not name.isdigit():
+        continue
+    try:
+        with open("/proc/%s/environ" % name, "rb") as f:
+            envi = f.read().split(b"\0")
+    except OSError:
+        continue
+    if needle in envi:
+        left.append(name)
+if left:
+    raise SystemExit("device processes remain: %s" % " ".join(left))
+print("ok   a shutdown leaves no device process behind")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL shutdown cleanup"; echo "$out"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" delete "$CLEAN_UDID" >/dev/null
+
 # ---------- 15. lock screen ----------
 # Locking draws the lock screen over the wallpaper; swiping up unlocks. An
 # app that is foreground when the device locks backgrounds, and the unlock

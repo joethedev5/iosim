@@ -104,6 +104,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | App switcher: bottom-edge gestures, cached frames, animated card strip, resume, swipe-up kill | ✅ |
 | Multi-page home screen: 16-slot pages, page dots, horizontal swipe paging with a slide animation | ✅ |
 | Home-screen folders: drag to group apps, member launch, title rename, twelve-slot pages with pagination dots and swipe paging, persisted across boots | ✅ |
+| Device shutdown ends every guest process of the device (launchd, SpringBoard and apps), identified by its `SIMULATOR_UDID` environment | ✅ |
 | Home-screen icon drag: lifted ghost, edge page turns, cross-page drop and a persisted layout | ✅ |
 | Lock screen: date and clock, lock/unlock, apps suspend on lock and resume in place | ✅ |
 | Spotlight search: pill opens a keyboard-driven search over installed apps | ✅ |
