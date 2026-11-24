@@ -1012,6 +1012,59 @@ check "[assoc] removed 1 other" "$out" \
     "removing associations leaves another object's entries"
 check "[assoc] done" "$out" "the associated-object fixture finishes"
 
+# ---------- 4f10e. Masks on transformed content ----------
+rm -f "$T/mask.fifo"
+mkfifo "$T/mask.fifo"
+"$ROOT/tools/build_app.sh" "$ROOT/tests/mask_transform_test.m" \
+    "$T/mask_transform_test" >/dev/null
+out="$(IOSIM_EVENT_FIFO="$T/mask.fifo" \
+    IOSIM_TEST_PNG="$T/mask_transform.png" \
+    DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" \
+    "$T/mask_transform_test" 2>&1)"
+rm -f "$T/mask.fifo"
+check "[mt] ready" "$out" "the transformed-mask fixture starts"
+check "[mt] captured" "$out" "the fixture captures the masked frame"
+check "[mt] done" "$out" "the transformed-mask fixture finishes"
+if out="$(python3 - "$ROOT/tools" "$T/mask_transform.png" <<'MASKPNG'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+
+def rgb(x, y):
+    c = pngpixel.px(rows, bpp, x * 3, y * 3)
+    return ((c >> 16) & 255, (c >> 8) & 255, c & 255)
+
+def red(c):
+    r, g, b = c
+    return r > 200 and g < 40 and b < 40
+
+def dark(c):
+    r, g, b = c
+    return abs(r - 13) <= 25 and abs(g - 15) <= 25 and abs(b - 23) <= 25
+
+checks = [
+    ("view inside", red(rgb(70, 250))),
+    ("view before edge", red(rgb(85, 250))),
+    ("view past edge", dark(rgb(95, 250))),
+    ("view outside", dark(rgb(110, 250))),
+    ("layer inside", red(rgb(270, 250))),
+    ("layer before edge", red(rgb(285, 250))),
+    ("layer past edge", dark(rgb(295, 250))),
+    ("layer outside", dark(rgb(310, 250))),
+]
+bad = [name for name, ok in checks if not ok]
+if bad:
+    raise SystemExit("transform-mask pixels failed: " + ", ".join(bad))
+print("ok   transformed view and layer masks fold into the offscreen pass")
+MASKPNG
+)"; then
+    echo "$out"
+else
+    echo "FAIL transformed masks"; echo "$out"; fails=$((fails+1))
+fi
+
 # ---------- 4f11. CAAnimation completion and fill modes ----------
 rm -f "$T/arem.fifo"
 mkfifo "$T/arem.fifo"

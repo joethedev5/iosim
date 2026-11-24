@@ -1850,3 +1850,13 @@ components.
 - The fixture exercises key isolation, replacement, nil clearing, retain
   identity under mutation, copy isolation for a custom object and for a
   mutable string.
+
+## 2026-11-24: Masks on transformed content
+
+- A mask on a view or standalone layer that is rendered through the transform
+  offscreen path is already applied inside that pass: the recursive render
+  pushes the mask before drawing contents and sublayers. The fixture masks a
+  red 1.2x view and layer with a left-half mask and samples both sides of the
+  transformed centre.
+- The architecture note claiming such masks were not folded was stale and has
+  been corrected.

@@ -1132,6 +1132,15 @@ centres read (42,11,17), roughly alpha cubed. The transformed extents still
 read red at x=310 while (340,250) stays dark, so the fix did not change the
 transform geometry.
 
+### UIKit: masks on transformed content
+
+`tests/mask_transform_test.m` masks a red 1.2x view and a red standalone 1.2x
+`CALayer` with a white left-half mask. The captures show red through the left
+half up to the transformed centre (x=85 for a view centred at 90, x=285 for a
+layer centred at 290), dark immediately past it and dark outside the scaled
+extent, so the mask is applied inside the offscreen transform pass rather
+than outside or not at all.
+
 ### UIKit: animated UIView transforms
 
 `tests/transform_animation_test.m` animates a 100×100 green square from

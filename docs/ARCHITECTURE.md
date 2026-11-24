@@ -708,9 +708,10 @@ framebuffer mask stack for the duration of the layer (or view) render, so
 sublayers, contents, gradients, shapes and blended pixels all pick up the
 mask. Coverage masks multiply with any active polygon or alpha mask, giving
 nested masks and partial-alpha masks their expected cumulative effect.
-Masks on standalone layers and on view backing layers are applied; a mask on
-a view that is also rendered through the rotation offscreen path is not
-folded into the rotated composite. `CAGradientLayer` carries the full color
+Masks on standalone layers and on view backing layers are applied; a
+transformed layer renders its mask inside the same offscreen pass, so the
+mask is folded into the rotated composite and its boundary follows the
+transform. `CAGradientLayer` carries the full color
 array plus optional `locations`; the renderer builds stop values and alpha
 from `CGColorRef` or `UIColor` entries, spaces them evenly when locations are
 absent, and fills through the same multi-stop path CoreGraphics uses. A

@@ -109,7 +109,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | Icon badges: `applicationIconBadgeNumber`, shared badge store, red count badge on the home icon, cleared by the response | ✅ |
 | Lock screen notifications: delivered cards above the controls, tap unlocks and opens the notification's app | ✅ |
 | UIView 2D transforms (rotation and scale) with decomposed animation interpolation and transform-aware hit-testing/location conversion, center/bounds/point conversion, UIScrollView insets/paging/zoom/delegate, momentum and animated offsets | ✅ |
-| Transformed views and layers render through an offscreen pass at full opacity and composite alpha and layer opacity once, so transformed and plain content at the same alpha match | ✅ |
+| Transformed views and layers render through an offscreen pass at full opacity and composite alpha and layer opacity once, so transformed and plain content at the same alpha match; masks fold into that same pass | ✅ |
 | Layer clipping (`clipsToBounds`/`masksToBounds`), shadows and borders | ✅ |
 | UIVisualEffectView backdrop blur: capture, box blur, tint, rounded mask, contentView | ✅ |
 | Switch, slider, segmented, progress, page and activity controls in the iOS 26 glass design | ✅ |
