@@ -202,6 +202,7 @@ struct layer_anim {
     double timeOffset;
     int autoreverses;
     id fillMode;
+    int removedOnCompletion;
     double seq;
     int spring;
     double mass;
@@ -460,6 +461,10 @@ extern id kCAMediaTimingFunctionLinear;
 extern id kCAMediaTimingFunctionEaseIn;
 extern id kCAMediaTimingFunctionEaseOut;
 extern id kCAMediaTimingFunctionEaseInEaseOut;
+extern id kCAFillModeForwards;
+extern id kCAFillModeBackwards;
+extern id kCAFillModeBoth;
+extern id kCAFillModeRemoved;
 
 @class CAAnimation;
 @protocol CAAnimationDelegate
@@ -4306,6 +4311,7 @@ static int anim_delegates_pending(void)
     entry->timeOffset = anim->_timeOffset;
     entry->autoreverses = anim->_autoreverses;
     entry->fillMode = anim->_fillMode;
+    entry->removedOnCompletion = anim->_removedOnCompletion;
     entry->seq = ++_animSeq;
     entry->infinite = anim->_repeatCount < 0;
     if (entry->duration <= 0)
@@ -4588,6 +4594,10 @@ id kCAMediaTimingFunctionLinear = @"linear";
 id kCAMediaTimingFunctionEaseIn = @"easeIn";
 id kCAMediaTimingFunctionEaseOut = @"easeOut";
 id kCAMediaTimingFunctionEaseInEaseOut = @"easeInEaseOut";
+id kCAFillModeForwards = @"forwards";
+id kCAFillModeBackwards = @"backwards";
+id kCAFillModeBoth = @"both";
+id kCAFillModeRemoved = @"removed";
 
 @implementation CAMediaTimingFunction
 + (id)functionWithName:(id)name
@@ -18166,6 +18176,19 @@ static int layer_progress(struct layer_anim *anim, double *outT)
         t = 1.0;
     else if (t >= 1.0)
         t = 1.0;
+    if (repeat >= 0 && elapsed >= duration * (repeat > 1 ? repeat : 1.0))
+    {
+        const char *fill =
+            anim->fillMode ? iosim_string_cstr(anim->fillMode) : 0;
+        int forward =
+            fill && (strstr(fill, "forward") || strstr(fill, "both"));
+        if (anim->removedOnCompletion || !forward)
+        {
+            if (anim->removedOnCompletion)
+                memset(anim, 0, sizeof(*anim));
+            return 0;
+        }
+    }
     if (anim->autoreverses)
     {
         if (t >= 1.0)
@@ -18436,6 +18459,21 @@ static double layer_key_value(CALayer *layer, const char *key, double base)
         if (!backwards)
             return base;
         elapsed = 0;
+    }
+    double span = anim->duration > 0 ? anim->duration : 0.25;
+    double reps = anim->repeatCount;
+    if (reps >= 0 && elapsed >= span * (reps > 1 ? reps : 1.0))
+    {
+        const char *fill =
+            anim->fillMode ? iosim_string_cstr(anim->fillMode) : 0;
+        int forward =
+            fill && (strstr(fill, "forward") || strstr(fill, "both"));
+        if (anim->removedOnCompletion || !forward)
+        {
+            if (anim->removedOnCompletion)
+                memset(anim, 0, sizeof(*anim));
+            return base;
+        }
     }
     double t = elapsed / anim->duration;
     double repeat = anim->repeatCount;

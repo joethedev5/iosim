@@ -1255,3 +1255,18 @@ components.
   or empty bounds runs the animations block synchronously and completes
   immediately, preserving the previous behavior.
 
+## 2026-11-24: Animation completion and fill modes
+
+- Each layer animation entry now records `removedOnCompletion`. Once the
+  active span (`duration * max(repeatCount, 1)`, never for an infinite
+  repeat) has elapsed, a default animation clears its slot: `animationForKey:`
+  returns nil and presentation values fall back to the layer's model.
+- With `removedOnCompletion` disabled, fill modes decide the presentation:
+  `forwards` and `both` keep evaluating the animation at its end value, while
+  `removed` and `backwards` stop affecting the value outside the active span.
+  The same rule covers scalar key paths, layer position/value keyframes and
+  CGPath paths.
+- The fill mode constants are exported as `forwards`, `backwards`, `both`
+  and `removed`; substring checks distinguish backward fill before the start
+  from forward fill after the end.
+

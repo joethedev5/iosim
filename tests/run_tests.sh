@@ -728,6 +728,57 @@ else
     echo "FAIL transition pixels"; echo "$out"; fails=$((fails+1))
 fi
 
+# ---------- 4f11. CAAnimation completion and fill modes ----------
+rm -f "$T/arem.fifo"
+mkfifo "$T/arem.fifo"
+"$ROOT/tools/build_app.sh" "$ROOT/tests/animation_removal_test.m" \
+    "$T/animation_removal_test" >/dev/null
+out="$(IOSIM_EVENT_FIFO="$T/arem.fifo" DYLD_ROOT_PATH="$ROOT/runtime" \
+    "$RUN" "$T/animation_removal_test" 2>&1)"
+rm -f "$T/arem.fifo"
+check "[arem] ready" "$out" \
+    "the animation removal fixture starts"
+check "[arem] done" "$out" \
+    "the animation removal fixture samples both phases"
+if out="$(python3 - "$out" <<'PY'
+import re
+import sys
+
+vals = {}
+for line in sys.argv[1].splitlines():
+    m = re.match(r'\[arem\] (mid|end) ([-0-9.]+) ([-0-9.]+) ([-0-9.]+)$',
+                 line)
+    if m:
+        vals[m.group(1)] = tuple(float(m.group(i)) for i in (2, 3, 4))
+    m = re.match(r'\[arem\] keep (\d) (\d) (\d)$', line)
+    if m:
+        vals['keep'] = tuple(int(m.group(i)) for i in (1, 2, 3))
+for name in ('mid', 'end', 'keep'):
+    if name not in vals:
+        raise SystemExit('missing %s sample: %r' % (name, vals))
+if not all(0.55 <= v <= 0.68 for v in vals['mid']):
+    raise SystemExit('mid animation values are off: %r' % (vals['mid'],))
+fade, hold, keep = vals['end']
+if not 0.95 <= fade <= 1.05:
+    raise SystemExit('removed animation did not restore the model: %.2f' %
+                     fade)
+if not 0.20 <= hold <= 0.30:
+    raise SystemExit('forward fill did not hold the final value: %.2f' %
+                     hold)
+if not 0.95 <= keep <= 1.05:
+    raise SystemExit('unfilled animation did not restore the model: %.2f' %
+                     keep)
+if vals['keep'] != (0, 1, 1):
+    raise SystemExit('animationForKey membership is wrong: %r' %
+                     (vals['keep'],))
+print("ok   completed animations are removed or kept by fill mode")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL animation completion"; echo "$out"; fails=$((fails+1))
+fi
+
 # ---------- 4g. NSCalendar components ----------
 "$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
     -ffreestanding -O1 -I "$ROOT/frameworks" \

@@ -40,6 +40,9 @@ extern int fflush(void *stream);
     fill.beginTime = CACurrentMediaTime() + 0.5;
     fill.fillMode = @"backwards";
     [_fill addAnimation:fill forKey:@"fill"];
+    /* Commit the model value; after the animation completes and is removed,
+     * the presentation layer falls back to this value. */
+    _fill.opacity = 0.0;
 
     _reverse = [self boxAtX:160];
     CABasicAnimation *reverse =

@@ -48,12 +48,16 @@ extern int fflush(void *stream);
     fade.fromValue = [NSNumber numberWithDouble:1.0];
     fade.toValue = [NSNumber numberWithDouble:0.2];
     fade.duration = 2.0;
+    fade.removedOnCompletion = NO;
+    fade.fillMode = kCAFillModeForwards;
 
     CABasicAnimation *corner =
         [CABasicAnimation animationWithKeyPath:@"cornerRadius"];
     corner.fromValue = [NSNumber numberWithDouble:0.0];
     corner.toValue = [NSNumber numberWithDouble:30.0];
     corner.duration = 2.0;
+    corner.removedOnCompletion = NO;
+    corner.fillMode = kCAFillModeForwards;
 
     CAAnimationGroup *group = [[CAAnimationGroup alloc] init];
     group.duration = 2.0;

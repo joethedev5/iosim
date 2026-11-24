@@ -665,7 +665,9 @@ seconds. A timer samples `layer.presentationLayer` halfway through and prints
 `[group] mid opacity=0.59 radius=15.30`; the suite accepts 0.45–0.75 and
 11–19 pt to allow for timer scheduling jitter. The end sample is exact:
 `[group] end opacity=0.20 radius=30.00`, so both children advanced together
-and held their end values. The screenshot taken then reads the layer centre at
+and held their end values. Both child animations set `removedOnCompletion` to
+NO and fill mode forwards, so the completed group keeps applying its end
+values until it is removed. The screenshot taken then reads the layer centre at
 (201, 300) pt as `#3c1923` — 0.2 alpha red over the dark backdrop — and a
 point 4 pt inside the top-left corner as the backdrop itself, so the 30 pt
 corner radius is really rendered. `removeAnimationForKey:@"group"` then logs
@@ -1640,7 +1642,9 @@ particles are spread around the emitter rather than stacked at its origin.
 `tests/animation_timing_test.m` drives four opacity animations and samples
 `presentationLayer.opacity` from timers. A fade with `beginTime` 0.5 s in the
 future and `fillMode = @"backwards"` samples 1.0 before its start, about 0.75
-midway and 0.0 after it ends. An `autoreverses` fade samples about 0.5 at
+midway and 0.0 after it ends; the fixture commits the layer's model opacity
+to 0 after adding the animation, so the default-removed animation falls back
+to 0.0 when its active span ends. An `autoreverses` fade samples about 0.5 at
 quarter and three-quarter time and 1.0 after completion. A `speed = 2` fade
 samples about 0.4 at 0.3 s, and a `timeOffset = 0.5` fade samples the same.
 The fixture also requires `[CATransaction animationDuration]` to be 0.50, its
@@ -1677,6 +1681,18 @@ the chip reads (118,255,0), the yellow snapshot over the new green. Outside
 the view stays black. At 0.9 s the frame is pure blue (0,0,255) with a green
 chip (0,255,0), and the transition logged `[trans] done 1`, so the snapshot
 overlay is removed after the fade.
+
+### CoreAnimation: completion and fill modes
+
+`tests/animation_removal_test.m` starts three 0.5 s opacity animations from
+1.0 to 0.25 on separate layer-backed views. The first leaves
+`removedOnCompletion` at its default YES, the second disables removal and
+sets fill mode forwards, and the third disables removal without a fill mode.
+At 0.25 s all three presentation opacities read 0.62. At 0.8 s the removed
+animation is back at the model value 1.00 and `animationForKey:` returns nil;
+the forwards animation still reads 0.25 and remains attached; the unfilled
+animation is back at 1.00 but still attached. The suite checks those values
+and the (0,1,1) membership flags.
 
 ### CoreAnimation: keyframe calculation modes
 

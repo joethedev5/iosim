@@ -1085,6 +1085,10 @@ decoded with libpng in `loader/image.c`.
   CGPath: the renderer walks the path through `CGPathApply`, accumulates
   segment lengths (the path store already flattens curves into lines) and
   samples the point at the animation fraction of total arc length.
+  Completed animations honor `removedOnCompletion`: by default the animation
+  is dropped from its layer slot, so `animationForKey:` returns nil and the
+  model value applies again; with removal disabled, a forwards or both fill
+  mode keeps the final value while other fill modes fall back to the model.
   Named timing functions store their two control points and keep the fast
   smoothstep-style evaluation; `functionWithControlPoints::::` marks a custom
   function, whose `evaluate:` solves x(t) by bisection and returns y(t) for

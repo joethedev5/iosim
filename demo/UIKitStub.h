@@ -563,6 +563,10 @@ extern id kCAMediaTimingFunctionLinear;
 extern id kCAMediaTimingFunctionEaseIn;
 extern id kCAMediaTimingFunctionEaseOut;
 extern id kCAMediaTimingFunctionEaseInEaseOut;
+extern id kCAFillModeForwards;
+extern id kCAFillModeBackwards;
+extern id kCAFillModeBoth;
+extern id kCAFillModeRemoved;
 
 @class CAAnimation;
 @protocol CAAnimationDelegate

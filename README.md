@@ -44,6 +44,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | `CADisplayLink` with `preferredFramesPerSecond`, presentation layers, multiple concurrent layer animations | ✅ |
 | `CAMediaTimingFunction` named curves and custom cubic-Bezier control points with `getControlPointAtIndex:` | ✅ |
 | `CAKeyframeAnimation` calculation modes (linear, discrete, paced, cubic) and per-segment timing functions | ✅ |
+| CAAnimation completion: `removedOnCompletion`, fill modes backwards/forwards/both/removed, `animationForKey:` removal | ✅ |
 | Direct layer `position` animations: `CABasicAnimation` and `CAKeyframeAnimation` CGPoint values move rendering, hit-testing and presentation layers; CGPath paths pace by arc length | ✅ |
 | `CAAnimationGroup`: grouped opacity/corner animations, group removal clears children | ✅ |
 | `CASpringAnimation`: mass/stiffness/damping/initial velocity, settling duration | ✅ |
