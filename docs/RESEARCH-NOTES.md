@@ -1157,3 +1157,22 @@ components.
   lines), so callers see the same shrink/truncate decision as the renderer.
   UILabel now defaults to `NSLineBreakByTruncatingTail` (4), matching UIKit.
 
+## 2026-11-24: Keyframe calculation modes
+
+- `CAKeyframeAnimation.calculationMode` is read at animation time and
+  defaults to `linear`. `discrete` returns the segment's starting value and
+  advances only when progress reaches the next key time. `paced` ignores
+  keyTimes and timing functions, accumulates the absolute distance between
+  consecutive values and maps progress into that cumulative length;
+  `cubicPaced` currently paces the same chord lengths linearly.
+- `cubic` treats the values as a Catmull-Rom spline: interior tangents are
+  half the difference of the neighbors and the endpoints use their one-sided
+  differences, evaluated with Hermite basis functions on the segment-local
+  fraction.
+- `timingFunctions` supplies one function per segment (clamped to the last
+  entry when short). It applies after the segment fraction is computed in
+  linear and cubic modes, and is ignored for paced modes as Apple documents.
+- The stored animation entry now keeps the calculation mode and the timing
+  function array alongside values and keyTimes, so presentation layers
+  evaluate the same policy as the renderer.
+

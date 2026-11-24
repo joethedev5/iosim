@@ -604,6 +604,10 @@ extern id kCAMediaTimingFunctionEaseInEaseOut;
 @interface CAKeyframeAnimation : CAAnimation
 - (void)setValues:(id)values;
 - (void)setKeyTimes:(id)keyTimes;
+- (void)setCalculationMode:(id)mode;
+- (id)calculationMode;
+- (void)setTimingFunctions:(id)functions;
+- (id)timingFunctions;
 @end
 
 @interface CASpringAnimation : CAAnimation

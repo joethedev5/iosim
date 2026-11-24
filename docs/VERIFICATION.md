@@ -1636,6 +1636,18 @@ second: hold at x=100, slide to x=200, then slide down to y=500. Timers log
 `[keyframe] end <x> <y>` at 1.2 s (200, 500). The completion block must log
 `[keyframe] done 1`.
 
+### CoreAnimation: keyframe calculation modes
+
+`tests/keyframe_modes_test.m` starts five 2 s opacity keyframe animations at
+once and samples each presentation layer 0.25 s later, when progress is about
+0.13. With values 0, 0.9, 1 at key times 0, 0.5, 1, linear interpolation reads
+0.239, discrete holds the first value at 0.000, and paced timing spaces the
+progress by distance so the sample is 0.133. A 0, 1, 0 spline in cubic mode
+reads 0.317 (the Catmull-Rom curve is above the 0.25 linear value), and the
+same values with an ease-in timing function read 0.071 (below linear). The
+fixture exits after printing `[kfmode] done`; the suite parses the five
+samples and checks those relationships with timing-tolerant ranges.
+
 ### Image renderer and PNG output
 
 `tests/image_renderer_test.m` uses `UIGraphicsImageRenderer` at scale 1 to

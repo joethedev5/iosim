@@ -188,6 +188,8 @@ struct layer_anim {
     id toValue;
     id values;
     id keyTimes;
+    id calcMode;
+    id timingFunctions;
     id timingFunction;
     id key;
     id animation;
@@ -515,9 +517,15 @@ extern id kCAMediaTimingFunctionEaseInEaseOut;
 @public
     id _values;
     id _keyTimes;
+    id _calculationMode;
+    id _timingFunctions;
 }
 - (void)setValues:(id)values;
 - (void)setKeyTimes:(id)keyTimes;
+- (void)setCalculationMode:(id)mode;
+- (id)calculationMode;
+- (void)setTimingFunctions:(id)functions;
+- (id)timingFunctions;
 @end
 
 @interface CASpringAnimation : CAAnimation {
@@ -4247,6 +4255,11 @@ static int anim_delegates_pending(void)
     entry->toValue = keyframe ? nil : anim->_toValue;
     entry->values = keyframe ? ((CAKeyframeAnimation *)anim)->_values : nil;
     entry->keyTimes = keyframe ? ((CAKeyframeAnimation *)anim)->_keyTimes : nil;
+    entry->calcMode = keyframe
+                          ? ((CAKeyframeAnimation *)anim)->_calculationMode
+                          : nil;
+    entry->timingFunctions =
+        keyframe ? ((CAKeyframeAnimation *)anim)->_timingFunctions : nil;
     if (spring)
     {
         CASpringAnimation *sa = (CASpringAnimation *)anim;
@@ -4688,6 +4701,16 @@ double CACurrentMediaTime(void)
 @implementation CAKeyframeAnimation
 - (void)setValues:(id)values { _values = values; }
 - (void)setKeyTimes:(id)keyTimes { _keyTimes = keyTimes; }
+- (void)setCalculationMode:(id)mode { _calculationMode = mode; }
+- (id)calculationMode
+{
+    return _calculationMode ? _calculationMode : @"linear";
+}
+- (void)setTimingFunctions:(id)functions
+{
+    _timingFunctions = functions;
+}
+- (id)timingFunctions { return _timingFunctions; }
 @end
 
 @implementation CASpringAnimation
@@ -17781,45 +17804,120 @@ static double number_value(id value, double fallback)
     return ((double (*)(id, SEL))objc_msgSend)(value, @selector(doubleValue));
 }
 
-static double layer_keyframe_value(id values, id keyTimes, double t)
+static double keyframe_timing(id functions, int segment, double f)
+{
+    if (!functions)
+        return f;
+    int count = (int)[functions count];
+    if (count <= 0)
+        return f;
+    int index = segment < count ? segment : count - 1;
+    id function = [functions objectAtIndex:(unsigned long)index];
+    if (!function ||
+        ![function respondsToSelector:@selector(evaluate:)])
+        return f;
+    return ((double (*)(id, SEL, double))objc_msgSend)(
+        function, @selector(evaluate:), f);
+}
+
+/* Evaluate keyframe values at progress t. Linear is the default; discrete
+ * holds each value until the next key time, paced distributes time by the
+ * distance between values, and cubic runs a Catmull-Rom spline through the
+ * values. timingFunctions apply per segment except in paced modes. */
+static double layer_keyframe_value(id values, id keyTimes, id calcMode,
+                                   id timingFunctions, double t)
 {
     int n = values ? (int)[values count] : 0;
     if (n <= 0)
         return 0.0;
-    double first = number_value([values objectAtIndex:0], 0.0);
-    if (n == 1 || t <= 0.0)
-        return first;
-    double last = number_value([values objectAtIndex:(unsigned long)(n - 1)],
+    if (n > 1024)
+        n = 1024;
+    double vals[1024];
+    for (int i = 0; i < n; i++)
+        vals[i] = number_value([values objectAtIndex:(unsigned long)i],
                                0.0);
+    if (n == 1 || t <= 0.0)
+        return vals[0];
     if (t >= 1.0)
-        return last;
-    for (int i = 0; i + 1 < n; i++)
+        return vals[n - 1];
+    const char *mode = calcMode ? iosim_string_cstr(calcMode) : "linear";
+    int discrete = mode && strcmp(mode, "discrete") == 0;
+    int paced = mode && (strcmp(mode, "paced") == 0 ||
+                         strcmp(mode, "cubicPaced") == 0);
+    int cubic = mode && (strcmp(mode, "cubic") == 0 ||
+                         strcmp(mode, "cubicPaced") == 0);
+    if (paced)
     {
-        double t0 = keyTimes
+        double total = 0.0;
+        for (int i = 0; i + 1 < n; i++)
+            total += __builtin_fabs(vals[i + 1] - vals[i]);
+        if (total <= 0.0)
+            return vals[0];
+        double target = t * total;
+        double acc = 0.0;
+        for (int i = 0; i + 1 < n; i++)
+        {
+            double len = __builtin_fabs(vals[i + 1] - vals[i]);
+            if (target <= acc + len || i == n - 2)
+            {
+                double f = len > 0 ? (target - acc) / len : 1.0;
+                if (f < 0)
+                    f = 0;
+                if (f > 1)
+                    f = 1;
+                return vals[i] + (vals[i + 1] - vals[i]) * f;
+            }
+            acc += len;
+        }
+        return vals[n - 1];
+    }
+    double times[1024];
+    for (int i = 0; i < n; i++)
+        times[i] = keyTimes
             ? number_value([keyTimes objectAtIndex:(unsigned long)i],
                            (double)i / (n - 1))
             : (double)i / (n - 1);
-        double t1 = keyTimes
-            ? number_value([keyTimes objectAtIndex:(unsigned long)(i + 1)],
-                           (double)(i + 1) / (n - 1))
-            : (double)(i + 1) / (n - 1);
-        if (t <= t1 || i == n - 2)
+    for (int i = 0; i + 1 < n; i++)
+    {
+        double t0 = times[i], t1 = times[i + 1];
+        int inSegment = discrete ? (t < t1) : (t <= t1);
+        if (inSegment || i == n - 2)
         {
-            double a = number_value([values objectAtIndex:(unsigned long)i],
-                                    0.0);
-            double b = number_value(
-                [values objectAtIndex:(unsigned long)(i + 1)], 0.0);
             if (t1 <= t0)
-                return b;
+                return vals[i + 1];
             double f = (t - t0) / (t1 - t0);
             if (f < 0)
                 f = 0;
             if (f > 1)
                 f = 1;
-            return a + (b - a) * f;
+            if (discrete)
+                return vals[i];
+            if (cubic)
+            {
+                double m0, m1;
+                if (i == 0)
+                    m0 = vals[1] - vals[0];
+                else
+                    m0 = (vals[i + 1] - vals[i - 1]) / 2.0;
+                if (i + 2 >= n)
+                    m1 = vals[n - 1] - vals[n - 2];
+                else
+                    m1 = (vals[i + 2] - vals[i]) / 2.0;
+                f = keyframe_timing(timingFunctions, i, f);
+                double f2 = f * f;
+                double f3 = f2 * f;
+                double h00 = 2.0 * f3 - 3.0 * f2 + 1.0;
+                double h10 = f3 - 2.0 * f2 + f;
+                double h01 = -2.0 * f3 + 3.0 * f2;
+                double h11 = f3 - f2;
+                return h00 * vals[i] + h10 * m0 + h01 * vals[i + 1] +
+                       h11 * m1;
+            }
+            f = keyframe_timing(timingFunctions, i, f);
+            return vals[i] + (vals[i + 1] - vals[i]) * f;
         }
     }
-    return last;
+    return vals[n - 1];
 }
 
 static double layer_key_value(CALayer *layer, const char *key, double base)
@@ -17880,11 +17978,15 @@ static double layer_key_value(CALayer *layer, const char *key, double base)
     if (finished && !anim->autoreverses)
     {
         if (anim->values)
-            return layer_keyframe_value(anim->values, anim->keyTimes, 1.0);
+            return layer_keyframe_value(anim->values, anim->keyTimes,
+                                        anim->calcMode,
+                                        anim->timingFunctions, 1.0);
         return number_value(anim->toValue, base);
     }
     if (anim->values)
-        return layer_keyframe_value(anim->values, anim->keyTimes, t);
+        return layer_keyframe_value(anim->values, anim->keyTimes,
+                                    anim->calcMode, anim->timingFunctions,
+                                    t);
     double from = number_value(anim->fromValue, base);
     double to = number_value(anim->toValue, base);
     if (anim->spring)

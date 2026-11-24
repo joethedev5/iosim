@@ -1054,6 +1054,10 @@ decoded with libpng in `loader/image.c`.
   layer opacity and corner radius, either from/to (`CABasicAnimation`) or
   through keyframes (`CAKeyframeAnimation` with values and keyTimes), using
   the animation's timing function or Core Animation's default linear pacing.
+  Keyframe `calculationMode` selects linear interpolation, discrete holds,
+  distance-paced timing or a Catmull-Rom cubic spline; a `timingFunctions`
+  array replaces the animation-wide function per segment, except in paced
+  modes where Apple ignores it.
   Named timing functions store their two control points and keep the fast
   smoothstep-style evaluation; `functionWithControlPoints::::` marks a custom
   function, whose `evaluate:` solves x(t) by bisection and returns y(t) for

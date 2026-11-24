@@ -42,6 +42,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | UIView animations (frame, alpha, transform), delay/curve/repeat options, completion blocks | ✅ |
 | `CADisplayLink` with `preferredFramesPerSecond`, presentation layers, multiple concurrent layer animations | ✅ |
 | `CAMediaTimingFunction` named curves and custom cubic-Bezier control points with `getControlPointAtIndex:` | ✅ |
+| `CAKeyframeAnimation` calculation modes (linear, discrete, paced, cubic) and per-segment timing functions | ✅ |
 | `CAAnimationGroup`: grouped opacity/corner animations, group removal clears children | ✅ |
 | `CASpringAnimation`: mass/stiffness/damping/initial velocity, settling duration | ✅ |
 | CAAnimation timing (`beginTime`, `speed`, `timeOffset`, `autoreverses`, `fillMode`) and value getters, `CAAnimationDelegate` start/stop callbacks, `animationKeys`/`animationForKey:`/`removeAllAnimations`, `CACurrentMediaTime`, `CATransaction` completion, `performWithoutAnimation:` | ✅ |

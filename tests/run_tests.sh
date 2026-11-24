@@ -443,6 +443,50 @@ check "[timing] custom 0.13 0.50 0.87" "$out" \
 check "[timing] linear 0.50 0.25" "$out" \
     "the named linear function evaluates to its input"
 
+# ---------- 4f6. CAKeyframeAnimation calculation modes ----------
+rm -f "$T/kfmode.fifo"
+mkfifo "$T/kfmode.fifo"
+"$ROOT/tools/build_app.sh" "$ROOT/tests/keyframe_modes_test.m" \
+    "$T/keyframe_modes_test" >/dev/null
+out="$(IOSIM_EVENT_FIFO="$T/kfmode.fifo" DYLD_ROOT_PATH="$ROOT/runtime" \
+    "$RUN" "$T/keyframe_modes_test" 2>&1)"
+rm -f "$T/kfmode.fifo"
+check "[kfmode] ready" "$out" \
+    "the keyframe modes fixture starts"
+check "[kfmode] done" "$out" \
+    "the keyframe modes fixture samples all animations"
+if out="$(python3 - "$out" <<'PY'
+import re
+import sys
+
+vals = {}
+for line in sys.argv[1].splitlines():
+    m = re.match(r'\[kfmode\] (linear|discrete|paced|cubic|eased) '
+                 r'([-0-9.]+)$', line)
+    if m:
+        vals[m.group(1)] = float(m.group(2))
+for name in ('linear', 'discrete', 'paced', 'cubic', 'eased'):
+    if name not in vals:
+        raise SystemExit('missing %s sample: %r' % (name, vals))
+if not 0.18 <= vals['linear'] <= 0.30:
+    raise SystemExit('linear sample out of range: %.3f' % vals['linear'])
+if vals['discrete'] > 0.01:
+    raise SystemExit('discrete did not hold its first value: %.3f' %
+                     vals['discrete'])
+if not 0.08 <= vals['paced'] <= 0.18 or vals['paced'] >= vals['linear']:
+    raise SystemExit('paced sample out of range: %.3f' % vals['paced'])
+if not 0.25 <= vals['cubic'] <= 0.38 or vals['cubic'] <= vals['linear']:
+    raise SystemExit('cubic sample out of range: %.3f' % vals['cubic'])
+if not 0.03 <= vals['eased'] <= 0.12 or vals['eased'] >= vals['linear']:
+    raise SystemExit('eased sample out of range: %.3f' % vals['eased'])
+print("ok   keyframes pick discrete, paced, cubic and eased samples")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL keyframe modes"; echo "$out"; fails=$((fails+1))
+fi
+
 # ---------- 4g. NSCalendar components ----------
 "$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
     -ffreestanding -O1 -I "$ROOT/frameworks" \
