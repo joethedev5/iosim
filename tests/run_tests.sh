@@ -779,6 +779,39 @@ else
     echo "FAIL animation completion"; echo "$out"; fails=$((fails+1))
 fi
 
+# ---------- 4f11b. CATransition fade ----------
+"$ROOT/tools/build_app.sh" "$ROOT/tests/catransition_test.m" \
+    "$T/catransition_test" >/dev/null
+out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/catransition_test" 2>&1)"
+check "[ctrans] props fade fromLeft 0.20 0.80" "$out" \
+    "CATransition stores its type, subtype and progress window"
+check "[ctrans] done" "$out" "the CATransition fixture finishes"
+if out="$(python3 - "$out" <<'PY'
+import re
+import sys
+
+vals = {}
+for line in sys.argv[1].splitlines():
+    m = re.match(r'\[ctrans\] (early|late|push) ([-0-9.]+)$', line)
+    if m:
+        vals[m.group(1)] = float(m.group(2))
+for name in ('early', 'late', 'push'):
+    if name not in vals:
+        raise SystemExit('missing %s sample: %r' % (name, vals))
+if not 0.15 <= vals['early'] <= 0.65:
+    raise SystemExit('the fade is not mid-flight: %r' % (vals['early'],))
+if abs(vals['late'] - 1.0) > 0.02:
+    raise SystemExit('the fade did not settle: %r' % (vals['late'],))
+if abs(vals['push'] - 1.0) > 0.02:
+    raise SystemExit('a push transition changed opacity: %r' % (vals['push'],))
+print("ok   a CATransition fade animates the layer opacity")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL CATransition fade"; echo "$out"; fails=$((fails+1))
+fi
+
 # ---------- 4f12. UIViewPropertyAnimator timing parameters ----------
 rm -f "$T/pram.fifo"
 mkfifo "$T/pram.fifo"

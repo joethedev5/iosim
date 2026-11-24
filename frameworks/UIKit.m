@@ -4479,9 +4479,19 @@ static int anim_delegates_pending(void)
         animation_unmark_infinite();
     memset(entry, 0, sizeof(*entry));
     entry->used = 1;
-    entry->keyPath = anim->_keyPath;
-    entry->fromValue = keyframe ? nil : anim->_fromValue;
-    entry->toValue = keyframe ? nil : anim->_toValue;
+    /* A fade transition is an opacity animation from transparent to the
+     * layer's model opacity; the other CATransition types are stored but the
+     * renderer does not stage old content for them. */
+    BOOL transition = [anim isKindOfClass:[CATransition class]];
+    BOOL fade = transition && (((CATransition *)anim)->_type == nil ||
+                [((CATransition *)anim)->_type isEqual:@"fade"]);
+    entry->keyPath = fade ? @"opacity" : anim->_keyPath;
+    entry->fromValue =
+        fade ? [NSNumber numberWithDouble:0.0]
+             : (keyframe ? nil : anim->_fromValue);
+    entry->toValue =
+        fade ? [NSNumber numberWithDouble:1.0]
+             : (keyframe ? nil : anim->_toValue);
     entry->values = keyframe ? ((CAKeyframeAnimation *)anim)->_values : nil;
     entry->keyTimes = keyframe ? ((CAKeyframeAnimation *)anim)->_keyTimes : nil;
     entry->calcMode = keyframe
@@ -4802,6 +4812,14 @@ id kCAFillModeForwards = @"forwards";
 id kCAFillModeBackwards = @"backwards";
 id kCAFillModeBoth = @"both";
 id kCAFillModeRemoved = @"removed";
+id kCATransitionFade = @"fade";
+id kCATransitionMoveIn = @"moveIn";
+id kCATransitionPush = @"push";
+id kCATransitionReveal = @"reveal";
+id kCATransitionFromRight = @"fromRight";
+id kCATransitionFromLeft = @"fromLeft";
+id kCATransitionFromTop = @"fromTop";
+id kCATransitionFromBottom = @"fromBottom";
 
 @implementation CAMediaTimingFunction
 + (id)functionWithName:(id)name
@@ -4908,6 +4926,10 @@ id kCAFillModeRemoved = @"removed";
         _removedOnCompletion = YES;
     }
     return self;
+}
++ (id)animation
+{
+    return [[self alloc] init];
 }
 + (id)animationWithKeyPath:(id)path
 {

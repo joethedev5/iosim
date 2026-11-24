@@ -1762,3 +1762,13 @@ components.
   `dispatch_sync` on such a queue enqueues and waits for the earlier blocks
   instead of running immediately, and `dispatch_barrier_async`/`_sync` take
   their FIFO place. The global queue keeps the one-thread-per-block pool.
+
+## 2026-11-24: CATransition fade
+
+- `CATransition` is part of the layer animation slot machinery. A fade
+  (type `fade` or unset) is translated into an opacity animation from 0 to 1
+  over the transition's duration, so the presentation layer fades in and the
+  model value returns afterwards. `moveIn`, `push` and `reveal` are stored
+  with their type/subtype/progress/filter but do not stage old content, so
+  they do not change the rendered frame.
+- The `kCATransition*` type and subtype constants are exported.

@@ -610,6 +610,14 @@ extern id kCAFillModeForwards;
 extern id kCAFillModeBackwards;
 extern id kCAFillModeBoth;
 extern id kCAFillModeRemoved;
+extern id kCATransitionFade;
+extern id kCATransitionMoveIn;
+extern id kCATransitionPush;
+extern id kCATransitionReveal;
+extern id kCATransitionFromRight;
+extern id kCATransitionFromLeft;
+extern id kCATransitionFromTop;
+extern id kCATransitionFromBottom;
 
 @class CAAnimation;
 @protocol CAAnimationDelegate
@@ -619,6 +627,7 @@ extern id kCAFillModeRemoved;
 @end
 
 @interface CAAnimation : NSObject
++ (id)animation;
 + (id)animationWithKeyPath:(id)path;
 - (void)setFromValue:(id)value;
 - (void)setToValue:(id)value;
@@ -670,6 +679,19 @@ extern id kCAFillModeRemoved;
 @interface CAAnimationGroup : CAAnimation
 - (void)setAnimations:(NSArray *)animations;
 - (NSArray *)animations;
+@end
+
+@interface CATransition : CAAnimation
+- (void)setType:(id)type;
+- (id)type;
+- (void)setSubtype:(id)subtype;
+- (id)subtype;
+- (void)setStartProgress:(float)progress;
+- (float)startProgress;
+- (void)setEndProgress:(float)progress;
+- (float)endProgress;
+- (void)setFilter:(id)filter;
+- (id)filter;
 @end
 
 @interface CATransaction : NSObject

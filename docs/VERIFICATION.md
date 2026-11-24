@@ -811,6 +811,16 @@ top-left corner is still `#000000` (the unblurred stripe), proving the rounded
 mask, and more than 3 000 near-white pixels in the label band show the
 "Vibrancy" label drawn on the contentView above the glass.
 
+### Core Animation: CATransition fade
+
+`tests/catransition_test.m` reads a fade transition's type, subtype and
+progress window back (`[ctrans] props fade fromLeft 0.20 0.80`), adds it to a
+layer and samples `presentationLayer.opacity`: after 0.3 s of a 0.8 s
+transition the layer is partly transparent (between 0.15 and 0.65), and after
+the duration it settles on the model opacity of 1. A later push transition
+leaves the opacity at 1, because only a fade is translated into a renderable
+opacity animation.
+
 ### UIKit: scroll-view insets, paging and delegate callbacks
 
 `tests/scroll_view_test.m` builds a real `UIWindow` and a `UIScrollView`

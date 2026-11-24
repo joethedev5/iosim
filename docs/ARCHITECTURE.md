@@ -1243,7 +1243,11 @@ decoded with libpng in `loader/image.c`.
   whose reverse pass adds a second duration, so the animation ends at the
   start value after 2 x duration) and a backwards/both `fillMode` that shows the
   start value during the delay. `CACurrentMediaTime` returns the runtime
-  clock. `CATransaction` tracks begin/commit nesting and runs its completion
+  clock. `CATransition` shares the explicit-animation slots: a fade (type
+  `fade` or unset) becomes an opacity animation from 0 to 1 over its
+  duration, so the layer fades in and its model value returns afterwards.
+  `moveIn`, `push` and `reveal` store their type, subtype, start/end progress
+  and filter but do not stage old content, so they leave the frame unchanged. `CATransaction` tracks begin/commit nesting and runs its completion
   block on the outermost commit; `UIView performWithoutAnimation:` and
   `setAnimationsEnabled:` execute animation blocks immediately with their
   completion handlers. `UIView animateKeyframesWithDuration:` queues each
