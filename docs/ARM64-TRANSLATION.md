@@ -1,6 +1,6 @@
 # Running arm64 app binaries
 
-Status: **milestones 0-4 implemented in a first form.** The loader accepts
+Status: **milestones 0-4 implemented**, with the limitations below. The loader accepts
 arm64 images (`--arm64`), registers their Objective-C metadata, and runs
 them on the scalar interpreter with native framework calls (the
 type-encoding message bridge, `objc_msgSendSuper2`, a generic C shim gate,
