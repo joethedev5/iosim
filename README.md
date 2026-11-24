@@ -76,7 +76,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | NSRunLoop timers and delayed performs, NSThread main-thread check, sleep, start/detach with executing/finished state, NSLock/NSRecursiveLock/NSCondition/NSConditionLock over guest pthreads | ✅ |
 | NSCalendar/NSDateComponents Gregorian decomposition and construction | ✅ |
 | NSLocale identifier/language/country lookup and NSTimeZone named, fixed and TZ-driven system zones | ✅ |
-| NSOperationQueue/NSBlockOperation over dispatch groups, with operation dependencies, `isReady` gating and max-concurrency enforcement | ✅ |
+| NSOperationQueue/NSBlockOperation over dispatch groups, with operation dependencies, `isReady`/`isExecuting`/`waitUntilFinished`, queue priority, the queue's operation list and max-concurrency enforcement | ✅ |
 | App bundle resources: `NSBundle` lookup and `UIImage imageNamed:` PNGs | ✅ |
 | libdispatch queues, groups, semaphores, timer/data sources; UIKit and run-loop drain | ✅ |
 | Block runtime: heap block copies with retain/release counts and `__block` byref promotion to shared heap storage | ✅ |

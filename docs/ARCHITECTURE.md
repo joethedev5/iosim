@@ -842,7 +842,10 @@ disables that limit.
 `NSOperationQueue` dispatches each `NSOperation` through a libdispatch
 global queue and counts it in a dispatch group, so
 `waitUntilAllOperationsAreFinished` is a real group wait; suspension defers
-the dispatch until resumed. `NSBlockOperation` copies its execution blocks
+the dispatch until resumed. An operation marks `isExecuting` around its
+`main`, and `waitUntilFinished` joins it by polling the finished/cancelled
+flags. Queue priority is stored on the operation, and the queue's
+`operations` list returns only unfinished, uncancelled operations. `NSBlockOperation` copies its execution blocks
 with `_Block_copy` when they are added (a stack literal would otherwise die
 with its loop frame), runs them in order and then the completion block.
 Dispatch's group scheduling now copies the queued block, runs it on a

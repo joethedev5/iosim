@@ -1365,6 +1365,17 @@ starts a second worker that signals the same condition (`[thread] detached 1`),
 and a cancelled, unstarted thread reports `[thread] cancelled 1`. The main
 thread reports `[thread] main 1` before any of this.
 
+### Foundation: operation state and priority
+
+`tests/operation_extra_test.m` names an `NSBlockOperation` `Worker`, gives it
+queue priority 1, and checks it is neither executing nor blocked before it is
+queued (`[op] name Worker`, `[op] priority 1`, `[op] before 0 1`). The block
+signals a condition when it starts; the main thread sees
+`[op] running 1`, the queue's `operations` list reports one live operation
+(`[op] operations 1`), and after releasing the block,
+`waitUntilFinished` returns with `[op] finished 1 0`. The queue then reports
+`[op] count 0`.
+
 ### Foundation: notifications with userInfo and blocks
 
 `tests/notification_test.m` registers a selector observer and a block

@@ -11096,15 +11096,25 @@ extern long dispatch_group_wait(void *group, unsigned long long timeout);
 {
     if (_cancelled || _finished)
         return;
+    _executing = YES;
     [self main];
+    _executing = NO;
     _finished = YES;
     if (_completionBlock)
         ((void (^)(void))_completionBlock)();
 }
 - (void)main { }
 - (void)cancel { _cancelled = YES; }
+- (void)waitUntilFinished
+{
+    while (!_finished && !_cancelled)
+        usleep(1000);
+}
 - (BOOL)isCancelled { return _cancelled; }
 - (BOOL)isFinished { return _finished; }
+- (BOOL)isExecuting { return _executing; }
+- (long)queuePriority { return _priority; }
+- (void)setQueuePriority:(long)priority { _priority = priority; }
 - (BOOL)isReady
 {
     if (!_dependencies)
@@ -11264,6 +11274,18 @@ extern long dispatch_group_wait(void *group, unsigned long long timeout);
             count++;
     }
     return count;
+}
+- (NSArray *)operations
+{
+    NSMutableArray *list = [NSMutableArray array];
+    for (unsigned long i = 0; i < [(NSArray *)_operations count]; i++)
+    {
+        NSOperation *operation =
+            (NSOperation *)[(NSArray *)_operations objectAtIndex:i];
+        if (!operation->_finished && !operation->_cancelled)
+            [list addObject:operation];
+    }
+    return list;
 }
 - (void)setMaxConcurrentOperationCount:(long)count { _maxConcurrent = count; }
 - (long)maxConcurrentOperationCount { return _maxConcurrent; }

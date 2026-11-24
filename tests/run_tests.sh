@@ -2515,6 +2515,28 @@ check "[thread] detached 1" "$out" \
     "detachNewThreadSelector: starts a real pthread"
 check "[thread] cancelled 1" "$out" "cancel marks an unstarted thread cancelled"
 
+# ---------- 4g13. NSOperation state, priority and waiting ----------
+"$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
+    -fblocks -ffreestanding -O1 -I "$ROOT/frameworks" \
+    -c "$ROOT/tests/operation_extra_test.m" -o "$T/operation_extra_test.o"
+"$LD64" -arch x86_64 -platform_version $PLATFORM -e _main \
+    -o "$T/operation_extra_test" "$T/operation_extra_test.o" \
+    "$ROOT/runtime/System/Library/Frameworks/Foundation.framework/Foundation" \
+    -undefined dynamic_lookup
+out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/operation_extra_test" 2>&1)"
+check "[op] name Worker" "$out" "NSOperation keeps its name"
+check "[op] priority 1" "$out" "NSOperation stores its queue priority"
+check "[op] before 0 1" "$out" \
+    "a new operation is not executing and is ready"
+check "[op] running 1" "$out" \
+    "a queued operation reports isExecuting while its block runs"
+check "[op] operations 1" "$out" \
+    "the queue lists the running operation"
+check "[op] finished 1 0" "$out" \
+    "waitUntilFinished returns after the operation completes"
+check "[op] count 0" "$out" \
+    "the finished operation leaves the queue count"
+
 # ---------- 4h. NSOperationQueue block operations ----------
 "$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc -fblocks \
     -ffreestanding -O1 -I "$ROOT/frameworks" \

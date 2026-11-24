@@ -1710,3 +1710,10 @@ components.
   real pthread; the trampoline runs `main` and flips executing to finished.
 - `currentThread` is a per-pthread object from a pthread key, `mainThread` is
   the shared first-thread object, and cancel/name/priority are recorded.
+
+## 2026-11-24: operation state, priority and waiting
+
+- An `NSOperation` marks `isExecuting` around `main` and exposes
+  `waitUntilFinished`, which polls the finished/cancelled flags.
+- `queuePriority` is stored on the operation, and `NSOperationQueue.operations`
+  returns only the operations that are still unfinished and uncancelled.
