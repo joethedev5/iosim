@@ -2446,6 +2446,49 @@ fi
 kill "$TASKS2_PID" 2>/dev/null || true
 
 
+# ---------- 4g11. NSLock, NSRecursiveLock and NSCondition ----------
+"$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
+    -ffreestanding -O1 -I "$ROOT/frameworks" \
+    -c "$ROOT/tests/locks_test.m" -o "$T/locks_test.o"
+"$LD64" -arch x86_64 -platform_version $PLATFORM -e _main \
+    -o "$T/locks_test" "$T/locks_test.o" \
+    "$ROOT/runtime/System/Library/Frameworks/Foundation.framework/Foundation" \
+    -undefined dynamic_lookup
+out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/locks_test" 2>&1)"
+check "[lock] try0 1" "$out" "a fresh NSLock tryLock succeeds"
+check "[lock] try1 0" "$out" \
+    "a non-recursive NSLock refuses a second tryLock from its owner"
+check "[lock] try2 1" "$out" "an unlocked NSLock can be taken again"
+check "[lock] past 0" "$out" \
+    "lockBeforeDate: times out while the lock is held"
+check "[lock] future 1" "$out" \
+    "lockBeforeDate: takes a free lock before its deadline"
+check "[lock] name L" "$out" "NSLock keeps its name"
+check "[recursive] depth 1" "$out" \
+    "NSRecursiveLock accepts nested tryLock from its owner"
+check "[recursive] free 1" "$out" \
+    "NSRecursiveLock is free after every unlock"
+check "[condition] timeout 0" "$out" \
+    "NSCondition waitUntilDate: returns NO on timeout"
+check "[condition] started 1" "$out" \
+    "a pthread worker signals the condition it waits on"
+check "[condition] finished 3" "$out" \
+    "the main thread wakes the worker through the same condition"
+check "[condlock] init 0" "$out" \
+    "NSConditionLock starts with its initial condition"
+check "[condlock] wrong 0" "$out" \
+    "NSConditionLock refuses a try for another condition"
+check "[condlock] right 1" "$out" \
+    "NSConditionLock accepts a try for the current condition"
+check "[condlock] now 2" "$out" \
+    "unlockWithCondition: publishes the new condition"
+check "[condlock] locked 2" "$out" \
+    "lockWhenCondition: acquires a matching condition"
+check "[condlock] past 0" "$out" \
+    "lockBeforeDate: times out while the condition lock is held"
+check "[condlock] future 1" "$out" \
+    "lockBeforeDate: takes a free condition lock"
+
 # ---------- 4h. NSOperationQueue block operations ----------
 "$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc -fblocks \
     -ffreestanding -O1 -I "$ROOT/frameworks" \

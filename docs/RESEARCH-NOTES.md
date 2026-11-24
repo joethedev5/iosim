@@ -1694,3 +1694,12 @@ components.
   only after the final frame, so screenshots after the log show the settled
   page.
 - Edge-of-screen page turns during an icon drag stay instantaneous.
+
+## 2026-11-24: locks and conditions
+
+- `NSLock` and `NSRecursiveLock` wrap a normal or recursive host pthread
+  mutex; `tryLock` is `pthread_mutex_trylock` and the before-date variants
+  poll it until the deadline.
+- `NSCondition` pairs a mutex with a condition variable (`waitUntilDate:`
+  uses `pthread_cond_timedwait`); `NSConditionLock` layers a condition value
+  and waiting locks on top, including timed condition waits.

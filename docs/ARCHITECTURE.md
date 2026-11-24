@@ -803,6 +803,13 @@ fire sends the argument instead of the timer, and the
 `cancelPreviousPerformRequests...` class methods invalidate matching entries.
 `NSThread` answers `isMainThread` through a `pthread_main_np` shim that
 records the loader's first thread, and sleeps with the same shim.
+`NSLock` and `NSRecursiveLock` wrap a normal or recursive host pthread
+mutex, so `tryLock` is `pthread_mutex_trylock` and the before-date variants
+poll it until their deadline. `NSCondition` pairs a mutex with a condition
+variable: `wait` releases the mutex, `waitUntilDate:` times out through
+`pthread_cond_timedwait`, and signal/broadcast wake waiters.
+`NSConditionLock` layers a condition value and waiting locks over an
+`NSCondition`, including timed condition waits and try-lock shortcuts.
 
 `NSCalendar` implements the Gregorian calendar over the same civil-date
 arithmetic as the property-list writer: `components:fromDate:` splits a

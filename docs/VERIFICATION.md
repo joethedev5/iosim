@@ -1337,6 +1337,22 @@ concurrent operation then reports `[fnd] limit 1 0`: the observed peak
 concurrency is one and the finished operations no longer count, so
 `maxConcurrentOperationCount` gates dispatch rather than being stored only.
 
+### Foundation: locks and conditions
+
+`tests/locks_test.m` exercises the locking primitives over guest pthreads.
+An `NSLock` accepts the first `tryLock`, refuses a second call from the same
+thread, and accepts the lock again after an unlock (`[lock] try0 1`,
+`try1 0`, `try2 1`); its past-dated `lockBeforeDate:` returns NO while the
+lock is held and its future-dated call returns YES once free, and `setName:`
+survives (`[lock] past 0`, `future 1`, `name L`). An `NSRecursiveLock`
+accepts three nested locks (`depth 1`) and is free after three unlocks
+(`free 1`). An `NSCondition` times out (`timeout 0`); a pthread worker then
+waits on it while the main thread signals: `started 1` and `finished 3`.
+`NSConditionLock` starts at condition 0, refuses a different-condition try,
+accepts the matching try, moves to condition 2, locks on that condition,
+times out while held, and locks again once free (`init 0`, `wrong 0`,
+`right 1`, `now 2`, `locked 2`, `past 0`, `future 1`).
+
 ### Foundation: notifications with userInfo and blocks
 
 `tests/notification_test.m` registers a selector observer and a block

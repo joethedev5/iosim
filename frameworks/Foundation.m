@@ -35,6 +35,18 @@ extern int usleep(unsigned int usec);
 extern long strtol(const char *s, char **end, int base);
 extern double strtod(const char *s, char **end);
 extern int pthread_main_np(void);
+extern int pthread_mutex_init(void *mutex, const void *attr);
+extern int pthread_mutex_lock(void *mutex);
+extern int pthread_mutex_unlock(void *mutex);
+extern int pthread_mutex_trylock(void *mutex);
+extern int pthread_mutexattr_init(void *attr);
+extern int pthread_mutexattr_settype(void *attr, int type);
+extern int pthread_mutexattr_destroy(void *attr);
+extern int pthread_cond_init(void *cond, const void *attr);
+extern int pthread_cond_wait(void *cond, void *mutex);
+extern int pthread_cond_timedwait(void *cond, void *mutex, const void *when);
+extern int pthread_cond_signal(void *cond);
+extern int pthread_cond_broadcast(void *cond);
 extern void *_Block_copy(void *block);
 extern void _Block_release(void *block);
 extern void *objc_msgSend(void *self, void *sel, ...);
@@ -5906,6 +5918,186 @@ id NSDefaultRunLoopMode = @"NSDefaultRunLoopMode";
 {
     if (interval > 0)
         usleep((unsigned int)(interval * 1000000.0));
+}
+@end
+
+/* ------------------------------------------------------------- locking */
+
+static void iosim_mutex_setup(unsigned char *storage, int recursive)
+{
+    if (!recursive)
+    {
+        pthread_mutex_init(storage, 0);
+        return;
+    }
+    unsigned char attr[64] __attribute__((aligned(16)));
+    pthread_mutexattr_init(attr);
+    /* Darwin's PTHREAD_MUTEX_RECURSIVE is 2; the loader translates it. */
+    pthread_mutexattr_settype(attr, 2);
+    pthread_mutex_init(storage, attr);
+    pthread_mutexattr_destroy(attr);
+}
+
+@implementation NSLock
+- (id)init
+{
+    self = [super init];
+    if (self)
+        iosim_mutex_setup(_mutex, 0);
+    return self;
+}
+- (void)lock { pthread_mutex_lock(_mutex); }
+- (BOOL)tryLock { return pthread_mutex_trylock(_mutex) == 0; }
+- (void)unlock { pthread_mutex_unlock(_mutex); }
+- (BOOL)lockBeforeDate:(id)limit
+{
+    double deadline = limit ? [limit timeIntervalSince1970]
+                            : iosim_wall_time();
+    for (;;)
+    {
+        if ([self tryLock])
+            return YES;
+        if (iosim_wall_time() >= deadline)
+            return NO;
+        usleep(1000);
+    }
+}
+- (id)name { return _name; }
+- (void)setName:(id)name { _name = name; }
+@end
+
+@implementation NSRecursiveLock
+- (id)init
+{
+    self = [super init];
+    if (self)
+        iosim_mutex_setup(_mutex, 1);
+    return self;
+}
+- (void)lock { pthread_mutex_lock(_mutex); }
+- (BOOL)tryLock { return pthread_mutex_trylock(_mutex) == 0; }
+- (void)unlock { pthread_mutex_unlock(_mutex); }
+- (BOOL)lockBeforeDate:(id)limit
+{
+    double deadline = limit ? [limit timeIntervalSince1970]
+                            : iosim_wall_time();
+    for (;;)
+    {
+        if ([self tryLock])
+            return YES;
+        if (iosim_wall_time() >= deadline)
+            return NO;
+        usleep(1000);
+    }
+}
+- (id)name { return _name; }
+- (void)setName:(id)name { _name = name; }
+@end
+
+struct iosim_timespec {
+    long tv_sec;
+    long tv_nsec;
+};
+
+@implementation NSCondition
+- (id)init
+{
+    self = [super init];
+    if (self)
+    {
+        pthread_mutex_init(_mutex, 0);
+        pthread_cond_init(_cond, 0);
+    }
+    return self;
+}
+- (void)lock { pthread_mutex_lock(_mutex); }
+- (void)unlock { pthread_mutex_unlock(_mutex); }
+- (void)wait { pthread_cond_wait(_cond, _mutex); }
+- (BOOL)waitUntilDate:(id)limit
+{
+    if (!limit)
+    {
+        pthread_cond_wait(_cond, _mutex);
+        return YES;
+    }
+    double t = [limit timeIntervalSince1970];
+    struct iosim_timespec ts;
+    ts.tv_sec = (long)t;
+    ts.tv_nsec = (long)((t - (double)ts.tv_sec) * 1000000000.0);
+    if (ts.tv_nsec < 0)
+        ts.tv_nsec = 0;
+    return pthread_cond_timedwait(_cond, _mutex, &ts) == 0;
+}
+- (void)signal { pthread_cond_signal(_cond); }
+- (void)broadcast { pthread_cond_broadcast(_cond); }
+- (id)name { return _name; }
+- (void)setName:(id)name { _name = name; }
+@end
+
+@implementation NSConditionLock
+- (id)init { return [self initWithCondition:0]; }
+- (id)initWithCondition:(long)condition
+{
+    self = [super init];
+    if (self)
+    {
+        _condition = [[NSCondition alloc] init];
+        _conditionValue = condition;
+    }
+    return self;
+}
+- (long)condition { return _conditionValue; }
+- (void)lock { [_condition lock]; }
+- (void)unlock { [_condition unlock]; }
+- (BOOL)tryLock
+{
+    return pthread_mutex_trylock(_condition->_mutex) == 0;
+}
+- (BOOL)tryLockWhenCondition:(long)condition
+{
+    if (pthread_mutex_trylock(_condition->_mutex) != 0)
+        return NO;
+    if (_conditionValue == condition)
+        return YES;
+    [_condition unlock];
+    return NO;
+}
+- (void)lockWhenCondition:(long)condition
+{
+    [_condition lock];
+    while (_conditionValue != condition)
+        [_condition wait];
+}
+- (void)unlockWithCondition:(long)condition
+{
+    _conditionValue = condition;
+    [_condition unlock];
+}
+- (BOOL)lockBeforeDate:(id)limit
+{
+    double deadline = limit ? [limit timeIntervalSince1970]
+                            : iosim_wall_time();
+    for (;;)
+    {
+        if ([self tryLock])
+            return YES;
+        if (iosim_wall_time() >= deadline)
+            return NO;
+        usleep(1000);
+    }
+}
+- (BOOL)lockWhenCondition:(long)condition beforeDate:(id)limit
+{
+    [_condition lock];
+    while (_conditionValue != condition)
+    {
+        if (![_condition waitUntilDate:limit])
+        {
+            [_condition unlock];
+            return NO;
+        }
+    }
+    return YES;
 }
 @end
 

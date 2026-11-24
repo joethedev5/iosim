@@ -1281,6 +1281,62 @@ extern id NSDefaultRunLoopMode;
 + (void)sleepForTimeInterval:(double)interval;
 @end
 
+@protocol NSLocking
+- (void)lock;
+- (void)unlock;
+@end
+
+@interface NSLock : NSObject <NSLocking> {
+@public
+    unsigned char _mutex[64];
+    id _name;
+}
+- (BOOL)tryLock;
+- (BOOL)lockBeforeDate:(NSDate *)limit;
+- (id)name;
+- (void)setName:(id)name;
+@end
+
+@interface NSRecursiveLock : NSObject <NSLocking> {
+@public
+    unsigned char _mutex[64];
+    id _name;
+}
+- (BOOL)tryLock;
+- (BOOL)lockBeforeDate:(NSDate *)limit;
+- (id)name;
+- (void)setName:(id)name;
+@end
+
+@interface NSCondition : NSObject <NSLocking> {
+@public
+    unsigned char _mutex[64];
+    unsigned char _cond[48];
+    id _name;
+}
+- (void)wait;
+- (BOOL)waitUntilDate:(NSDate *)limit;
+- (void)signal;
+- (void)broadcast;
+- (id)name;
+- (void)setName:(id)name;
+@end
+
+@interface NSConditionLock : NSObject <NSLocking> {
+@public
+    NSCondition *_condition;
+    long _conditionValue;
+}
+- (id)initWithCondition:(long)condition;
+- (long)condition;
+- (BOOL)tryLock;
+- (BOOL)tryLockWhenCondition:(long)condition;
+- (void)lockWhenCondition:(long)condition;
+- (void)unlockWithCondition:(long)condition;
+- (BOOL)lockBeforeDate:(NSDate *)limit;
+- (BOOL)lockWhenCondition:(long)condition beforeDate:(NSDate *)limit;
+@end
+
 @interface NSOperation : NSObject {
 @public
     BOOL _cancelled;

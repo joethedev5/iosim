@@ -73,7 +73,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | `NSPropertyListSerialization` (XML and binary formats) and persistent `NSUserDefaults` domains | ✅ |
 | NSCache count/cost limits with FIFO eviction and an eviction delegate | ✅ |
 | `NSKeyedArchiver`/`NSKeyedUnarchiver` keyed archives with custom `NSCoding` classes | ✅ |
-| NSRunLoop timers and delayed performs, NSThread main-thread check and sleep | ✅ |
+| NSRunLoop timers and delayed performs, NSThread main-thread check and sleep, NSLock/NSRecursiveLock/NSCondition/NSConditionLock over guest pthreads | ✅ |
 | NSCalendar/NSDateComponents Gregorian decomposition and construction | ✅ |
 | NSLocale identifier/language/country lookup and NSTimeZone named, fixed and TZ-driven system zones | ✅ |
 | NSOperationQueue/NSBlockOperation over dispatch groups, with operation dependencies, `isReady` gating and max-concurrency enforcement | ✅ |
