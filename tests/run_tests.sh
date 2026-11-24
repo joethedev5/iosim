@@ -2310,6 +2310,58 @@ else
     fails=$((fails+1))
 fi
 
+# SectionApp's row-height delegate compiles to FCSEL, and CollectionApp's
+# colour loop uses a post-indexed floating-point load; both used to fail
+# silently on arm64 and render different frames.
+for app in SectionApp CollectionApp; do
+    "$ROOT/tools/build_app.sh" --arch arm64 "$ROOT/demo/$app.m" \
+        "$T/${app}_a64" >/dev/null
+    "$ROOT/tools/build_app.sh" "$ROOT/demo/$app.m" \
+        "$T/${app}_x64" >/dev/null
+    if IOSIM_SCREENSHOT_PATH="$T/${app}_a64.png" \
+        DYLD_ROOT_PATH="$ROOT/runtime" timeout 15 "$RUN" --arm64 $FW_ARGS \
+        "$T/${app}_a64" >"$T/${app}_a64.log" 2>&1; then
+        rc_a=0
+    else
+        rc_a=$?
+    fi
+    if IOSIM_SCREENSHOT_PATH="$T/${app}_x64.png" \
+        DYLD_ROOT_PATH="$ROOT/runtime" timeout 15 "$RUN" \
+        "$T/${app}_x64" >"$T/${app}_x64.log" 2>&1; then
+        rc_x=0
+    else
+        rc_x=$?
+    fi
+    if [ "$rc_a" -eq 0 ] && [ "$rc_x" -eq 0 ] && \
+        cmp -s "$T/${app}_a64.png" "$T/${app}_x64.png"; then
+        echo "ok   the arm64 and x86_64 $app builds render identical frames"
+    else
+        echo "FAIL dual-architecture $app frame"; fails=$((fails+1))
+    fi
+    if out="$(python3 - "$T/${app}_a64.log" "$T/${app}_x64.log" \
+        "$app" <<'PY'
+import re, sys
+
+app = sys.argv[3].encode()
+
+def normalized(path):
+    with open(path, "rb") as f:
+        text = f.read()
+    text = re.sub(app + rb"_(a64|x64)\.png", app + b".png", text)
+    return re.sub(rb"0x[0-9a-fA-F]+", b"0xADDR", text)
+
+if normalized(sys.argv[1]) != normalized(sys.argv[2]):
+    raise SystemExit("launch logs differ")
+print("ok   the two %s builds log the same lines" % sys.argv[3])
+PY
+)"; then
+        echo "$out"
+    else
+        echo "FAIL dual-architecture $app log"; echo "$out"
+        fails=$((fails+1))
+    fi
+done
+
 # ---------- 4f10aj. arm64 variadic Objective-C format methods ----------
 # NSString's format constructors are variadic methods: the type encoding
 # stops at the named arguments, so the native IMP would read an empty
@@ -2463,6 +2515,60 @@ if [ "$rc_x" -eq 0 ] && [ "$out" = "$out_x" ]; then
     echo "ok   the arm64 ivar values match the x86_64 build"
 else
     echo "FAIL dual-architecture ivars"; echo "$out_x"
+    fails=$((fails+1))
+fi
+
+# ---------- 4f10am. arm64 conditional floating-point select ----------
+# A chooser returning one of two doubles compiles to FCSEL, which the
+# translator used to reject (the message bridge then returned whatever
+# happened to be in d0). The same fixture also negates a signed int,
+# which compiles to a shifted-register SUB with XZR as the first operand.
+"$CC" -target arm64-apple-ios18.0-simulator -ffreestanding \
+    -fobjc-runtime=ios-18.0 -fno-objc-arc -fblocks -O1 -I "$ROOT/demo" \
+    -c "$ROOT/tests/arm64_fcsel.m" -o "$T/arm64_fcsel.o"
+"$LD64" -arch arm64 -platform_version $PLATFORM -e _main \
+    -o "$T/arm64_fcsel" "$T/arm64_fcsel.o" -undefined dynamic_lookup
+if out="$(DYLD_ROOT_PATH="$ROOT/runtime" timeout 10 "$RUN" --arm64 \
+    $FW_ARGS "$T/arm64_fcsel" 2>&1)"; then
+    rc=0
+else
+    rc=$?
+fi
+check "fcsel 44.0 50.0 50.0" "$out" \
+    "the arm64 conditional selects the matching double"
+check "fcsel32 0.75 0.25" "$out" \
+    "the arm64 conditional selects the matching float"
+check "neg -7 -7 -3" "$out" \
+    "the arm64 negation of a signed int is correct"
+if [ "$rc" -eq 0 ]; then
+    echo "ok   the arm64 fcsel fixture exits zero"
+else
+    echo "FAIL arm64 fcsel (exit $rc)"; fails=$((fails+1))
+fi
+if out_nj="$(IOSIM_ARM64_NOJIT=1 DYLD_ROOT_PATH="$ROOT/runtime" \
+    timeout 10 "$RUN" --arm64 $FW_ARGS "$T/arm64_fcsel" 2>&1)"; then
+    :
+fi
+if [ "$out" = "$out_nj" ]; then
+    echo "ok   the interpreter selects the same values"
+else
+    echo "FAIL arm64 fcsel under interpretation"; fails=$((fails+1))
+fi
+"$CC" -target x86_64-apple-ios18.0-simulator -ffreestanding \
+    -fobjc-runtime=ios-18.0 -fno-objc-arc -fblocks -O1 -I "$ROOT/demo" \
+    -c "$ROOT/tests/arm64_fcsel.m" -o "$T/fcsel_x64.o"
+"$LD64" -arch x86_64 -platform_version $PLATFORM -e _main \
+    -o "$T/fcsel_x64" "$T/fcsel_x64.o" -undefined dynamic_lookup
+if out_x="$(DYLD_ROOT_PATH="$ROOT/runtime" timeout 10 "$RUN" \
+    $FW_ARGS "$T/fcsel_x64" 2>&1)"; then
+    rc_x=0
+else
+    rc_x=$?
+fi
+if [ "$rc_x" -eq 0 ] && [ "$out" = "$out_x" ]; then
+    echo "ok   the arm64 fcsel values match the x86_64 build"
+else
+    echo "FAIL dual-architecture fcsel"; echo "$out_x"
     fails=$((fails+1))
 fi
 

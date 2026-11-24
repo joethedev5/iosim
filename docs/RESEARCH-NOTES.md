@@ -2526,3 +2526,32 @@ components.
   offset variable is a four-byte slot. tests/arm64_ivars.m stores and
   reads back four ivars on a native superclass, and ListApp's arm64
   frame is byte-identical to its x86_64 build.
+
+## 2026-11-24: FCSEL and the shifted-register zero register
+
+- The arm64 build of SectionApp rendered every table row 50 pt tall while
+  the x86_64 build used 44 pt for section 0. Its
+  `heightForRowAtIndexPath:` compiles the ternary to
+  `fcsel d0, d1, d0, eq`; neither the interpreter nor the block
+  translator decoded FCSEL, so the guest stopped at that instruction.
+  The native-to-guest message bridge ignored the failed call and handed
+  back whatever d0 already held (50.0), so the wrong height propagated
+  without an abort.
+- The bridge and the two native-callback entry points now treat "did not
+  reach the return sentinel" as a failed guest call and exit the process
+  with a message, instead of returning a stale register. The interpreter
+  now records the sentinel as pc on RET so a normal return is
+  distinguishable from a stopped frame in both execution paths.
+- FCSEL now selects between the two FP registers on the condition flags
+  in both execution paths, through a helper appended to the persisted
+  helper table. SectionApp's frame is byte-identical to x86_64.
+- Two other decoder gaps surfaced in the same sweep: ADD/SUB
+  shifted-register with Rn=31 treated the zero register as SP, so
+  `neg`/`negs x9, x0` computed sp-x0 and inverted the flags; and the
+  immediate FP load/store class used a mask that rejected pre/post-index
+  forms such as `ldr d1, [x21], #0x18`. CollectionApp's colour loop uses
+  that load; its frame is now byte-identical too.
+- tests/arm64_fcsel.m checks FCSEL for double and float plus signed
+  negation, which compiles to shifted-register SUB with XZR. The suite
+  also compares SectionApp and CollectionApp frames and normalized logs
+  across architectures.

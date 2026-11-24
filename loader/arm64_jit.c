@@ -399,6 +399,7 @@ static void *const jit_helpers[] = {
     (void *)a64t_fp3_insn,
     (void *)a64t_fp1_insn,
     (void *)a64t_fcmp_insn,
+    (void *)a64t_fcsel_insn,
 };
 
 #define JIT_NHELPERS ((int)(sizeof jit_helpers / sizeof jit_helpers[0]))
@@ -743,15 +744,15 @@ static int jit_emit_one(struct jc *j, uint32_t insn, uint64_t pc)
             else { if (sf) em_ror_rax(j, amount); else em_ror_eax(j, amount); }
         }
         em_mov_rcx_rax(j);
-        if (rn == 31)
+        if (extended && rn == 31)
             em_load_rax(j, O_SP);
         else
             em_gpr_load(j, rn, sf);
         if (sub) { if (sf) em_sub_rax_rcx(j); else em_sub_eax_ecx(j); }
         else { if (sf) em_add_rax_rcx(j); else em_add_eax_ecx(j); }
-        if (rd == 31)
+        if (extended && rd == 31)
             em_base_store(j, 31);
-        else
+        else if (rd != 31)
             em_gpr_store(j, rd, sf);
         return 1;
     }
@@ -1137,6 +1138,12 @@ static int jit_emit_one(struct jc *j, uint32_t insn, uint64_t pc)
             em_mov_rax_imm(j, 0);
             em_store_rax(j, O_DHI(rt));
         }
+        return 1;
+    }
+    /* FCSEL: floating-point conditional select */
+    if ((insn & 0x7f200c00) == 0x1e200c00)
+    {
+        em_call_insn(j, (void *)a64t_fcsel_insn, insn);
         return 1;
     }
     /* FP two-source arithmetic */

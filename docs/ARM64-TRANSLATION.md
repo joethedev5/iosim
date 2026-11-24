@@ -25,7 +25,7 @@ a page drops the translations that started in it. Native code can call
 arm64 blocks back through the callback bridge, so libdispatch timers
 and queues run app blocks, and the call gate recognizes the loader's
 service symbols by address. A UIKit app compiled once for each
-architecture renders the same pixels. Two stock demo apps built for both
+architecture renders the same pixels. Four stock demo apps built for both
 architectures produce byte-identical frame captures, and the arm64
 printf gates print the same log as the x86_64 build. Guest classes on a
 native superclass keep their ivar offsets in 32-bit slots, so sibling
@@ -56,8 +56,9 @@ pairwise adds, horizontal reductions, element moves and zip/uzp/trn
 permutations; LD1/ST1 single-structure loads and stores cover one to
 four consecutive registers with no offset or a post-index. Interleaved
 LD2/LD3/LD4 structures, widening and narrowing arithmetic, saturating
-add/sub, TBL/TBX and EXT, floating-point rounding and compares, and
-pairwise floating-point operations are covered too. This document records the method and
+add/sub, TBL/TBX and EXT, floating-point rounding and compares,
+conditional floating-point selects (FCSEL), and pairwise floating-point
+operations are covered too. This document records the method and
 the milestones that prove it.
 
 ## The constraint and the reframing

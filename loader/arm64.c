@@ -1896,9 +1896,9 @@ static int a64_run(struct a64_cpu *c)
         {
             int rn = (insn >> 5) & 31;
             uint64_t target = rd_x(c, rn);
+            c->pc = target;
             if (target == A64_RETURN_SENTINEL)
                 return (int)(int64_t)c->x[0];
-            c->pc = target;
             continue;
         }
         /* B / BL */
@@ -2106,10 +2106,12 @@ static int a64_run(struct a64_cpu *c)
                     b = (uint64_t)((int64_t)(b << (64 - bits)) >>
                                    (64 - bits)) >> amount;
             }
-            uint64_t a = rn == 31 ? c->sp : c->x[rn];
+            /* Only the extended-register form names the stack pointer as
+             * register 31; in the shifted-register form it is XZR. */
+            uint64_t a = (extended && rn == 31) ? c->sp : rd_x(c, rn);
             uint64_t res = sub ? a64_sub_flags(c, a, b, bits, setflags)
                                : a64_add_flags(c, a, b, bits, setflags);
-            if (rd == 31 && !setflags)
+            if (extended && rd == 31 && !setflags)
                 c->sp = res;
             else
                 wr_x(c, rd, res);
@@ -2465,7 +2467,7 @@ static int a64_run(struct a64_cpu *c)
             continue;
         }
         /* FP LDUR/STUR and pre/post-indexed FP loads and stores. */
-        if ((insn & 0x3f200c00) == 0x3c000000)
+        if ((insn & 0x3f200000) == 0x3c000000)
         {
             unsigned size = (insn >> 30) & 3;
             unsigned opc = (insn >> 22) & 3;
@@ -2667,6 +2669,20 @@ static int a64_run(struct a64_cpu *c)
                 c->d[rd] = out;
                 c->dhi[rd] = 0;
             }
+            c->pc = next;
+            continue;
+        }
+        /* FCSEL: floating-point conditional select */
+        if ((insn & 0x7f200c00) == 0x1e200c00)
+        {
+            int is_double = (insn >> 22) & 1;
+            int rm = (insn >> 16) & 31;
+            unsigned cond = (insn >> 12) & 0xf;
+            int rn = (insn >> 5) & 31;
+            int rd = insn & 31;
+            uint64_t v = a64_cond(c->nzcv, cond) ? c->d[rn] : c->d[rm];
+            c->d[rd] = is_double ? v : (uint32_t)v;
+            c->dhi[rd] = 0;
             c->pc = next;
             continue;
         }
@@ -4878,6 +4894,15 @@ static int arm64_x86_msg_hook(void *imp, void *self, void *sel,
     cpu.pc = (uint64_t)(uintptr_t)imp;
     a64_run_blocks(&cpu);
     munmap(stack, A64_STACK_SIZE);
+    if (cpu.pc != A64_RETURN_SENTINEL)
+    {
+        /* A failed guest call has no error channel back through the native
+         * caller, so returning a stale register would fabricate a result. */
+        fprintf(stderr,
+                "iosim: arm64: native-to-guest message %s aborted\n",
+                sel ? (const char *)sel : "(null)");
+        _exit(1);
+    }
 
     uint64_t ret = cpu.x[0];
     uint64_t fpr = cpu.d[0];
@@ -4964,7 +4989,7 @@ void a64t_addsub_flags(struct a64_cpu *c, uint32_t insn)
             b = (uint64_t)((int64_t)(b << (64 - bits)) >>
                            (64 - bits)) >> amount;
     }
-    uint64_t a = rn == 31 ? c->sp : c->x[rn];
+    uint64_t a = (extended && rn == 31) ? c->sp : rd_x(c, rn);
     uint64_t res = sub ? a64_sub_flags(c, a, b, bits, 1)
                        : a64_add_flags(c, a, b, bits, 1);
     wr_x(c, rd, res);
@@ -5065,6 +5090,18 @@ void a64t_csel_insn(struct a64_cpu *c, uint32_t insn)
         wr_x(c, rd, (~b) & m);
     else
         wr_x(c, rd, (0 - b) & m);
+}
+
+void a64t_fcsel_insn(struct a64_cpu *c, uint32_t insn)
+{
+    int is_double = (insn >> 22) & 1;
+    int rm = (insn >> 16) & 31;
+    unsigned cond = (insn >> 12) & 0xf;
+    int rn = (insn >> 5) & 31;
+    int rd = insn & 31;
+    uint64_t v = a64_cond(c->nzcv, cond) ? c->d[rn] : c->d[rm];
+    c->d[rd] = is_double ? v : (uint32_t)v;
+    c->dhi[rd] = 0;
 }
 
 void a64t_fp2_insn(struct a64_cpu *c, uint32_t insn)
@@ -5379,6 +5416,11 @@ void iosim_arm64_call_guest_ret(void *fn, const uint64_t *gp,
     cpu.pc = (uint64_t)(uintptr_t)fn;
     a64_run_blocks(&cpu);
     munmap(stack, A64_STACK_SIZE);
+    if (cpu.pc != A64_RETURN_SENTINEL)
+    {
+        fprintf(stderr, "iosim: arm64: guest callback aborted\n");
+        _exit(1);
+    }
     if (ret)
     {
         ret[0] = cpu.x[0];
@@ -5410,5 +5452,10 @@ int iosim_arm64_call_guest(void *fn, uint64_t a0, uint64_t a1)
     cpu.pc = (uint64_t)(uintptr_t)fn;
     a64_run_blocks(&cpu);
     munmap(stack, A64_STACK_SIZE);
+    if (cpu.pc != A64_RETURN_SENTINEL)
+    {
+        fprintf(stderr, "iosim: arm64: guest callback aborted\n");
+        _exit(1);
+    }
     return 1;
 }

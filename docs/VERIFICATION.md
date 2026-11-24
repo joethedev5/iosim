@@ -2314,7 +2314,10 @@ launch lines are compared after replacing pointer values with a
 placeholder, since each build allocates the window at a different host
 address. `demo/ListApp.m`, a table scene with reusable cells and a
 selection callback, is built the same way and also renders a
-byte-identical frame with the same normalized log.
+byte-identical frame with the same normalized log. `demo/SectionApp.m`
+and `demo/CollectionApp.m` are compared the same way; they exercise
+FCSEL in a row-height delegate and a post-indexed floating-point load in
+a colour loop.
 
 ### arm64: ivars on a native superclass
 
@@ -2350,6 +2353,26 @@ return and d0-d3 an HFA return, so object, integer and floating-point
 results all read zero. The suite checks the line, the exit status and the
 interpreter run, and compares the log with the x86_64 build of the same
 source.
+
+### arm64: conditional selects and signed negation
+
+`tests/arm64_fcsel.m` chooses between two doubles and between two
+floats from volatile inputs, so clang emits `fcsel` rather than a
+branch, and negates signed integers, which emits a shifted-register
+`SUB` with `XZR` as the first operand (plus `cneg` for the conditional
+form). The translator used to reject FCSEL, and shifted-register
+ADD/SUB with Rn=31 read SP instead of the zero register, so the fixture
+was a regression trap for both. The suite checks `fcsel 44.0 50.0 50.0`,
+`fcsel32 0.75 0.25`, `neg -7 -7 -3` and the exit status, repeats the run
+with `IOSIM_ARM64_NOJIT=1`, and compares the log with the x86_64 build
+of the same source.
+
+A guest call that stops before reaching the return sentinel is a failed
+call: the native-to-guest message bridge and the two native-callback
+entry points report which selector or callback aborted and exit,
+instead of publishing a stale register as the result. The interpreter
+records the sentinel in `pc` on `ret` so a normal return is
+distinguishable from a stopped frame under both execution paths.
 
 ### arm64: AdvSIMD coverage
 

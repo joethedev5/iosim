@@ -47,6 +47,7 @@ void a64t_fp2_insn(struct a64_cpu *c, uint32_t insn);
 void a64t_fp3_insn(struct a64_cpu *c, uint32_t insn);
 void a64t_fp1_insn(struct a64_cpu *c, uint32_t insn);
 void a64t_fcmp_insn(struct a64_cpu *c, uint32_t insn);
+void a64t_fcsel_insn(struct a64_cpu *c, uint32_t insn);
 
 /* True when pc lies in an executable segment of the current arm64 image. */
 int iosim_arm64_pc_in_image(struct a64_cpu *c, uint64_t pc);
