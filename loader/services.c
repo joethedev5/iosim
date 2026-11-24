@@ -2903,25 +2903,39 @@ int iosim_http_request(const char *url, const char *method,
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
-    if (getaddrinfo(host, port, &hints, &addresses) != 0)
+    /* Connection setup to a loopback service can transiently fail while the
+     * host is busy; retry before reporting a request error. Nothing has been
+     * sent at this point, so retrying is safe for every method. */
+    int connect_errno = 0;
+    for (int attempt = 0; attempt < 3 && fd < 0; attempt++)
     {
-        http_set_error(&error, "could not resolve host");
-        goto done;
-    }
-    for (struct addrinfo *a = addresses; a; a = a->ai_next)
-    {
-        fd = socket(a->ai_family, a->ai_socktype, a->ai_protocol);
-        if (fd < 0)
+        if (attempt > 0)
+            usleep(20000);
+        addresses = NULL;
+        if (getaddrinfo(host, port, &hints, &addresses) != 0)
             continue;
-        if (connect(fd, a->ai_addr, a->ai_addrlen) == 0)
-            break;
-        close(fd);
-        fd = -1;
+        for (struct addrinfo *a = addresses; a; a = a->ai_next)
+        {
+            fd = socket(a->ai_family, a->ai_socktype, a->ai_protocol);
+            if (fd < 0)
+            {
+                connect_errno = errno;
+                continue;
+            }
+            if (connect(fd, a->ai_addr, a->ai_addrlen) == 0)
+                break;
+            connect_errno = errno;
+            close(fd);
+            fd = -1;
+        }
+        freeaddrinfo(addresses);
     }
-    freeaddrinfo(addresses);
     if (fd < 0)
     {
-        http_set_error(&error, "could not connect to host");
+        char message[96];
+        snprintf(message, sizeof(message),
+                 "could not connect to host (errno %d)", connect_errno);
+        http_set_error(&error, message);
         goto done;
     }
     struct timeval timeout = { 15, 0 };

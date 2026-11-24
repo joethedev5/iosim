@@ -29,7 +29,9 @@ int main(int argc, char **argv)
         NSDictionary *headers = [response allHeaderFields];
         printf("[http] header %s\n",
                [[headers objectForKey:@"Content-type"] UTF8String]);
-        (void)error;
+        if (error)
+            printf("[http] error %ld %s\n", [error code],
+                   [[error localizedDescription] UTF8String]);
         finished = 1;
     }];
     [task resume];
