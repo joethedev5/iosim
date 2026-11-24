@@ -213,6 +213,17 @@ horizontal scroll direction. Ten items wrap after two rows, so cells sit at
 60 pt content offset, captured pixels read white at the second and fourth
 column centers and black in the 10 pt gap, so rendering follows the offset.
 
+### UIKit: diffable data sources
+
+`tests/diffable_data_source_test.m` builds a two-section snapshot, appends
+items, inserts before and after an item, deletes an item, moves one to the
+front and deletes the second section. It prints `[diff] snapshot 2 3`,
+`[diff] final 1 2` and the surviving `c1`, `a1` order. A table data source
+then reports one section and two rows, maps index path 0:1 to `a1` and back,
+and produces a cell whose text is `a1`; a collection data source with a
+registered cell class reports one section and three items and resolves
+0:2 to `g3`.
+
 ### UIKit: split-view columns
 
 `tests/foundation_extra_test.m` lays out a 1024 pt double-column split view and

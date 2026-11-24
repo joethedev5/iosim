@@ -2340,6 +2340,68 @@ enum {
                                         point:(CGPoint)point;
 @end
 
+@interface NSDiffableDataSourceSnapshot : NSObject
+- (long)numberOfSections;
+- (long)numberOfItems;
+- (NSArray *)sectionIdentifiers;
+- (NSArray *)itemIdentifiers;
+- (NSArray *)itemIdentifiersInSectionWithIdentifier:(id)sectionIdentifier;
+- (long)numberOfItemsInSection:(id)sectionIdentifier;
+- (id)sectionIdentifierForSectionContainingItemIdentifier:(id)identifier;
+- (long)indexOfSectionIdentifier:(id)sectionIdentifier;
+- (long)indexOfItemIdentifier:(id)identifier;
+- (void)appendSectionsWithIdentifiers:(NSArray *)identifiers;
+- (void)appendItemsWithIdentifiers:(NSArray *)identifiers;
+- (void)appendItemsWithIdentifiers:(NSArray *)identifiers
+          intoSectionWithIdentifier:(id)sectionIdentifier;
+- (void)insertItemsWithIdentifiers:(NSArray *)identifiers
+            beforeItemWithIdentifier:(id)identifier;
+- (void)insertItemsWithIdentifiers:(NSArray *)identifiers
+             afterItemWithIdentifier:(id)identifier;
+- (void)insertSectionsWithIdentifiers:(NSArray *)identifiers
+          beforeSectionWithIdentifier:(id)identifier;
+- (void)deleteAllItems;
+- (void)deleteItemsWithIdentifiers:(NSArray *)identifiers;
+- (void)deleteSectionsWithIdentifiers:(NSArray *)identifiers;
+- (void)moveItemWithIdentifier:(id)fromIdentifier
+      beforeItemWithIdentifier:(id)toIdentifier;
+- (void)moveSectionWithIdentifier:(id)fromIdentifier
+   beforeSectionWithIdentifier:(id)toIdentifier;
+- (void)reloadItemsWithIdentifiers:(NSArray *)identifiers;
+- (void)reloadSectionsWithIdentifiers:(NSArray *)identifiers;
+@end
+
+typedef id (^UITableViewDiffableDataSourceCellProvider)(
+    UITableView *, NSIndexPath *, id);
+
+@interface UITableViewDiffableDataSource : NSObject <UITableViewDataSource>
+- (id)initWithTableView:(UITableView *)tableView
+          cellProvider:(UITableViewDiffableDataSourceCellProvider)provider;
+- (NSDiffableDataSourceSnapshot *)snapshot;
+- (void)applySnapshot:(NSDiffableDataSourceSnapshot *)snapshot
+    animatingDifferences:(BOOL)animating;
+- (void)applySnapshotUsingReloadData:(NSDiffableDataSourceSnapshot *)snapshot;
+- (id)itemIdentifierForIndexPath:(NSIndexPath *)indexPath;
+- (NSIndexPath *)indexPathForItemIdentifier:(id)identifier;
+- (long)numberOfSectionsInTableView:(UITableView *)tableView;
+@end
+
+typedef id (^UICollectionViewDiffableDataSourceCellProvider)(
+    UICollectionView *, NSIndexPath *, id);
+
+@interface UICollectionViewDiffableDataSource : NSObject
+    <UICollectionViewDataSource>
+- (id)initWithCollectionView:(UICollectionView *)collectionView
+                cellProvider:
+                    (UICollectionViewDiffableDataSourceCellProvider)provider;
+- (NSDiffableDataSourceSnapshot *)snapshot;
+- (void)applySnapshot:(NSDiffableDataSourceSnapshot *)snapshot
+    animatingDifferences:(BOOL)animating;
+- (void)applySnapshotUsingReloadData:(NSDiffableDataSourceSnapshot *)snapshot;
+- (id)itemIdentifierForIndexPath:(NSIndexPath *)indexPath;
+- (NSIndexPath *)indexPathForItemIdentifier:(id)identifier;
+@end
+
 enum {
     UICollectionViewScrollDirectionVertical = 0,
     UICollectionViewScrollDirectionHorizontal = 1

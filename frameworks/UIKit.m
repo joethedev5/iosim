@@ -16571,6 +16571,512 @@ int iosim_scroll_tick(void)
     return redraw;
 }
 
+/* -------------------------------------------------- diffable data sources */
+
+@interface NSDiffableDataSourceSnapshot : NSObject {
+@public
+    NSMutableArray *_sections;
+    NSMutableArray *_items;
+}
+- (long)numberOfSections;
+- (long)numberOfItems;
+- (NSArray *)sectionIdentifiers;
+- (NSArray *)itemIdentifiers;
+- (NSArray *)itemIdentifiersInSectionWithIdentifier:(id)sectionIdentifier;
+- (long)numberOfItemsInSection:(id)sectionIdentifier;
+- (id)sectionIdentifierForSectionContainingItemIdentifier:(id)identifier;
+- (long)indexOfSectionIdentifier:(id)sectionIdentifier;
+- (long)indexOfItemIdentifier:(id)identifier;
+- (void)appendSectionsWithIdentifiers:(NSArray *)identifiers;
+- (void)appendItemsWithIdentifiers:(NSArray *)identifiers;
+- (void)appendItemsWithIdentifiers:(NSArray *)identifiers
+          intoSectionWithIdentifier:(id)sectionIdentifier;
+- (void)insertItemsWithIdentifiers:(NSArray *)identifiers
+            beforeItemWithIdentifier:(id)identifier;
+- (void)insertItemsWithIdentifiers:(NSArray *)identifiers
+             afterItemWithIdentifier:(id)identifier;
+- (void)insertSectionsWithIdentifiers:(NSArray *)identifiers
+          beforeSectionWithIdentifier:(id)identifier;
+- (void)deleteAllItems;
+- (void)deleteItemsWithIdentifiers:(NSArray *)identifiers;
+- (void)deleteSectionsWithIdentifiers:(NSArray *)identifiers;
+- (void)moveItemWithIdentifier:(id)fromIdentifier
+      beforeItemWithIdentifier:(id)toIdentifier;
+- (void)moveSectionWithIdentifier:(id)fromIdentifier
+   beforeSectionWithIdentifier:(id)toIdentifier;
+- (void)reloadItemsWithIdentifiers:(NSArray *)identifiers;
+- (void)reloadSectionsWithIdentifiers:(NSArray *)identifiers;
+- (id)sectionIdentifierAtIndex:(long)index;
+@end
+
+@interface UITableViewDiffableDataSource : NSObject <UITableViewDataSource> {
+@public
+    UITableView *_tableView;
+    id (^_cellProvider)(UITableView *, NSIndexPath *, id);
+    NSDiffableDataSourceSnapshot *_snapshot;
+}
+- (id)initWithTableView:(UITableView *)tableView
+          cellProvider:(id (^)(UITableView *, NSIndexPath *, id))provider;
+- (NSDiffableDataSourceSnapshot *)snapshot;
+- (void)applySnapshot:(NSDiffableDataSourceSnapshot *)snapshot
+    animatingDifferences:(BOOL)animating;
+- (void)applySnapshotUsingReloadData:(NSDiffableDataSourceSnapshot *)snapshot;
+- (id)itemIdentifierForIndexPath:(NSIndexPath *)indexPath;
+- (NSIndexPath *)indexPathForItemIdentifier:(id)identifier;
+@end
+
+@interface UICollectionViewDiffableDataSource : NSObject
+    <UICollectionViewDataSource> {
+@public
+    UICollectionView *_collectionView;
+    id (^_cellProvider)(UICollectionView *, NSIndexPath *, id);
+    NSDiffableDataSourceSnapshot *_snapshot;
+}
+- (id)initWithCollectionView:(UICollectionView *)collectionView
+                cellProvider:
+                    (id (^)(UICollectionView *, NSIndexPath *, id))provider;
+- (NSDiffableDataSourceSnapshot *)snapshot;
+- (void)applySnapshot:(NSDiffableDataSourceSnapshot *)snapshot
+    animatingDifferences:(BOOL)animating;
+- (void)applySnapshotUsingReloadData:(NSDiffableDataSourceSnapshot *)snapshot;
+- (id)itemIdentifierForIndexPath:(NSIndexPath *)indexPath;
+- (NSIndexPath *)indexPathForItemIdentifier:(id)identifier;
+@end
+
+static long snapshot_section_index(NSDiffableDataSourceSnapshot *snapshot,
+                                   id identifier)
+{
+    if (!snapshot || !identifier)
+        return -1;
+    for (unsigned long i = 0; i < [snapshot->_sections count]; i++)
+    {
+        if ([[snapshot->_sections objectAtIndex:i] isEqual:identifier])
+            return (long)i;
+    }
+    return -1;
+}
+
+static void snapshot_add_unique_section(NSDiffableDataSourceSnapshot *snapshot,
+                                        id identifier)
+{
+    if (!identifier || snapshot_section_index(snapshot, identifier) >= 0)
+        return;
+    [snapshot->_sections addObject:identifier];
+    [snapshot->_items addObject:[[NSMutableArray alloc] init]];
+}
+
+static long snapshot_item_index_in_section(NSArray *items, id identifier)
+{
+    if (!items || !identifier)
+        return -1;
+    for (unsigned long i = 0; i < [items count]; i++)
+    {
+        if ([[items objectAtIndex:i] isEqual:identifier])
+            return (long)i;
+    }
+    return -1;
+}
+
+static NSMutableArray *snapshot_items_for_section(
+    NSDiffableDataSourceSnapshot *snapshot, id sectionIdentifier)
+{
+    long index = snapshot_section_index(snapshot, sectionIdentifier);
+    if (index < 0)
+        return nil;
+    return [snapshot->_items objectAtIndex:(unsigned long)index];
+}
+
+static void snapshot_insert_items(NSDiffableDataSourceSnapshot *snapshot,
+                                  NSArray *identifiers, id target,
+                                  int after)
+{
+    if (!identifiers || !target)
+        return;
+    for (unsigned long s = 0; s < [snapshot->_items count]; s++)
+    {
+        NSMutableArray *items = [snapshot->_items objectAtIndex:s];
+        long at = snapshot_item_index_in_section(items, target);
+        if (at < 0)
+            continue;
+        unsigned long cursor = (unsigned long)(after ? at + 1 : at);
+        for (unsigned long i = 0; i < [identifiers count]; i++)
+        {
+            id identifier = [identifiers objectAtIndex:i];
+            if (snapshot_item_index_in_section(items, identifier) >= 0)
+                continue;
+            [items insertObject:identifier atIndex:cursor++];
+        }
+        return;
+    }
+}
+
+@implementation NSDiffableDataSourceSnapshot
+- (id)init
+{
+    self = [super init];
+    if (self)
+    {
+        _sections = [[NSMutableArray alloc] init];
+        _items = [[NSMutableArray alloc] init];
+    }
+    return self;
+}
+- (long)numberOfSections { return (long)[_sections count]; }
+- (long)numberOfItems
+{
+    long count = 0;
+    for (unsigned long i = 0; i < [_items count]; i++)
+        count += (long)[((NSArray *)[_items objectAtIndex:i]) count];
+    return count;
+}
+- (NSArray *)sectionIdentifiers { return _sections; }
+- (NSArray *)itemIdentifiers
+{
+    NSMutableArray *all = [[NSMutableArray alloc] init];
+    for (unsigned long i = 0; i < [_items count]; i++)
+    {
+        NSArray *items = [_items objectAtIndex:i];
+        for (unsigned long j = 0; j < [items count]; j++)
+            [all addObject:[items objectAtIndex:j]];
+    }
+    return all;
+}
+- (NSArray *)itemIdentifiersInSectionWithIdentifier:(id)sectionIdentifier
+{
+    NSMutableArray *items =
+        snapshot_items_for_section(self, sectionIdentifier);
+    return items ? items : [NSArray array];
+}
+- (long)numberOfItemsInSection:(id)sectionIdentifier
+{
+    NSMutableArray *items =
+        snapshot_items_for_section(self, sectionIdentifier);
+    return items ? (long)[items count] : 0;
+}
+- (id)sectionIdentifierForSectionContainingItemIdentifier:(id)identifier
+{
+    for (unsigned long i = 0; i < [_items count]; i++)
+    {
+        if (snapshot_item_index_in_section([_items objectAtIndex:i],
+                                           identifier) >= 0)
+            return [_sections objectAtIndex:i];
+    }
+    return nil;
+}
+- (long)indexOfSectionIdentifier:(id)sectionIdentifier
+{
+    return snapshot_section_index(self, sectionIdentifier);
+}
+- (long)indexOfItemIdentifier:(id)identifier
+{
+    long index = 0;
+    for (unsigned long i = 0; i < [_items count]; i++)
+    {
+        NSArray *items = [_items objectAtIndex:i];
+        long at = snapshot_item_index_in_section(items, identifier);
+        if (at >= 0)
+            return index + at;
+        index += (long)[items count];
+    }
+    return -1;
+}
+- (void)appendSectionsWithIdentifiers:(NSArray *)identifiers
+{
+    if (!identifiers)
+        return;
+    for (unsigned long i = 0; i < [identifiers count]; i++)
+        snapshot_add_unique_section(self, [identifiers objectAtIndex:i]);
+}
+- (void)appendItemsWithIdentifiers:(NSArray *)identifiers
+{
+    if (!_sections || [_sections count] == 0)
+        return;
+    [self appendItemsWithIdentifiers:identifiers
+           intoSectionWithIdentifier:[_sections lastObject]];
+}
+- (void)appendItemsWithIdentifiers:(NSArray *)identifiers
+          intoSectionWithIdentifier:(id)sectionIdentifier
+{
+    if (!identifiers)
+        return;
+    NSMutableArray *items =
+        snapshot_items_for_section(self, sectionIdentifier);
+    if (!items)
+        return;
+    for (unsigned long i = 0; i < [identifiers count]; i++)
+    {
+        id identifier = [identifiers objectAtIndex:i];
+        if (snapshot_item_index_in_section(items, identifier) >= 0)
+            continue;
+        [items addObject:identifier];
+    }
+}
+- (void)insertItemsWithIdentifiers:(NSArray *)identifiers
+            beforeItemWithIdentifier:(id)identifier
+{
+    snapshot_insert_items(self, identifiers, identifier, 0);
+}
+- (void)insertItemsWithIdentifiers:(NSArray *)identifiers
+             afterItemWithIdentifier:(id)identifier
+{
+    snapshot_insert_items(self, identifiers, identifier, 1);
+}
+- (void)insertSectionsWithIdentifiers:(NSArray *)identifiers
+          beforeSectionWithIdentifier:(id)identifier
+{
+    if (!identifiers)
+        return;
+    long at = snapshot_section_index(self, identifier);
+    if (at < 0)
+        return;
+    for (unsigned long i = 0; i < [identifiers count]; i++)
+    {
+        id section = [identifiers objectAtIndex:i];
+        if (snapshot_section_index(self, section) >= 0)
+            continue;
+        [_sections insertObject:section atIndex:(unsigned long)at];
+        [_items insertObject:[[NSMutableArray alloc] init]
+                     atIndex:(unsigned long)at];
+        at++;
+    }
+}
+- (void)deleteAllItems
+{
+    for (unsigned long i = 0; i < [_items count]; i++)
+        [(NSMutableArray *)[_items objectAtIndex:i] removeAllObjects];
+}
+- (void)deleteItemsWithIdentifiers:(NSArray *)identifiers
+{
+    if (!identifiers)
+        return;
+    for (unsigned long i = 0; i < [_items count]; i++)
+    {
+        NSMutableArray *items = [_items objectAtIndex:i];
+        for (unsigned long j = 0; j < [identifiers count]; j++)
+        {
+            id identifier = [identifiers objectAtIndex:j];
+            long at;
+            while ((at = snapshot_item_index_in_section(items, identifier)) >= 0)
+                [items removeObjectAtIndex:(unsigned long)at];
+        }
+    }
+}
+- (void)deleteSectionsWithIdentifiers:(NSArray *)identifiers
+{
+    if (!identifiers)
+        return;
+    for (unsigned long i = 0; i < [identifiers count]; i++)
+    {
+        long at = snapshot_section_index(self, [identifiers objectAtIndex:i]);
+        if (at < 0)
+            continue;
+        [_items removeObjectAtIndex:(unsigned long)at];
+        [_sections removeObjectAtIndex:(unsigned long)at];
+    }
+}
+- (void)moveItemWithIdentifier:(id)fromIdentifier
+      beforeItemWithIdentifier:(id)toIdentifier
+{
+    if (!fromIdentifier || !toIdentifier)
+        return;
+    if ([fromIdentifier isEqual:toIdentifier])
+        return;
+    long section = snapshot_section_index(
+        self, [self sectionIdentifierForSectionContainingItemIdentifier:
+                        fromIdentifier]);
+    if (section < 0)
+        return;
+    NSMutableArray *items = [_items objectAtIndex:(unsigned long)section];
+    long to = snapshot_item_index_in_section(items, toIdentifier);
+    long from = snapshot_item_index_in_section(items, fromIdentifier);
+    if (to < 0 || from < 0)
+        return;
+    [items removeObjectAtIndex:(unsigned long)from];
+    if (from < to)
+        to--;
+    [items insertObject:fromIdentifier atIndex:(unsigned long)to];
+}
+- (void)moveSectionWithIdentifier:(id)fromIdentifier
+   beforeSectionWithIdentifier:(id)toIdentifier
+{
+    if (!fromIdentifier || !toIdentifier)
+        return;
+    long from = snapshot_section_index(self, fromIdentifier);
+    long to = snapshot_section_index(self, toIdentifier);
+    if (from < 0 || to < 0 || from == to)
+        return;
+    id section = [_sections objectAtIndex:(unsigned long)from];
+    NSMutableArray *items = [_items objectAtIndex:(unsigned long)from];
+    [_sections removeObjectAtIndex:(unsigned long)from];
+    [_items removeObjectAtIndex:(unsigned long)from];
+    if (to > from)
+        to--;
+    [_sections insertObject:section atIndex:(unsigned long)to];
+    [_items insertObject:items atIndex:(unsigned long)to];
+}
+- (void)reloadItemsWithIdentifiers:(NSArray *)identifiers
+{
+    (void)identifiers;
+}
+- (void)reloadSectionsWithIdentifiers:(NSArray *)identifiers
+{
+    (void)identifiers;
+}
+- (id)sectionIdentifierAtIndex:(long)index
+{
+    if (index < 0 || index >= (long)[_sections count])
+        return nil;
+    return [_sections objectAtIndex:(unsigned long)index];
+}
+@end
+
+@implementation UITableViewDiffableDataSource
+- (id)initWithTableView:(UITableView *)tableView
+          cellProvider:(id (^)(UITableView *, NSIndexPath *, id))provider
+{
+    self = [super init];
+    if (self)
+    {
+        _tableView = tableView;
+        _cellProvider = provider ? _Block_copy((void *)provider) : 0;
+        _snapshot = [[NSDiffableDataSourceSnapshot alloc] init];
+    }
+    return self;
+}
+- (NSDiffableDataSourceSnapshot *)snapshot { return _snapshot; }
+- (void)applySnapshot:(NSDiffableDataSourceSnapshot *)snapshot
+    animatingDifferences:(BOOL)animating
+{
+    (void)animating;
+    if (!snapshot)
+        return;
+    _snapshot = snapshot;
+    [_tableView reloadData];
+}
+- (void)applySnapshotUsingReloadData:(NSDiffableDataSourceSnapshot *)snapshot
+{
+    if (!snapshot)
+        return;
+    _snapshot = snapshot;
+    [_tableView reloadData];
+}
+- (long)numberOfSectionsInTableView:(UITableView *)tableView
+{
+    (void)tableView;
+    return [_snapshot numberOfSections];
+}
+- (long)tableView:(UITableView *)tableView numberOfRowsInSection:(long)section
+{
+    (void)tableView;
+    return [_snapshot numberOfItemsInSection:
+                          [_snapshot sectionIdentifierAtIndex:section]];
+}
+- (id)itemIdentifierForIndexPath:(NSIndexPath *)indexPath
+{
+    NSArray *items = [_snapshot itemIdentifiersInSectionWithIdentifier:
+                          [_snapshot sectionIdentifierAtIndex:[indexPath section]]];
+    long row = [indexPath row];
+    if (row < 0 || row >= (long)[items count])
+        return nil;
+    return [items objectAtIndex:(unsigned long)row];
+}
+- (NSIndexPath *)indexPathForItemIdentifier:(id)identifier
+{
+    for (long s = 0; s < [_snapshot numberOfSections]; s++)
+    {
+        NSArray *items = [_snapshot itemIdentifiersInSectionWithIdentifier:
+                              [_snapshot sectionIdentifierAtIndex:s]];
+        long row = snapshot_item_index_in_section(items, identifier);
+        if (row >= 0)
+            return [NSIndexPath indexPathForRow:row inSection:s];
+    }
+    return nil;
+}
+- (UITableViewCell *)tableView:(UITableView *)tableView
+         cellForRowAtIndexPath:(NSIndexPath *)indexPath
+{
+    id item = [self itemIdentifierForIndexPath:indexPath];
+    if (!item || !_cellProvider)
+        return nil;
+    return (UITableViewCell *)_cellProvider(tableView, indexPath, item);
+}
+@end
+
+@implementation UICollectionViewDiffableDataSource
+- (id)initWithCollectionView:(UICollectionView *)collectionView
+                cellProvider:
+                    (id (^)(UICollectionView *, NSIndexPath *, id))provider
+{
+    self = [super init];
+    if (self)
+    {
+        _collectionView = collectionView;
+        _cellProvider = provider ? _Block_copy((void *)provider) : 0;
+        _snapshot = [[NSDiffableDataSourceSnapshot alloc] init];
+    }
+    return self;
+}
+- (NSDiffableDataSourceSnapshot *)snapshot { return _snapshot; }
+- (void)applySnapshot:(NSDiffableDataSourceSnapshot *)snapshot
+    animatingDifferences:(BOOL)animating
+{
+    (void)animating;
+    if (!snapshot)
+        return;
+    _snapshot = snapshot;
+    [_collectionView reloadData];
+}
+- (void)applySnapshotUsingReloadData:(NSDiffableDataSourceSnapshot *)snapshot
+{
+    if (!snapshot)
+        return;
+    _snapshot = snapshot;
+    [_collectionView reloadData];
+}
+- (long)numberOfSectionsInCollectionView:(UICollectionView *)collectionView
+{
+    (void)collectionView;
+    return [_snapshot numberOfSections];
+}
+- (long)collectionView:(UICollectionView *)collectionView
+    numberOfItemsInSection:(long)section
+{
+    (void)collectionView;
+    return [_snapshot numberOfItemsInSection:
+                          [_snapshot sectionIdentifierAtIndex:section]];
+}
+- (id)itemIdentifierForIndexPath:(NSIndexPath *)indexPath
+{
+    NSArray *items = [_snapshot itemIdentifiersInSectionWithIdentifier:
+                          [_snapshot sectionIdentifierAtIndex:[indexPath section]]];
+    long row = [indexPath row];
+    if (row < 0 || row >= (long)[items count])
+        return nil;
+    return [items objectAtIndex:(unsigned long)row];
+}
+- (NSIndexPath *)indexPathForItemIdentifier:(id)identifier
+{
+    for (long s = 0; s < [_snapshot numberOfSections]; s++)
+    {
+        NSArray *items = [_snapshot itemIdentifiersInSectionWithIdentifier:
+                              [_snapshot sectionIdentifierAtIndex:s]];
+        long row = snapshot_item_index_in_section(items, identifier);
+        if (row >= 0)
+            return [NSIndexPath indexPathForItem:row inSection:s];
+    }
+    return nil;
+}
+- (UICollectionViewCell *)collectionView:(UICollectionView *)collectionView
+            cellForItemAtIndexPath:(NSIndexPath *)indexPath
+{
+    id item = [self itemIdentifierForIndexPath:indexPath];
+    if (!item || !_cellProvider)
+        return nil;
+    return (UICollectionViewCell *)_cellProvider(collectionView, indexPath,
+                                                 item);
+}
+@end
+
 /* ---------------------------------------------------- context menus */
 
 @implementation UIMenuElement

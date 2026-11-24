@@ -1566,6 +1566,17 @@ content insets. `reloadData` and `handleTapAtPoint:` both call the same
 agree. Section providers are invoked per section index; orthogonal scrolling
 behavior is recorded but sections still stack vertically.
 
+The diffable data source layer is a model object plus two adapters.
+`NSDiffableDataSourceSnapshot` keeps section identifiers in order with one
+mutable array of item identifiers per section, and implements append,
+insert-before/after, delete, move and reload bookkeeping; reloads are no-ops
+because applying a snapshot reloads the view. A
+`UITableViewDiffableDataSource` or `UICollectionViewDiffableDataSource`
+holds the snapshot and a copied cell-provider block, implements the matching
+data-source protocol methods, and `applySnapshot:animatingDifferences:`
+assigns the snapshot and calls `reloadData`; the animating flag is accepted
+but the reload is immediate.
+
 `UIViewPropertyAnimator` is a thin state machine over the existing UIView
 animation engine: `startAnimation` schedules the animation blocks and a
 completion, `finishAnimationAtPosition:` settles immediately, and pause/stop

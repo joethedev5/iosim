@@ -1170,6 +1170,78 @@ else
     echo "FAIL text blend pixels"; echo "$out"; fails=$((fails+1))
 fi
 
+# ---------- 4f17. Diffable data sources ----------
+"$ROOT/tools/build_app.sh" "$ROOT/tests/diffable_data_source_test.m" \
+    "$T/diffable_test" >/dev/null
+out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/diffable_test" 2>&1)"
+check "[diff] done" "$out" "the diffable data source fixture runs"
+if report="$(python3 - "$out" <<'PY'
+import re
+import sys
+
+lines = sys.argv[1].splitlines()
+want = [
+    r'\[diff\] snapshot 2 3',
+    r'\[diff\] s1 2',
+    r'\[diff\] index b1 2',
+    r'\[diff\] section a2 S1',
+    r'\[diff\] final 1 2',
+    r'\[diff\] finalitem 0 c1',
+    r'\[diff\] finalitem 1 a1',
+]
+for pattern in want:
+    if not any(re.fullmatch(pattern, line) for line in lines):
+        raise SystemExit('missing snapshot line: ' + pattern)
+print("ok   snapshots track sections, items, insertions, moves and deletes")
+PY
+)"; then
+    echo "$report"
+else
+    echo "FAIL diffable snapshot bookkeeping"; echo "$report"; fails=$((fails+1))
+fi
+if report="$(python3 - "$out" <<'PY'
+import re
+import sys
+
+wanted = {
+    r'\[diff\] table 1 2': 'table section/row counts',
+    r'\[diff\] table id a1': 'table item at 0:1',
+    r'\[diff\] table path 0 0': 'table path for c1',
+    r'\[diff\] table cell a1': 'table cell text',
+}
+for pattern, label in wanted.items():
+    if not any(re.fullmatch(pattern, line)
+               for line in sys.argv[1].splitlines()):
+        raise SystemExit('missing %s: %s' % (label, pattern))
+print("ok   the table diffable data source drives rows and cells")
+PY
+)"; then
+    echo "$report"
+else
+    echo "FAIL diffable table data source"; echo "$report"; fails=$((fails+1))
+fi
+if report="$(python3 - "$out" <<'PY'
+import re
+import sys
+
+wanted = {
+    r'\[diff\] collection 1 3': 'collection section/item counts',
+    r'\[diff\] collection id g3': 'collection item at 0:2',
+    r'\[diff\] collection path 0 0': 'collection path for g1',
+    r'\[diff\] collection cell 1': 'collection cell reuse identity',
+}
+for pattern, label in wanted.items():
+    if not any(re.fullmatch(pattern, line)
+               for line in sys.argv[1].splitlines()):
+        raise SystemExit('missing %s: %s' % (label, pattern))
+print("ok   the collection diffable data source drives items and cells")
+PY
+)"; then
+    echo "$report"
+else
+    echo "FAIL diffable collection data source"; echo "$report"; fails=$((fails+1))
+fi
+
 # ---------- 4g. NSCalendar components ----------
 "$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
     -ffreestanding -O1 -I "$ROOT/frameworks" \

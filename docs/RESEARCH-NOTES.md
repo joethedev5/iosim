@@ -1397,3 +1397,19 @@ components.
   reads (128,0,0); screen reads (255,128,128). Text pixels are scanned
   because glyph antialiasing varies, while the image centers are sampled
   directly.
+
+## 2026-11-24: Diffable data sources
+
+- `NSDiffableDataSourceSnapshot` is a model object: ordered section
+  identifiers and a parallel array of item arrays. Appends skip duplicate
+  identifiers; inserts before/after locate the target item's section;
+  delete, move and reload update the same storage. `reload*` is a no-op
+  because the adapters reload the whole view when a snapshot is applied.
+- `UITableViewDiffableDataSource` and `UICollectionViewDiffableDataSource`
+  conform to their data source protocols, keep the snapshot and a
+  `_Block_copy` of the cell provider, map index paths to identifiers and
+  back, and reload the view on `applySnapshot:animatingDifferences:`
+  (the flag is accepted; the reload is immediate).
+- The fixture round-trips a mutated snapshot through a table (one section,
+  two rows, cell text `a1`) and a collection (one section, three items,
+  0:2 -> `g3`, registered reuse identifier present).
