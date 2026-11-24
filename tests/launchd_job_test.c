@@ -9,6 +9,8 @@
  *                                    StartInterval plist repeats it
  *   launchd_job_test keepalive        prints one line and exits, so a
  *                                    KeepAlive plist restarts it
+ *   launchd_job_test keepalive-exit <code>
+ *                                    prints the code and exits with it
  *
  * The job is installed as a LaunchDaemon plist with MachServices = <service>
  * and RunAtLoad = false, so the service only starts when a client looks the
@@ -134,6 +136,15 @@ int main(int argc, char **argv)
         printf("launchd job: keepalive\n");
         fflush(0);
         return 0;
+    }
+    if (argc > 2 && strcmp(argv[1], "keepalive-exit") == 0)
+    {
+        int code = 0;
+        for (const char *q = argv[2]; *q >= '0' && *q <= '9'; q++)
+            code = code * 10 + (*q - '0');
+        printf("launchd job: keepalive %s\n", argv[2]);
+        fflush(0);
+        return code;
     }
     printf("usage: launchd_job_test job|client <service> | interval\n");
     return 2;

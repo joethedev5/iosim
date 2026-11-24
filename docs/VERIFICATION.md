@@ -1606,7 +1606,10 @@ after each exit: the suite polls the log, records when each of three
 `launchd job: keepalive` lines arrives and requires consecutive gaps of at
 least 1.6 s, so the restart is throttled rather than the old one-second
 retry; after `iosimctl launchd-unload` no further line appears within
-2.5 s.
+2.5 s. Two more plists use the dictionary form: `KeepAlive =
+{SuccessfulExit = true}` with a job that prints `launchd job: keepalive 0`
+and exits zero collects at least two starts in 3.5 s, while the same job
+under `SuccessfulExit = false` stops after its single successful run.
 
 ### Services: launchd socket activation
 

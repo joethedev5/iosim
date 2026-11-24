@@ -148,6 +148,13 @@ def parse_job(path):
         throttle = 10.0
     if throttle < 1.0:
         throttle = 1.0
+    keep_alive_cfg = pl.get("KeepAlive")
+    keep_alive = keep_alive_cfg is True
+    successful_exit = None
+    if isinstance(keep_alive_cfg, dict):
+        keep_alive = True
+        if "SuccessfulExit" in keep_alive_cfg:
+            successful_exit = bool(keep_alive_cfg["SuccessfulExit"])
     sockets_cfg = pl.get("Sockets") or {}
     sockets = []
     if isinstance(sockets_cfg, dict):
@@ -168,7 +175,9 @@ def parse_job(path):
         "program": program,
         "machServices": services,
         "runAtLoad": bool(pl.get("RunAtLoad", False)),
-        "keepAlive": pl.get("KeepAlive") is True,
+        "keepAlive": keep_alive,
+        "successfulExit": successful_exit,
+        "lastExit": None,
         "startInterval": int(pl.get("StartInterval", 0) or 0),
         "throttleInterval": throttle,
         "environment": {str(k): str(v) for k, v in env.items()},
@@ -238,6 +247,7 @@ def prune_jobs():
             # instead of lingering as a zombie that kill(pid, 0) still sees.
             if proc.poll() is None:
                 continue
+            job["lastExit"] = proc.returncode
             job["proc"] = None
             job["pid"] = 0
         elif job["pid"] and not pid_alive(job["pid"]):
@@ -247,9 +257,16 @@ def prune_jobs():
         now = time.monotonic()
         since = now - job.get("lastStart", 0.0)
         # launchd restarts a KeepAlive job no sooner than ThrottleInterval
-        # after its previous start; the default is ten seconds.
+        # after its previous start; the default is ten seconds. A
+        # SuccessfulExit dictionary restricts restarts by exit status.
         if job["keepAlive"] and since >= job["throttleInterval"]:
-            start_job(job)
+            want = True
+            wanted_exit = job.get("successfulExit")
+            last_exit = job.get("lastExit")
+            if wanted_exit is not None and last_exit is not None:
+                want = (last_exit == 0) == wanted_exit
+            if want:
+                start_job(job)
         elif job.get("startInterval", 0) > 0 and \
                 since >= job["startInterval"]:
             start_job(job)

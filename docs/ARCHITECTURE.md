@@ -1020,9 +1020,11 @@ transport and the bootstrap namespace are shared across the device.
   guest-side lookup retries across that window, then connects to the service
   socket once the job registers it (also retrying while the socket binds).
   Dead jobs are pruned; KeepAlive jobs restart no sooner than their
-  `ThrottleInterval` (ten seconds by default), StartInterval jobs start again
-  on their period once the previous process has exited, and shutdown
-  terminates every job. `iosimctl launchd-unload` stops a job,
+  `ThrottleInterval` (ten seconds by default), and a dictionary form with
+  `SuccessfulExit` restricts the restart to a matching exit status (true for
+  a zero exit, false for a non-zero one). StartInterval jobs start again on
+  their period once the previous process has exited, and shutdown terminates
+  every job. `iosimctl launchd-unload` stops a job,
   closes its listeners and removes the installed plist. A job's `Sockets` dictionary is honored: launchd_sim binds each
   `SockPathName` (stream or datagram) when the job is loaded, keeps the
   listener, and starts the job when a connection makes it readable. The job

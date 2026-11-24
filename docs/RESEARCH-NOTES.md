@@ -1825,3 +1825,13 @@ components.
 - `tests/alpha_transform_test.m` compares a plain view, a transformed view, a
   transformed view with layer opacity and a standalone transformed sublayer;
   all four centres now match and the transformed extents remain scaled.
+
+## 2026-11-24: launchd KeepAlive SuccessfulExit dictionaries
+
+- `KeepAlive` accepts the dictionary form; `SuccessfulExit = true` restarts
+  the job only when it exited with status zero, `SuccessfulExit = false`
+  restarts only on a non-zero status, and a dictionary without that key
+  restarts regardless. Restarts still respect `ThrottleInterval`.
+- The fixture's `keepalive-exit <code>` mode exits with the given status; the
+  suite loads a zero-exit job under each SuccessfulExit value and counts
+  starts: the true job restarts, the false job stays stopped.

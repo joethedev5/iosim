@@ -4959,6 +4959,56 @@ else
     echo "FAIL KeepAlive unload"; fails=$((fails+1))
 fi
 
+# A KeepAlive dictionary gates restarts on the exit status: SuccessfulExit
+# true restarts after a zero exit, false keeps a zero exit stopped.
+python3 - "$T/launchd_job" "$T/ka_ok.plist" com.iosim.launchd.kaok <<'PY'
+import plistlib, sys
+binary, out, label = sys.argv[1:4]
+with open(out, "wb") as f:
+    plistlib.dump({
+        "Label": label,
+        "ProgramArguments": [binary, "keepalive-exit", "0"],
+        "KeepAlive": {"SuccessfulExit": True},
+        "ThrottleInterval": 1,
+        "RunAtLoad": True,
+    }, f)
+PY
+python3 - "$T/launchd_job" "$T/ka_stop.plist" \
+    com.iosim.launchd.kastop <<'PY'
+import plistlib, sys
+binary, out, label = sys.argv[1:4]
+with open(out, "wb") as f:
+    plistlib.dump({
+        "Label": label,
+        "ProgramArguments": [binary, "keepalive-exit", "0"],
+        "KeepAlive": {"SuccessfulExit": False},
+        "ThrottleInterval": 1,
+        "RunAtLoad": True,
+    }, f)
+PY
+"$ROOT/tools/iosimctl" launchd-load "$UDID" "$T/ka_ok.plist" >/dev/null
+"$ROOT/tools/iosimctl" launchd-load "$UDID" "$T/ka_stop.plist" >/dev/null
+sleep 3.5
+AKLOG="$IOSIM_HOME/Devices/$UDID/logs/com.iosim.launchd.kaok.log"
+ASLOG="$IOSIM_HOME/Devices/$UDID/logs/com.iosim.launchd.kastop.log"
+a_count=$(grep -c "launchd job: keepalive 0" "$AKLOG" 2>/dev/null || true)
+s_count=$(grep -c "launchd job: keepalive 0" "$ASLOG" 2>/dev/null || true)
+if [ "${a_count:-0}" -ge 2 ]; then
+    echo "ok   SuccessfulExit true restarts a job after a zero exit"
+else
+    echo "FAIL SuccessfulExit restart"; cat "$AKLOG" 2>/dev/null || true
+    fails=$((fails+1))
+fi
+if [ "${s_count:-0}" -eq 1 ]; then
+    echo "ok   SuccessfulExit false keeps a zero-exit job stopped"
+else
+    echo "FAIL SuccessfulExit stop"; cat "$ASLOG" 2>/dev/null || true
+    fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" launchd-unload "$UDID" com.iosim.launchd.kaok >/dev/null
+"$ROOT/tools/iosimctl" launchd-unload "$UDID" \
+    com.iosim.launchd.kastop >/dev/null
+
 
 # ---------- 13. Control Center ----------
 # A downward drag from the top-right corner opens the glass panel over the
