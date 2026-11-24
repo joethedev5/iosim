@@ -448,7 +448,12 @@ fills, gradients, images and text alike.
 `UIGraphicsBeginImageContextWithOptions`
 redirects the same CGContext into a loader offscreen framebuffer; the result
 is copied out as RGBA for `UIGraphicsGetImageFromCurrentImageContext`, and
-`UIImage drawInRect:` blits into whichever context is current. Mutable
+`UIImage drawInRect:` blits into whichever context is current. An 8-bit RGBA
+`CGBitmapContextCreate` renders into the same kind of offscreen framebuffer;
+`CGBitmapContextGetData` copies its current pixels into the caller's rows,
+and `CGBitmapContextCreateImage` snapshots them as a `CGImage`.
+`CGContextDrawTiledImage` repeats an image at one pixel per point from the
+rect's origin, clipped to the rect and the current clip stack. Mutable
 `CGPath` objects record move/line/close elements, `CGPathAddRect`,
 `CGPathAddEllipseInRect` and `CGPathAddPath` append geometry, `CGPathApply`
 walks them, and `CGContextAddPath` flattens a path into the context point

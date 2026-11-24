@@ -184,6 +184,18 @@ const unsigned char *iosim_cgimage_data(CGImageRef image, int *out_w,
                                         int *out_h);
 int iosim_cgimage_is_valid(const void *image);
 void CGContextDrawImage(CGContextRef context, CGRect rect, CGImageRef image);
+void CGContextDrawTiledImage(CGContextRef context, CGRect rect,
+                             CGImageRef image);
+CGContextRef CGBitmapContextCreate(void *data, unsigned long width,
+                                   unsigned long height,
+                                   unsigned long bitsPerComponent,
+                                   unsigned long bytesPerRow,
+                                   CGColorSpaceRef space,
+                                   unsigned long bitmapInfo);
+CGImageRef CGBitmapContextCreateImage(CGContextRef context);
+void *CGBitmapContextGetData(CGContextRef context);
+unsigned long CGBitmapContextGetWidth(CGContextRef context);
+unsigned long CGBitmapContextGetHeight(CGContextRef context);
 CGGradientRef CGGradientCreateWithColorComponents(
     CGColorSpaceRef space, const double *components, const double *locations,
     unsigned long count);

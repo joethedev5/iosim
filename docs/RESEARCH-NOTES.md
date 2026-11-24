@@ -1574,3 +1574,16 @@ components.
 - The fixture builds three solid 24 pt icons through
   `UIGraphicsImageRenderer`; the suite samples the icon centers and taps the
   middle column to run its action.
+
+## 2026-11-24: bitmap contexts and tiled images
+
+- `CGBitmapContextCreate` returns an image context backed by the loader's
+  offscreen framebuffer; only 8-bit components are accepted. `CGBitmapContextGetData`
+  copies the current pixels into the caller's rows as RGBA on demand, and
+  `CGBitmapContextCreateImage` snapshots them through `CGImageCreateWithRGBA`.
+  Width and height accessors report the context size.
+- `CGContextDrawTiledImage` repeats an image from the rect origin at one image
+  pixel per user point, using the context transform for the tile size, and
+  clips the loop to the rect and any existing clip. The fixture checks the
+  four tile colors, rect edges, an intersecting clip, and a bitmap context's
+  data and image round trip.

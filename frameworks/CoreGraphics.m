@@ -146,6 +146,8 @@ struct CGContext {
     int image;
     void *offscreen;
     unsigned char *rgba;
+    void *bitmapData;
+    unsigned long bitmapRow;
     CGContextRef previous;
 };
 
@@ -1271,6 +1273,131 @@ void CGContextDrawImage(CGContextRef context, CGRect rect, CGImageRef imageRef)
     if (!image)
         return;
     iosim_cg_draw_image(context, image->rgba, image->w, image->h, rect);
+}
+
+/* A tile is one image pixel per user-space point. The image repeats from
+ * the rect's origin and is clipped to the rect. */
+void CGContextDrawTiledImage(CGContextRef context, CGRect rect,
+                             CGImageRef imageRef)
+{
+    struct CGImage *image = (struct CGImage *)imageRef;
+    if (!context)
+        context = g_current_context;
+    if (!context || !image || image->w <= 0 || image->h <= 0)
+        return;
+    double x0, y0, x1, y1;
+    cg_transform(context, rect.origin.x, rect.origin.y, &x0, &y0);
+    cg_transform(context, rect.origin.x + rect.size.width,
+                 rect.origin.y + rect.size.height, &x1, &y1);
+    int px = (int)(x0 + 0.5), py = (int)(y0 + 0.5);
+    int pw = (int)(x1 - x0 + 0.5), ph = (int)(y1 - y0 + 0.5);
+    if (pw <= 0 || ph <= 0)
+        return;
+    double u0x, u0y, u1x, u1y;
+    cg_transform(context, 0, 0, &u0x, &u0y);
+    cg_transform(context, image->w, image->h, &u1x, &u1y);
+    int tileW = (int)(u1x - u0x + 0.5);
+    int tileH = (int)(u1y - u0y + 0.5);
+    if (tileW <= 0 || tileH <= 0)
+        return;
+    int pushed = iosim_fb_push_clip(px, py, pw, ph);
+    if (pushed)
+        context->clips++;
+    iosim_fb_set_opacity(context->base_alpha * context->state.alpha);
+    iosim_fb_set_blend_mode(context->state.blend_mode);
+    for (int y = py; y < py + ph; y += tileH)
+        for (int x = px; x < px + pw; x += tileW)
+            iosim_fb_blit_rgba_scaled(x, y, tileW, tileH, image->rgba,
+                                      image->w, image->h, image->w * 4);
+    if (pushed)
+    {
+        iosim_fb_pop_clip();
+        context->clips--;
+    }
+}
+
+CGContextRef CGBitmapContextCreate(void *data, unsigned long width,
+                                   unsigned long height,
+                                   unsigned long bitsPerComponent,
+                                   unsigned long bytesPerRow,
+                                   CGColorSpaceRef space,
+                                   unsigned long bitmapInfo)
+{
+    (void)space;
+    (void)bitmapInfo;
+    if (width == 0 || height == 0 || bitsPerComponent != 8)
+        return 0;
+    CGContextRef context = iosim_cg_begin_image((int)width, (int)height,
+                                                1.0);
+    if (!context)
+        return 0;
+    context->bitmapData = data;
+    context->bitmapRow = bytesPerRow;
+    return context;
+}
+
+CGImageRef CGBitmapContextCreateImage(CGContextRef context)
+{
+    if (!context || !context->offscreen)
+        return 0;
+    int w = 0, h = 0;
+    unsigned *pixels = iosim_fb_offscreen_pixels(context->offscreen, &w, &h);
+    if (!pixels || w <= 0 || h <= 0)
+        return 0;
+    unsigned char *rgba = malloc((unsigned long)w * h * 4);
+    if (!rgba)
+        return 0;
+    for (int y = 0; y < h; y++)
+        for (int x = 0; x < w; x++)
+        {
+            unsigned color = pixels[(unsigned long)y * w + x];
+            unsigned char *dst = rgba + ((unsigned long)y * w + x) * 4;
+            dst[0] = (unsigned char)((color >> 16) & 255);
+            dst[1] = (unsigned char)((color >> 8) & 255);
+            dst[2] = (unsigned char)(color & 255);
+            dst[3] = 255;
+        }
+    CGImageRef image = CGImageCreateWithRGBA(rgba, w, h);
+    free(rgba);
+    return image;
+}
+
+/* The caller-provided buffer is filled with RGBA8 rows on demand; contexts
+ * created without one still render and can make images. */
+void *CGBitmapContextGetData(CGContextRef context)
+{
+    if (!context || !context->bitmapData)
+        return 0;
+    int w = 0, h = 0;
+    unsigned *pixels = context->offscreen
+        ? iosim_fb_offscreen_pixels(context->offscreen, &w, &h) : 0;
+    if (!pixels || w <= 0 || h <= 0)
+        return context->bitmapData;
+    unsigned char *data = context->bitmapData;
+    unsigned long row = context->bitmapRow
+        ? context->bitmapRow : (unsigned long)w * 4;
+    for (int y = 0; y < h; y++)
+        for (int x = 0; x < w; x++)
+        {
+            unsigned color = pixels[(unsigned long)y * w + x];
+            unsigned char *dst = data + (unsigned long)y * row +
+                                 (unsigned long)x * 4;
+            dst[0] = (unsigned char)((color >> 16) & 255);
+            dst[1] = (unsigned char)((color >> 8) & 255);
+            dst[2] = (unsigned char)(color & 255);
+            dst[3] = 255;
+        }
+    return context->bitmapData;
+}
+
+unsigned long CGBitmapContextGetWidth(CGContextRef context)
+{
+    return context ? (unsigned long)context->w : 0;
+}
+
+unsigned long CGBitmapContextGetHeight(CGContextRef context)
+{
+    return context ? (unsigned long)context->h : 0;
 }
 
 CGGradientRef CGGradientCreateWithColorComponents(

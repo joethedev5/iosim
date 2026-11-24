@@ -641,6 +641,18 @@ points with a tolerance of four levels per channel.
 rows for at least twenty pixels at those values, so glyph coverage
 interpolates the blend result while empty pixels keep the gray field.
 
+### Graphics: bitmap contexts and tiled images
+
+`tests/bitmap_tiled_test.m` draws a 2x2 red/green/blue/yellow `CGImage` as
+tiles into a 60 pt rect on a (26,26,26) field. Samples at (20,20), (21,20),
+(20,21) and (21,21) read the four tile colors, (79,79) reads yellow while
+(80,20) keeps the field, proving the rect boundary. A second tiled rect under
+a 30x60 clip paints at (125,25) but not at (155,25). An 8x8 bitmap context
+fills red, then a 4x4 green square at (2,2); `CGBitmapContextCreateImage`
+reports 8x8, `CGBitmapContextGetData` returns the caller's buffer with red at
+(0,0) and green at (2,2), and drawing that image at 16x16 onto the
+framebuffer reads red at (22,122) and green at (26,126).
+
 ### Graphics: rounded subtree clipping
 
 `tests/rounded_clip_test.m` stacks three cards. The first clips to bounds

@@ -1721,6 +1721,23 @@ else
     echo "FAIL context menu palette"; echo "$out"; fails=$((fails+1))
 fi
 
+# ---------- 4f24. Bitmap contexts and tiled images ----------
+"$ROOT/tools/build_app.sh" "$ROOT/tests/bitmap_tiled_test.m" \
+    "$T/bitmap_tiled_test" >/dev/null
+out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/bitmap_tiled_test" 2>&1)"
+check "[cg] tiled colors 1 1 1 1" "$out" \
+    "a tiled CGImage repeats its pixels"
+check "[cg] tiled edge 1 1" "$out" \
+    "tiled drawing clips to its rect"
+check "[cg] tiled clip 1 1" "$out" \
+    "an existing clip bounds the tiles"
+check "[cg] bitmap size 8 8 8 8" "$out" \
+    "a bitmap context and its image are 8 x 8"
+check "[cg] bitmap pixels 1 1" "$out" \
+    "bitmap context data holds the drawn pixels"
+check "[cg] bitmap drawn 1 1" "$out" \
+    "a bitmap image draws back through the framebuffer"
+
 # ---------- 4g. NSCalendar components ----------
 "$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
     -ffreestanding -O1 -I "$ROOT/frameworks" \
