@@ -1624,3 +1624,14 @@ components.
   every grid computation, so the layout survives a boot.
 - Folder creation and extension update the saved order by replacing the
   first member's key with the folder key and dropping folded apps.
+
+## 2026-11-24: replicator instance delays
+
+- `CAReplicatorLayer.instanceDelay` staggers the animations of the copies:
+  each copy renders in its own offscreen pass with a render-time offset of
+  `index * instanceDelay` applied by `layer_progress` and `layer_key_value`.
+- Copies without a delay keep the single shared offscreen pass; the tint and
+  channel-shift helpers are shared by both paths.
+- The replicator fixture gains a three-copy row with a six-second fade and a
+  2.5 s delay; a later screenshot reads decreasing brightness across the
+  copies.

@@ -19837,14 +19837,19 @@ static int layer_point_value(id value, CGPoint *point)
     return 1;
 }
 
+/* A replicator copy with an instance delay evaluates its sublayers'
+ * animations at a shifted time; everything outside such a copy uses zero. */
+static double g_anim_time_offset;
+
 /* Normalized progress of a layer animation, with fill-mode handling and
  * the same repeat/autoreverse rules as scalar key paths. Returns 0 when a
  * fill-backwards animation has not started yet. */
 static int layer_progress(struct layer_anim *anim, double *outT)
 {
-    double elapsed = (iosim_now() - anim->start - anim->delay) *
-                         anim->speed +
-                     anim->timeOffset;
+    double elapsed =
+        (iosim_now() - g_anim_time_offset - anim->start - anim->delay) *
+            anim->speed +
+        anim->timeOffset;
     if (elapsed < 0)
     {
         const char *fill =
@@ -20137,7 +20142,8 @@ static double layer_key_value(CALayer *layer, const char *key, double base)
     if (!anim)
         return base;
     double elapsed =
-        (iosim_now() - anim->start - anim->delay) * anim->speed +
+        (iosim_now() - g_anim_time_offset - anim->start - anim->delay) *
+            anim->speed +
         anim->timeOffset;
     if (elapsed < 0)
     {
@@ -21269,6 +21275,27 @@ static void replicator_shift_color(unsigned *pixels, long count, float dr,
     }
 }
 
+static void replicator_tint(unsigned *work, long count, id color)
+{
+    if (!color)
+        return;
+    unsigned tint = gradient_entry_rgb(color);
+    double tint_alpha = gradient_entry_alpha(color) / 255.0;
+    int tr = (int)((tint >> 16) & 255);
+    int tg = (int)((tint >> 8) & 255);
+    int tb = (int)(tint & 255);
+    for (long i = 0; i < count; i++)
+    {
+        unsigned p = work[i];
+        int a = (int)(((p >> 24) & 255) * tint_alpha);
+        int r = (int)(((p >> 16) & 255) * tr / 255.0);
+        int g = (int)(((p >> 8) & 255) * tg / 255.0);
+        int b = (int)((p & 255) * tb / 255.0);
+        work[i] = ((unsigned)a << 24) | ((unsigned)r << 16) |
+                  ((unsigned)g << 8) | (unsigned)b;
+    }
+}
+
 static void render_replicator(CAReplicatorLayer *rep, int x, int y, int w,
                               int h, double scale, double alpha, CGRect frame)
 {
@@ -21279,6 +21306,66 @@ static void render_replicator(CAReplicatorLayer *rep, int x, int y, int w,
         count = 64;
     if (w <= 0 || h <= 0 || rep->_sublayerCount == 0)
         return;
+    if (rep->_instanceDelay > 0.0 && count > 1)
+    {
+        /* Each copy renders at its own animation phase. */
+        CATransform3D t = rep->_instanceTransform;
+        double a = 1, b = 0, c = 0, d = 1, tx = 0, ty = 0;
+        for (long i = 0; i < count; i++)
+        {
+            void *state =
+                iosim_fb_begin_offscreen((unsigned)w, (unsigned)h);
+            if (!state)
+                return;
+            g_render_offscreen++;
+            g_anim_time_offset = (double)i * rep->_instanceDelay;
+            for (int k = 0; k < rep->_sublayerCount; k++)
+                render_layer((CALayer *)rep->_sublayers[k], 0, 0, scale, 1.0);
+            g_anim_time_offset = 0.0;
+            g_render_offscreen--;
+            int bw = 0, bh = 0;
+            unsigned *buf = iosim_fb_end_offscreen(state, &bw, &bh);
+            if (!buf || bw <= 0 || bh <= 0)
+            {
+                if (buf)
+                    iosim_fb_free_offscreen(buf);
+                continue;
+            }
+            unsigned *work = malloc((unsigned long)bw * (unsigned long)bh *
+                                    sizeof(unsigned));
+            if (!work)
+            {
+                iosim_fb_free_offscreen(buf);
+                continue;
+            }
+            memcpy(work, buf, (unsigned long)bw * (unsigned long)bh *
+                               sizeof(unsigned));
+            replicator_tint(work, (long)bw * bh, rep->_instanceColor);
+            for (long k = 0; k < i; k++)
+                replicator_shift_color(work, (long)bw * bh,
+                                       rep->_instanceRedOffset,
+                                       rep->_instanceGreenOffset,
+                                       rep->_instanceBlueOffset,
+                                       rep->_instanceAlphaOffset);
+            double cx = w / 2.0, cy = h / 2.0;
+            double ftx = x + cx - (a * cx + c * cy) + tx * scale;
+            double fty = y + cy - (b * cx + d * cy) + ty * scale;
+            iosim_fb_blit_affine(work, bw, bh, a, b, c, d, ftx, fty, alpha);
+            free(work);
+            iosim_fb_free_offscreen(buf);
+            if (i + 1 < count)
+            {
+                double na = a * t.m11 + c * t.m12;
+                double nb = b * t.m11 + d * t.m12;
+                double nc = a * t.m21 + c * t.m22;
+                double nd = b * t.m21 + d * t.m22;
+                double ntx = a * t.m41 + c * t.m42 + tx;
+                double nty = b * t.m41 + d * t.m42 + ty;
+                a = na; b = nb; c = nc; d = nd; tx = ntx; ty = nty;
+            }
+        }
+        return;
+    }
     void *state = iosim_fb_begin_offscreen((unsigned)w, (unsigned)h);
     if (!state)
         return;
@@ -21303,25 +21390,7 @@ static void render_replicator(CAReplicatorLayer *rep, int x, int y, int w,
     }
     memcpy(work, buf, (unsigned long)bw * (unsigned long)bh *
                        sizeof(unsigned));
-    if (rep->_instanceColor)
-    {
-        unsigned tint = gradient_entry_rgb(rep->_instanceColor);
-        double tint_alpha =
-            gradient_entry_alpha(rep->_instanceColor) / 255.0;
-        int tr = (int)((tint >> 16) & 255);
-        int tg = (int)((tint >> 8) & 255);
-        int tb = (int)(tint & 255);
-        for (int i = 0; i < bw * bh; i++)
-        {
-            unsigned p = work[i];
-            int a = (int)(((p >> 24) & 255) * tint_alpha);
-            int r = (int)(((p >> 16) & 255) * tr / 255.0);
-            int g = (int)(((p >> 8) & 255) * tg / 255.0);
-            int b = (int)((p & 255) * tb / 255.0);
-            work[i] = ((unsigned)a << 24) | ((unsigned)r << 16) |
-                      ((unsigned)g << 8) | (unsigned)b;
-        }
-    }
+    replicator_tint(work, (long)bw * bh, rep->_instanceColor);
     CATransform3D t = rep->_instanceTransform;
     double a = 1, b = 0, c = 0, d = 1, tx = 0, ty = 0;
     for (long i = 0; i < count; i++)

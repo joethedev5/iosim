@@ -1780,7 +1780,12 @@ adds 0.15 to the blue channel per copy. The suite screenshots the frame and
 samples the eight 45-degree positions at radius 90 pt around (201, 437):
 every sample must be orange, and the center must stay black. It also samples
 the translated row at (70, 620), (130, 620), (190, 620) and (250, 620): all
-red, with blue rising roughly 0, 38, 76 and 114.
+red, with blue rising roughly 0, 38, 76 and 114. A third replicator holds one
+white bar with `instanceCount = 3`, a 70 pt translation, an
+`instanceDelay` of 2.5 s and a six-second opacity fade from 0 to 1 with
+backwards fill. Three seconds after the first screenshot, (85, 730) pt is
+bright, (155, 730) pt is dimmer by at least 40 levels, and (225, 730) pt is
+still black, so each copy evaluates the animation at its own delayed phase.
 
 ### CoreAnimation: emitter layer
 

@@ -609,10 +609,12 @@ view's backing layer. `UIView.safeAreaInsets` reports the device top/bottom
 insets for a root view (overridable through `IOSIM_SAFE_TOP`/`_BOTTOM`), and
 the feedback generators are accepted no-ops because the framebuffer has no
 haptic device. `CAReplicatorLayer`
-renders its sublayers once into an offscreen buffer, then blits
-`instanceCount` copies with the accumulated `instanceTransform` around the
-layer's center; `instanceColor` tints the copies and the per-channel offsets
-shift each successive copy. `CAEmitterLayer` renders a steady particle field:
+renders its sublayers into an offscreen buffer and blits `instanceCount`
+copies with the accumulated `instanceTransform` around the layer's center;
+`instanceColor` tints the copies and the per-channel offsets shift each
+successive copy. With an `instanceDelay`, each copy instead renders in its
+own pass with every sublayer animation evaluated at the copy's shifted time,
+so successive copies show different animation phases. `CAEmitterLayer` renders a steady particle field:
 each cell's particles sit on a repeating lifetime ring (`birthRate` times
 `lifetime` slots), with deterministic per-particle angle (`emissionRange`),
 velocity/range, acceleration, scale/range and RGBA speed/range variation from

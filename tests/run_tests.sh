@@ -7638,6 +7638,40 @@ REPPNG
 else
     echo "FAIL replicator pixels"; echo "$out"; fails=$((fails+1))
 fi
+sleep 3
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/replicator-delay.png" >/dev/null
+if out="$(python3 - "$ROOT/tools" "$T/replicator.png" \
+    "$T/replicator-delay.png" <<'REPDELAY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+
+def load(path):
+    w, h, bpp, rows = pngpixel.load(path)
+    def red(x, y):
+        return (pngpixel.px(rows, bpp, x * 3, y * 3) >> 16) & 255
+    return red
+
+early = load(sys.argv[2])
+late = load(sys.argv[3])
+start = early(85, 730)
+first, second, third = late(85, 730), late(155, 730), late(225, 730)
+if not (first > start + 20):
+    raise SystemExit("the leading copy did not advance: %d -> %d" %
+                     (start, first))
+if not (second >= 0 and third < 30):
+    raise SystemExit("staggered opacities are wrong: %d %d %d" %
+                     (first, second, third))
+if first - second < 25:
+    raise SystemExit("the copies are not staggered: %d %d" %
+                     (first, second))
+print("ok   instanceDelay staggers each copy's animation")
+REPDELAY
+)"; then
+    echo "$out"
+else
+    echo "FAIL replicator delay"; echo "$out"; fails=$((fails+1))
+fi
 "$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
 
 # ---------- CAAnimation timing and CATransaction ----------

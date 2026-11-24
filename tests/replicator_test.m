@@ -45,6 +45,28 @@ extern int fflush(void *stream);
     [row addSublayer:bar];
     [root.layer addSublayer:row];
 
+    /* A staggered row: three copies of one bar, each 2.5 s behind the last,
+     * with a six-second fade so the copies show different phases. */
+    CAReplicatorLayer *delayRow = [[CAReplicatorLayer alloc] init];
+    delayRow.frame = CGRectMake(60, 700, 240, 60);
+    delayRow.instanceCount = 3;
+    delayRow.instanceDelay = 2.5;
+    delayRow.instanceTransform = CATransform3DMakeTranslation(70, 0, 0);
+    CALayer *pulse = [[CALayer alloc] init];
+    pulse.frame = CGRectMake(10, 10, 30, 40);
+    pulse.backgroundColor = [UIColor whiteColor];
+    pulse.cornerRadius = 6;
+    CABasicAnimation *fade =
+        [CABasicAnimation animationWithKeyPath:@"opacity"];
+    fade.fromValue = [NSNumber numberWithDouble:0.0];
+    fade.toValue = [NSNumber numberWithDouble:1.0];
+    fade.duration = 6.0;
+    fade.fillMode = @"backwards";
+    fade.removedOnCompletion = NO;
+    [pulse addAnimation:fade forKey:@"fade"];
+    [delayRow addSublayer:pulse];
+    [root.layer addSublayer:delayRow];
+
     self.view = root;
 }
 
