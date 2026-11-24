@@ -23,6 +23,13 @@ void iosim_block_call(void *block);
 void iosim_block_call1(void *block, uint64_t arg);
 void iosim_block_call2(void *block, uint64_t a, uint64_t b);
 void iosim_block_call3(void *block, uint64_t a, uint64_t b, uint64_t c);
+void iosim_block_call4(void *block, uint64_t a, uint64_t b, uint64_t c,
+                       uint64_t d);
+uint64_t iosim_block_call_ret(void *block);
+uint64_t iosim_block_call_ret1(void *block, uint64_t arg);
+uint64_t iosim_block_call_ret2(void *block, uint64_t a, uint64_t b);
+uint64_t iosim_block_call_ret3(void *block, uint64_t a, uint64_t b,
+                               uint64_t c);
 
 /* Exported data symbols (Mach-O binds these by address). */
 extern uint32_t bootstrap_port_value;

@@ -112,6 +112,14 @@ extern int  iosim_png_load_memory(const unsigned char *bytes,
                            int *out_width, int *out_height);
 extern void iosim_block_call(void *block);
 extern void iosim_block_call1(void *block, unsigned long arg);
+extern void iosim_block_call2(void *block, unsigned long a, unsigned long b);
+extern void iosim_block_call4(void *block, unsigned long a, unsigned long b,
+                              unsigned long c, unsigned long d);
+extern unsigned long iosim_block_call_ret(void *block);
+extern unsigned long iosim_block_call_ret1(void *block, unsigned long arg);
+extern unsigned long iosim_block_call_ret3(void *block, unsigned long a,
+                                           unsigned long b,
+                                           unsigned long c);
 extern void *_Block_copy(void *block);
 extern void _Block_release(void *block);
 extern void iosim_fb_fill_ellipse(int cx, int cy, int rx, int ry,
@@ -8779,7 +8787,7 @@ static void cubic_points_for_curve(long curve, CGPoint *point1,
     {
         void (^block)(void) =
             (void (^)(void))[(NSArray *)_animations objectAtIndex:i];
-        block();
+        iosim_block_call(block);
     }
 }
 - (void)completeWithPosition:(long)position
@@ -8794,7 +8802,7 @@ static void cubic_points_for_curve(long curve, CGPoint *point1,
     {
         void (^block)(long) =
             (void (^)(long))[(NSArray *)_completions objectAtIndex:i];
-        block(position);
+        iosim_block_call1(block, (unsigned long)position);
     }
 }
 - (void)startAnimation
@@ -13600,9 +13608,12 @@ static id share_string_for_item(id item)
 {
     id type = [activity activityType];
     if (_completionWithItemsHandler)
-        _completionWithItemsHandler(type, completed, nil, nil);
+        iosim_block_call4(_completionWithItemsHandler,
+                           (unsigned long)type,
+                           (unsigned long)completed, 0, 0);
     else if (_completionHandler)
-        _completionHandler(type, completed);
+        iosim_block_call2(_completionHandler, (unsigned long)type,
+                           (unsigned long)completed);
     UIViewController *presenter = g_share_presenter;
     g_share_presenter = nil;
     g_active_share_controller = nil;
@@ -17598,7 +17609,9 @@ static void snapshot_insert_items(NSDiffableDataSourceSnapshot *snapshot,
     id item = [self itemIdentifierForIndexPath:indexPath];
     if (!item || !_cellProvider)
         return nil;
-    return (UITableViewCell *)_cellProvider(tableView, indexPath, item);
+    return (UITableViewCell *)iosim_block_call_ret3(
+        _cellProvider, (unsigned long)tableView,
+        (unsigned long)indexPath, (unsigned long)item);
 }
 @end
 
@@ -17672,8 +17685,9 @@ static void snapshot_insert_items(NSDiffableDataSourceSnapshot *snapshot,
     id item = [self itemIdentifierForIndexPath:indexPath];
     if (!item || !_cellProvider)
         return nil;
-    return (UICollectionViewCell *)_cellProvider(collectionView, indexPath,
-                                                 item);
+    return (UICollectionViewCell *)iosim_block_call_ret3(
+        _cellProvider, (unsigned long)collectionView,
+        (unsigned long)indexPath, (unsigned long)item);
 }
 @end
 
@@ -18206,7 +18220,8 @@ static int context_menu_begin_at(UIWindow *window, CGPoint point)
 
     if (configuration->_previewProvider)
     {
-        UIViewController *preview = configuration->_previewProvider();
+        UIViewController *preview = (UIViewController *)
+            iosim_block_call_ret(configuration->_previewProvider);
         if (preview)
         {
             (void)[preview view];
@@ -18216,7 +18231,8 @@ static int context_menu_begin_at(UIWindow *window, CGPoint point)
     }
     if (configuration->_actionProvider)
     {
-        UIMenu *menu = configuration->_actionProvider(nil);
+        UIMenu *menu = (UIMenu *)iosim_block_call_ret1(
+            configuration->_actionProvider, 0);
         if (menu)
         {
             g_ctx.menuStack[0] = menu;
@@ -18341,12 +18357,12 @@ static int context_menu_handle_tap(int px, int py)
         if (action->_attributes & UIMenuElementAttributesKeepsMenuPresented)
         {
             if (handler)
-                handler(action);
+                iosim_block_call1(handler, (unsigned long)(void *)action);
             return 1;
         }
         context_menu_dismiss();
         if (handler)
-            handler(action);
+            iosim_block_call1(handler, (unsigned long)(void *)action);
         return 1;
     }
     context_menu_dismiss();
@@ -30674,7 +30690,7 @@ static int alert_handle_tap(UIViewController *root, int px, int py, int fbW,
     {
         UIAlertAction *a = alert->_actions[action];
         if (a && a->_handler)
-            a->_handler(a);
+            iosim_block_call1(a->_handler, (unsigned long)(void *)a);
         [root dismissViewControllerAnimated:NO completion:nil];
         return 1;
     }
@@ -30694,9 +30710,10 @@ static void share_dismiss_cancel(UIActivityViewController *controller,
                                  UIViewController *presenter)
 {
     if (controller->_completionWithItemsHandler)
-        controller->_completionWithItemsHandler(nil, NO, nil, nil);
+        iosim_block_call4(controller->_completionWithItemsHandler,
+                          0, 0, 0, 0);
     else if (controller->_completionHandler)
-        controller->_completionHandler(nil, NO);
+        iosim_block_call2(controller->_completionHandler, 0, 0);
     g_active_share_controller = nil;
     g_share_presenter = nil;
     if (presenter && presenter->_presentedController == controller)

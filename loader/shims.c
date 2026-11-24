@@ -1133,6 +1133,11 @@ static const struct iosim_shim shims[] = {
     SHIM_DIRECT(iosim_block_call1),
     SHIM_DIRECT(iosim_block_call2),
     SHIM_DIRECT(iosim_block_call3),
+    SHIM_DIRECT(iosim_block_call4),
+    SHIM_DIRECT(iosim_block_call_ret),
+    SHIM_DIRECT(iosim_block_call_ret1),
+    SHIM_DIRECT(iosim_block_call_ret2),
+    SHIM_DIRECT(iosim_block_call_ret3),
     SHIM_DIRECT(_Block_object_assign),
     SHIM_DIRECT(_Block_object_dispose),
     SHIM_ALIAS("_Unwind_Resume", unwind_resume),
@@ -1587,7 +1592,13 @@ void _Block_release(void *block)
     b->flags = old | IOSIM_BLOCK_DEALLOCATING;
     if ((b->flags & IOSIM_BLOCK_HAS_COPY_DISPOSE) && b->descriptor &&
         b->descriptor->dispose)
-        b->descriptor->dispose(b);
+    {
+        /* The dispose helper is arm64 app code for a block that came
+         * from an arm64 image; run it on the interpreter. */
+        if (!iosim_arm64_call_guest((void *)b->descriptor->dispose,
+                                    (uint64_t)(uintptr_t)b, 0))
+            b->descriptor->dispose(b);
+    }
     free(b);
 }
 

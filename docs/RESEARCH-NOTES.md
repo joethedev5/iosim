@@ -2439,3 +2439,17 @@ components.
 - LD2/LD3/LD4 de-interleave with `Vr[i] = mem[nregs*i + r]`; stores
   interleave with the inverse. The list mask must exclude the length
   bits 15-14.
+
+## 2026-11-24: blocks that return values
+
+- Cell providers return an object in x0. The bridge captures it with the
+  same call_guest_block result slot the dispatch apply path uses, and an
+  x86 provider keeps its native call and return value.
+- Activity completions take four arguments (type, completed, items,
+  error), so a four-argument call helper was needed; the plain
+  completion handler takes two. The share sheet path used to call both
+  invoke pointers directly.
+- UITableViewDiffableDataSource and UICollectionViewDiffableDataSource
+  providers, UIViewPropertyAnimator animation and completion blocks, and
+  alert and context-menu action handlers are all reachable from an
+  arm64 app now.

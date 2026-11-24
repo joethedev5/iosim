@@ -708,19 +708,19 @@ static void *lookup_imp_internal(void *obj, void *sel)
     struct class_entry *ce = find_class_entry(obj);
     void *imp = NULL;
     struct objc_class_min *cls = NULL;
-    if (ce)
+    /* A constant CFString's isa points at a shim class reference whose
+     * method list is a placeholder; resolve through NSString directly
+     * instead of dereferencing it. */
+    void *stringClass = constant_string_class(obj);
+    if (stringClass)
+        imp = lookup_instance_method((struct objc_class_min *)stringClass,
+                                     name);
+    else if (ce)
         imp = lookup_class_method(ce->cls, name);
     else
     {
         cls = (struct objc_class_min *)(*(void **)obj);
         imp = lookup_instance_method(cls, name);
-    }
-    if (!imp && !ce)
-    {
-        void *stringClass = constant_string_class(obj);
-        if (stringClass)
-            imp = lookup_instance_method(
-                (struct objc_class_min *)stringClass, name);
     }
     if (!imp)
         imp = resolve_method(ce ? (void *)ce->cls : (void *)cls, sel,

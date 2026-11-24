@@ -2130,6 +2130,54 @@ else
     fails=$((fails+1))
 fi
 
+# ---------- 4f10ah. arm64 blocks that return values ----------
+# A diffable table data source cell provider returns a cell, an alert
+# action handler runs on a tap, two activity view controller completions
+# see a cancellation, and a property animator runs its animation and
+# completion blocks.
+"$CC" -target arm64-apple-ios18.0-simulator -ffreestanding \
+    -fobjc-runtime=ios-18.0 -fno-objc-arc -fblocks -O1 -I "$ROOT/demo" \
+    -c "$ROOT/tests/arm64_blocks2.m" -o "$T/arm64_blocks2.o"
+"$LD64" -arch arm64 -platform_version $PLATFORM -e _main \
+    -o "$T/arm64_blocks2" "$T/arm64_blocks2.o" -undefined dynamic_lookup
+rm -f "$T/arm64blocks2.fifo"
+mkfifo "$T/arm64blocks2.fifo"
+if out="$(IOSIM_EVENT_FIFO="$T/arm64blocks2.fifo" DYLD_ROOT_PATH="$ROOT/runtime" \
+    timeout 12 "$RUN" --arm64 $FW_ARGS "$T/arm64_blocks2" 2>&1)"; then
+    rc=0
+else
+    rc=$?
+fi
+check "[blocks2] provider 0 alpha" "$out" \
+    "a table cell provider returns an arm64 block's cell"
+check "[blocks2] provider 1 beta" "$out" \
+    "the cell provider receives the row and the item"
+check "[blocks2] cell beta" "$out" \
+    "the returned cell carries the item text"
+check "[blocks2] alert three" "$out" \
+    "an alert action handler runs on a tap"
+check "[blocks2] items 0 0" "$out" \
+    "a four-argument activity completion sees the cancellation"
+check "[blocks2] completion 0" "$out" \
+    "the plain activity completion runs when no items handler is set"
+check "[blocks2] animator 0 50" "$out" \
+    "the animator runs its animation and completion blocks"
+check "[blocks2] done" "$out" \
+    "the arm64 blocks fixture finishes"
+if [ "$rc" -eq 0 ]; then
+    echo "ok   the arm64 blocks fixture exits zero"
+else
+    echo "FAIL arm64 returning blocks (exit $rc)"; fails=$((fails+1))
+fi
+if out_nj="$(IOSIM_ARM64_NOJIT=1 IOSIM_EVENT_FIFO="$T/arm64blocks2.fifo" \
+    DYLD_ROOT_PATH="$ROOT/runtime" timeout 12 "$RUN" --arm64 $FW_ARGS \
+    "$T/arm64_blocks2" 2>&1)"; then
+    :
+fi
+check "[blocks2] cell beta" "$out_nj" \
+    "the interpreter runs the same returning blocks"
+rm -f "$T/arm64blocks2.fifo"
+
 # ---------- 4f11. CAAnimation completion and fill modes ----------
 rm -f "$T/arem.fifo"
 mkfifo "$T/arem.fifo"

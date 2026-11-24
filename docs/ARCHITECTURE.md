@@ -1791,7 +1791,10 @@ Python for iteration speed.
   app block directly — UIView animations and completions, Foundation
   index-set enumeration, NSOperation and URLSession handlers, and
   UserNotifications completions — through `iosim_block_call` and its
-  one-to-three-argument forms. The call gate recognizes the loader's
+  one-to-four-argument forms. Blocks that return a value (cell and menu
+  providers, preview providers) come back through `iosim_block_call_ret`
+  and its argument variants, which read the guest x0 after the nested
+  call and leave x86 blocks on the native path. The call gate recognizes the loader's
   service symbols by address. Native `qsort`/`bsearch`
   shims call an arm64 comparator back through a general native-to-guest
   C call bridge. The message-send

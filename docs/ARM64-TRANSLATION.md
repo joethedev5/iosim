@@ -37,7 +37,9 @@ second launch skips translation. Framework code that invokes an app
 block — UIView animations and completions, Foundation index-set
 enumeration, NSOperation and URLSession handlers, UserNotifications
 completions — calls it through the block-call bridge, which runs an
-arm64 invoke pointer on the interpreter. The printf-family gates now cover
+arm64 invoke pointer on the interpreter. Blocks with four arguments and
+blocks that return objects are bridged as well (activity completions,
+cell and menu providers, preview providers). The printf-family gates now cover
 fprintf, sprintf, snprintf and NSLog, including %@ through the object's
 description, and AdvSIMD coverage includes shifts by immediate, integer
 add/sub/mul/mla in every lane size, signed and unsigned min/max,

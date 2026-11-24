@@ -130,6 +130,64 @@ void iosim_block_call3(void *block, uint64_t a, uint64_t b, uint64_t c)
             block, a, b, c);
 }
 
+void iosim_block_call4(void *block, uint64_t a, uint64_t b, uint64_t c,
+                       uint64_t d)
+{
+    if (!block)
+        return;
+    struct block_layout *blk = block;
+    uint64_t args[4] = {a, b, c, d};
+    if (blk->invoke && !call_guest_block(block, args, 4, NULL))
+        ((void (*)(void *, uint64_t, uint64_t, uint64_t,
+                   uint64_t))blk->invoke)(block, a, b, c, d);
+}
+
+/* A block that returns a scalar (an object pointer or a BOOL). */
+static uint64_t call_block_ret(void *block, const uint64_t *args, int nargs)
+{
+    if (!block)
+        return 0;
+    struct block_layout *blk = block;
+    uint64_t ret = 0;
+    if (!blk->invoke)
+        return 0;
+    if (call_guest_block(block, args, nargs, &ret))
+        return ret;
+    if (nargs == 0)
+        return ((uint64_t (*)(void *))blk->invoke)(block);
+    if (nargs == 1)
+        return ((uint64_t (*)(void *, uint64_t))blk->invoke)(block, args[0]);
+    if (nargs == 2)
+        return ((uint64_t (*)(void *, uint64_t, uint64_t))blk->invoke)(
+            block, args[0], args[1]);
+    return ((uint64_t (*)(void *, uint64_t, uint64_t, uint64_t))blk->invoke)(
+        block, args[0], args[1], args[2]);
+}
+
+uint64_t iosim_block_call_ret(void *block)
+{
+    return call_block_ret(block, NULL, 0);
+}
+
+uint64_t iosim_block_call_ret1(void *block, uint64_t a)
+{
+    uint64_t args[1] = {a};
+    return call_block_ret(block, args, 1);
+}
+
+uint64_t iosim_block_call_ret2(void *block, uint64_t a, uint64_t b)
+{
+    uint64_t args[2] = {a, b};
+    return call_block_ret(block, args, 2);
+}
+
+uint64_t iosim_block_call_ret3(void *block, uint64_t a, uint64_t b,
+                               uint64_t c)
+{
+    uint64_t args[3] = {a, b, c};
+    return call_block_ret(block, args, 3);
+}
+
 static double now_seconds(void)
 {
     struct timespec ts;

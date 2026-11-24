@@ -2316,6 +2316,19 @@ out-of-range indexes and 8B extraction, 2S/2D rounding and compares,
 result lines across the two fixtures and requires each translator's
 output to equal its `IOSIM_ARM64_NOJIT=1` interpreter run.
 
+### arm64: blocks that return values and four-argument blocks
+
+`tests/arm64_blocks2.m` builds a diffable table data source whose cell
+provider returns a cell, presents an alert whose third action prints when
+tapped, runs a UIViewPropertyAnimator start and completion pair, and
+cancels two activity sheets: one with an items completion and one with
+the plain completion handler. The cell provider comes back through the
+return-value bridge, the alert handler through the one-argument call,
+and the two sheet completions through the four- and two-argument calls.
+The suite checks the provider rows, the returned cell's text, the alert
+line, the animator completion, both cancellation lines and the done
+line, then repeats the run with `IOSIM_ARM64_NOJIT=1`.
+
 ### arm64: an app bundle on the device path
 
 `tests/arm64_device_app.m` is a thin arm64 bundle with the same scene as
