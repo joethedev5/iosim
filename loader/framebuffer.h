@@ -22,6 +22,7 @@ void iosim_fb_fill_squircle(int x, int y, int w, int h, uint32_t color);
 void iosim_fb_fill_squircle_gradient(int x, int y, int w, int h,
                                      uint32_t top, uint32_t bottom);
 void iosim_fb_set_opacity(double opacity);
+double iosim_fb_get_opacity(void);
 /* CGBlendMode value applied by subsequent shape fills and gradients.
  * 0 is source-over. */
 void iosim_fb_set_blend_mode(int mode);

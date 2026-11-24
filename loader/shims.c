@@ -1039,6 +1039,7 @@ static const struct iosim_shim shims[] = {
     SHIM_DIRECT(iosim_png_load),
     SHIM_DIRECT(iosim_png_load_memory),
     SHIM_DIRECT(iosim_fb_set_opacity),
+    SHIM_DIRECT(iosim_fb_get_opacity),
     SHIM_DIRECT(iosim_fb_set_blend_mode),
     SHIM_DIRECT(iosim_fb_push_clip),
     SHIM_DIRECT(iosim_fb_pop_clip),

@@ -1973,6 +1973,19 @@ is its underline, which extends 8 px below the red run's baseline. The text
 view keeps its base font metrics, so this color pass does not disturb
 selection or caret geometry.
 
+### UIKit: label and attributed text shadows
+
+`tests/text_shadow_test.m` puts the white 40 pt bold `SHADOW` text in two
+labels on black. The first label sets `shadowColor` red and a (3, 3) pt
+`shadowOffset`; the second carries an `NSShadow` on its runs with a blue
+color, a (-3, 3) pt offset and a 2 pt blur radius. The captured frame reads
+more than 200 white glyph pixels and more than 150 red pixels in the first
+band, and the red bounding box extends 5–15 px past the white box both to
+the right and below — the 9 px offset. In the attributed band more than 150
+blue pixels sit around the white text, extending 3–16 px to the left of the
+white box and 4–16 px below it, and the blur spreads them past the bare 9 px
+offset.
+
 ### Page view controllers
 
 `tests/pageview_test.m` installs a scroll-style horizontal page controller as a

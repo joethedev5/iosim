@@ -126,6 +126,21 @@ extern id NSForegroundColorAttributeName;
 extern id NSBackgroundColorAttributeName;
 extern id NSUnderlineStyleAttributeName;
 extern id NSParagraphStyleAttributeName;
+extern id NSShadowAttributeName;
+
+@interface NSShadow : NSObject {
+@public
+    CGSize _shadowOffset;
+    double _shadowBlurRadius;
+    id _shadowColor;
+}
+- (CGSize)shadowOffset;
+- (void)setShadowOffset:(CGSize)offset;
+- (double)shadowBlurRadius;
+- (void)setShadowBlurRadius:(double)radius;
+- (id)shadowColor;
+- (void)setShadowColor:(id)color;
+@end
 
 @interface NSString : NSObject {
 @public

@@ -1237,6 +1237,8 @@ enum {
 @property double preferredMaxLayoutWidth;
 @property BOOL adjustsFontSizeToFitWidth;
 @property double minimumScaleFactor;
+@property(nonatomic, retain) UIColor *shadowColor;
+@property CGSize shadowOffset;
 - (CGRect)textRectForBounds:(CGRect)bounds
      limitedToNumberOfLines:(int)numberOfLines;
 @end
@@ -2684,6 +2686,13 @@ extern id NSForegroundColorAttributeName;
 extern id NSBackgroundColorAttributeName;
 extern id NSUnderlineStyleAttributeName;
 extern id NSParagraphStyleAttributeName;
+extern id NSShadowAttributeName;
+
+@interface NSShadow : NSObject
+@property CGSize shadowOffset;
+@property double shadowBlurRadius;
+@property(nonatomic, retain) id shadowColor;
+@end
 
 @interface NSString (UIKitDrawing)
 - (CGSize)sizeWithAttributes:(NSDictionary *)attributes;

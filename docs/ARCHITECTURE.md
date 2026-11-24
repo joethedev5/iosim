@@ -504,11 +504,17 @@ a run overflowing the frame falls back to the plain string with the first
 run's font and color. A multiline attributed label wraps with the existing
 plain-text wrapper, maps each printed line back to its source range, draws
 that range run by run, and takes `NSParagraphStyle` alignment and
-`lineSpacing` from the paragraph style at the line start. `UIButton` reads
-the first attribute dictionary only. A text view draws each wrapped line's
-run ranges with per-run colors, backgrounds and underlines while keeping
-the base font metrics, so selection and caret geometry stay aligned with
-the plain-text layout. A single-line label shrinks its font
+`lineSpacing` from the paragraph style at the line start. A run carrying
+`NSShadowAttributeName` draws its glyphs a second time at the shadow offset;
+a blur radius adds four ring positions at reduced opacity, and the text
+coverage accumulates in the framebuffer instead of an alpha buffer. The
+shadow color's alpha scales the framebuffer's current opacity, which is
+restored afterwards, so view alpha still applies. `UILabel`'s own
+`shadowColor`/`shadowOffset` use the same drawing pass for plain text.
+`UIButton` reads the first attribute dictionary only. A text view draws each
+wrapped line's run ranges with per-run colors, backgrounds and underlines
+while keeping the base font metrics, so selection and caret geometry stay
+aligned with the plain-text layout. A single-line label shrinks its font
 only when `adjustsFontSizeToFitWidth` is set, in half-point steps down to
 `minimumScaleFactor` (or 1 pt when it is zero), and otherwise truncates
 according to `lineBreakMode`: clipping keeps the string, while head, tail and

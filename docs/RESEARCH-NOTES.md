@@ -1635,3 +1635,15 @@ components.
 - The replicator fixture gains a three-copy row with a six-second fade and a
   2.5 s delay; a later screenshot reads decreasing brightness across the
   copies.
+
+## 2026-11-24: label and attributed text shadows
+
+- `NSShadow` carries an offset, blur radius and color and can be attached to
+  attributed runs with `NSShadowAttributeName`; `UILabel` exposes the plain
+  `shadowColor`/`shadowOffset` pair.
+- A shadow draws the glyphs a second time at the offset; a blur radius adds
+  four ring positions at reduced opacity and relies on coverage accumulation
+  in the framebuffer. The shadow color alpha scales the current framebuffer
+  opacity through a new `iosim_fb_get_opacity` shim and restores it.
+- Attributed label runs, single-line and multiline labels, and attributed
+  text views share the pass.

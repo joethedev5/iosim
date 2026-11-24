@@ -75,6 +75,7 @@ extern void iosim_event_second_point(int *x, int *y);
 extern int  iosim_event_touch_id(void);
 extern int  iosim_event_open(void);
 extern void iosim_fb_set_opacity(double opacity);
+extern double iosim_fb_get_opacity(void);
 extern int iosim_fb_push_clip(int x, int y, int w, int h);
 extern void iosim_fb_pop_clip(void);
 extern int iosim_fb_push_clip_alpha(const unsigned char *alpha, int w,
@@ -1717,6 +1718,8 @@ typedef enum {
     double _preferredMaxLayoutWidth;
     BOOL _adjustsFontSizeToFitWidth;
     double _minimumScaleFactor;
+    id _shadowColor;
+    CGSize _shadowOffset;
 }
 - (void)setText:(id)text;
 - (id)text;
@@ -1738,6 +1741,10 @@ typedef enum {
 - (void)setAdjustsFontSizeToFitWidth:(BOOL)adjusts;
 - (double)minimumScaleFactor;
 - (void)setMinimumScaleFactor:(double)scale;
+- (UIColor *)shadowColor;
+- (void)setShadowColor:(UIColor *)color;
+- (CGSize)shadowOffset;
+- (void)setShadowOffset:(CGSize)offset;
 - (CGSize)intrinsicContentSize;
 - (CGSize)sizeThatFits:(CGSize)size;
 @end
@@ -5673,6 +5680,7 @@ id NSFontAttributeName = @"NSFontAttributeName";
 id NSForegroundColorAttributeName = @"NSForegroundColorAttributeName";
 id NSBackgroundColorAttributeName = @"NSBackgroundColorAttributeName";
 id NSUnderlineStyleAttributeName = @"NSUnderlineStyleAttributeName";
+id NSShadowAttributeName = @"NSShadowAttributeName";
 id NSParagraphStyleAttributeName = @"NSParagraphStyleAttributeName";
 
 static unsigned text_color_rgb(UIColor *color)
@@ -8554,6 +8562,7 @@ static void label_ellipsized(const char *text, int style, double points,
         _numberOfLines = 1;
         _lineBreakMode = 4;
         _accessibilityTraits = 64;
+        _shadowOffset = CGSizeMake(0, -1);
     }
     return self;
 }
@@ -8565,6 +8574,7 @@ static void label_ellipsized(const char *text, int style, double points,
         _numberOfLines = 1;
         _lineBreakMode = 4;
         _accessibilityTraits = 64;
+        _shadowOffset = CGSizeMake(0, -1);
     }
     return self;
 }
@@ -8611,6 +8621,10 @@ static void label_ellipsized(const char *text, int style, double points,
 }
 - (double)minimumScaleFactor { return _minimumScaleFactor; }
 - (void)setMinimumScaleFactor:(double)scale { _minimumScaleFactor = scale; }
+- (UIColor *)shadowColor { return _shadowColor; }
+- (void)setShadowColor:(UIColor *)color { _shadowColor = color; }
+- (CGSize)shadowOffset { return _shadowOffset; }
+- (void)setShadowOffset:(CGSize)offset { _shadowOffset = offset; }
 - (UIView *)hitTest:(CGPoint)point
 {
     (void)point;
@@ -21607,6 +21621,10 @@ static void blur_box_xrgb(unsigned *pix, int w, int h, int radius, int passes)
  * font size and weight, foreground and background colors, and underline.
  * Only ASCII strings whose runs fit inside the label take this path; the
  * caller falls back to the plain-text label renderer otherwise. */
+static void label_draw_attributed_shadow(id shadow, const char *segment,
+                                         int style, double points,
+                                         double scale, int x, int baseline);
+
 static int label_draw_attributed_single(UILabel *label, int x, int y, int w,
                                        int h, double scale)
 {
@@ -21714,6 +21732,11 @@ static int label_draw_attributed_single(UILabel *label, int x, int y, int w,
         if (background && [background isKindOfClass:[UIColor class]])
             iosim_fb_fill_rect(cursor, y + (h - lineHeight) / 2, runWidth,
                                lineHeight, color_rgb(background));
+        id shadow = attributes
+            ? [attributes objectForKey:NSShadowAttributeName]
+            : nil;
+        label_draw_attributed_shadow(shadow, segment, style, points, scale,
+                                     cursor, baseline);
         iosim_fb_font_text(cursor, baseline, segment, style, points, scale,
                            color);
         id underline = attributes
@@ -21727,6 +21750,58 @@ static int label_draw_attributed_single(UILabel *label, int x, int y, int w,
         index = range.location + range.length;
     }
     return 1;
+}
+
+/* A text shadow is a second pass of the glyphs at an offset. A blur radius
+ * spreads that pass over four extra ring positions; glyph coverage
+ * accumulates in the framebuffer, softening the edge without an alpha
+ * buffer. The shadow color's alpha scales the current framebuffer opacity,
+ * which is restored afterwards. */
+static void label_draw_shadow_text(id color, CGSize offset, double blur,
+                                   const char *segment, int style,
+                                   double points, double scale, int x,
+                                   int baseline)
+{
+    if (!segment || !*segment)
+        return;
+    unsigned rgb = color ? color_rgb((UIColor *)color) : 0x000000;
+    double alpha = color ? color_alpha((UIColor *)color) : 1.0;
+    int dx = (int)(offset.width * scale +
+                   (offset.width < 0 ? -0.5 : 0.5));
+    int dy = (int)(offset.height * scale +
+                   (offset.height < 0 ? -0.5 : 0.5));
+    int spread = (int)(blur * scale + 0.5);
+    double saved = iosim_fb_get_opacity();
+    iosim_fb_set_opacity(saved * alpha * (spread > 0 ? 0.55 : 1.0));
+    iosim_fb_font_text(x + dx, baseline + dy, segment, style, points, scale,
+                       rgb);
+    if (spread > 0)
+    {
+        int step = spread / 2;
+        if (step < 1)
+            step = 1;
+        iosim_fb_font_text(x + dx - step, baseline + dy, segment, style,
+                           points, scale, rgb);
+        iosim_fb_font_text(x + dx + step, baseline + dy, segment, style,
+                           points, scale, rgb);
+        iosim_fb_font_text(x + dx, baseline + dy - step, segment, style,
+                           points, scale, rgb);
+        iosim_fb_font_text(x + dx, baseline + dy + step, segment, style,
+                           points, scale, rgb);
+    }
+    iosim_fb_set_opacity(saved);
+}
+
+static void label_draw_attributed_shadow(id shadow, const char *segment,
+                                         int style, double points,
+                                         double scale, int x, int baseline)
+{
+    if (!shadow || ![shadow isKindOfClass:[NSShadow class]])
+        return;
+    NSShadow *value = (NSShadow *)shadow;
+    label_draw_shadow_text(value->_shadowColor, value->_shadowOffset,
+                           value->_shadowBlurRadius, segment, style, points,
+                           scale, x, baseline);
 }
 
 static int attributed_range_width(NSAttributedString *attributed,
@@ -21824,6 +21899,11 @@ static int attributed_draw_range(NSAttributedString *attributed,
         if (background && [background isKindOfClass:[UIColor class]])
             iosim_fb_fill_rect(cursor, lineTop, runWidth, lineHeight,
                                color_rgb(background));
+        id shadow = attributes
+            ? [attributes objectForKey:NSShadowAttributeName]
+            : nil;
+        label_draw_attributed_shadow(shadow, segment, style, points, scale,
+                                     cursor, baseline);
         iosim_fb_font_text(cursor, baseline, segment, style, points, scale,
                            color);
         id underline = attributes
@@ -22804,6 +22884,13 @@ static void render_view(UIView *view, double originX, double originY,
                         tx = x + (w - lw) / 2;
                     else if (label->_textAlignment == 2)
                         tx = x + w - lw;
+                    if (label->_shadowColor)
+                        label_draw_shadow_text(label->_shadowColor,
+                                               label->_shadowOffset, 0,
+                                               lines[i], style, points,
+                                               scale, tx,
+                                               startY + i * lineHeight +
+                                                   ascent);
                     iosim_fb_font_text(tx, startY + i * lineHeight + ascent,
                                        lines[i], style, points, scale, color);
                 }
@@ -22835,6 +22922,11 @@ static void render_view(UIView *view, double originX, double originY,
                 else if (label->_textAlignment == 2)
                     tx = x + w - textWidth;
                 int baseline = y + (h - lineHeight) / 2 + ascent;
+                if (label->_shadowColor)
+                    label_draw_shadow_text(label->_shadowColor,
+                                           label->_shadowOffset, 0, text,
+                                           style, points, scale, tx,
+                                           baseline);
                 iosim_fb_font_text(tx, baseline, text, style, points, scale,
                                    color);
             }

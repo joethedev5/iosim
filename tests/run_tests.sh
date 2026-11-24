@@ -1738,6 +1738,108 @@ check "[cg] bitmap pixels 1 1" "$out" \
 check "[cg] bitmap drawn 1 1" "$out" \
     "a bitmap image draws back through the framebuffer"
 
+# ---------- 4f25. Label and attributed text shadows ----------
+rm -f "$T/shadow.fifo"
+mkfifo "$T/shadow.fifo"
+"$ROOT/tools/build_app.sh" "$ROOT/tests/text_shadow_test.m" \
+    "$T/text_shadow_test" >/dev/null
+out="$(IOSIM_EVENT_FIFO="$T/shadow.fifo" IOSIM_TEST_PNG="$T/shadow.png" \
+    DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/text_shadow_test" 2>&1)"
+rm -f "$T/shadow.fifo"
+check "[shadow] ready" "$out" "the label shadow fixture starts"
+check "[shadow] done" "$out" "the label shadow fixture draws its labels"
+if report="$(python3 - "$ROOT/tools" "$T/shadow.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+def region(top, bottom):
+    stats = {}
+    for name in ('white', 'red', 'blue'):
+        stats[name] = {'n': 0, 'minx': 10 ** 9, 'maxx': -1,
+                       'miny': 10 ** 9, 'maxy': -1}
+    for yy in range(top * 3, bottom * 3):
+        for xx in range(40, 1160):
+            c = pngpixel.px(rows, bpp, xx, yy)
+            r, g, b = (c >> 16) & 255, (c >> 8) & 255, c & 255
+            if min(r, g, b) > 200:
+                key = 'white'
+            elif r > 150 and g < 90 and b < 90:
+                key = 'red'
+            elif b > 100 and r < 90 and g < 90:
+                key = 'blue'
+            else:
+                continue
+            s = stats[key]
+            s['n'] += 1
+            s['minx'] = min(s['minx'], xx)
+            s['maxx'] = max(s['maxx'], xx)
+            s['miny'] = min(s['miny'], yy)
+            s['maxy'] = max(s['maxy'], yy)
+    return stats
+
+plain = region(160, 240)
+if plain['white']['n'] < 200 or plain['red']['n'] < 150:
+    raise SystemExit('plain label pixels: white %d red %d' %
+                     (plain['white']['n'], plain['red']['n']))
+dx = plain['red']['maxx'] - plain['white']['maxx']
+dy = plain['red']['maxy'] - plain['white']['maxy']
+if not (5 <= dx <= 15 and 5 <= dy <= 15):
+    raise SystemExit('plain shadow offset is %d,%d' % (dx, dy))
+print("ok   a UILabel shadow draws offset from its text")
+PY
+)"; then
+    echo "$report"
+else
+    echo "FAIL label shadow"; echo "$report"; fails=$((fails+1))
+fi
+if report="$(python3 - "$ROOT/tools" "$T/shadow.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+def region(top, bottom):
+    stats = {}
+    for name in ('white', 'blue'):
+        stats[name] = {'n': 0, 'minx': 10 ** 9, 'maxx': -1,
+                       'miny': 10 ** 9, 'maxy': -1}
+    for yy in range(top * 3, bottom * 3):
+        for xx in range(40, 1160):
+            c = pngpixel.px(rows, bpp, xx, yy)
+            r, g, b = (c >> 16) & 255, (c >> 8) & 255, c & 255
+            if min(r, g, b) > 200:
+                key = 'white'
+            elif b > 100 and r < 90 and g < 90:
+                key = 'blue'
+            else:
+                continue
+            s = stats[key]
+            s['n'] += 1
+            s['minx'] = min(s['minx'], xx)
+            s['maxx'] = max(s['maxx'], xx)
+            s['miny'] = min(s['miny'], yy)
+            s['maxy'] = max(s['maxy'], yy)
+    return stats
+
+attributed = region(320, 400)
+if attributed['white']['n'] < 200 or attributed['blue']['n'] < 150:
+    raise SystemExit('attributed label pixels: white %d blue %d' %
+                     (attributed['white']['n'], attributed['blue']['n']))
+dx = attributed['blue']['minx'] - attributed['white']['minx']
+dy = attributed['blue']['maxy'] - attributed['white']['maxy']
+if not (-16 <= dx <= -3 and 4 <= dy <= 16):
+    raise SystemExit('attributed shadow offset is %d,%d' % (dx, dy))
+print("ok   an NSShadow attribute draws a blurred offset shadow")
+PY
+)"; then
+    echo "$report"
+else
+    echo "FAIL attributed shadow"; echo "$report"; fails=$((fails+1))
+fi
+
+
 # ---------- 4g. NSCalendar components ----------
 "$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
     -ffreestanding -O1 -I "$ROOT/frameworks" \

@@ -2100,6 +2100,26 @@ static void attributed_runs_rebuild(id *runs, unsigned long oldLength,
 }
 @end
 
+@implementation NSShadow
+- (id)init
+{
+    self = [super init];
+    if (self)
+    {
+        _shadowOffset = CGSizeMake(0, -3);
+        _shadowBlurRadius = 0;
+        _shadowColor = nil;
+    }
+    return self;
+}
+- (CGSize)shadowOffset { return _shadowOffset; }
+- (void)setShadowOffset:(CGSize)offset { _shadowOffset = offset; }
+- (double)shadowBlurRadius { return _shadowBlurRadius; }
+- (void)setShadowBlurRadius:(double)radius { _shadowBlurRadius = radius; }
+- (id)shadowColor { return _shadowColor; }
+- (void)setShadowColor:(id)color { _shadowColor = color; }
+@end
+
 @implementation NSMutableAttributedString
 - (id)initWithString:(id)string
 {

@@ -1204,6 +1204,11 @@ void iosim_fb_set_opacity(double opacity)
     fb_opacity = opacity;
 }
 
+double iosim_fb_get_opacity(void)
+{
+    return fb_opacity;
+}
+
 static uint32_t blend_color(uint32_t color, double alpha)
 {
     if (alpha >= 0.999)
