@@ -498,6 +498,14 @@ still presented. Sort Name starts checked; tapping Sort Date prints
 Sort Name row to the Sort Date row without dismissing. The back row restores
 the root card and an outside tap dismisses to the green background.
 
+### Context menu palettes
+
+`tests/palette_menu_test.m` raises a root menu with
+`UIMenuOptionsDisplayAsPalette` and Red/Green/Blue actions whose 24 pt icons
+are solid fills. The capture shows three 76 pt columns: red at (125,512),
+green at (201,512) and blue at (277,512) inside a 92 pt card. Tapping the
+green column prints `[palette] green` and restores the green background.
+
 ### Action sheets
 
 `tests/alert_sheet_test.m` presents a `UIAlertControllerStyleActionSheet`

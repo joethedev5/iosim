@@ -1358,7 +1358,10 @@ press keeps the menu open. An action whose state is on draws a trailing
 checkmark. `UIMenuElementAttributesKeepsMenuPresented` actions run their
 handler without dismissing, so the redraw reflects any state they changed,
 and a page with `UIMenuOptionsSingleSelection` clears the state of its other
-actions and checks the tapped one before the handler runs.
+actions and checks the tapped one before the handler runs. A root menu
+carrying `UIMenuOptionsDisplayAsPalette` whose children are all actions lays
+out as a horizontal row of equal-width columns, each with a 24 pt image above
+a centered 12 pt title.
 
 Standard controls render with the measured iOS 26 design. `UISwitch` paints
 a 63 x 28 pt capsule with a 36.3 x 23.3 pt white knob; `UISlider` uses a

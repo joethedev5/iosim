@@ -112,6 +112,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | UILongPressGestureRecognizer duration, movement tolerance and state changes | ✅ |
 | UIContextMenuInteraction context menus on table rows, collection items and views: blurred backdrop, lifted preview, action menus, submenu pages with a back row | ✅ |
 | Context menu action state: `UIMenuElementStateOn` trailing checkmarks, `UIMenuElementAttributesKeepsMenuPresented` actions, automatic `UIMenuOptionsSingleSelection` exclusivity | ✅ |
+| Context menu palettes: `UIMenuOptionsDisplayAsPalette` root menus draw equal-width icon columns under the preview | ✅ |
 | UIBarButtonItem/UINavigationItem, right bar buttons and automatic back button | ✅ |
 | UISearchBar with delegate edits, Return action, Cancel and keyboard focus; UISearchController with results updater, active state and scope properties | ✅ |
 | UIDevice model/system/orientation/battery surface, UIAccessibility element storage and query functions, gesture recognizer delegate/touch/delay properties | ✅ |

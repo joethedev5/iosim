@@ -1669,6 +1669,58 @@ else
     echo "FAIL menu action state"; echo "$out"; fails=$((fails+1))
 fi
 
+# ---------- 4f23. Context menu palettes ----------
+rm -f "$T/palette.fifo"
+mkfifo "$T/palette.fifo"
+"$ROOT/tools/build_app.sh" "$ROOT/tests/palette_menu_test.m" \
+    "$T/palette_menu_test" >/dev/null
+out="$(IOSIM_EVENT_FIFO="$T/palette.fifo" \
+    IOSIM_TEST_PNG_PALETTE="$T/palette.png" \
+    IOSIM_TEST_PNG_END="$T/palette_end.png" \
+    DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" \
+    "$T/palette_menu_test" 2>&1)"
+check "[palette] green" "$out" "a palette menu column runs its action"
+check "[palette] png written" "$out" "the palette fixture captures every phase"
+if out="$(python3 - "$ROOT/tools" "$T" <<'PALPNG'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+
+def loader(path):
+    w, h, bpp, rows = pngpixel.load(path)
+    def read(x, y):
+        return pngpixel.px(rows, bpp, x * 3, y * 3)
+    return read
+
+def rgb(read, x, y):
+    c = read(x, y)
+    return ((c >> 16) & 255, (c >> 8) & 255, c & 255)
+
+def green(c):
+    return abs(c[0] - 26) < 25 and abs(c[1] - 204) < 25 and abs(c[2] - 77) < 25
+
+root = sys.argv[2]
+pal = loader(root + "/palette.png")
+end = loader(root + "/palette_end.png")
+red = rgb(pal, 125, 512)
+grn = rgb(pal, 201, 512)
+blu = rgb(pal, 277, 512)
+if not (red[0] > 200 and red[1] < 80 and red[2] < 80):
+    raise SystemExit("the red palette icon is missing: %r" % (red,))
+if not (grn[1] > 200 and grn[0] < 80 and grn[2] < 80):
+    raise SystemExit("the green palette icon is missing: %r" % (grn,))
+if not (blu[2] > 200 and blu[0] < 80 and blu[1] < 80):
+    raise SystemExit("the blue palette icon is missing: %r" % (blu,))
+if not green(rgb(end, 10, 300)):
+    raise SystemExit("the palette did not dismiss")
+print("ok   palette menus draw icon columns and run a column action")
+PALPNG
+)"; then
+    echo "$out"
+else
+    echo "FAIL context menu palette"; echo "$out"; fails=$((fails+1))
+fi
+
 # ---------- 4g. NSCalendar components ----------
 "$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
     -ffreestanding -O1 -I "$ROOT/frameworks" \

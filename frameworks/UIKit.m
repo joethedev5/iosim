@@ -17235,8 +17235,25 @@ static void ctx_screen_origin(UIView *view, double *ox, double *oy)
     *oy = y;
 }
 
+/* A root menu with UIMenuOptionsDisplayAsPalette and only actions draws as
+ * a horizontal row of icon columns instead of the vertical card. */
+static int ctx_palette_page(void)
+{
+    if (g_ctx.menuDepth != 0 || g_ctx.entryCount <= 0)
+        return 0;
+    UIMenu *menu = g_ctx.menuStack[0];
+    if (!menu || !(menu->_options & UIMenuOptionsDisplayAsPalette))
+        return 0;
+    for (int i = 0; i < g_ctx.entryCount; i++)
+        if (!g_ctx.entries[i].action)
+            return 0;
+    return 1;
+}
+
 static double ctx_menu_height(void)
 {
+    if (ctx_palette_page())
+        return 92.0;
     double height = 16;
     for (int i = 0; i < g_ctx.entryCount; i++)
     {
@@ -17259,7 +17276,15 @@ static void ctx_compute_frames(double screenWidth, double screenHeight)
         previewH = 44;
     if (previewH > screenHeight * 0.55)
         previewH = screenHeight * 0.55;
-    double menuW = previewW < 250 ? 250 : previewW;
+    double menuW;
+    if (ctx_palette_page())
+    {
+        menuW = g_ctx.entryCount * 76.0 + 16.0;
+        if (menuW < 200.0)
+            menuW = 200.0;
+    }
+    else
+        menuW = previewW < 250 ? 250 : previewW;
     if (menuW > screenWidth - 24)
         menuW = screenWidth - 24;
     double menuH = ctx_menu_height();
@@ -28785,6 +28810,56 @@ static void draw_context_menu(int fbW, int fbH, double scale)
     iosim_fb_fill_round_rect(mx, my, mw, mh, menuRadius, 0x3f4048);
     iosim_fb_fill_round_rect(mx + 1, my + 1, mw - 2, mh - 2, menuRadius - 1,
                              0x23242d);
+
+    if (ctx_palette_page())
+    {
+        int pad = (int)(8 * scale + 0.5);
+        int itemW = (mw - 2 * pad) / g_ctx.entryCount;
+        int iconSize = (int)(24 * scale + 0.5);
+        int iconY = my + (int)(10 * scale + 0.5);
+        int textY = iconY + iconSize + (int)(6 * scale + 0.5);
+        int asc = 0, desc = 0, lh = 0;
+        iosim_fb_font_metrics(IOSIM_FONT_REGULAR, 12, scale, &asc, &desc,
+                              &lh);
+        g_ctx.rowCount = 0;
+        for (int i = 0; i < g_ctx.entryCount; i++)
+        {
+            UIAction *action = g_ctx.entries[i].action;
+            int x0 = mx + pad + i * itemW;
+            unsigned color = 0xffffff;
+            if (action->_attributes & UIMenuElementAttributesDestructive)
+                color = 0xff453a;
+            else if (action->_attributes & UIMenuElementAttributesDisabled)
+                color = 0x7c7c82;
+            UIImage *image = action->_image;
+            if (image && image->_rgba && image->_width > 0)
+                iosim_fb_blit_rgba_scaled(x0 + (itemW - iconSize) / 2,
+                                          iconY, iconSize, iconSize,
+                                          image->_rgba, image->_width,
+                                          image->_height, image->_width * 4);
+            char title[96];
+            share_text_ellipsis(iosim_string_cstr(action->_title),
+                                IOSIM_FONT_REGULAR, 12, scale,
+                                itemW - (int)(8 * scale + 0.5), title,
+                                sizeof(title));
+            int tw = iosim_fb_font_text_width(title, IOSIM_FONT_REGULAR, 12,
+                                              scale);
+            iosim_fb_font_text(x0 + (itemW - tw) / 2, textY + asc, title,
+                               IOSIM_FONT_REGULAR, 12, scale, color);
+            if (g_ctx.rowCount < CTX_MAX_ENTRIES)
+            {
+                g_ctx.rowRects[g_ctx.rowCount][0] = x0;
+                g_ctx.rowRects[g_ctx.rowCount][1] = my;
+                g_ctx.rowRects[g_ctx.rowCount][2] = x0 + itemW;
+                g_ctx.rowRects[g_ctx.rowCount][3] = my + mh;
+                g_ctx.rowEntries[g_ctx.rowCount] = i;
+                g_ctx.rowCount++;
+            }
+        }
+        if (bg)
+            free(bg);
+        return;
+    }
 
     int cursor = my + (int)(8 * scale + 0.5);
     int rowH = (int)(46 * scale + 0.5);

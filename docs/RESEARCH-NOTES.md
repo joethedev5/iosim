@@ -1562,3 +1562,15 @@ components.
 - `tests/launchd_job_test.c interval` prints one line and exits; the suite
   loads a plist with `StartInterval = 1` and no RunAtLoad, waits for two log
   lines, unloads the job and verifies the count stops growing.
+
+## 2026-11-24: context menu palettes
+
+- A root menu with `UIMenuOptionsDisplayAsPalette` and only action children
+  draws as a 92 pt horizontal card. Its width is 76 pt per action plus 16 pt
+  of padding, clamped to the screen; each column centers a 24 pt image above
+  a 12 pt title, honors destructive and disabled colors, and registers one
+  hit rectangle for the whole column. Menus with headers or submenus fall
+  back to the vertical card.
+- The fixture builds three solid 24 pt icons through
+  `UIGraphicsImageRenderer`; the suite samples the icon centers and taps the
+  middle column to run its action.
