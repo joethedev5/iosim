@@ -2358,6 +2358,47 @@ check "[stream] fileout file output 1" "$out" \
 check "[stream] append file output! 1" "$out" \
     "append mode adds to the existing file"
 
+# ---------- 4g10. URLSession delegate callbacks ----------
+python3 -u "$ROOT/tests/tasks_http_server.py" > "$T/tasks2.log" 2>&1 &
+TASKS2_PID=$!
+TASKS2_PORT=""
+i=0
+while [ "$i" -lt 100 ]; do
+    TASKS2_PORT=$(sed -n 's/.*port \([0-9][0-9]*\).*/\1/p' "$T/tasks2.log" | head -1)
+    [ -n "$TASKS2_PORT" ] && break
+    i=$((i + 1))
+    sleep 0.05
+done
+if [ -z "$TASKS2_PORT" ]; then
+    echo "FAIL delegate server did not start"
+    fails=$((fails + 1))
+    kill "$TASKS2_PID" 2>/dev/null || true
+else
+    "$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
+        -fblocks -ffreestanding -O1 -I "$ROOT/frameworks" \
+        -c "$ROOT/tests/urlsession_delegate_test.m" \
+        -o "$T/urlsession_delegate_test.o"
+    "$LD64" -arch x86_64 -platform_version $PLATFORM -e _main \
+        -o "$T/urlsession_delegate_test" "$T/urlsession_delegate_test.o" \
+        "$ROOT/runtime/System/Library/Frameworks/Foundation.framework/Foundation" \
+        -undefined dynamic_lookup
+    out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/urlsession_delegate_test" \
+        "$TASKS2_PORT" 2>&1)"
+    check "[delegate] data 1 16 downloaded bytes" "$out" \
+        "a data task delivers its body to the delegate"
+    check "[delegate] progress 2 16 16" "$out" \
+        "a download task reports progress to the delegate"
+    check "[delegate] file 2 1 16 downloaded bytes" "$out" \
+        "the download delegate reads the finished temp file"
+    check "[delegate] complete 1 0" "$out" \
+        "the data task completes without an error"
+    check "[delegate] complete 2 0" "$out" \
+        "the download task completes without an error"
+    check "[delegate] done 2" "$out" "the delegate fixture finishes both tasks"
+fi
+kill "$TASKS2_PID" 2>/dev/null || true
+
+
 # ---------- 4h. NSOperationQueue block operations ----------
 "$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc -fblocks \
     -ffreestanding -O1 -I "$ROOT/frameworks" \

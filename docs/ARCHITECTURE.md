@@ -360,6 +360,21 @@ default through the system trust store; tests that use a self-signed loopback
 certificate set `IOSIM_TLS_INSECURE=1`, and a build without OpenSSL reports an
 unsupported-HTTPS error instead.
 
+`NSURLSessionConfiguration` stores the request timeout, additional HTTP
+headers and `waitsForConnectivity`; `sessionWithConfiguration:delegate:
+delegateQueue:` keeps that configuration and the delegate, while
+`sharedSession` stays delegate-free. Data, upload and download tasks record
+their session and a monotonically increasing `taskIdentifier`. A task with no
+completion block hands the transfer to its session's delegate:
+`URLSession:dataTask:didReceiveData:` receives the whole body, the download
+pair `URLSession:downloadTask:didWriteData:totalBytesWritten:
+totalBytesExpectedToWrite:` reports progress and
+`URLSession:downloadTask:didFinishDownloadingToURL:` receives the temp file
+(removed after the callback returns), and every task finishes with
+`URLSession:task:didCompleteWithError:`. Optional callbacks are probed with
+`respondsToSelector:`, and `invalidateAndCancel` reports
+`URLSession:didBecomeInvalidWithError:`.
+
 `NSHTTPCookie` stores its name, value, domain, path, expiry, secure and
 HTTP-only flags from a properties dictionary and serializes them back.
 `NSHTTPCookieStorage` keeps a shared ordered list, replaces a cookie with the

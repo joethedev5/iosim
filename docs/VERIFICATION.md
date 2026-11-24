@@ -1194,6 +1194,19 @@ prints `[tasks] download 200 1 16 downloaded bytes`; it then removes the
 file. `uploadTaskWithRequest:fromData:` posts `upload payload` to `/echo`,
 and the echoed body comes back as `[tasks] upload 200 14 upload payload`.
 
+### Foundation: URLSession delegate callbacks
+
+`tests/urlsession_delegate_test.m` creates a delegate session through
+`sessionWithConfiguration:delegate:delegateQueue:` and starts a data task and
+a download task at `tests/tasks_http_server.py`'s `/file` with nil completion
+handlers. The delegate prints `[delegate] data 1 16 downloaded bytes` from
+`URLSession:dataTask:didReceiveData:` and, for the download task,
+`[delegate] progress 2 16 16` and `[delegate] file 2 1 16 downloaded bytes`:
+the progress callback reports the full body, and the finished temp file URL
+reads back 16 bytes before the runtime removes it. Both
+`URLSession:task:didCompleteWithError:` calls report an error code of 0, and
+the fixture prints `[delegate] done 2` once both tasks have finished.
+
 ### Foundation: KVC collection operators
 
 `tests/kvc_operators_test.m` runs the operators over an array of boxed

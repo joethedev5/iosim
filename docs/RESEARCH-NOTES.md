@@ -1667,3 +1667,13 @@ components.
   folder record, rekeys any saved `folder:` order entry, and redraws the
   overlay. Tapping on the software keyboard inserts its characters; tapping
   outside the field commits, and closing the folder clears a stale rename.
+
+## 2026-11-24: URLSession delegate callbacks
+
+- `NSURLSessionConfiguration` carries a request timeout, additional headers
+  and `waitsForConnectivity`; delegate sessions keep the configuration,
+  delegate and queue, and every task records its session and identifier.
+- A task with no completion block hands its body, download progress, finished
+  temp file and completion error to the session delegate; optional callbacks
+  are probe-checked with `respondsToSelector:`, and the temp download file is
+  removed after the delegate callback.

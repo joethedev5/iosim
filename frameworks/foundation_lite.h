@@ -903,6 +903,47 @@ typedef void *NSURLSessionCompletionHandler;
 typedef void *NSURLSessionDownloadCompletionHandler;
 #endif
 
+@interface NSURLSessionConfiguration : NSObject {
+@public
+    double _timeoutIntervalForRequest;
+    id _HTTPAdditionalHeaders;
+    BOOL _waitsForConnectivity;
+}
++ (id)defaultSessionConfiguration;
++ (id)ephemeralSessionConfiguration;
+- (double)timeoutIntervalForRequest;
+- (void)setTimeoutIntervalForRequest:(double)interval;
+- (id)HTTPAdditionalHeaders;
+- (void)setHTTPAdditionalHeaders:(id)headers;
+- (BOOL)waitsForConnectivity;
+- (void)setWaitsForConnectivity:(BOOL)waits;
+@end
+
+@protocol NSURLSessionDelegate
+@optional
+- (void)URLSession:(id)session didBecomeInvalidWithError:(id)error;
+@end
+
+@protocol NSURLSessionTaskDelegate <NSURLSessionDelegate>
+@optional
+- (void)URLSession:(id)session task:(id)task
+    didCompleteWithError:(id)error;
+@end
+
+@protocol NSURLSessionDataDelegate <NSURLSessionTaskDelegate>
+@optional
+- (void)URLSession:(id)session dataTask:(id)task didReceiveData:(id)data;
+@end
+
+@protocol NSURLSessionDownloadDelegate <NSURLSessionTaskDelegate>
+@optional
+- (void)URLSession:(id)session downloadTask:(id)task
+    didFinishDownloadingToURL:(id)location;
+- (void)URLSession:(id)session downloadTask:(id)task didWriteData:(long long)
+    bytesWritten totalBytesWritten:(long long)totalBytesWritten
+    totalBytesExpectedToWrite:(long long)totalBytesExpectedToWrite;
+@end
+
 @interface NSURLQueryItem : NSObject {
 @public
     id _name;
@@ -1094,9 +1135,12 @@ enum {
     void *_context;
     id _uploadData;
     int _download;
+    id _session;
+    unsigned long _identifier;
 }
 - (void)resume;
 - (void)cancel;
+- (unsigned long)taskIdentifier;
 @end
 
 @interface NSURLSessionUploadTask : NSURLSessionDataTask
@@ -1105,8 +1149,22 @@ enum {
 @interface NSURLSessionDownloadTask : NSURLSessionDataTask
 @end
 
-@interface NSURLSession : NSObject
+@interface NSURLSession : NSObject {
+@public
+    id _configuration;
+    id _delegate;
+    id _delegateQueue;
+    int _invalid;
+}
 + (id)sharedSession;
++ (id)sessionWithConfiguration:(id)configuration
+                      delegate:(id)delegate
+                 delegateQueue:(id)queue;
+- (id)configuration;
+- (id)delegate;
+- (id)delegateQueue;
+- (void)invalidateAndCancel;
+- (void)finishTasksAndInvalidate;
 - (NSURLSessionDataTask *)dataTaskWithURL:(id)url
                         completionHandler:(NSURLSessionCompletionHandler)handler;
 - (NSURLSessionDataTask *)dataTaskWithRequest:(id)request

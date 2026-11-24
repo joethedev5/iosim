@@ -7990,25 +7990,64 @@ static void url_task_main(void *raw)
     if (service_error)
         iosim_http_free(service_error);
     void (^handler)(id, id, id) = (void (^)(id, id, id))task->_completion;
+    id location = nil;
+    if (task->_download && !error && data)
+    {
+        const char *tmp = getenv("TMPDIR");
+        if (!tmp || !*tmp)
+            tmp = "/tmp";
+        char path[512];
+        snprintf(path, sizeof(path), "%s/iosim-download-%p", tmp, task);
+        NSString *file = [NSString stringWithUTF8String:path];
+        if ([data writeToFile:file atomically:NO])
+            location = [NSURL fileURLWithPath:file];
+    }
     if (task->_download)
     {
-        id location = nil;
-        if (!error && data)
-        {
-            const char *tmp = getenv("TMPDIR");
-            if (!tmp || !*tmp)
-                tmp = "/tmp";
-            char path[512];
-            snprintf(path, sizeof(path), "%s/iosim-download-%p", tmp, task);
-            NSString *file = [NSString stringWithUTF8String:path];
-            if ([data writeToFile:file atomically:NO])
-                location = [NSURL fileURLWithPath:file];
-        }
         if (handler)
             handler(location, response, error);
     }
     else if (handler)
         handler(data, response, error);
+    id session = task->_session;
+    id delegate = session ? ((NSURLSession *)session)->_delegate : nil;
+    if (!handler && delegate)
+    {
+        if (task->_download)
+        {
+            if (location && [delegate respondsToSelector:
+                    @selector(URLSession:downloadTask:didWriteData:
+                              totalBytesWritten:totalBytesExpectedToWrite:)])
+                ((void (*)(id, SEL, id, id, long long, long long, long long))
+                     objc_msgSend)(
+                    delegate,
+                    @selector(URLSession:downloadTask:didWriteData:
+                              totalBytesWritten:totalBytesExpectedToWrite:),
+                    session, task, (long long)length, (long long)length,
+                    (long long)length);
+            if (location && [delegate respondsToSelector:
+                    @selector(URLSession:downloadTask:
+                              didFinishDownloadingToURL:)])
+                ((void (*)(id, SEL, id, id, id))objc_msgSend)(
+                    delegate,
+                    @selector(URLSession:downloadTask:
+                              didFinishDownloadingToURL:),
+                    session, task, location);
+        }
+        else if (data && [delegate respondsToSelector:
+                @selector(URLSession:dataTask:didReceiveData:)])
+            ((void (*)(id, SEL, id, id, id))objc_msgSend)(
+                delegate, @selector(URLSession:dataTask:didReceiveData:),
+                session, task, data);
+        if ([delegate respondsToSelector:
+                @selector(URLSession:task:didCompleteWithError:)])
+            ((void (*)(id, SEL, id, id, id))objc_msgSend)(
+                delegate, @selector(URLSession:task:didCompleteWithError:),
+                session, task, error);
+        if (location)
+            [[NSFileManager defaultManager] removeItemAtPath:[location path]
+                                                       error:0];
+    }
     if (task->_completion)
     {
         _Block_release(task->_completion);
@@ -8116,7 +8155,10 @@ static id url_cache_key(id request)
 - (unsigned long)diskCapacity { return _diskCapacity; }
 @end
 
+static unsigned long g_url_task_identifier;
+
 @implementation NSURLSessionDataTask
+- (unsigned long)taskIdentifier { return _identifier; }
 - (void)resume
 {
     if (_resumed)
@@ -8205,6 +8247,35 @@ static id url_cache_key(id request)
 @implementation NSURLSessionDownloadTask
 @end
 
+@implementation NSURLSessionConfiguration
++ (id)defaultSessionConfiguration
+{
+    NSURLSessionConfiguration *config =
+        [[NSURLSessionConfiguration alloc] init];
+    config->_timeoutIntervalForRequest = 60.0;
+    return config;
+}
++ (id)ephemeralSessionConfiguration
+{
+    return [self defaultSessionConfiguration];
+}
+- (double)timeoutIntervalForRequest { return _timeoutIntervalForRequest; }
+- (void)setTimeoutIntervalForRequest:(double)interval
+{
+    _timeoutIntervalForRequest = interval;
+}
+- (id)HTTPAdditionalHeaders { return _HTTPAdditionalHeaders; }
+- (void)setHTTPAdditionalHeaders:(id)headers
+{
+    _HTTPAdditionalHeaders = headers;
+}
+- (BOOL)waitsForConnectivity { return _waitsForConnectivity; }
+- (void)setWaitsForConnectivity:(BOOL)waits
+{
+    _waitsForConnectivity = waits;
+}
+@end
+
 @implementation NSURLSession
 + (id)sharedSession
 {
@@ -8212,6 +8283,32 @@ static id url_cache_key(id request)
     if (!shared)
         shared = [[NSURLSession alloc] init];
     return shared;
+}
++ (id)sessionWithConfiguration:(id)configuration
+                      delegate:(id)delegate
+                 delegateQueue:(id)queue
+{
+    NSURLSession *session = [[NSURLSession alloc] init];
+    session->_configuration = configuration;
+    session->_delegate = delegate;
+    session->_delegateQueue = queue;
+    return session;
+}
+- (id)configuration { return _configuration; }
+- (id)delegate { return _delegate; }
+- (id)delegateQueue { return _delegateQueue; }
+- (void)invalidateAndCancel
+{
+    _invalid = 1;
+    if (_delegate && [_delegate respondsToSelector:
+            @selector(URLSession:didBecomeInvalidWithError:)])
+        ((void (*)(id, SEL, id, id))objc_msgSend)(
+            _delegate, @selector(URLSession:didBecomeInvalidWithError:),
+            self, nil);
+}
+- (void)finishTasksAndInvalidate
+{
+    _invalid = 1;
 }
 - (NSURLSessionDataTask *)dataTaskWithURL:(id)url
                         completionHandler:(NSURLSessionCompletionHandler)handler
@@ -8225,6 +8322,8 @@ static id url_cache_key(id request)
     NSURLSessionDataTask *task = [[NSURLSessionDataTask alloc] init];
     task->_request = request;
     task->_completion = handler ? _Block_copy((void *)handler) : 0;
+    task->_session = self;
+    task->_identifier = ++g_url_task_identifier;
     return task;
 }
 - (NSURLSessionUploadTask *)uploadTaskWithRequest:(id)request
@@ -8235,6 +8334,8 @@ static id url_cache_key(id request)
     task->_request = request;
     task->_uploadData = body;
     task->_completion = handler ? _Block_copy((void *)handler) : 0;
+    task->_session = self;
+    task->_identifier = ++g_url_task_identifier;
     return task;
 }
 - (NSURLSessionDownloadTask *)downloadTaskWithURL:(id)url
@@ -8250,6 +8351,8 @@ static id url_cache_key(id request)
     task->_request = request;
     task->_download = 1;
     task->_completion = handler ? _Block_copy((void *)handler) : 0;
+    task->_session = self;
+    task->_identifier = ++g_url_task_identifier;
     return task;
 }
 @end
