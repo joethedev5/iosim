@@ -1671,6 +1671,11 @@ swipes right, asserts that no `switcher card` line appears in the first
 the gesture, and swipes left back to `switcher card TouchApp` before tapping
 the centre card. During the slide both cards are drawn — the centred card
 full size, the neighbour at 92% size and 75% opacity.
+Resuming an app animates its cached frame. Tapping TouchApp's home-screen
+icon logs `launch zoom TouchApp` at least 150 ms after the tap, and the log
+line order shows the final zoom frame is drawn before `resuming TouchApp`.
+Selecting the same app from its switcher card logs a second
+`launch zoom TouchApp`, this time from the card's rect.
 A bottom-edge swipe up opens the switcher from the home screen and a downward
 swipe closes it; `ui switcher` injects the same toggle for headless tests.
 The same gesture works inside a foreground app. The test resumes TouchApp from

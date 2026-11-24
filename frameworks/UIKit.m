@@ -27903,13 +27903,114 @@ static void shell_close_app(int index, int fbWidth, int fbHeight, double scale,
     shell_repaint(fbWidth, fbHeight, scale, path, g_switcher);
 }
 
+/* A resumed app's cached last frame grows from its icon (request 1) or its
+ * switcher card (request 2) to the full screen before the process runs. The
+ * source rect for an icon launch is the app's grid slot on the current home
+ * page; a card launch carries the card's rect in the globals. */
+#define SHELL_LAUNCH_ZOOM_SECONDS 0.24
+static int g_launch_zoom_request;
+static double g_launch_zoom_x, g_launch_zoom_y, g_launch_zoom_w, g_launch_zoom_h;
+
+static int shell_app_icon_source(int index, double W, double H, double scale,
+                                 double *x, double *y, double *w, double *h)
+{
+    struct shell_grid_entry entries[SHELL_MAX_APPS + SHELL_MAX_FOLDERS];
+    int count =
+        shell_grid_entries(entries, SHELL_MAX_APPS + SHELL_MAX_FOLDERS);
+    for (int e = 0; e < count; e++)
+    {
+        if (entries[e].folder >= 0 || entries[e].app != index)
+            continue;
+        int page = e / 16, slot = e % 16;
+        if (page != g_home_page)
+            return 0;
+        double pitch = (W - 2 * SHELL_MARGIN_PT - SHELL_ICON_PT) / 3.0;
+        /* Expand a screen-aspect window from the icon's centre, so the
+         * snapshot scales uniformly into the full screen. */
+        *x = SHELL_MARGIN_PT + (slot % 4) * pitch;
+        *w = SHELL_ICON_PT;
+        *h = SHELL_ICON_PT * H / W;
+        *y = shell_row_center[slot / 4] - *h / 2;
+        return 1;
+    }
+    return 0;
+}
+
+static void shell_launch_zoom_frame(const unsigned char *rgba, int sw, int sh,
+                                    double p, int request, int fbWidth,
+                                    int fbHeight, double scale,
+                                    const char *path)
+{
+    double W = fbWidth / scale, H = fbHeight / scale;
+    if (request == 2)
+        shell_draw_switcher(fbWidth, fbHeight, scale, 0);
+    else
+        shell_draw(fbWidth, fbHeight, scale);
+    double x = g_launch_zoom_x + (0 - g_launch_zoom_x) * p;
+    double y = g_launch_zoom_y + (0 - g_launch_zoom_y) * p;
+    double w = g_launch_zoom_w + (W - g_launch_zoom_w) * p;
+    double h = g_launch_zoom_h + (H - g_launch_zoom_h) * p;
+    iosim_fb_set_opacity(0.35 * p);
+    iosim_fb_fill_rect(0, 0, fbWidth, fbHeight, 0x000000);
+    iosim_fb_set_opacity(1.0);
+    if (rgba)
+    {
+        int xpx = (int)(x * scale + 0.5), ypx = (int)(y * scale + 0.5);
+        int wpx = (int)(w * scale + 0.5), hpx = (int)(h * scale + 0.5);
+        iosim_fb_blit_rgba_scaled(xpx, ypx, wpx, hpx,
+                                  (unsigned char *)rgba, sw, sh, sw * 4);
+    }
+    if (path && *path)
+        iosim_fb_present(path);
+}
+
+/* Runs the zoom while the app is still stopped, then reports the completed
+ * animation before the caller logs the resume and continues the process. */
+static void shell_launch_zoom(struct shell_app *a, int request, int fbWidth,
+                              int fbHeight, double scale, const char *path)
+{
+    unsigned char *rgba = 0;
+    int sw = 0, sh = 0;
+    if (!a->snapshot[0] ||
+        iosim_png_load(a->snapshot, &rgba, &sw, &sh) != 0 || !rgba)
+        return;
+    double start = iosim_now();
+    for (;;)
+    {
+        double p = (iosim_now() - start) / SHELL_LAUNCH_ZOOM_SECONDS;
+        if (p > 1)
+            p = 1;
+        p = 1 - (1 - p) * (1 - p);
+        shell_launch_zoom_frame(rgba, sw, sh, p, request, fbWidth, fbHeight,
+                                scale, path);
+        if (p >= 1)
+            break;
+        usleep(15000);
+    }
+    free(rgba);
+    printf("[SpringBoard] launch zoom %s\n", a->name);
+    fflush(0);
+}
+
 static void shell_launch(int index, int fbWidth, int fbHeight, double scale,
                          const char *path)
 {
     struct shell_app *a = &g_shell_apps[index];
     g_fg_app = index;
+    int zoom = g_launch_zoom_request;
+    g_launch_zoom_request = 0;
+    if (zoom == 1)
+    {
+        double W = fbWidth / scale, H = fbHeight / scale;
+        if (!shell_app_icon_source(index, W, H, scale, &g_launch_zoom_x,
+                                   &g_launch_zoom_y, &g_launch_zoom_w,
+                                   &g_launch_zoom_h))
+            zoom = 0;
+    }
     if (a->pid > 0)
     {
+        if (zoom)
+            shell_launch_zoom(a, zoom, fbWidth, fbHeight, scale, path);
         /* The app stopped itself from the home event. Hand the event
          * stream back and continue the same process where it left off. */
         printf("[SpringBoard] resuming %s (pid %d)\n", a->name, a->pid);
@@ -28778,6 +28879,18 @@ static int run_springboard(void)
                 printf("[SpringBoard] switcher selected %s\n",
                        a ? a->name : "?");
                 fflush(0);
+                if (a)
+                {
+                    double zx, zy, zw, zh;
+                    shell_switcher_geometry(fbWidth, fbHeight, scale,
+                                           (double)g_switcher_index, ordinal,
+                                           &zx, &zy, &zw, &zh);
+                    g_launch_zoom_x = zx;
+                    g_launch_zoom_y = zy;
+                    g_launch_zoom_w = zw;
+                    g_launch_zoom_h = zh;
+                    g_launch_zoom_request = 2;
+                }
                 g_switcher = 0;
                 if (a)
                     shell_launch(appIndex, fbWidth, fbHeight, scale, path);
@@ -28858,7 +28971,10 @@ static int run_springboard(void)
             }
         }
         if (hit >= 0)
+        {
+            g_launch_zoom_request = 1;
             shell_launch(hit, fbWidth, fbHeight, scale, path);
+        }
     }
     return 0;
 }

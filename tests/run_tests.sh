@@ -2819,12 +2819,44 @@ else
     echo "FAIL app suspension"; fails=$((fails+1))
 fi
 sleep 0.5
-# Tapping the same icon continues the same process (grid slot 9).
+# Tapping the same icon continues the same process (grid slot 9). While the
+# process is stopped, its cached frame zooms from the icon to full screen.
+zoom_before="$(grep -Fc "[SpringBoard] launch zoom" "$SBLOG" 2>/dev/null || true)"
+zoom_start=$(date +%s%N)
 "$ROOT/tools/iosimctl" ui "$UDID" tap 154.7222 322.5 >/dev/null
+zoom_now="$zoom_before"
+i=0
+while [ "$i" -lt 50 ]; do
+    zoom_now="$(grep -Fc "[SpringBoard] launch zoom" "$SBLOG" 2>/dev/null || true)"
+    [ "$zoom_now" -gt "$zoom_before" ] && break
+    sleep 0.05
+    i=$((i+1))
+done
+if [ "$zoom_now" -gt "$zoom_before" ] &&
+    grep -Fq "[SpringBoard] launch zoom TouchApp" "$SBLOG"; then
+    echo "ok   resuming an app zooms its cached frame up from the icon"
+else
+    echo "FAIL launch zoom ($zoom_before -> $zoom_now)"; fails=$((fails+1))
+fi
+zoom_ms=$(( ($(date +%s%N) - zoom_start) / 1000000 ))
+if [ "$zoom_ms" -ge 150 ]; then
+    echo "ok   the launch zoom animates before the app resumes"
+else
+    echo "FAIL launch zoom timing ($zoom_ms ms)"; fails=$((fails+1))
+fi
 if wait_log "resuming TouchApp"; then
     echo "ok   SpringBoard resumes the suspended app process"
 else
     echo "FAIL app resume"; fails=$((fails+1))
+fi
+zoom_line="$(grep -n -F "[SpringBoard] launch zoom TouchApp" "$SBLOG" 2>/dev/null | tail -1 | cut -d: -f1)"
+resume_line="$(grep -n -F "[SpringBoard] resuming TouchApp" "$SBLOG" 2>/dev/null | tail -1 | cut -d: -f1)"
+if [ -n "$zoom_line" ] && [ -n "$resume_line" ] &&
+    [ "$zoom_line" -lt "$resume_line" ]; then
+    echo "ok   the zoom's final frame is drawn before the resume"
+else
+    echo "FAIL launch zoom order (zoom=$zoom_line resume=$resume_line)"
+    fails=$((fails+1))
 fi
 if wait_log "[UIKit-lite] resumed from suspension"; then
     echo "ok   the app continues from sceneWillEnterForeground"
@@ -2932,11 +2964,26 @@ else
 fi
 sleep 0.1
 resumed_before="$(grep -Fc "[UIKit-lite] resumed from suspension" "$SBLOG" 2>/dev/null || true)"
+swzoom_before="$(grep -Fc "[SpringBoard] launch zoom TouchApp" "$SBLOG" 2>/dev/null || true)"
 "$ROOT/tools/iosimctl" ui "$UDID" tap 201 400 >/dev/null
 if wait_log "switcher selected TouchApp"; then
     echo "ok   tapping a switcher card selects the suspended app"
 else
     echo "FAIL switcher selection"; fails=$((fails+1))
+fi
+swzoom_now="$swzoom_before"
+i=0
+while [ "$i" -lt 50 ]; do
+    swzoom_now="$(grep -Fc "[SpringBoard] launch zoom TouchApp" "$SBLOG" 2>/dev/null || true)"
+    [ "$swzoom_now" -gt "$swzoom_before" ] && break
+    sleep 0.05
+    i=$((i+1))
+done
+if [ "$swzoom_now" -gt "$swzoom_before" ]; then
+    echo "ok   a switcher card zooms into the resumed app"
+else
+    echo "FAIL switcher launch zoom ($swzoom_before -> $swzoom_now)"
+    fails=$((fails+1))
 fi
 sleep 0.6
 resumed_after="$(grep -Fc "[UIKit-lite] resumed from suspension" "$SBLOG" 2>/dev/null || true)"

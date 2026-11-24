@@ -90,6 +90,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | UIPasteboard general pasteboard shared across processes, with changeCount, change notifications, `iosimctl pbcopy`/`pbpaste`, and multi-item strings/URLs/colors/images with type queries | ✅ |
 | SpringBoard system UI: measured iOS 26 home screen, installed apps, real app launching | ✅ |
 | Real app suspension: home stops the process, the icon resumes it in place | ✅ |
+| App launch zoom: a resumed app's cached frame grows from its icon or switcher card to the full screen before the process runs | ✅ |
 | Application/scene lifecycle callbacks, notifications, UIApplication state and a background execution window for `beginBackgroundTaskWithExpirationHandler:` | ✅ |
 | App switcher: bottom-edge gestures, cached frames, animated card strip, resume, swipe-up kill | ✅ |
 | Multi-page home screen: 16-slot pages, page dots, horizontal swipe paging with a slide animation | ✅ |

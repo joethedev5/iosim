@@ -1726,3 +1726,10 @@ components.
 - Every card intersecting the viewport is drawn, with the centred card full
   size and neighbours at 92% size and 75% opacity, so the entering card shows
   during the slide.
+
+## 2026-11-24: app launch zoom
+
+- A resumed app zooms its cached last frame from its home-screen icon (or
+  switcher card) to the full screen over 0.24 s while the process is still
+  stopped, then logs the completed zoom and resumes the process.
+- First launches have no cached frame and start without a zoom.

@@ -918,6 +918,12 @@ exist: `list`, `create`, `delete`, `boot`, `bootstatus`, `shutdown`, `erase`,
   and its neighbours shrink by 8% and fade to 75%. A horizontal swipe eases
   the strip to the neighbouring card over 0.22 s, driven by the same
   event-loop tick, and the card log follows the final frame.
+- Resuming a stopped app zooms its cached last frame from the app's icon
+  (or from its switcher card) to the full screen over 0.24 s. SpringBoard
+  redraws the current surface behind a growing snapshot while the process
+  is still stopped, reports the completed zoom, and only then sends
+  SIGCONT, so the app's live frame replaces the final zoom frame. A first
+  launch has no cached frame and starts without the zoom.
 - An app can ask for the switcher itself. A bottom-edge swipe inside the app
   (touch down within 45 pt of the bottom edge, release at least 100 pt higher
   and within 140 pt horizontally) runs the same background lifecycle as
@@ -1665,7 +1671,9 @@ Python for iteration speed.
   folders cannot nest. Widgets and a Today view are absent. The switcher opens
   from the home screen, an in-app bottom-edge swipe, or `ui switcher`; a
   horizontal swipe eases the strip to the neighbouring card, the strip is not
-  freely draggable, and a swipe up on a card force-quits its app. A
+  freely draggable, and a swipe up on a card force-quits its app. A resumed
+  app zooms from its icon or card, but a first launch has no cached frame
+  and appears without a zoom. A
   backgrounded app is suspended in place (the process stops and the same
   process resumes from its icon), with no memory-pressure termination policy.
   Stock system apps are display icons without executables, and a directly
