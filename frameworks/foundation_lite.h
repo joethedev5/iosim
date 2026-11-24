@@ -877,6 +877,51 @@ typedef void *NSURLSessionCompletionHandler;
 - (void)setPort:(int)port;
 @end
 
+extern id NSHTTPCookieName;
+extern id NSHTTPCookieValue;
+extern id NSHTTPCookieDomain;
+extern id NSHTTPCookiePath;
+extern id NSHTTPCookieSecure;
+extern id NSHTTPCookieExpires;
+extern id NSHTTPCookieHTTPOnly;
+
+@interface NSHTTPCookie : NSObject {
+@public
+    id _name;
+    id _value;
+    id _domain;
+    id _path;
+    id _expiresDate;
+    id _properties;
+    BOOL _secure;
+    BOOL _httpOnly;
+}
++ (id)cookieWithProperties:(NSDictionary *)properties;
+- (id)initWithProperties:(NSDictionary *)properties;
+- (id)name;
+- (id)value;
+- (id)domain;
+- (id)path;
+- (id)expiresDate;
+- (BOOL)isSecure;
+- (BOOL)isHTTPOnly;
+- (NSDictionary *)properties;
++ (NSDictionary *)requestHeaderFieldsWithCookies:(NSArray *)cookies;
++ (NSArray *)cookiesWithResponseHeaderFields:(NSDictionary *)headerFields
+                                      forURL:(NSURL *)URL;
+@end
+
+@interface NSHTTPCookieStorage : NSObject {
+@public
+    NSMutableArray *_cookies;
+}
++ (id)sharedHTTPCookieStorage;
+- (NSArray *)cookies;
+- (void)setCookie:(NSHTTPCookie *)cookie;
+- (void)deleteCookie:(NSHTTPCookie *)cookie;
+- (NSArray *)cookiesForURL:(NSURL *)URL;
+@end
+
 @interface NSURLRequest : NSObject {
 @public
     id _URL;

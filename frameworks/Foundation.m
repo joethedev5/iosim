@@ -7337,6 +7337,341 @@ static NSMutableDictionary *url_headers_from_raw(const char *raw)
     return headers;
 }
 
+/* ------------------------------------------------------ HTTP cookies */
+
+id NSHTTPCookieName = @"Name";
+id NSHTTPCookieValue = @"Value";
+id NSHTTPCookieDomain = @"Domain";
+id NSHTTPCookiePath = @"Path";
+id NSHTTPCookieSecure = @"Secure";
+id NSHTTPCookieExpires = @"Expires";
+id NSHTTPCookieHTTPOnly = @"HTTPOnly";
+
+static int cookie_prefix_ci(const char *text, const char *prefix)
+{
+    while (*prefix)
+    {
+        char a = *text, b = *prefix;
+        if (a >= 'A' && a <= 'Z')
+            a = (char)(a + 32);
+        if (b >= 'A' && b <= 'Z')
+            b = (char)(b + 32);
+        if (a != b)
+            return 0;
+        text++;
+        prefix++;
+    }
+    return 1;
+}
+
+static id cookie_trim_string(const char *start, const char *end)
+{
+    while (start < end && (*start == ' ' || *start == '\t'))
+        start++;
+    while (end > start && (end[-1] == ' ' || end[-1] == '\t' ||
+                           end[-1] == '\r'))
+        end--;
+    if (end <= start)
+        return nil;
+    unsigned long length = (unsigned long)(end - start);
+    char text[2048];
+    if (length >= sizeof(text))
+        length = sizeof(text) - 1;
+    memcpy(text, start, length);
+    text[length] = 0;
+    return [NSString stringWithUTF8String:text];
+}
+
+static id cookie_from_set_cookie(const char *header, id url)
+{
+    if (!header || !url)
+        return nil;
+    while (*header == ' ' || *header == '\t')
+        header++;
+    const char *end = header + strlen(header);
+    const char *first_end = header;
+    while (first_end < end && *first_end != ';')
+        first_end++;
+    const char *equals = header;
+    while (equals < first_end && *equals != '=')
+        equals++;
+    if (equals >= first_end)
+        return nil;
+    id name = cookie_trim_string(header, equals);
+    id value = cookie_trim_string(equals + 1, first_end);
+    if (!name)
+        return nil;
+    id domain = [url host];
+    id path = @"/";
+    BOOL secure = NO, httpOnly = NO;
+    const char *p = first_end;
+    while (p < end)
+    {
+        while (p < end && (*p == ';' || *p == ' ' || *p == '\t'))
+            p++;
+        const char *attribute_end = p;
+        while (attribute_end < end && *attribute_end != ';')
+            attribute_end++;
+        if (cookie_prefix_ci(p, "domain="))
+            domain = cookie_trim_string(p + 7, attribute_end);
+        else if (cookie_prefix_ci(p, "path="))
+            path = cookie_trim_string(p + 5, attribute_end);
+        else if (cookie_prefix_ci(p, "secure"))
+            secure = YES;
+        else if (cookie_prefix_ci(p, "httponly"))
+            httpOnly = YES;
+        p = attribute_end;
+    }
+    NSMutableDictionary *properties = [NSMutableDictionary dictionary];
+    [properties setObject:name forKey:NSHTTPCookieName];
+    if (value)
+        [properties setObject:value forKey:NSHTTPCookieValue];
+    if (domain)
+        [properties setObject:domain forKey:NSHTTPCookieDomain];
+    if (path)
+        [properties setObject:path forKey:NSHTTPCookiePath];
+    if (secure)
+        [properties setObject:[NSNumber numberWithBool:YES]
+                       forKey:NSHTTPCookieSecure];
+    if (httpOnly)
+        [properties setObject:[NSNumber numberWithBool:YES]
+                       forKey:NSHTTPCookieHTTPOnly];
+    return [[[NSHTTPCookie alloc] initWithProperties:properties] autorelease];
+}
+
+static int cookie_same_identity(id first, id second)
+{
+    if (!first || !second ||
+        ![first isKindOfClass:[NSHTTPCookie class]] ||
+        ![second isKindOfClass:[NSHTTPCookie class]])
+        return 0;
+    NSHTTPCookie *a = (NSHTTPCookie *)first;
+    NSHTTPCookie *b = (NSHTTPCookie *)second;
+    if (a->_name != b->_name && ![a->_name isEqual:b->_name])
+        return 0;
+    if (a->_domain != b->_domain && ![a->_domain isEqual:b->_domain])
+        return 0;
+    if (a->_path != b->_path && ![a->_path isEqual:b->_path])
+        return 0;
+    return 1;
+}
+
+static void cookie_store_response_headers(const char *raw, id url)
+{
+    if (!raw || !url)
+        return;
+    NSHTTPCookieStorage *storage =
+        [NSHTTPCookieStorage sharedHTTPCookieStorage];
+    const char *p = raw;
+    while (*p)
+    {
+        const char *line = p;
+        const char *newline = strchr(p, '\n');
+        unsigned long length =
+            newline ? (unsigned long)(newline - p) : strlen(p);
+        p = newline ? newline + 1 : p + strlen(p);
+        if (length && line[length - 1] == '\r')
+            length--;
+        if (length <= 11 || !cookie_prefix_ci(line, "set-cookie:"))
+            continue;
+        unsigned long text_length = length - 11;
+        char text[4096];
+        if (text_length >= sizeof(text))
+            text_length = sizeof(text) - 1;
+        memcpy(text, line + 11, text_length);
+        text[text_length] = 0;
+        id cookie = cookie_from_set_cookie(text, url);
+        if (cookie)
+            [storage setCookie:cookie];
+    }
+}
+
+@implementation NSHTTPCookie
++ (id)cookieWithProperties:(NSDictionary *)properties
+{
+    return [[[self alloc] initWithProperties:properties] autorelease];
+}
+- (id)initWithProperties:(NSDictionary *)properties
+{
+    self = [super init];
+    if (!self)
+        return nil;
+    if (!properties || ![properties isKindOfClass:[NSDictionary class]])
+        return nil;
+    _properties = properties;
+    _name = [properties objectForKey:NSHTTPCookieName];
+    _value = [properties objectForKey:NSHTTPCookieValue];
+    _domain = [properties objectForKey:NSHTTPCookieDomain];
+    _path = [properties objectForKey:NSHTTPCookiePath];
+    _expiresDate = [properties objectForKey:NSHTTPCookieExpires];
+    id secure = [properties objectForKey:NSHTTPCookieSecure];
+    id httpOnly = [properties objectForKey:NSHTTPCookieHTTPOnly];
+    _secure = secure ? [secure boolValue] : NO;
+    _httpOnly = httpOnly ? [httpOnly boolValue] : NO;
+    if (!_name)
+        return nil;
+    return self;
+}
+- (id)name { return _name; }
+- (id)value { return _value; }
+- (id)domain { return _domain; }
+- (id)path { return _path; }
+- (id)expiresDate { return _expiresDate; }
+- (BOOL)isSecure { return _secure; }
+- (BOOL)isHTTPOnly { return _httpOnly; }
+- (NSDictionary *)properties
+{
+    NSMutableDictionary *properties = [NSMutableDictionary dictionary];
+    if (_name)
+        [properties setObject:_name forKey:NSHTTPCookieName];
+    if (_value)
+        [properties setObject:_value forKey:NSHTTPCookieValue];
+    if (_domain)
+        [properties setObject:_domain forKey:NSHTTPCookieDomain];
+    if (_path)
+        [properties setObject:_path forKey:NSHTTPCookiePath];
+    if (_expiresDate)
+        [properties setObject:_expiresDate forKey:NSHTTPCookieExpires];
+    if (_secure)
+        [properties setObject:[NSNumber numberWithBool:YES]
+                       forKey:NSHTTPCookieSecure];
+    if (_httpOnly)
+        [properties setObject:[NSNumber numberWithBool:YES]
+                       forKey:NSHTTPCookieHTTPOnly];
+    return properties;
+}
++ (NSDictionary *)requestHeaderFieldsWithCookies:(NSArray *)cookies
+{
+    NSMutableString *value = [NSMutableString string];
+    if (cookies)
+    {
+        for (unsigned long i = 0; i < [cookies count]; i++)
+        {
+            NSHTTPCookie *cookie = [cookies objectAtIndex:i];
+            if (!cookie || ![cookie isKindOfClass:[NSHTTPCookie class]])
+                continue;
+            if ([value length] > 0)
+                [value appendString:@"; "];
+            [value appendString:cookie->_name ? cookie->_name : @""];
+            [value appendString:@"="];
+            [value appendString:cookie->_value ? cookie->_value : @""];
+        }
+    }
+    if ([value length] == 0)
+        return [NSDictionary dictionary];
+    return [NSDictionary dictionaryWithObject:value forKey:@"Cookie"];
+}
++ (NSArray *)cookiesWithResponseHeaderFields:(NSDictionary *)headerFields
+                                      forURL:(NSURL *)URL
+{
+    NSMutableArray *result = [NSMutableArray array];
+    id setCookie = headerFields
+                       ? [headerFields objectForKey:@"Set-Cookie"] : nil;
+    if (setCookie && [setCookie isKindOfClass:[NSString class]])
+    {
+        const char *text = [setCookie UTF8String];
+        const char *p = text;
+        while (p && *p)
+        {
+            const char *newline = strchr(p, '\n');
+            unsigned long length =
+                newline ? (unsigned long)(newline - p) : strlen(p);
+            char line[4096];
+            if (length >= sizeof(line))
+                length = sizeof(line) - 1;
+            memcpy(line, p, length);
+            line[length] = 0;
+            id cookie = cookie_from_set_cookie(line, URL);
+            if (cookie)
+                [result addObject:cookie];
+            p = newline ? newline + 1 : p + strlen(p);
+        }
+    }
+    return result;
+}
+@end
+
+@implementation NSHTTPCookieStorage
++ (id)sharedHTTPCookieStorage
+{
+    static NSHTTPCookieStorage *storage;
+    if (!storage)
+    {
+        storage = [[NSHTTPCookieStorage alloc] init];
+        storage->_cookies = [[NSMutableArray alloc] init];
+    }
+    return storage;
+}
+- (NSArray *)cookies
+{
+    return _cookies ? _cookies : [NSArray array];
+}
+- (void)setCookie:(NSHTTPCookie *)cookie
+{
+    if (!cookie || ![cookie isKindOfClass:[NSHTTPCookie class]])
+        return;
+    if (!_cookies)
+        _cookies = [[NSMutableArray alloc] init];
+    for (unsigned long i = 0; i < [_cookies count]; i++)
+    {
+        if (cookie_same_identity([_cookies objectAtIndex:i], cookie))
+        {
+            [_cookies removeObjectAtIndex:i];
+            i--;
+        }
+    }
+    [_cookies addObject:cookie];
+}
+- (void)deleteCookie:(NSHTTPCookie *)cookie
+{
+    if (!cookie || !_cookies)
+        return;
+    for (unsigned long i = 0; i < [_cookies count]; i++)
+    {
+        if (cookie_same_identity([_cookies objectAtIndex:i], cookie))
+        {
+            [_cookies removeObjectAtIndex:i];
+            i--;
+        }
+    }
+}
+- (NSArray *)cookiesForURL:(NSURL *)URL
+{
+    NSMutableArray *result = [NSMutableArray array];
+    if (!URL || !_cookies)
+        return result;
+    id host = [URL host];
+    id scheme = [URL scheme];
+    id path = [URL path];
+    if (!path || [path length] == 0)
+        path = @"/";
+    BOOL secureRequest = scheme && [scheme isEqual:@"https"];
+    for (unsigned long i = 0; i < [_cookies count]; i++)
+    {
+        NSHTTPCookie *cookie = [_cookies objectAtIndex:i];
+        if (!cookie || ![cookie isKindOfClass:[NSHTTPCookie class]])
+            continue;
+        if (cookie->_secure && !secureRequest)
+            continue;
+        if (!cookie->_domain || ![host isKindOfClass:[NSString class]])
+            continue;
+        BOOL matches = [host isEqual:cookie->_domain];
+        if (!matches)
+        {
+            id dotted = [@"." stringByAppendingString:cookie->_domain];
+            matches = [host hasSuffix:dotted];
+        }
+        if (!matches)
+            continue;
+        id cookiePath = cookie->_path ? cookie->_path : @"/";
+        if (![path hasPrefix:cookiePath])
+            continue;
+        [result addObject:cookie];
+    }
+    return result;
+}
+@end
+
 @implementation NSURLRequest
 + (id)requestWithURL:(id)url
 {
@@ -7446,6 +7781,7 @@ static void url_task_main(void *raw)
             initWithURL:ctx->url
              statusCode:status
                 headers:url_headers_from_raw(raw_headers)];
+        cookie_store_response_headers(raw_headers, ctx->url);
     }
     else
     {
@@ -7503,6 +7839,27 @@ static void url_task_main(void *raw)
         }
         ctx->headers_object = raw;
         ctx->headers = [raw UTF8String];
+    }
+    NSHTTPCookieStorage *cookieStorage =
+        [NSHTTPCookieStorage sharedHTTPCookieStorage];
+    NSArray *requestCookies = [cookieStorage cookiesForURL:ctx->url];
+    if (requestCookies && [requestCookies count] > 0)
+    {
+        id fields = [NSHTTPCookie requestHeaderFieldsWithCookies:
+                                       requestCookies];
+        id cookieHeader = fields ? [fields objectForKey:@"Cookie"] : nil;
+        if (cookieHeader)
+        {
+            NSMutableString *raw =
+                ctx->headers_object
+                    ? (NSMutableString *)ctx->headers_object
+                    : [NSMutableString string];
+            [raw appendString:@"Cookie: "];
+            [raw appendString:cookieHeader];
+            [raw appendString:@"\r\n"];
+            ctx->headers_object = raw;
+            ctx->headers = [raw UTF8String];
+        }
     }
     id body = [request HTTPBody];
     if (body)

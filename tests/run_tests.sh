@@ -1800,6 +1800,86 @@ else
     echo "FAIL measurement formatting"; echo "$report"; fails=$((fails+1))
 fi
 
+# ---------- 4g6. HTTP cookie storage ----------
+python3 -u "$ROOT/tests/cookie_http_server.py" > "$T/cookie.log" 2>&1 &
+COOKIE_PID=$!
+COOKIE_PORT=""
+i=0
+while [ "$i" -lt 100 ]; do
+    COOKIE_PORT=$(sed -n 's/.*port \([0-9][0-9]*\).*/\1/p' "$T/cookie.log" | head -1)
+    [ -n "$COOKIE_PORT" ] && break
+    i=$((i + 1))
+    sleep 0.05
+done
+if [ -z "$COOKIE_PORT" ]; then
+    echo "FAIL cookie server did not start"
+    fails=$((fails + 1))
+    kill "$COOKIE_PID" 2>/dev/null || true
+else
+    "$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
+        -fblocks -ffreestanding -O1 -I "$ROOT/frameworks" \
+        -c "$ROOT/tests/cookies_test.m" -o "$T/cookies_test.o"
+    "$LD64" -arch x86_64 -platform_version $PLATFORM -e _main \
+        -o "$T/cookies_test" "$T/cookies_test.o" \
+        "$ROOT/runtime/System/Library/Frameworks/Foundation.framework/Foundation" \
+        -undefined dynamic_lookup
+    out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/cookies_test" \
+        "$COOKIE_PORT" 2>&1)"
+    check "[cookie] done" "$out" "the cookie fixture runs"
+    if report="$(python3 - "$out" <<'PY'
+import re
+import sys
+
+lines = sys.argv[1].splitlines()
+want = [
+    r'\[cookie\] direct a 1',
+    r'\[cookie\] header a=1',
+    r'\[cookie\] manual 1 manual yes',
+]
+for pattern in want:
+    if not any(re.fullmatch(pattern, line) for line in lines):
+        raise SystemExit('missing cookie line: ' + pattern)
+print("ok   cookie properties and header fields serialize")
+PY
+)"; then
+        echo "$report"
+    else
+        echo "FAIL cookie properties"; echo "$report"; fails=$((fails+1))
+    fi
+    if report="$(python3 - "$out" <<'PY'
+import re
+import sys
+
+lines = sys.argv[1].splitlines()
+want = [r'\[cookie\] set 200', r'\[cookie\] stored 2']
+for pattern in want:
+    if not any(re.fullmatch(pattern, line) for line in lines):
+        raise SystemExit('missing cookie storage line: ' + pattern)
+print("ok   Set-Cookie responses populate the shared storage")
+PY
+)"; then
+        echo "$report"
+    else
+        echo "FAIL cookie storage"; echo "$report"; fails=$((fails+1))
+    fi
+    if report="$(python3 - "$out" <<'PY'
+import re
+import sys
+
+pattern = (r'\[cookie\] echo body '
+           r'cookie session=abc123; theme=dark')
+if not any(re.fullmatch(pattern, line) for line in sys.argv[1].splitlines()):
+    raise SystemExit('the echoed Cookie header did not carry both cookies')
+print("ok   URL requests replay stored cookies in order")
+PY
+)"; then
+        echo "$report"
+    else
+        echo "FAIL cookie replay"; echo "$report"; fails=$((fails+1))
+    fi
+fi
+kill "$COOKIE_PID" 2>/dev/null || true
+
 # ---------- 4h. NSOperationQueue block operations ----------
 "$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc -fblocks \
     -ffreestanding -O1 -I "$ROOT/frameworks" \

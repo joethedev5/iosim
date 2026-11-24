@@ -1121,6 +1121,14 @@ with `setValue:forHTTPHeaderField:`. The server answers
 `[post] body POST ping yes` and `[post] done 1`, proving the mutable request,
 custom headers, request body and `dataTaskWithRequest:` path.
 
+`tests/cookies_test.m` builds a cookie for `example.com`, prints its name and
+value with the generated `Cookie: a=1` header, and parses `manual=yes; Path=/`
+through `cookiesWithResponseHeaderFields:forURL:`. Against
+`tests/cookie_http_server.py`, a GET to `/set` returns two `Set-Cookie`
+headers; the guest then reads two URL-matched cookies from the shared
+storage, and a GET to `/echo` sends `Cookie: session=abc123; theme=dark`,
+which the server echoes back.
+
 ### Foundation: KVC collection operators
 
 `tests/kvc_operators_test.m` runs the operators over an array of boxed

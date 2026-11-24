@@ -357,6 +357,14 @@ default through the system trust store; tests that use a self-signed loopback
 certificate set `IOSIM_TLS_INSECURE=1`, and a build without OpenSSL reports an
 unsupported-HTTPS error instead.
 
+`NSHTTPCookie` stores its name, value, domain, path, expiry, secure and
+HTTP-only flags from a properties dictionary and serializes them back.
+`NSHTTPCookieStorage` keeps a shared ordered list, replaces a cookie with the
+same name/domain/path, filters by host suffix, path prefix and secure scheme,
+and builds the request `Cookie` header. A URL session appends matching stored
+cookies to outgoing requests and scans every raw `Set-Cookie` response line
+into the storage before the completion handler runs.
+
 `NSRegularExpression` compiles patterns through a loader-host POSIX regex
 shim: the pattern translator accepts ICU spellings for `\d`, `\w`, `\s`
 (and their negations), non-capturing groups and lazy quantifiers before

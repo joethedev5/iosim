@@ -1474,3 +1474,19 @@ components.
   attributed string is ASCII and its length matches the editor text.
 - The fixture shows red, blue and green runs in order; the blue underline
   spans its 128 px run and sits 8 px below the red baseline.
+
+## 2026-11-24: HTTP cookie storage
+
+- `NSHTTPCookie` keeps name/value/domain/path/expiry/secure/HTTP-only from a
+  properties dictionary and serializes them back. Class helpers build a
+  request `Cookie` header and parse response header fields.
+- `NSHTTPCookieStorage` is a shared ordered array: `setCookie:` replaces a
+  cookie with the same name, domain and path, and `cookiesForURL:` filters by
+  host suffix, path prefix and the secure scheme.
+- `NSURLSessionDataTask.resume` appends matching cookies as a `Cookie`
+  header before dispatching. The loader response path scans every raw
+  `Set-Cookie` line (not the collapsed header dictionary, which keeps only
+  the last duplicate) and stores each parsed cookie before the completion
+  handler runs.
+- The fixture reads back two cookies set by the loopback server, and the next
+  request carries both in insertion order.
