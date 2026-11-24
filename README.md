@@ -78,7 +78,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | NSLocale identifier/language/country lookup and NSTimeZone named, fixed and TZ-driven system zones | ✅ |
 | NSOperationQueue/NSBlockOperation over dispatch groups, with operation dependencies, `isReady`/`isExecuting`/`waitUntilFinished`, queue priority, the queue's operation list and max-concurrency enforcement | ✅ |
 | App bundle resources: `NSBundle` lookup and `UIImage imageNamed:` PNGs | ✅ |
-| libdispatch queues, groups, semaphores, timer/data sources; UIKit and run-loop drain | ✅ |
+| libdispatch queues (FIFO serial queues with ordered sync and barriers), groups, semaphores, timer/data sources; UIKit and run-loop drain | ✅ |
 | Block runtime: heap block copies with retain/release counts and `__block` byref promotion to shared heap storage | ✅ |
 | Mach ports/messages with refcounted rights, launchd bootstrap namespace, cross-process messaging | ✅ |
 | Mach-O initializers (`__init_offsets`, `__mod_init_func`), thread-local variables, Darwin pthread normalization | ✅ |

@@ -5641,6 +5641,25 @@ check "[kvo] count 2 initial 2" "$out" \
 check "[kvo] after-remove count 2 name erin" "$out" \
     "removeObserver: stops notifications but setters still work"
 
+# ---------- 4d2. serial dispatch queues and ordered sync ----------
+"$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
+    -fblocks -ffreestanding -O1 -I "$ROOT/frameworks" \
+    -c "$ROOT/tests/dispatch_queue_test.m" -o "$T/dispatch_queue_test.o"
+"$LD64" -arch x86_64 -platform_version $PLATFORM -e _main \
+    -o "$T/dispatch_queue_test" "$T/dispatch_queue_test.o" \
+    "$ROOT/runtime/System/Library/Frameworks/Foundation.framework/Foundation" \
+    -undefined dynamic_lookup
+out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/dispatch_queue_test" 2>&1)"
+check "[queue] order abcd" "$out" \
+    "blocks on a serial queue run in submission order"
+check "[queue] overlap 0" "$out" \
+    "a serial queue never runs two blocks at once"
+check "[queue] sync xy" "$out" \
+    "dispatch_sync waits for the queue's pending blocks"
+check "[queue] barrier 12B3 0" "$out" \
+    "a barrier keeps its place in the serial FIFO"
+check "[queue] done" "$out" "the dispatch queue fixture finishes"
+
 # ---------- 23. libdispatch source timers and data ----------
 "$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
     -ffreestanding -O1 -I "$ROOT/frameworks" \

@@ -1754,3 +1754,11 @@ components.
 - The callback is expected to call its completion handler synchronously; if
   it has not been called when the delegate method returns, the task follows
   the redirect automatically.
+
+## 2026-11-24: serial dispatch queues
+
+- `dispatch_queue_create` now gives a serial queue a lock-protected FIFO and a
+  single worker thread, so its blocks run one at a time in submission order.
+  `dispatch_sync` on such a queue enqueues and waits for the earlier blocks
+  instead of running immediately, and `dispatch_barrier_async`/`_sync` take
+  their FIFO place. The global queue keeps the one-thread-per-block pool.

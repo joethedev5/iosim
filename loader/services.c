@@ -87,15 +87,32 @@ struct dispatch_object_header {
     int kind;
     void *context;
 };
+struct dispatch_work {
+    void *block;
+    void (*function)(void *);
+    void *context;
+    struct dispatch_work *next;
+    int synchronous;
+    int copied;
+    pthread_mutex_t sync_lock;
+    pthread_cond_t sync_cond;
+    int sync_done;
+};
 struct dispatch_queue_s {
     struct dispatch_object_header hdr;
     int is_main;
+    int is_serial;
+    pthread_mutex_t lock;
+    struct dispatch_work *head;
+    struct dispatch_work *tail;
+    int worker;
 };
 struct dispatch_queue_s main_queue = {
-    { DISPATCH_OBJECT_MAGIC, DISPATCH_KIND_QUEUE, NULL }, 1
+    .hdr = { DISPATCH_OBJECT_MAGIC, DISPATCH_KIND_QUEUE, NULL },
+    .is_main = 1,
 };
 struct dispatch_queue_s global_queue = {
-    { DISPATCH_OBJECT_MAGIC, DISPATCH_KIND_QUEUE, NULL }, 0
+    .hdr = { DISPATCH_OBJECT_MAGIC, DISPATCH_KIND_QUEUE, NULL },
 };
 char dispatch_main_q_storage[64];
 
@@ -113,11 +130,128 @@ void *dispatch_queue_create(const char *label, void *attr)
     {
         queue->hdr.magic = DISPATCH_OBJECT_MAGIC;
         queue->hdr.kind = DISPATCH_KIND_QUEUE;
+        queue->is_serial = 1;
+        pthread_mutex_init(&queue->lock, NULL);
     }
     return queue;
 }
 void dispatch_release(void *queue) { (void)queue; }
 void dispatch_retain(void *queue) { (void)queue; }
+
+/* Custom queues run their blocks on one worker thread in FIFO order, so a
+ * serial queue never has two blocks in flight. The global queue keeps the
+ * one-thread-per-block pool. */
+static int dispatch_is_serial_queue(void *queue)
+{
+    struct dispatch_queue_s *q = queue;
+    return q && q != &main_queue && q != &global_queue &&
+           q->hdr.magic == DISPATCH_OBJECT_MAGIC &&
+           q->hdr.kind == DISPATCH_KIND_QUEUE && q->is_serial;
+}
+
+static void *dispatch_queue_worker(void *arg)
+{
+    struct dispatch_queue_s *q = arg;
+    for (;;)
+    {
+        pthread_mutex_lock(&q->lock);
+        struct dispatch_work *work = q->head;
+        if (!work)
+        {
+            q->worker = 0;
+            pthread_mutex_unlock(&q->lock);
+            return NULL;
+        }
+        q->head = work->next;
+        if (!q->head)
+            q->tail = NULL;
+        pthread_mutex_unlock(&q->lock);
+        if (work->block)
+        {
+            call_block(work->block);
+            if (work->copied)
+                _Block_release(work->block);
+        }
+        else if (work->function)
+            work->function(work->context);
+        if (work->synchronous)
+        {
+            pthread_mutex_lock(&work->sync_lock);
+            work->sync_done = 1;
+            pthread_cond_signal(&work->sync_cond);
+            pthread_mutex_unlock(&work->sync_lock);
+        }
+        else
+            free(work);
+    }
+}
+
+/* Appends one item and makes sure a worker is running. Returns the item for
+ * a synchronous push, or NULL when the item could not be queued; the caller
+ * then runs the work inline. */
+static struct dispatch_work *dispatch_queue_push(struct dispatch_queue_s *q,
+                                                 void *block,
+                                                 void (*function)(void *),
+                                                 void *context, int synchronous,
+                                                 int copied)
+{
+    struct dispatch_work *work = calloc(1, sizeof(*work));
+    if (!work)
+        return NULL;
+    work->block = block;
+    work->function = function;
+    work->context = context;
+    work->synchronous = synchronous;
+    work->copied = copied;
+    if (synchronous)
+    {
+        pthread_mutex_init(&work->sync_lock, NULL);
+        pthread_cond_init(&work->sync_cond, NULL);
+    }
+    pthread_mutex_lock(&q->lock);
+    struct dispatch_work *previous = q->tail;
+    if (previous)
+        previous->next = work;
+    else
+        q->head = work;
+    q->tail = work;
+    if (!q->worker)
+    {
+        q->worker = 1;
+        pthread_t thread;
+        if (pthread_create(&thread, NULL, dispatch_queue_worker, q) != 0)
+        {
+            q->worker = 0;
+            if (previous)
+                previous->next = NULL;
+            else
+                q->head = NULL;
+            q->tail = previous;
+            pthread_mutex_unlock(&q->lock);
+            if (synchronous)
+            {
+                pthread_mutex_destroy(&work->sync_lock);
+                pthread_cond_destroy(&work->sync_cond);
+            }
+            free(work);
+            return NULL;
+        }
+        pthread_detach(thread);
+    }
+    pthread_mutex_unlock(&q->lock);
+    return work;
+}
+
+static void dispatch_sync_wait(struct dispatch_work *work)
+{
+    pthread_mutex_lock(&work->sync_lock);
+    while (!work->sync_done)
+        pthread_cond_wait(&work->sync_cond, &work->sync_lock);
+    pthread_mutex_unlock(&work->sync_lock);
+    pthread_mutex_destroy(&work->sync_lock);
+    pthread_cond_destroy(&work->sync_cond);
+    free(work);
+}
 
 static void mainq_push_item(void *block, void (*function)(void *),
                             void *context, double when)
@@ -157,6 +291,15 @@ void dispatch_async(void *queue, void *block)
     if (queue == &main_queue || queue == NULL)
     {
         mainq_push(block, 0.0);
+        return;
+    }
+    if (dispatch_is_serial_queue(queue))
+    {
+        if (!dispatch_queue_push(queue, block, NULL, NULL, 0, 1))
+        {
+            call_block(block);
+            _Block_release(block);
+        }
         return;
     }
     pthread_t thread;
@@ -219,6 +362,12 @@ void dispatch_async_f(void *queue, void *context, void (*function)(void *))
         mainq_push_item(NULL, function, context, 0.0);
         return;
     }
+    if (dispatch_is_serial_queue(queue))
+    {
+        if (!dispatch_queue_push(queue, NULL, function, context, 0, 0))
+            function(context);
+        return;
+    }
     struct fn_call *call = malloc(sizeof(*call));
     if (!call)
     {
@@ -239,14 +388,35 @@ void dispatch_async_f(void *queue, void *context, void (*function)(void *))
 
 void dispatch_sync(void *queue, void *block)
 {
-    (void)queue;
+    if (!block)
+        return;
+    if (dispatch_is_serial_queue(queue))
+    {
+        struct dispatch_work *work =
+            dispatch_queue_push(queue, block, NULL, NULL, 1, 0);
+        if (work)
+        {
+            dispatch_sync_wait(work);
+            return;
+        }
+    }
     call_block(block);
 }
 void dispatch_sync_f(void *queue, void *context, void (*function)(void *))
 {
-    (void)queue;
-    if (function)
-        function(context);
+    if (!function)
+        return;
+    if (dispatch_is_serial_queue(queue))
+    {
+        struct dispatch_work *work =
+            dispatch_queue_push(queue, NULL, function, context, 1, 0);
+        if (work)
+        {
+            dispatch_sync_wait(work);
+            return;
+        }
+    }
+    function(context);
 }
 
 typedef uint64_t dispatch_time_t;
@@ -407,6 +577,9 @@ void dispatch_queue_set_specific(void *queue, const void *key, void *context,
     (void)queue; (void)key; (void)context; (void)destructor;
 }
 void *dispatch_get_specific(const void *key) { (void)key; return NULL; }
+/* A barrier on a custom queue is an ordered FIFO block, which is exactly
+ * what a serial queue gives us; the global queue's thread pool does not
+ * exclude other global work around a barrier. */
 void dispatch_barrier_async(void *queue, void *block)
 {
     dispatch_async(queue, block);

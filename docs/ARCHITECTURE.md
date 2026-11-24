@@ -962,7 +962,12 @@ transport and the bootstrap namespace are shared across the device.
   `NSRunLoop` (`iosim_dispatch_drain_main`), global queues backed by detached
   pthreads, groups, semaphores, `dispatch_once`, `dispatch_after` and its
   function variants, and a `dispatch_main` that honours Darwin's `noreturn`
-  contract. Blocks are heap-copied when queued, so stack blocks stay valid
+  contract. A queue created by `dispatch_queue_create` is serial: a
+  lock-protected FIFO feeds one worker thread, so its blocks run in
+  submission order, `dispatch_sync` waits behind the pending work, and
+  barrier blocks keep their FIFO place. The global queues stay a
+  thread-per-block pool, so a barrier there does not exclude other global
+  work. Blocks are heap-copied when queued, so stack blocks stay valid
   after their frame returns.
   Dispatch sources start suspended, as on Darwin. Timer sources run from a
   monotonic-clock scheduler that coalesces a pending event and advances the
