@@ -2446,6 +2446,45 @@ fi
 kill "$TASKS2_PID" 2>/dev/null || true
 
 
+# ---------- 4g10b. URLSession redirect handling ----------
+python3 -u "$ROOT/tests/redirect_http_server.py" > "$T/redirect.log" 2>&1 &
+REDIRECT_PID=$!
+REDIRECT_PORT=""
+i=0
+while [ "$i" -lt 100 ]; do
+    REDIRECT_PORT=$(sed -n 's/.*port \([0-9][0-9]*\).*/\1/p' "$T/redirect.log" | head -1)
+    [ -n "$REDIRECT_PORT" ] && break
+    i=$((i + 1))
+    sleep 0.05
+done
+if [ -z "$REDIRECT_PORT" ]; then
+    echo "FAIL redirect server did not start"
+    fails=$((fails + 1))
+    kill "$REDIRECT_PID" 2>/dev/null || true
+else
+    "$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
+        -fblocks -ffreestanding -O1 -I "$ROOT/frameworks" \
+        -c "$ROOT/tests/urlsession_redirect_test.m" \
+        -o "$T/urlsession_redirect_test.o"
+    "$LD64" -arch x86_64 -platform_version $PLATFORM -e _main \
+        -o "$T/urlsession_redirect_test" "$T/urlsession_redirect_test.o" \
+        "$ROOT/runtime/System/Library/Frameworks/Foundation.framework/Foundation" \
+        -undefined dynamic_lookup
+    out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/urlsession_redirect_test" \
+        "$REDIRECT_PORT" 2>&1)"
+    check "[redirect] start 200 1 15 redirected body /final" "$out" \
+        "a relative Location redirect is followed to the final URL"
+    check "[redirect] chain 200 1 15 redirected body /final" "$out" \
+        "a redirect chain resolves each Location against the previous URL"
+    check "[redirect] post 200 1 15 redirected body /final" "$out" \
+        "a 303 redirect turns a POST into a GET"
+    check "[redirect] kept 200 1 10 final post /final" "$out" \
+        "a 307 redirect preserves the POST method and body"
+    check "[redirect] loop error -1007" "$out" \
+        "a redirect loop fails with NSURLErrorHTTPTooManyRedirects"
+fi
+kill "$REDIRECT_PID" 2>/dev/null || true
+
 # ---------- 4g11. NSLock, NSRecursiveLock and NSCondition ----------
 "$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
     -ffreestanding -O1 -I "$ROOT/frameworks" \

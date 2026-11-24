@@ -8209,6 +8209,96 @@ static void cookie_store_response_headers(const char *raw, id url)
 @implementation NSHTTPURLResponse
 @end
 
+/* Resolves a Location header against the request URL. Absolute URLs pass
+ * through; absolute, scheme-relative and path-relative references reuse the
+ * base authority. */
+static id url_resolve_location(NSURL *base, id location)
+{
+    const char *loc = [location UTF8String];
+    if (!loc || !*loc)
+        return nil;
+    if (strstr(loc, "://"))
+        return [NSURL URLWithString:location];
+    const char *scheme = [[base scheme] UTF8String];
+    const char *host = [[base host] UTF8String];
+    const char *base_path = [[base path] UTF8String];
+    int port = [base port];
+    if (!scheme || !*scheme || !host || !*host)
+        return nil;
+    char authority[360];
+    if (port > 0)
+        snprintf(authority, sizeof(authority), "%s://%s:%d", scheme, host,
+                 port);
+    else
+        snprintf(authority, sizeof(authority), "%s://%s", scheme, host);
+    char buf[2048];
+    if (loc[0] == '/' && loc[1] == '/')
+        snprintf(buf, sizeof(buf), "%s:%s", scheme, loc);
+    else if (loc[0] == '/')
+        snprintf(buf, sizeof(buf), "%s%s", authority, loc);
+    else if (loc[0] == '?')
+        snprintf(buf, sizeof(buf), "%s%s%s", authority,
+                 base_path && *base_path ? base_path : "/", loc);
+    else
+    {
+        char dir[1024];
+        snprintf(dir, sizeof(dir), "%s", base_path && *base_path ? base_path
+                                                                  : "/");
+        char *slash = strrchr(dir, '/');
+        if (slash)
+            slash[1] = 0;
+        else
+            snprintf(dir, sizeof(dir), "/");
+        snprintf(buf, sizeof(buf), "%s%s%s", authority, dir, loc);
+    }
+    return [NSURL URLWithString:[NSString stringWithUTF8String:buf]];
+}
+
+/* Case-insensitive prefix test for a serialized header line. */
+static int url_header_prefix(const char *line, const char *lower_name)
+{
+    for (unsigned long i = 0; lower_name[i]; i++)
+    {
+        char c = line[i];
+        if (c >= 'A' && c <= 'Z')
+            c = (char)(c - 'A' + 'a');
+        if (c != lower_name[i])
+            return 0;
+    }
+    return 1;
+}
+
+/* A rewritten GET must not advertise the body that was dropped. */
+static id url_redirect_headers(id currentHeaders, BOOL dropBody)
+{
+    if (!currentHeaders || !dropBody)
+        return currentHeaders;
+    const char *raw = [currentHeaders UTF8String];
+    NSMutableString *out = [NSMutableString string];
+    while (raw && *raw)
+    {
+        const char *end = strstr(raw, "\r\n");
+        if (!end)
+            end = raw + strlen(raw);
+        unsigned long length = (unsigned long)(end - raw);
+        int drop =
+            (length >= 15 && url_header_prefix(raw, "content-length:")) ||
+            (length >= 13 && url_header_prefix(raw, "content-type:"));
+        if (!drop)
+        {
+            char line[512];
+            unsigned long copy =
+                length < sizeof(line) - 1 ? length : sizeof(line) - 1;
+            memcpy(line, raw, copy);
+            line[copy] = 0;
+            [out appendString:[NSString stringWithUTF8String:line]];
+            [out appendString:@"\r\n"];
+        }
+        raw = *end ? end + 2 : end;
+    }
+    return out;
+}
+
 struct url_task_ctx {
     id task;
     id url;
@@ -8245,33 +8335,114 @@ static void url_task_main(void *raw)
         data = [ctx->cached data];
         response = [ctx->cached response];
     }
-    else if (iosim_http_request(ctx->url_string, ctx->method, ctx->headers,
-                                ctx->body, ctx->body_length, &bytes, &length,
-                                &status, &raw_headers, &service_error) == 0)
-    {
-        data = [NSData dataWithBytes:bytes length:length];
-        response = [[NSHTTPURLResponse alloc]
-            initWithURL:ctx->url
-             statusCode:status
-                headers:url_headers_from_raw(raw_headers)];
-        cookie_store_response_headers(raw_headers, ctx->url);
-        id method = ctx->request ? [ctx->request HTTPMethod] : nil;
-        if (!method || [method isEqual:@"GET"])
-        {
-            NSCachedURLResponse *cached = [[NSCachedURLResponse alloc]
-                initWithResponse:response data:data];
-            [[NSURLCache sharedURLCache] storeCachedResponse:cached
-                                                  forRequest:ctx->request];
-        }
-    }
     else
     {
-        NSDictionary *info = [NSDictionary
-            dictionaryWithObject:[NSString stringWithUTF8String:
-                service_error ? service_error : "request failed"]
-                          forKey:@"NSLocalizedDescription"];
-        error = [NSError errorWithDomain:@"NSURLErrorDomain" code:-1004
-                                    userInfo:info];
+        /* Follow 301, 302, 303, 307 and 308 responses up to ten hops. A
+         * 303 (and a 301/302 on a non-GET) becomes a GET without its body;
+         * 307/308 keep the method and body. */
+        NSURL *currentURL = ctx->url;
+        id currentMethod = ctx->method_object;
+        const void *currentBody = ctx->body;
+        unsigned long currentBodyLength = ctx->body_length;
+        id currentHeaders = ctx->headers_object;
+        int redirects = 0;
+        for (;;)
+        {
+            bytes = 0;
+            raw_headers = 0;
+            service_error = 0;
+            length = 0;
+            status = 0;
+            id url_string_object = [currentURL absoluteString];
+            const char *url_string = [url_string_object UTF8String];
+            const char *method =
+                currentMethod ? [currentMethod UTF8String] : "GET";
+            const char *header_string =
+                currentHeaders ? [currentHeaders UTF8String] : 0;
+            if (iosim_http_request(url_string, method, header_string,
+                                   currentBody, currentBodyLength, &bytes,
+                                   &length, &status, &raw_headers,
+                                   &service_error) != 0)
+            {
+                NSDictionary *info = [NSDictionary
+                    dictionaryWithObject:[NSString stringWithUTF8String:
+                        service_error ? service_error : "request failed"]
+                                  forKey:@"NSLocalizedDescription"];
+                error = [NSError errorWithDomain:@"NSURLErrorDomain"
+                                            code:-1004
+                                        userInfo:info];
+                break;
+            }
+            id response_headers = url_headers_from_raw(raw_headers);
+            id location = [response_headers objectForKey:@"Location"];
+            BOOL redirected = (status == 301 || status == 302 ||
+                               status == 303 || status == 307 ||
+                               status == 308) && location != nil;
+            if (!redirected)
+            {
+                data = [NSData dataWithBytes:bytes length:length];
+                response = [[NSHTTPURLResponse alloc]
+                    initWithURL:currentURL
+                     statusCode:status
+                        headers:response_headers];
+                cookie_store_response_headers(raw_headers, currentURL);
+                if (!currentMethod || [currentMethod isEqual:@"GET"])
+                {
+                    NSCachedURLResponse *cached = [[NSCachedURLResponse alloc]
+                        initWithResponse:response data:data];
+                    [[NSURLCache sharedURLCache] storeCachedResponse:cached
+                                                          forRequest:ctx->request];
+                }
+                break;
+            }
+            redirects++;
+            if (redirects > 10)
+            {
+                error = [NSError errorWithDomain:@"NSURLErrorDomain"
+                                            code:-1007
+                                        userInfo:nil];
+                break;
+            }
+            NSURL *nextURL = url_resolve_location(currentURL, location);
+            if (!nextURL)
+            {
+                /* An unusable Location is the response, not a redirect. */
+                data = [NSData dataWithBytes:bytes length:length];
+                response = [[NSHTTPURLResponse alloc]
+                    initWithURL:currentURL
+                     statusCode:status
+                        headers:response_headers];
+                cookie_store_response_headers(raw_headers, currentURL);
+                break;
+            }
+            BOOL toGet =
+                status == 303 ||
+                ((status == 301 || status == 302) && currentMethod != nil &&
+                 ![[currentMethod uppercaseString] isEqual:@"GET"]);
+            currentURL = nextURL;
+            currentHeaders = url_redirect_headers(currentHeaders, toGet);
+            if (toGet)
+            {
+                currentMethod = @"GET";
+                currentBody = 0;
+                currentBodyLength = 0;
+            }
+            if (bytes)
+            {
+                iosim_http_free(bytes);
+                bytes = 0;
+            }
+            if (raw_headers)
+            {
+                iosim_http_free(raw_headers);
+                raw_headers = 0;
+            }
+            if (service_error)
+            {
+                iosim_http_free(service_error);
+                service_error = 0;
+            }
+        }
     }
     if (bytes)
         iosim_http_free(bytes);

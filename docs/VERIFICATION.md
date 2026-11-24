@@ -1207,6 +1207,20 @@ reads back 16 bytes before the runtime removes it. Both
 `URLSession:task:didCompleteWithError:` calls report an error code of 0, and
 the fixture prints `[delegate] done 2` once both tasks have finished.
 
+### Foundation: URLSession redirects
+
+`tests/urlsession_redirect_test.m` runs against
+`tests/redirect_http_server.py`. `GET /start` answers 302 with a relative
+`Location: /final`; the completion reports `[redirect] start 200 1 15
+redirected body /final` — status 200, the 15-byte body and the final URL.
+`GET /hop` redirects to `/start` and then `/final`, proving each Location is
+resolved against the previous URL. `POST /post` answers 303, so the follow-up
+is a GET and `/final` returns its GET body, `redirected body`; `POST
+/redirect-307` answers 307 with an absolute Location, preserving the POST, so
+`/final` returns `final post`.
+`GET /loop` redirects to itself and fails with
+`[redirect] loop error -1007` after ten hops.
+
 ### Foundation: KVC collection operators
 
 `tests/kvc_operators_test.m` runs the operators over an array of boxed

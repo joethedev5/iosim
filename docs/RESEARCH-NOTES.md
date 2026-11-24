@@ -1733,3 +1733,13 @@ components.
   switcher card) to the full screen over 0.24 s while the process is still
   stopped, then logs the completed zoom and resumes the process.
 - First launches have no cached frame and start without a zoom.
+
+## 2026-11-24: URLSession redirects
+
+- URLSession tasks follow 301, 302, 303, 307 and 308 responses with a
+  Location header, resolving absolute, scheme-relative, absolute-path and
+  path-relative references against the current URL.
+- A 303 (or a 301/302 on a non-GET) rewrites the request to a body-less GET;
+  307/308 keep the method and body. More than ten hops fail with
+  NSURLErrorHTTPTooManyRedirects (-1007), and the final response carries the
+  final URL.

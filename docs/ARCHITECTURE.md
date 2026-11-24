@@ -353,7 +353,14 @@ owns a small host HTTP/1.0 client (`iosim_http_request`) that parses the URL,
 resolves and connects to the host, streams the request body, reads until the
 peer closes and splits status line, headers and body. The task builds
 `NSData` and `NSHTTPURLResponse` with a parsed header dictionary; failures and
-cancellation arrive as `NSError` in `NSURLErrorDomain`. For `https://` URLs
+cancellation arrive as `NSError` in `NSURLErrorDomain`. A 301, 302, 303, 307
+or 308 response with a `Location` header is followed in the task itself: the
+Location is resolved against the current URL (absolute, scheme-relative,
+absolute-path and path-relative forms), a 303 rewrites the request to a
+body-less GET and a 307/308 keeps the method and body, and more than ten hops
+fail
+with `NSURLErrorHTTPTooManyRedirects`. The final response carries the final
+URL. For `https://` URLs
 the same client wraps the connected socket in OpenSSL with SNI and the
 system TLS stack. Certificate and hostname verification are enabled by
 default through the system trust store; tests that use a self-signed loopback
