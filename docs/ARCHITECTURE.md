@@ -1057,9 +1057,13 @@ decoded with libpng in `loader/image.c`.
   update continuously while the finger moves. A single `tap` is synthesised
   as a down/up pair through the same path, then run-loop ticks, dispatch and
   active animations decide whether to re-render.
-- `UIView` animations interpolate frames and alpha with the animation's
-  delay, curve, repeat and autoreverse options; completion blocks run on the
-  run-loop tick that passes their deadline. `CAAnimation` key paths drive
+- `UIView` animations interpolate frames, alpha and transforms with the
+  animation's delay, curve, repeat and autoreverse options; completion blocks
+  run on the run-loop tick that passes their deadline. The
+  `usingSpringWithDamping:initialSpringVelocity:` variant replaces the curve
+  with a damped harmonic response over normalized time, so soft springs
+  overshoot and critically damped ones approach the target from below.
+  `CAAnimation` key paths drive
   layer opacity and corner radius, either from/to (`CABasicAnimation`) or
   through keyframes (`CAKeyframeAnimation` with values and keyTimes), using
   the animation's timing function or Core Animation's default linear pacing.

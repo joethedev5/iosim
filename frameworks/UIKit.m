@@ -1333,6 +1333,9 @@ typedef enum {
     BOOL _animInfinite;
     BOOL _animAutoreverse;
     int _animCurve;
+    BOOL _animSpring;
+    double _animDamping;
+    double _animVelocity;
     id _superview;
     BOOL _needsLayout;
     CGAffineTransform _transform;
@@ -1507,6 +1510,12 @@ typedef enum {
 + (void)animateWithDuration:(double)duration animations:(void (^)(void))animations
                  completion:(void (^)(BOOL finished))completion;
 + (void)animateWithDuration:(double)duration delay:(double)delay
+                    options:(unsigned long)options
+                 animations:(void (^)(void))animations
+                 completion:(void (^)(BOOL finished))completion;
++ (void)animateWithDuration:(double)duration delay:(double)delay
+     usingSpringWithDamping:(double)damping
+      initialSpringVelocity:(double)velocity
                     options:(unsigned long)options
                  animations:(void (^)(void))animations
                  completion:(void (^)(BOOL finished))completion;
@@ -5900,6 +5909,9 @@ static double g_animateDelay;
 static BOOL g_animateInfinite;
 static BOOL g_animateAutoreverse;
 static int g_animateCurve;
+static BOOL g_animateSpring;
+static double g_animateDamping;
+static double g_animateVelocity;
 static double g_animActiveUntil;
 static int g_animInfiniteCount;
 
@@ -6802,6 +6814,9 @@ static void ui_trait_children(UIView *view, int oldParent, int newParent)
         _animInfinite = g_animateInfinite;
         _animAutoreverse = g_animateAutoreverse;
         _animCurve = g_animateCurve;
+        _animSpring = g_animateSpring;
+        _animDamping = g_animateDamping;
+        _animVelocity = g_animateVelocity;
         _animatingFrame = YES;
         animation_mark_active(g_animDuration + g_animateDelay,
                               g_animateInfinite ? -1 : 0);
@@ -7192,6 +7207,9 @@ static CGPoint window_point_for_view(UIView *view, CGPoint point)
         _animInfinite = g_animateInfinite;
         _animAutoreverse = g_animateAutoreverse;
         _animCurve = g_animateCurve;
+        _animSpring = g_animateSpring;
+        _animDamping = g_animateDamping;
+        _animVelocity = g_animateVelocity;
         _animatingAlpha = YES;
         animation_mark_active(g_animDuration + g_animateDelay,
                               g_animateInfinite ? -1 : 0);
@@ -7225,6 +7243,9 @@ static CGPoint window_point_for_view(UIView *view, CGPoint point)
         _animInfinite = g_animateInfinite;
         _animAutoreverse = g_animateAutoreverse;
         _animCurve = g_animateCurve;
+        _animSpring = g_animateSpring;
+        _animDamping = g_animateDamping;
+        _animVelocity = g_animateVelocity;
         _animatingTransform = YES;
         animation_mark_active(g_animDuration + g_animateDelay,
                               g_animateInfinite ? -1 : 0);
@@ -7588,6 +7609,49 @@ static CGPoint window_point_for_view(UIView *view, CGPoint point)
     g_animateInfinite = NO;
     g_animateAutoreverse = NO;
     g_animateCurve = 0;
+    g_animateSpring = NO;
+    g_animateDamping = 0.0;
+    g_animateVelocity = 0.0;
+    if (!repeat && completion)
+        animation_add_completion(delay + duration, completion);
+}
++ (void)animateWithDuration:(double)duration delay:(double)delay
+     usingSpringWithDamping:(double)damping
+      initialSpringVelocity:(double)velocity
+                    options:(unsigned long)options
+                 animations:(void (^)(void))animations
+                 completion:(void (^)(BOOL finished))completion
+{
+    if (!animations)
+        return;
+    BOOL repeat = (options & UIViewAnimationOptionRepeat) != 0;
+    if (!g_animationsEnabled)
+    {
+        animations();
+        if (!repeat && completion)
+            completion(YES);
+        return;
+    }
+    g_animating = YES;
+    g_animStart = iosim_now();
+    g_animDuration = duration;
+    g_animateDelay = delay;
+    g_animateInfinite = repeat;
+    g_animateAutoreverse =
+        (options & UIViewAnimationOptionAutoreverse) != 0;
+    g_animateCurve = (int)((options >> 16) & 3);
+    g_animateSpring = YES;
+    g_animateDamping = damping;
+    g_animateVelocity = velocity;
+    animations();
+    g_animating = NO;
+    g_animateDelay = 0.0;
+    g_animateInfinite = NO;
+    g_animateAutoreverse = NO;
+    g_animateCurve = 0;
+    g_animateSpring = NO;
+    g_animateDamping = 0.0;
+    g_animateVelocity = 0.0;
     if (!repeat && completion)
         animation_add_completion(delay + duration, completion);
 }
@@ -17660,6 +17724,41 @@ static double curve_value(double t, int curve)
     return t * t * (3.0 - 2.0 * t);
 }
 
+/* Damped spring response from 0 to 1 over normalized time t. The damping
+ * ratio is clamped to (0, 1]; initialSpringVelocity is UIKit's fraction of
+ * the animation distance per second. The natural frequency is fixed so the
+ * response has settled by the end of the animation. */
+static double spring_value(double t, double damping, double velocity,
+                           double duration)
+{
+    if (t <= 0.0)
+        return 0.0;
+    if (t >= 1.0)
+        return 1.0;
+    double zeta = damping;
+    if (zeta < 0.01)
+        zeta = 0.01;
+    if (zeta > 1.0)
+        zeta = 1.0;
+    double omega = 10.0;
+    double wd = omega * __builtin_sqrt(1.0 - zeta * zeta);
+    double v0 = velocity * duration;
+    double decay = __builtin_exp(-zeta * omega * t);
+    if (wd < 0.0001)
+        return 1.0 - decay * (1.0 + (omega - v0) * t);
+    return 1.0 - decay *
+        (__builtin_cos(wd * t) +
+         ((zeta * omega - v0) / wd) * __builtin_sin(wd * t));
+}
+
+static double view_animation_ease(UIView *view, double local)
+{
+    if (view->_animSpring)
+        return spring_value(local, view->_animDamping,
+                            view->_animVelocity, view->_animDuration);
+    return curve_value(local, view->_animCurve);
+}
+
 /* Progress in 0..1 for a view animation, honouring its delay, curve and
  * repeat/autoreverse options. Sets *finished once a finite animation ends. */
 static double view_animation_progress(UIView *view, int *finished)
@@ -17685,7 +17784,7 @@ static double view_animation_progress(UIView *view, int *finished)
                 *finished = 1;
             return 1.0;
         }
-        return curve_value(p, view->_animCurve);
+        return view_animation_ease(view, p);
     }
     double local;
     if (view->_animAutoreverse)
@@ -17695,7 +17794,7 @@ static double view_animation_progress(UIView *view, int *finished)
     }
     else
         local = p - (long)p;
-    return curve_value(local, view->_animCurve);
+    return view_animation_ease(view, local);
 }
 
 static CGRect current_frame(UIView *view)

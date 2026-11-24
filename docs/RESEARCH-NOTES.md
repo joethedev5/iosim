@@ -1223,3 +1223,18 @@ components.
   length and interpolates on the containing segment, which gives constant
   speed along the path. Curves are handled defensively in the applier too.
 
+## 2026-11-24: UIView spring animations
+
+- `animateWithDuration:delay:usingSpringWithDamping:initialSpringVelocity:options:animations:completion:`
+  records the damping ratio and initial velocity in the same globals that
+  frame/alpha/transform setters snapshot into each view's animation state.
+- Animation progress is a damped harmonic around the target: with normalized
+  time t, damping zeta and fixed natural frequency 10, the eased fraction is
+  `1 - exp(-zeta*10*t) * (cos(wd*t) + ((zeta*10 - v0)/wd)*sin(wd*t))`, with
+  the critically damped limit `1 - exp(-10*t)*(1 + (10 - v0)*t)`. The initial
+  velocity is scaled by the duration, matching UIKit's fraction-per-second
+  meaning. Soft springs overshoot; damping 1 approaches from below.
+- Spring and curve animations share the per-view frame, alpha and transform
+  interpolation; only the easing function changes, so delays, autoreverse,
+  repeat and completion callbacks keep their existing behavior.
+

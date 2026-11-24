@@ -1656,6 +1656,16 @@ second: hold at x=100, slide to x=200, then slide down to y=500. Timers log
 `[keyframe] end <x> <y>` at 1.2 s (200, 500). The completion block must log
 `[keyframe] done 1`.
 
+### UIView spring animations
+
+`tests/spring_ui_test.m` animates two white boxes from x=40 to x=240 over one
+second with `animateWithDuration:delay:usingSpringWithDamping:initialSpringVelocity:options:animations:completion:`.
+The first uses damping 0.5 and the second damping 1.0. At 0.25 s the soft
+spring's presentation origin is 250.9 (past the 240 target) while the
+critically damped box is at 187.3, approaching from below. At 0.75 s the
+soft spring has returned to 235.0 and the critical one has reached 239.2, so
+the damping ratio changes both the overshoot and the settle path.
+
 ### CoreAnimation: keyframe calculation modes
 
 `tests/keyframe_modes_test.m` starts five 2 s opacity keyframe animations at

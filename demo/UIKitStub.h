@@ -974,6 +974,12 @@ enum {
                     options:(unsigned long)options
                  animations:(void (^)(void))animations
                  completion:(void (^)(BOOL finished))completion;
++ (void)animateWithDuration:(double)duration delay:(double)delay
+     usingSpringWithDamping:(double)damping
+      initialSpringVelocity:(double)velocity
+                    options:(unsigned long)options
+                 animations:(void (^)(void))animations
+                 completion:(void (^)(BOOL finished))completion;
 + (BOOL)areAnimationsEnabled;
 + (void)setAnimationsEnabled:(BOOL)enabled;
 + (void)performWithoutAnimation:(void (^)(void))actionsWithoutAnimation;

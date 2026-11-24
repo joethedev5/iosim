@@ -625,6 +625,53 @@ else
     echo "FAIL path pixels"; echo "$out"; fails=$((fails+1))
 fi
 
+# ---------- 4f9. UIView spring animations ----------
+rm -f "$T/springui.fifo"
+mkfifo "$T/springui.fifo"
+"$ROOT/tools/build_app.sh" "$ROOT/tests/spring_ui_test.m" \
+    "$T/spring_ui_test" >/dev/null
+out="$(IOSIM_EVENT_FIFO="$T/springui.fifo" DYLD_ROOT_PATH="$ROOT/runtime" \
+    "$RUN" "$T/spring_ui_test" 2>&1)"
+rm -f "$T/springui.fifo"
+check "[springui] ready" "$out" \
+    "the UIView spring fixture starts"
+check "[springui] done" "$out" \
+    "the UIView spring fixture samples both phases"
+if out="$(python3 - "$out" <<'PY'
+import re
+import sys
+
+vals = {}
+for line in sys.argv[1].splitlines():
+    m = re.match(r'\[springui\] (early|late) ([-0-9.]+) ([-0-9.]+)$',
+                 line)
+    if m:
+        vals[m.group(1)] = (float(m.group(2)), float(m.group(3)))
+if 'early' not in vals or 'late' not in vals:
+    raise SystemExit('missing spring samples: %r' % vals)
+se, ce = vals['early']
+sl, cl = vals['late']
+if not 230.0 <= se <= 265.0:
+    raise SystemExit('soft spring did not overshoot early: %.1f' % se)
+if not 170.0 <= ce <= 200.0:
+    raise SystemExit('critical spring early sample is off: %.1f' % ce)
+if se < ce + 30.0:
+    raise SystemExit('spring dampings did not separate: %.1f vs %.1f' %
+                     (se, ce))
+if not (230.0 <= sl <= 242.0 and 230.0 <= cl <= 245.0):
+    raise SystemExit('springs did not settle near the target: %.1f %.1f' %
+                     (sl, cl))
+if not sl < cl:
+    raise SystemExit('soft spring did not return past the critical spring: '
+                     '%.1f vs %.1f' % (sl, cl))
+print("ok   UIView spring damping overshoots and settles")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL UIView springs"; echo "$out"; fails=$((fails+1))
+fi
+
 # ---------- 4g. NSCalendar components ----------
 "$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
     -ffreestanding -O1 -I "$ROOT/frameworks" \
