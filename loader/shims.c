@@ -612,6 +612,39 @@ static void shim_os_release(void *obj) { (void)obj; }
 
 /* ---------- Foundation / UIKit lite ---------- */
 
+/* An arm64 guest's atexit handler is guest code, which the host must not
+ * jump to. Guest handlers are collected and run from one native handler
+ * in reverse registration order; a native handler keeps the host path. */
+#define IOSIM_ATEXIT_GUEST_MAX 64
+static void (*g_atexit_guest[IOSIM_ATEXIT_GUEST_MAX])(void);
+static int g_atexit_guest_count;
+
+static void run_guest_atexit(void)
+{
+    while (g_atexit_guest_count > 0)
+    {
+        void (*fn)(void) = g_atexit_guest[--g_atexit_guest_count];
+        uint64_t gp[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+        uint64_t fp[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+        uint64_t ret[2] = {0, 0};
+        iosim_arm64_call_guest_ret((void *)(uintptr_t)fn, gp, fp, ret);
+    }
+}
+
+static int shim_atexit(void (*fn)(void))
+{
+    if (fn && iosim_arm64_is_guest_code((void *)(uintptr_t)fn))
+    {
+        if (g_atexit_guest_count == 0 && atexit(run_guest_atexit) != 0)
+            return -1;
+        if (g_atexit_guest_count >= IOSIM_ATEXIT_GUEST_MAX)
+            return -1;
+        g_atexit_guest[g_atexit_guest_count++] = fn;
+        return 0;
+    }
+    return atexit(fn);
+}
+
 static void shim_iosim_nslog(const char *message)
 {
     fprintf(stderr, "NSLog: %s\n", message ? message : "(null)");
@@ -985,6 +1018,7 @@ static const struct iosim_shim shims[] = {
     SHIM_ALIAS("_NSGetExecutablePath", NSGetExecutablePath),
     SHIM_ALIAS("getprogname", getprogname),
     SHIM_ALIAS("setprogname", setprogname),
+    SHIM(atexit),
     SHIM_ALIAS("__error", __error),
     SHIM_ALIAS("malloc_size", malloc_size),
     SHIM_ALIAS("malloc_default_zone", malloc_default_zone),

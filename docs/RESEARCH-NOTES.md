@@ -2612,3 +2612,19 @@ components.
   pointer, and prints `thread create=0,0 join=0,0 main=1 workers=41,42
   ret=100,101` in the translator, the interpreter and the x86_64 build.
   The pthread attributes argument is ignored (host defaults are used).
+
+## 2026-11-24: atexit handlers in an arm64 image
+
+- An arm64 call to atexit binds the import through the resolver, but
+  glibc does not export atexit to dlsym, so the loader used to plant a
+  missing-symbol stub and the arm64 call gate rejected the branch target
+  before libc could run. The import is now a loader shim: a guest
+  handler is appended to a table, and the first registration installs
+  one native handler that runs the table in reverse order through
+  iosim_arm64_call_guest_ret. A native handler still goes to the host
+  atexit.
+- tests/arm64_atexit.c registers report, first and second; main prints
+  `main done`, then the group runs second, first and report and prints
+  `atexit 2 1` for the translator, interpreter and x86_64 builds. The
+  grouping means guest and native handlers are not interleaved, and
+  __cxa_atexit is not bridged.

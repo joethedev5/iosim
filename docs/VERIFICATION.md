@@ -2411,6 +2411,19 @@ reached `pthread_join`. The suite checks the line and exit status,
 repeats the run with `IOSIM_ARM64_NOJIT=1`, and compares the log with
 the x86_64 build.
 
+### arm64: atexit handlers
+
+`tests/arm64_atexit.c` registers three guest functions. The `atexit`
+import resolves to a loader shim rather than a host symbol (glibc does
+not export `atexit` to `dlsym`), and the shim collects guest handlers
+and installs one native handler that runs them in reverse registration
+order through the native-to-guest callback entry. Main prints
+`main done`; the group then runs the second handler, the first handler
+and the reporter, which prints `atexit 2 1`. The suite checks both
+lines and the exit status, repeats the run with `IOSIM_ARM64_NOJIT=1`,
+and compares the log with the x86_64 build, whose handlers stay on the
+host's own atexit path.
+
 ### arm64: AdvSIMD coverage
 
 `tests/arm64_neon.c` exercises float max/min/div/sqrt/abs, integer
