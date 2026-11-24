@@ -4217,6 +4217,176 @@ else
     echo "FAIL folder restore"; echo "$out"; fails=$((fails+1))
 fi
 
+# ---------- 14b. home-screen icon drag between pages ----------
+# A held drag lifts a stock Fitness icon into a ghost that follows the
+# finger; hovering in the right-edge strip turns to the second page and the
+# drop moves the icon there. The order is persisted and survives a reboot.
+GRID_UDID="$("$ROOT/tools/iosimctl" create "Grid iPhone" com.iosim.SimDeviceType.iPhone-18-Pro)"
+"$ROOT/tools/iosimctl" boot "$GRID_UDID" >/dev/null
+SAVED_SBLOG="$SBLOG"
+SBLOG="$IOSIM_HOME/Devices/$GRID_UDID/logs/springboard.log"
+sleep 1
+i=1
+while [ "$i" -le 20 ]; do
+    n="$(printf '%02d' "$i")"
+    d="$T/Grid$n.app"
+    rm -rf "$d"
+    mkdir -p "$d"
+    cp "$T/hello" "$d/GridApp"
+    python3 - "$d/Info.plist" "$n" <<'PY'
+import plistlib, sys
+n = sys.argv[2]
+with open(sys.argv[1], "wb") as f:
+    plistlib.dump({
+        "CFBundleIdentifier": "com.iosim.grid%s" % n,
+        "CFBundleExecutable": "GridApp",
+        "CFBundleName": "Grid%s" % n,
+        "CFBundlePackageType": "APPL",
+        "CFBundleVersion": "1",
+        "CFBundleShortVersionString": "1.0",
+    }, f)
+PY
+    "$ROOT/tools/iosimctl" install "$GRID_UDID" "$d" >/dev/null
+    i=$((i + 1))
+done
+sleep 0.6
+"$ROOT/tools/iosimctl" io "$GRID_UDID" screenshot "$T/grid-before.png" >/dev/null
+"$ROOT/tools/iosimctl" ui "$GRID_UDID" down 62.1667 121.8333 >/dev/null
+sleep 0.5
+"$ROOT/tools/iosimctl" ui "$GRID_UDID" move 200 560 >/dev/null
+sleep 0.3
+"$ROOT/tools/iosimctl" io "$GRID_UDID" screenshot "$T/grid-grab.png" >/dev/null
+if out="$(python3 - "$ROOT/tools" "$T/grid-before.png" "$T/grid-grab.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+
+def load(path):
+    w, h, bpp, rows = pngpixel.load(path)
+    def px(x, y):
+        c = pngpixel.px(rows, bpp, int(x * 3), int(y * 3))
+        return ((c >> 16) & 255, (c >> 8) & 255, c & 255)
+    return px
+
+def colour(px, x0, y0):
+    spread = 0
+    count = 0
+    for dy in range(-28, 29, 2):
+        for dx in range(-28, 29, 2):
+            r, g, b = px(x0 + dx, y0 + dy)
+            s = abs(r - g) + abs(g - b) + abs(r - b)
+            if s > spread:
+                spread = s
+            if s > 120:
+                count += 1
+    return spread, count
+
+before = load(sys.argv[2])
+grab = load(sys.argv[3])
+wall = colour(before, 200, 560)
+ghost = colour(grab, 200, 560)
+if wall[0] > 120:
+    raise SystemExit("the wallpaper under the ghost is too colourful: %r" %
+                     (wall,))
+if ghost[0] < 300 or ghost[1] < 100:
+    raise SystemExit("the lifted icon ghost is missing: %r" % (ghost,))
+print("ok   a held drag lifts the Fitness icon and the ghost follows the finger")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL icon grab"; echo "$out"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$GRID_UDID" move 392 222.1667 >/dev/null
+"$ROOT/tools/iosimctl" ui "$GRID_UDID" up 392 222.1667 >/dev/null
+if wait_log "[SpringBoard] moved Fitness to page 2 slot 8"; then
+    echo "ok   dropping an icon at the page edge moves it to the second page"
+else
+    echo "FAIL icon move"; fails=$((fails+1))
+fi
+sleep 0.5
+"$ROOT/tools/iosimctl" io "$GRID_UDID" screenshot "$T/grid-drop.png" >/dev/null
+if out="$(python3 - "$ROOT/tools" "$T/grid-drop.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+def px(x, y):
+    c = pngpixel.px(rows, bpp, int(x * 3), int(y * 3))
+    return ((c >> 16) & 255, (c >> 8) & 255, c & 255)
+
+spread = 0
+count = 0
+for dy in range(-28, 29, 2):
+    for dx in range(-28, 29, 2):
+        r, g, b = px(339.8333 + dx, 222.1667 + dy)
+        s = abs(r - g) + abs(g - b) + abs(r - b)
+        if s > spread:
+            spread = s
+        if s > 120:
+            count += 1
+if spread < 300 or count < 100:
+    raise SystemExit("Fitness did not land in the slot: %d %d" %
+                     (spread, count))
+white = lambda c: min(c) > 230
+gray = lambda c: 100 < c[0] < 180 and abs(c[0] - c[2]) < 12
+if not (gray(px(193, 686)) and white(px(209, 686))):
+    raise SystemExit("the page dots do not mark the second page")
+print("ok   the dropped icon lands in the second page's fourth column")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL icon drop"; echo "$out"; fails=$((fails+1))
+fi
+if [ "$(sed -n '24p' \
+    "$IOSIM_HOME/Devices/$GRID_UDID/data/Library/SpringBoard/home_order.txt" \
+    2>/dev/null)" = "name:Fitness" ]; then
+    echo "ok   the moved icon's slot is persisted to home_order.txt"
+else
+    echo "FAIL icon order file"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" shutdown "$GRID_UDID" >/dev/null
+"$ROOT/tools/iosimctl" boot "$GRID_UDID" >/dev/null
+SBLOG="$IOSIM_HOME/Devices/$GRID_UDID/logs/springboard.log"
+sleep 1
+"$ROOT/tools/iosimctl" ui "$GRID_UDID" swipe 350 400 50 400 0.3 >/dev/null
+sleep 0.4
+"$ROOT/tools/iosimctl" io "$GRID_UDID" screenshot "$T/grid-reboot.png" >/dev/null
+if out="$(python3 - "$ROOT/tools" "$T/grid-reboot.png" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+def px(x, y):
+    c = pngpixel.px(rows, bpp, int(x * 3), int(y * 3))
+    return ((c >> 16) & 255, (c >> 8) & 255, c & 255)
+
+spread = 0
+for dy in range(-28, 29, 2):
+    for dx in range(-28, 29, 2):
+        r, g, b = px(339.8333 + dx, 222.1667 + dy)
+        s = abs(r - g) + abs(g - b) + abs(r - b)
+        if s > spread:
+            spread = s
+if spread < 300:
+    raise SystemExit("the moved icon is not on the second page: %d" % spread)
+c = px(209, 686)
+if min(c) < 230:
+    raise SystemExit("the second page is not active after the swipe")
+print("ok   the saved home order is restored on the next boot")
+PY
+)"; then
+    echo "$out"
+else
+    echo "FAIL icon restore"; echo "$out"; fails=$((fails+1))
+fi
+SBLOG="$SAVED_SBLOG"
+"$ROOT/tools/iosimctl" shutdown "$GRID_UDID" >/dev/null || true
+
+
 # ---------- 15. lock screen ----------
 # Locking draws the lock screen over the wallpaper; swiping up unlocks. An
 # app that is foreground when the device locks backgrounds, and the unlock

@@ -1689,6 +1689,22 @@ the member mapping and the launch path are both real. Tapping outside at
 boots it again, swipes to page 3 and reads the same `#3a3a3c` tile pixel: the
 folder was restored from disk, not kept only in SpringBoard's memory.
 
+### Home-screen icon drag and layout persistence
+
+A fresh grid phone installs `Grid01`–`Grid20`, giving two pages. `ui down` on
+the Fitness icon at (62.1667, 121.8333) pt, a 0.5 s hold and `ui move` to
+(200, 560) pt lift the icon: the box around the finger has vivid ring pixels
+(max channel spread 510, against 58 on the wallpaper beneath it), drawn at
+108 %, while the tile's old slot is left out of the grid. Moving to
+(392, 222.1667) pt enters the 30 pt right-edge strip, which logs
+`home page 2 of 2`; the `ui up` there logs
+`[SpringBoard] moved Fitness to page 2 slot 8`. The screenshot then reads the
+Fitness ring colors in the second page's fourth column at (339.8333,
+222.1667) pt and the active second page dot. Line 24 of
+`data/Library/SpringBoard/home_order.txt` is `name:Fitness`. After a shutdown
+and boot, swiping to page 2 shows the same rings in the same slot, so the
+saved order, not the manifest order, drives the grid.
+
 ### Lock screen
 
 Locking is a real system event, not a drawn overlay the test triggers directly.
@@ -2248,9 +2264,11 @@ messages, the bootstrap namespace and serialized XPC dictionaries are shared
 across guest processes. SpringBoard pages in groups of 16 without a sliding
 page animation, and the switcher shows at most three cards with no scrolling
 animation; stock system apps have no executables in this runtime. Home-screen
-folders group apps by bundle identifier and persist, but cannot be renamed,
-nested, reordered or moved between pages, and the grid compacts entries when a
-folder forms. The lock screen has no passcode, Face ID, notifications or
+folders group apps by bundle identifier and persist; they cannot be renamed or
+nested, and the grid compacts entries when a folder forms. Icons can be
+reordered by dragging them to empty slots, including across pages, with the
+layout persisted in `home_order.txt`; folder tiles themselves are not
+draggable. The lock screen has no passcode, Face ID, notifications or
 widgets; unlocking is the swipe-up/home gesture.
 Backgrounded apps are suspended in place (SIGSTOP) and resumed from their icon
 or switcher card, with no memory-pressure termination policy.

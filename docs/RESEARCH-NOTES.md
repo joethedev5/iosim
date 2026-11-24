@@ -1611,3 +1611,16 @@ components.
   existing file contents.
 - The fixture covers chunked reads, status transitions, the memory property,
   file writing and append.
+
+## 2026-11-24: home-screen icon drag across pages
+
+- A held drag lifts the icon into a 108 % ghost that follows the finger and
+  leaves its tile out of the grid.
+- Holding the ghost inside a 30 pt screen-edge strip turns one page per edge
+  entry; dropping on an empty slot moves the icon to that linear grid
+  position and shifts the entries between the old and new slots.
+- The grid order persists in `Library/SpringBoard/home_order.txt` as one key
+  per line (bundle id, `name:<stock>` or `folder:<name>`) and is replayed by
+  every grid computation, so the layout survives a boot.
+- Folder creation and extension update the saved order by replacing the
+  first member's key with the folder key and dropping folded apps.

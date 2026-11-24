@@ -23978,6 +23978,8 @@ struct shell_grid_entry {
 };
 
 static int shell_grid_entries(struct shell_grid_entry *out, int cap);
+static void shell_home_order_note_folder(int folder, int add_app,
+                                         int other_app);
 
 /* Pages follow grid entries, not raw apps: a folder occupies one slot no
  * matter how many apps it holds. */
@@ -24427,6 +24429,10 @@ static int shell_folder_create(int add_app, int into_folder, int other_app)
             return folder;
     shell_copy(f->bundles[f->count++], (int)sizeof(f->bundles[0]), bundle);
     shell_folders_save();
+    if (into_folder < 0)
+        shell_home_order_note_folder(folder, add_app, other_app);
+    else
+        shell_home_order_note_folder(folder, add_app, -1);
     if (into_folder >= 0)
         printf("[SpringBoard] folder added %s (%d apps)\n",
                g_shell_apps[add_app].name, f->count);
@@ -24437,7 +24443,7 @@ static int shell_folder_create(int add_app, int into_folder, int other_app)
     return folder;
 }
 
-static int shell_grid_entries(struct shell_grid_entry *out, int cap)
+static int shell_grid_entries_base(struct shell_grid_entry *out, int cap)
 {
     int n = 0;
     for (int i = 0; i < g_shell_app_count && n < cap; i++)
@@ -24464,6 +24470,247 @@ static int shell_grid_entries(struct shell_grid_entry *out, int cap)
         n++;
     }
     return n;
+}
+
+static void shell_app_key(int index, char *out, unsigned long cap)
+{
+    if (index < 0 || index >= g_shell_app_count)
+    {
+        out[0] = 0;
+        return;
+    }
+    struct shell_app *a = &g_shell_apps[index];
+    if (a->bundle[0])
+        snprintf(out, cap, "%s", a->bundle);
+    else
+        snprintf(out, cap, "name:%s", a->name);
+}
+
+static void shell_grid_entry_key(const struct shell_grid_entry *entry,
+                                 char *out, unsigned long cap)
+{
+    if (entry->folder >= 0 && entry->folder < g_folder_count)
+        snprintf(out, cap, "folder:%s", g_folders[entry->folder].name);
+    else
+        shell_app_key(entry->app, out, cap);
+}
+
+/* Home-screen layout: grid entry keys, one per line, persisted so an icon
+ * dragged to another page or slot stays there across a SpringBoard boot. */
+static char g_home_order[SHELL_MAX_APPS + SHELL_MAX_FOLDERS][160];
+static int g_home_order_count;
+
+static void shell_home_order_path(char *out, unsigned long cap)
+{
+    const char *shared = getenv("SIMULATOR_SHARED_RESOURCES_DIRECTORY");
+    out[0] = 0;
+    if (!shared || !*shared)
+        return;
+    snprintf(out, cap, "%s/Library/SpringBoard/home_order.txt", shared);
+}
+
+static void shell_home_order_store(char keys[][160], int count)
+{
+    if (count < 0)
+        count = 0;
+    if (count > SHELL_MAX_APPS + SHELL_MAX_FOLDERS)
+        count = SHELL_MAX_APPS + SHELL_MAX_FOLDERS;
+    for (int i = 0; i < count; i++)
+        snprintf(g_home_order[i], sizeof(g_home_order[i]), "%s", keys[i]);
+    g_home_order_count = count;
+    char path[1024];
+    shell_home_order_path(path, sizeof path);
+    if (!path[0])
+        return;
+    int slash = -1;
+    for (int i = 0; path[i]; i++)
+        if (path[i] == '/')
+            slash = i;
+    if (slash > 0)
+    {
+        char dir[1024];
+        memcpy(dir, path, (unsigned long)slash);
+        dir[slash] = 0;
+        iosim_fs_mkdir(dir, 1);
+    }
+    static char buf[8192];
+    unsigned long o = 0;
+    for (int i = 0; i < count && o < sizeof(buf) - 2; i++)
+        o += (unsigned long)snprintf(buf + o, sizeof(buf) - o, "%s\n",
+                                     g_home_order[i]);
+    iosim_fs_write(path, buf, o);
+}
+
+static void shell_home_order_load(void)
+{
+    g_home_order_count = 0;
+    char path[1024];
+    shell_home_order_path(path, sizeof path);
+    if (!path[0])
+        return;
+    unsigned char *bytes = 0;
+    unsigned long len = 0;
+    if (iosim_fs_read(path, &bytes, &len) != 0 || !bytes)
+        return;
+    char *text = (char *)bytes;
+    unsigned long i = 0;
+    while (i < len && g_home_order_count < SHELL_MAX_APPS + SHELL_MAX_FOLDERS)
+    {
+        unsigned long start = i;
+        while (i < len && text[i] != '\n')
+            i++;
+        unsigned long end = i;
+        if (i < len)
+            i++;
+        while (end > start && (text[end - 1] == '\r' || text[end - 1] == ' '))
+            end--;
+        if (start >= end || text[start] == '#')
+            continue;
+        unsigned long n = end - start;
+        if (n > sizeof(g_home_order[0]) - 1)
+            n = sizeof(g_home_order[0]) - 1;
+        memcpy(g_home_order[g_home_order_count], text + start, n);
+        g_home_order[g_home_order_count][n] = 0;
+        g_home_order_count++;
+    }
+    free(bytes);
+}
+
+/* A new folder replaces its first member's tile; folding an app in removes
+ * the app's old tile. Keep the saved order consistent with that grid. */
+static void shell_home_order_note_folder(int folder, int add_app,
+                                         int other_app)
+{
+    if (g_home_order_count <= 0 || folder < 0 || folder >= g_folder_count)
+        return;
+    char addKey[160] = { 0 }, otherKey[160] = { 0 }, folderKey[160];
+    shell_app_key(add_app, addKey, sizeof addKey);
+    shell_app_key(other_app, otherKey, sizeof otherKey);
+    snprintf(folderKey, sizeof folderKey, "folder:%s",
+             g_folders[folder].name);
+    static char next[SHELL_MAX_APPS + SHELL_MAX_FOLDERS][160];
+    int n = 0, placed = 0;
+    for (int k = 0; k < g_home_order_count; k++)
+    {
+        if (addKey[0] && strcmp(g_home_order[k], addKey) == 0)
+            continue;
+        if (otherKey[0] && strcmp(g_home_order[k], otherKey) == 0)
+        {
+            snprintf(next[n], sizeof(next[n]), "%s", folderKey);
+            n++;
+            placed = 1;
+            continue;
+        }
+        snprintf(next[n], sizeof(next[n]), "%s", g_home_order[k]);
+        n++;
+    }
+    if (!placed && n < SHELL_MAX_APPS + SHELL_MAX_FOLDERS)
+    {
+        snprintf(next[n], sizeof(next[n]), "%s", folderKey);
+        n++;
+    }
+    shell_home_order_store(next, n);
+}
+
+static int shell_grid_entries(struct shell_grid_entry *out, int cap)
+{
+    struct shell_grid_entry base[SHELL_MAX_APPS + SHELL_MAX_FOLDERS];
+    int count =
+        shell_grid_entries_base(base, SHELL_MAX_APPS + SHELL_MAX_FOLDERS);
+    if (out && g_home_order_count > 0 && count > 0)
+    {
+        char used[SHELL_MAX_APPS + SHELL_MAX_FOLDERS];
+        memset(used, 0, sizeof used);
+        int n = 0;
+        for (int k = 0; k < g_home_order_count && n < cap; k++)
+        {
+            for (int i = 0; i < count; i++)
+            {
+                if (used[i])
+                    continue;
+                char key[160];
+                shell_grid_entry_key(&base[i], key, sizeof key);
+                if (strcmp(key, g_home_order[k]) == 0)
+                {
+                    out[n++] = base[i];
+                    used[i] = 1;
+                    break;
+                }
+            }
+        }
+        for (int i = 0; i < count && n < cap; i++)
+            if (!used[i])
+                out[n++] = base[i];
+        return n;
+    }
+    if (out)
+        for (int i = 0; i < count && i < cap; i++)
+            out[i] = base[i];
+    return count;
+}
+
+/* Linear grid slot under a home-screen point on the current page. */
+static void shell_grid_slot_at(double px, double py, double W, int *page,
+                               int *slot)
+{
+    double pitch = (W - 2 * SHELL_MARGIN_PT - SHELL_ICON_PT) / 3.0;
+    int col = (int)__builtin_floor(
+        (px - SHELL_MARGIN_PT - SHELL_ICON_PT / 2) / pitch + 0.5);
+    if (col < 0)
+        col = 0;
+    if (col > 3)
+        col = 3;
+    int row = 0;
+    double best = 1e9;
+    for (int r = 0; r < 4; r++)
+    {
+        double d = __builtin_fabs(py - shell_row_center[r]);
+        if (d < best)
+        {
+            best = d;
+            row = r;
+        }
+    }
+    *page = g_home_page;
+    *slot = row * 4 + col;
+}
+
+/* Move a grid app to the page slot under the finger, rewriting the saved
+ * order so the layout survives a boot. */
+static void shell_move_app_to_slot(int app, int page, int slot)
+{
+    struct shell_grid_entry entries[SHELL_MAX_APPS + SHELL_MAX_FOLDERS];
+    int count = shell_grid_entries(entries, SHELL_MAX_APPS + SHELL_MAX_FOLDERS);
+    if (count <= 0 || app < 0 || app >= g_shell_app_count)
+        return;
+    static char keys[SHELL_MAX_APPS + SHELL_MAX_FOLDERS][160];
+    int from = -1;
+    for (int i = 0; i < count; i++)
+    {
+        shell_grid_entry_key(&entries[i], keys[i], sizeof(keys[i]));
+        if (entries[i].folder < 0 && entries[i].app == app)
+            from = i;
+    }
+    if (from < 0)
+        return;
+    char moved[160];
+    snprintf(moved, sizeof moved, "%s", keys[from]);
+    for (int i = from; i + 1 < count; i++)
+        memcpy(keys[i], keys[i + 1], sizeof(keys[0]));
+    count--;
+    int to = page * 16 + slot;
+    if (to > count)
+        to = count;
+    if (to < 0)
+        to = 0;
+    for (int i = count; i > to; i--)
+        memcpy(keys[i], keys[i - 1], sizeof(keys[0]));
+    snprintf(keys[to], sizeof(keys[to]), "%s", moved);
+    count++;
+    shell_home_order_store(keys, count);
+    printf("[SpringBoard] moved %s to page %d slot %d\n",
+           g_shell_apps[app].name, page + 1, slot + 1);
+    fflush(0);
 }
 
 /* Which grid entry, if any, sits under a home-screen point. */
@@ -25045,6 +25292,14 @@ static void shell_stock_icon_draw(int kind, int x, int y, int s, double scale)
     }
 }
 
+/* Home-screen icon drag: the lifted app follows the finger, hovering at a
+ * screen edge turns the page, and the drop moves the icon to the slot under
+ * the finger. */
+static int g_sb_drag_app = -1;
+static double g_sb_drag_x, g_sb_drag_y;
+static int g_sb_drag_edge;
+static double g_sb_drag_drawn;
+
 static void shell_draw(int fbWidth, int fbHeight, double scale)
 {
     shell_wallpaper_build(fbWidth, fbHeight);
@@ -25079,6 +25334,8 @@ static void shell_draw(int fbWidth, int fbHeight, double scale)
         else
         {
             struct shell_app *a = &g_shell_apps[entries[e].app];
+            if (entries[e].app == g_sb_drag_app)
+                continue;
             shell_stock_icon(a->stock, cx - s / 2, cy - s / 2, s, scale);
             if (a->badge > 0)
                 shell_draw_badge(cx + s / 2 - (int)(4 * scale + 0.5),
@@ -25086,6 +25343,17 @@ static void shell_draw(int fbWidth, int fbHeight, double scale)
                                  a->badge, scale);
             shell_label(a->name, cx, baseline, scale);
         }
+    }
+
+    if (g_sb_drag_app >= 0 && g_sb_drag_app < g_shell_app_count)
+    {
+        struct shell_app *a = &g_shell_apps[g_sb_drag_app];
+        int gs = (int)(s * 1.08 + 0.5);
+        int gx = (int)(g_sb_drag_x * scale + 0.5) - gs / 2;
+        int gy = (int)(g_sb_drag_y * scale + 0.5) - gs / 2;
+        iosim_fb_set_opacity(0.92);
+        shell_stock_icon(a->stock, gx, gy, gs, scale);
+        iosim_fb_set_opacity(1.0);
     }
 
     /* Page dots sit between the grid and the search pill and are hidden for
@@ -27339,6 +27607,7 @@ static int run_springboard(void)
     shell_load_apps();
     shell_folders_load();
     shell_folders_prune();
+    shell_home_order_load();
     shell_badges_load();
     shell_notification_categories_load();
     g_shell_active = 1;
@@ -27382,6 +27651,7 @@ static int run_springboard(void)
             g_open_folder = -1;
             shell_load_apps();
             shell_folders_prune();
+            shell_home_order_load();
             shell_badges_load();
             if (g_home_page >= shell_page_count())
                 g_home_page = shell_page_count() - 1;
@@ -27473,6 +27743,8 @@ static int run_springboard(void)
             g_sb_down_time = iosim_now();
             g_sb_moved = 0;
             g_sb_icon_hold = 0;
+            g_sb_drag_app = -1;
+            g_sb_drag_edge = 0;
             continue;
         }
         if (r == 1 && type == 3)
@@ -27487,6 +27759,48 @@ static int run_springboard(void)
                     if (iosim_now() - g_sb_down_time >=
                         SHELL_ICON_HOLD_SECONDS)
                         g_sb_icon_hold = 1;
+                }
+            }
+            if (g_sb_icon_hold && g_sb_drag_app < 0)
+            {
+                int start_app = -1, start_folder = -1;
+                if (shell_grid_entry_at(g_sb_down_x, g_sb_down_y, W, scale,
+                                        &start_app, &start_folder) &&
+                    start_app >= 0 && start_folder < 0 &&
+                    shell_folder_for_app(start_app) < 0)
+                {
+                    g_sb_drag_app = start_app;
+                    g_sb_drag_edge = 0;
+                    g_sb_drag_drawn = 0;
+                }
+            }
+            if (g_sb_drag_app >= 0)
+            {
+                g_sb_drag_x = px;
+                g_sb_drag_y = py;
+                int pages = shell_page_count();
+                int zone = 0;
+                if (px > W - 30.0)
+                    zone = 1;
+                else if (px < 30.0)
+                    zone = -1;
+                if (zone != 0 && zone != g_sb_drag_edge &&
+                    ((zone > 0 && g_home_page < pages - 1) ||
+                     (zone < 0 && g_home_page > 0)))
+                {
+                    g_home_page += zone > 0 ? 1 : -1;
+                    printf("[SpringBoard] home page %d of %d\n",
+                           g_home_page + 1, pages);
+                    fflush(0);
+                    g_sb_drag_drawn = 0;
+                }
+                g_sb_drag_edge = zone;
+                if (iosim_now() - g_sb_drag_drawn >= 0.04)
+                {
+                    g_sb_drag_drawn = iosim_now();
+                    shell_draw(fbWidth, fbHeight, scale);
+                    if (path && *path)
+                        iosim_fb_present(path);
                 }
             }
             continue;
@@ -27666,10 +27980,12 @@ static int run_springboard(void)
                                         scale, &start_app, &start_folder) &&
                     shell_grid_entry_at(px, py, fbWidth / scale, scale,
                                         &end_app, &end_folder) &&
-                    start_app >= 0 && g_shell_apps[start_app].bundle[0])
+                    start_app >= 0 && g_shell_apps[start_app].bundle[0] &&
+                    (g_sb_drag_app < 0 || g_sb_drag_app == start_app))
                 {
                     if (end_folder >= 0 && end_folder != start_folder)
                     {
+                        g_sb_drag_app = -1;
                         shell_folder_create(start_app, end_folder, -1);
                         shell_repaint(fbWidth, fbHeight, scale, path, 0);
                         continue;
@@ -27677,11 +27993,29 @@ static int run_springboard(void)
                     if (end_app >= 0 && end_app != start_app &&
                         g_shell_apps[end_app].bundle[0])
                     {
+                        g_sb_drag_app = -1;
                         shell_folder_create(start_app, -1, end_app);
                         shell_repaint(fbWidth, fbHeight, scale, path, 0);
                         continue;
                     }
                 }
+            }
+            if (g_sb_drag_app >= 0)
+            {
+                /* An icon lifted off the grid and dropped on an empty slot
+                 * moves there, shifting the entries around it. */
+                if (!g_switcher && !g_search && !g_control_center &&
+                    g_open_folder < 0 &&
+                    __builtin_fabs(dx) + __builtin_fabs(dy) > 40)
+                {
+                    int page = 0, slot = 0;
+                    shell_grid_slot_at(px, py, W, &page, &slot);
+                    shell_move_app_to_slot(g_sb_drag_app, page, slot);
+                    g_sb_drag_app = -1;
+                    shell_repaint(fbWidth, fbHeight, scale, path, 0);
+                    continue;
+                }
+                g_sb_drag_app = -1;
             }
             if (g_search)
             {

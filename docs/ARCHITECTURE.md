@@ -1451,7 +1451,15 @@ colors are real pixels, not a static overlay.
 
 A held drag on the home screen picks up an icon: the finger must rest for
 300 ms before its first movement, which arms the drag, so a quick swipe that
-happens to start on an icon still turns the page. Dropping the icon on another
+happens to start on an icon still turns the page. The lifted icon follows the
+finger as a 108 % ghost drawn over the grid while its tile is left out, and
+holding it inside the 30 pt screen-edge strip turns one page per edge entry.
+Releasing over an empty slot moves the icon to that linear grid position,
+shifting the entries between the old and the new slot. The resulting order is
+written to `Library/SpringBoard/home_order.txt`, one entry key per line — a
+bundle id, `name:<stock name>`, or `folder:<name>` — and every grid
+computation replays it, so a moved icon stays on its page across boots.
+Creating or extending a folder rewrites the saved order at the same time. Dropping the icon on another
 groups both into a home-screen folder, matched by bundle identifier rather than
 by executable; the grid entry collapses into the first member's slot and is
 drawn as a dark tile holding up to four mini icons. Dropping it on an existing
