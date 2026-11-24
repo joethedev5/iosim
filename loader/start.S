@@ -194,3 +194,39 @@ objc_msgSend_stret:
     xorl %eax, %eax
     ret
     .size objc_msgSend_stret, .-objc_msgSend_stret
+
+    .text
+    .globl iosim_arm64_native_invoke
+    .type iosim_arm64_native_invoke, @function
+/* void iosim_arm64_native_invoke(void *imp, void *self, void *sel,
+ *                                void *gp, void *sse, void *retbuf)
+ *
+ * The arm64 bridge's call gate: calls a native x86_64 method with self and
+ * sel, four further integer registers from gp[0..3] and xmm0..xmm7 from
+ * sse[0..7]. retbuf receives rax at offset 0 and xmm0 at offset 8. */
+iosim_arm64_native_invoke:
+    pushq %rbx
+    movq %r9, %rbx
+    movq %rcx, %r10
+    movq %r8, %r11
+    movq %rdi, %rax
+    movq %rsi, %rdi
+    movq %rdx, %rsi
+    movq 0(%r10), %rdx
+    movq 8(%r10), %rcx
+    movq 16(%r10), %r8
+    movq 24(%r10), %r9
+    movdqu 0(%r11), %xmm0
+    movdqu 16(%r11), %xmm1
+    movdqu 32(%r11), %xmm2
+    movdqu 48(%r11), %xmm3
+    movdqu 64(%r11), %xmm4
+    movdqu 80(%r11), %xmm5
+    movdqu 96(%r11), %xmm6
+    movdqu 112(%r11), %xmm7
+    callq *%rax
+    movq %rax, 0(%rbx)
+    movdqu %xmm0, 8(%rbx)
+    popq %rbx
+    ret
+    .size iosim_arm64_native_invoke, .-iosim_arm64_native_invoke

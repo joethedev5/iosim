@@ -2107,6 +2107,121 @@ confirms `isProxy` and `isKindOfClass:[NSProxy class]`, and sends an absent
 process whose environment carries `SIMULATOR_UDID=<udid>`, shuts the device
 down, and checks again that no such process remains.
 
+### arm64: image mapping and metadata
+
+`tests/arm64_probe.m` defines a root Objective-C class and is linked as an
+arm64 executable. `iosim-run --arm64 --inspect -v` reports `arch: arm64`,
+registers `objc: class Arm64Probe` from the image's `__objc_classlist`, and
+prints `arm64 image mapped; execution pending` instead of jumping into arm64
+code.
+
+### arm64: interpreter execution
+
+`tests/arm64_exec.c` runs a real frame, a loop and a call under `iosim-run
+--arm64` and returns 46 through the process status. `tests/arm64_msg_send.m`
+defines a root class whose `+answer` returns 42; main's `[Arm64Calc answer]`
+goes through `objc_msgSend`, the interpreter resolves the arm64 class
+method and the process exits 42.
+
+### arm64: native method bridge
+
+`tests/arm64_native.m` is an arm64 main that calls `objc_getClass` and
+`sel_registerName` through C gates, then sends `stringWithUTF8String:` to
+the native NSString class and `length` to the returned native object. The
+suite loads the x86 Foundation with `--load-dylib`; the interpreter
+marshals both message sends from the method's type encoding and exits with
+the string length, 5.
+
+### arm64: super sends, C shims, Foundation, ARC and blocks
+
+Four arm64 fixtures exercise the native bridges:
+
+- `tests/arm64_super.m` sends `[super value]` from a subclass class
+  method (`objc_msgSendSuper2`) and calls `strlen`, `calloc`/`free`,
+  `strtod` and `strncmp` through the generic shim gate; it prints
+  `a=9 b=8 n=4 d=5 cmp=0` and exits 26.
+- `tests/arm64_foundation.m` parses JSON with NSString, NSData and
+  NSJSONSerialization, reads the object for a key, and adds a double from
+  NSNumber; it exits 28.
+- `tests/arm64_enum_blocks.m` builds an NSMutableArray, walks it with
+  `countByEnumeratingWithState:objects:count:`, and invokes an arm64 block;
+  it prints `n=4 total=47` and exits 447 (191 as a process status).
+- `tests/arm64_arc.m` is compiled with ARC and uses `@autoreleasepool`,
+  Foundation objects, a copied string and a `__block` capture. Copying the
+  block calls its arm64 copy helper from the native block runtime
+  (`iosim_arm64_call_guest`); it prints `v=82 w=77 r=85` and exits 244.
+
+### arm64: lazy block translator
+
+Every arm64 fixture above runs through the block translator by default:
+basic blocks compile to x86_64 in an executable arena, cached by guest
+address, and instructions outside the inline set are single-stepped by the
+interpreter. The suite also runs `tests/arm64_super.m` with
+`IOSIM_ARM64_NOJIT=1` and requires the same output and exit status, so the
+translated path is checked against the interpreter. `IOSIM_ARM64_JIT_TRACE`
+prints each translated block's guest range.
+
+### arm64: NEON and container round trip
+
+A vectorized float loop (`tests/arm64_vector.c`) exercises the 128-bit
+register model: modified immediates, ORR, FMLA, element extraction, Q
+loads/stores and vector arithmetic. The suite builds it for arm64 and
+x86_64, requires identical exit status (288, seen as status 32) from both,
+and repeats the arm64 run with `IOSIM_ARM64_NOJIT=1`.
+`tests/arm64_dict.m` builds an NSMutableDictionary, enumerates its keys and
+appends to an NSMutableString; it prints `total=6 len=5` and exits 65.
+`tests/arm64_vector_int.c` vectorizes to integer MLA/ADD/ADDV and is built
+for x86_64 as well; both runs exit with status 168 (sum 424).
+
+### arm64: native-to-guest message bridge
+
+`tests/arm64_reverse.m` defines an arm64 class inheriting NSObject. The
+arm64 main asks native Foundation to `-performSelector:withObject:` on it
+and puts an instance in an NSMutableArray, then calls
+`-containsObject:`. Both paths run x86_64 code that sends `hit:` or
+`isEqual:` back to the arm64 object; the trampoline's saved frame is
+marshalled from the method type encoding and the arm64 IMP runs on a nested
+interpreter context. The fixture prints `c=1 hit=42` and exits 77.
+
+### arm64: atomics
+
+`tests/arm64_atomic.c` exercises the atomic forms clang emits for the
+simulator target: LSE read-modify-write (add/sub/and/or/xor over
+8/16/32/64-bit), compare-exchange success and failure, byte test-and-set
+and clear, ordered loads/stores, RCpc acquire loads and barriers; an
+`#if __aarch64__` block drives LL/SC exclusives through inline asm. The
+suite builds the fixture for arm64 and x86_64, requires both to exit 107,
+and repeats the arm64 run with `IOSIM_ARM64_NOJIT=1`.
+
+### arm64: native C callbacks
+
+`tests/arm64_callback.c` passes an arm64 comparator to native `qsort` and
+`bsearch`. The shims call the comparator back through
+`iosim_arm64_call_guest_ret`, and the string comparator calls native
+`strcmp` from inside the bridged call. The fixture also exercises a
+128-bit SIMD literal load (`ldr q0, label`). It prints `1 2 3 4 5` and
+`apple banana fig pear`, and exits 33 from both architectures and under
+`IOSIM_ARM64_NOJIT=1`.
+
+### arm64: struct ABI and floating-point printf
+
+`tests/arm64_struct.c` passes and returns aggregates entirely inside the
+arm64 image: a `{int,int}` pair and an HFA `{float,float}` in registers, a
+`{long,long,long}` through the x8 result pointer. It prints
+`p=50 t=12 v=4.0` (the last through the printf gate's variadic-double
+support) and exits 51 for the arm64 build, the x86_64 build and
+`IOSIM_ARM64_NOJIT=1`.
+
+### arm64: framework C functions
+
+`tests/arm64_framework_calls.c` calls `CACurrentMediaTime` (double result)
+and two UIKit accessibility queries (integer results) directly from arm64
+code. These are exported by the native framework dylibs rather than the
+loader shim table; the arm64 call gate resolves them through the recorded
+native symbol map. The suite runs the fixture with Foundation, UIKit and
+QuartzCore preloaded, requires exit 64, and repeats the run with
+`IOSIM_ARM64_NOJIT=1`.
+
 ### SpringBoard: folder pagination
 
 A folder is rewritten to hold thirteen members across two pages.

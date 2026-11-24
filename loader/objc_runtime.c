@@ -728,6 +728,30 @@ static void *lookup_imp_internal(void *obj, void *sel)
     return imp;
 }
 
+/* Type encoding of the method that would answer sel on obj, or NULL.
+ * Used by the arm64 call bridge to marshal arguments into the x86_64
+ * convention without guessing a signature. */
+const char *objc_lookup_method_types(void *obj, void *sel)
+{
+    if (!obj || !sel)
+        return NULL;
+    struct class_entry *ce = find_class_entry(obj);
+    void *method = ce ? class_getClassMethod((void *)ce->cls, sel)
+                      : class_getInstanceMethod(iosim_objc_class_of(obj), sel);
+    if (!method)
+    {
+        void *cls = ce ? (void *)ce->cls : iosim_objc_class_of(obj);
+        if (resolve_method(cls, sel, ce ? 1 : 0))
+            method = ce ? class_getClassMethod((void *)ce->cls, sel)
+                        : class_getInstanceMethod(iosim_objc_class_of(obj),
+                                                  sel);
+    }
+    return method ? method_getTypeEncoding(method) : NULL;
+}
+
+int (*iosim_arm64_msg_hook)(void *imp, void *self, void *sel,
+                            void *frame, void *result);
+
 void *objc_lookup_imp(void *obj, void *sel)
 {
     if (!sel)
@@ -937,7 +961,14 @@ void *objc_msgSend_lookup(void *obj, void *sel, void **receiver_out,
         return NULL;
     void *imp = lookup_imp_internal(obj, sel);
     if (imp)
+    {
+        /* An arm64 IMP cannot be jumped to from x86_64 code: run it here
+         * and let the trampoline return its saved scalar result. */
+        if (iosim_arm64_msg_hook &&
+            iosim_arm64_msg_hook(imp, obj, sel, frame, result_out))
+            return OBJC_FORWARDED_IMP;
         return imp;
+    }
 
     /* Stage 1: an object may hand the message to another receiver. Chains
      * are followed a few hops, exactly like resending the message. Class
@@ -964,7 +995,12 @@ void *objc_msgSend_lookup(void *obj, void *sel, void **receiver_out,
                 *receiver_out = obj;
             imp = lookup_imp_internal(obj, sel);
             if (imp)
+            {
+                if (iosim_arm64_msg_hook &&
+                    iosim_arm64_msg_hook(imp, obj, sel, frame, result_out))
+                    return OBJC_FORWARDED_IMP;
                 return imp;
+            }
             ce = find_class_entry(obj);
             if (ce)
                 break;

@@ -14,6 +14,8 @@ option(IOSIM_USE_ZIG_ASM "Build the TLV getter from Zig inline assembly" OFF)
 
 add_executable(iosim-run
   loader/main.c
+  loader/arm64.c
+  loader/arm64_jit.c
   loader/macho.c
   loader/fixups.c
   loader/symbols.c

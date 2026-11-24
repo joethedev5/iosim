@@ -14,6 +14,7 @@
 
 #define CPU_ARCH_ABI64   0x01000000u
 #define CPU_TYPE_X86_64  (CPU_ARCH_ABI64 | 7)
+#define CPU_TYPE_ARM64   (CPU_ARCH_ABI64 | 12)
 
 #define MH_EXECUTE       0x2u
 #define MH_DYLIB         0x6u
@@ -323,6 +324,7 @@ struct iosim_image {
     uint64_t preferred_base;
     intptr_t slide;
     int      verbose;
+    int      is_arm64;
 
     struct iosim_segment segs[IOSIM_MAX_SEGS];
     int      nsegs;
@@ -358,7 +360,7 @@ void *iosim_default_resolve(struct iosim_resolver *r, struct iosim_image *img,
                             const char *name, int lib_ordinal, int weak);
 
 int  iosim_image_load(const char *path, struct iosim_image *img,
-                      char *err, size_t errlen);
+                      int prefer_arm64, char *err, size_t errlen);
 void iosim_image_unmap(struct iosim_image *img);
 
 /* Returns address of a symbol defined in this image, or NULL. */

@@ -1,6 +1,7 @@
 #define _GNU_SOURCE
 #include "shims.h"
 #include "macho.h"
+#include "arm64.h"
 #include "objc_runtime.h"
 #include "framebuffer.h"
 #include "events.h"
@@ -924,6 +925,52 @@ int shim_objc_personality(int version, int actions, unsigned long long exclass,
                           void *exception, void *context);
 void shim_unwind_resume(void *exception);
 
+/* qsort/bsearch comparators may be arm64 guest code. The comparator is
+ * called through the arm64 callback bridge; native comparators are called
+ * directly. The active comparator is per-thread so nested sorts keep
+ * their own. */
+static __thread void *t_sort_cmp;
+static __thread int t_sort_cmp_guest;
+
+static int sort_cmp_bridge(const void *a, const void *b)
+{
+    if (!t_sort_cmp_guest)
+        return ((int (*)(const void *, const void *))t_sort_cmp)(a, b);
+    uint64_t gp[8] = {(uint64_t)(uintptr_t)a, (uint64_t)(uintptr_t)b};
+    uint64_t fp[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+    uint64_t ret[2] = {0, 0};
+    iosim_arm64_call_guest_ret(t_sort_cmp, gp, fp, ret);
+    return (int)(int64_t)ret[0];
+}
+
+void iosim_qsort(void *base, size_t count, size_t size, void *compar)
+{
+    if (!base || !compar || count < 2 || size == 0)
+        return;
+    void *prev = t_sort_cmp;
+    int prev_guest = t_sort_cmp_guest;
+    t_sort_cmp = compar;
+    t_sort_cmp_guest = iosim_arm64_is_guest_code(compar);
+    qsort(base, count, size, sort_cmp_bridge);
+    t_sort_cmp = prev;
+    t_sort_cmp_guest = prev_guest;
+}
+
+void *iosim_bsearch(const void *key, const void *base, size_t count,
+                    size_t size, void *compar)
+{
+    if (!base || !compar || count == 0 || size == 0)
+        return NULL;
+    void *prev = t_sort_cmp;
+    int prev_guest = t_sort_cmp_guest;
+    t_sort_cmp = compar;
+    t_sort_cmp_guest = iosim_arm64_is_guest_code(compar);
+    void *found = bsearch(key, base, count, size, sort_cmp_bridge);
+    t_sort_cmp = prev;
+    t_sort_cmp_guest = prev_guest;
+    return found;
+}
+
 #define SHIM(fn) { #fn, (void *)(uintptr_t)&shim_##fn }
 #define SHIM_ALIAS(nm, fn) { nm, (void *)(uintptr_t)&shim_##fn }
 #define SHIM_DIRECT(nm) { #nm, (void *)(uintptr_t)&nm }
@@ -1096,6 +1143,8 @@ static const struct iosim_shim shims[] = {
     SHIM_DIRECT(free),
     SHIM_DIRECT(strlen),
     SHIM_DIRECT(strcmp),
+    SHIM_EXPORT("qsort", qsort),
+    SHIM_EXPORT("bsearch", bsearch),
     SHIM_DIRECT(strncmp),
     SHIM_DIRECT(strcpy),
     SHIM_DIRECT(strncpy),
@@ -1217,6 +1266,72 @@ void *iosim_lookup_shim(const char *name)
     return NULL;
 }
 
+int iosim_shim_lookup_addr(void *addr, const char **name)
+{
+    if (!addr)
+        return 0;
+    for (size_t i = 0; i < sizeof(shims) / sizeof(shims[0]); i++)
+    {
+        if (shims[i].addr == addr)
+        {
+            if (name)
+                *name = shims[i].name;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+struct iosim_native_symbol {
+    void *addr;
+    char *name;
+};
+
+static struct iosim_native_symbol *g_native_symbols;
+static int g_native_count;
+static int g_native_cap;
+
+void iosim_native_symbol_note(void *addr, const char *name)
+{
+    if (!addr || !name)
+        return;
+    for (int i = 0; i < g_native_count; i++)
+        if (g_native_symbols[i].addr == addr)
+            return;
+    if (g_native_count == g_native_cap)
+    {
+        int cap = g_native_cap ? g_native_cap * 2 : 32;
+        struct iosim_native_symbol *n = realloc(g_native_symbols,
+                                                (size_t)cap * sizeof *n);
+        if (!n)
+            return;
+        g_native_symbols = n;
+        g_native_cap = cap;
+    }
+    char *copy = strdup(name);
+    if (!copy)
+        return;
+    g_native_symbols[g_native_count].addr = addr;
+    g_native_symbols[g_native_count].name = copy;
+    g_native_count++;
+}
+
+int iosim_native_symbol_lookup(void *addr, const char **name)
+{
+    if (!addr)
+        return 0;
+    for (int i = 0; i < g_native_count; i++)
+    {
+        if (g_native_symbols[i].addr == addr)
+        {
+            if (name)
+                *name = g_native_symbols[i].name;
+            return 1;
+        }
+    }
+    return 0;
+}
+
 void *objc_opt_class(void *obj)
 {
     return iosim_objc_normalize_class(obj);
@@ -1302,7 +1417,14 @@ void *_Block_copy(void *block)
     copy->flags = (copy->flags & ~IOSIM_BLOCK_REFCOUNT_MASK) |
                   IOSIM_BLOCK_IS_HEAP | 2;
     if ((b->flags & IOSIM_BLOCK_HAS_COPY_DISPOSE) && b->descriptor->copy)
-        b->descriptor->copy(copy, b);
+    {
+        /* The helper may be arm64 app code when the block came from an
+         * arm64 image; run it on the interpreter, otherwise call it. */
+        if (!iosim_arm64_call_guest((void *)b->descriptor->copy,
+                                    (uint64_t)(uintptr_t)copy,
+                                    (uint64_t)(uintptr_t)b))
+            b->descriptor->copy(copy, b);
+    }
     return copy;
 }
 
@@ -1364,7 +1486,12 @@ static struct iosim_block_byref *iosim_byref_copy(void *object)
                       IOSIM_BLOCK_BYREF_NEEDS_FREE | 4;
         src->forwarding = copy;
         if ((copy->flags & IOSIM_BLOCK_BYREF_HAS_COPY_DISPOSE) && copy->keep)
-            copy->keep(copy, src);
+        {
+            if (!iosim_arm64_call_guest((void *)copy->keep,
+                                        (uint64_t)(uintptr_t)copy,
+                                        (uint64_t)(uintptr_t)src))
+                copy->keep(copy, src);
+        }
         return copy;
     }
     if (forward->flags & IOSIM_BLOCK_BYREF_NEEDS_FREE)
@@ -1389,7 +1516,11 @@ static void iosim_byref_release(void *object)
         return;
     }
     if ((byref->flags & IOSIM_BLOCK_BYREF_HAS_COPY_DISPOSE) && byref->destroy)
-        byref->destroy(byref);
+    {
+        if (!iosim_arm64_call_guest((void *)byref->destroy,
+                                    (uint64_t)(uintptr_t)byref, 0))
+            byref->destroy(byref);
+    }
     free(byref);
 }
 

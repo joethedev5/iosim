@@ -10,6 +10,7 @@ struct iosim_context {
     char  *search_paths[64];
     int    npaths;
     char   main_dir[1024];
+    int    prefer_arm64;   /* load the arm64 slice of the main executable */
 };
 
 void iosim_context_init(struct iosim_context *ctx);
@@ -23,6 +24,12 @@ void iosim_context_add_path(struct iosim_context *ctx, const char *dir);
 struct iosim_image *iosim_context_load(struct iosim_context *ctx,
                                        const char *path,
                                        char *err, size_t errlen);
+
+/* Loads an additional dylib into the context (for an arm64 main executable
+ * whose link-time framework is not present as an arm64 binary). */
+struct iosim_image *iosim_context_load_dylib(struct iosim_context *ctx,
+                                             const char *path,
+                                             char *err, size_t errlen);
 
 /* Applies fixups to every loaded image. */
 int iosim_context_apply_fixups(struct iosim_context *ctx,

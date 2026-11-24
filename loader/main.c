@@ -1,6 +1,7 @@
 #define _GNU_SOURCE
 #include "context.h"
 #include "macho.h"
+#include "arm64.h"
 #include "shims.h"
 #include "objc_runtime.h"
 
@@ -29,7 +30,12 @@ static void usage(const char *prog)
         "  -v, --verbose        print image details\n"
         "      --imports        list chained imports and exit\n"
         "      --entry          print entry point and exit\n"
+        "      --arm64          load the arm64 slice of the main executable\n"
+        "      --inspect        map and register an image, print metadata,\n"
+        "                       then exit without running it\n"
         "      --dylib-path DIR add a dylib/framework search directory\n"
+        "      --load-dylib P  load an extra dylib (repeatable); used to\n"
+        "                       link an arm64 main against the x86 runtime\n"
         "  -h, --help           this help\n"
         "\n"
         "Environment: IOSIM_DYLIB_PATH (colon-separated search path)\n", prog);
@@ -54,6 +60,7 @@ static void print_image(struct iosim_image *img)
     printf("  preferred base: 0x%llx, slide: 0x%llx\n",
            (unsigned long long)img->preferred_base,
            (unsigned long long)(uint64_t)img->slide);
+    printf("  arch: %s\n", img->is_arm64 ? "arm64" : "x86_64");
     printf("  entry: 0x%llx %s%s\n", (unsigned long long)img->entry_addr,
            img->entry_name[0] ? img->entry_name : "(unknown)",
            img->entry_is_main ? " [main]" : " [crt]");
@@ -124,6 +131,9 @@ int main(int argc, char **argv)
 {
     const char *path = NULL;
     int verbose = 0, list_imports = 0, print_entry_only = 0;
+    int prefer_arm64 = 0, inspect = 0;
+    const char *preload[16];
+    int npreload = 0;
     int first_arg = 0;
     struct iosim_context ctx;
     iosim_context_init(&ctx);
@@ -136,8 +146,15 @@ int main(int argc, char **argv)
             list_imports = 1;
         else if (strcmp(argv[i], "--entry") == 0)
             print_entry_only = 1;
+        else if (strcmp(argv[i], "--arm64") == 0)
+            prefer_arm64 = 1;
+        else if (strcmp(argv[i], "--inspect") == 0)
+            inspect = 1;
         else if (strcmp(argv[i], "--dylib-path") == 0 && i + 1 < argc)
             iosim_context_add_path(&ctx, argv[++i]);
+        else if (strcmp(argv[i], "--load-dylib") == 0 && i + 1 < argc &&
+                 npreload < 16)
+            preload[npreload++] = argv[++i];
         else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0)
         {
             usage(argv[0]);
@@ -176,6 +193,8 @@ int main(int argc, char **argv)
         free(copy);
     }
 
+    ctx.prefer_arm64 = prefer_arm64;
+
     char err[1024] = {0};
     struct iosim_image *img = iosim_context_load(&ctx, path, err, sizeof(err));
     if (!img)
@@ -185,6 +204,16 @@ int main(int argc, char **argv)
         return 1;
     }
     img->verbose = verbose;
+
+    for (int i = 0; i < npreload; i++)
+    {
+        if (!iosim_context_load_dylib(&ctx, preload[i], err, sizeof(err)))
+        {
+            fprintf(stderr, "iosim: %s\n", err);
+            iosim_context_free(&ctx);
+            return 1;
+        }
+    }
 
     if (verbose)
     {
@@ -221,15 +250,23 @@ int main(int argc, char **argv)
 
     /* Prepare language-runtime data before any constructor runs: thread-local
      * thunks get their getter and per-image metadata, and Darwin pthread
-     * static initializers are translated to the host library's layout. */
+     * static initializers are translated to the host library's layout. arm64
+     * images have no x86_64 thunks yet. */
     for (int i = 0; i < ctx.nimages; i++)
-        iosim_tlv_setup_image(ctx.images[i]);
+        if (!ctx.images[i]->is_arm64)
+            iosim_tlv_setup_image(ctx.images[i]);
     iosim_normalize_pthread_objects(&ctx);
 
     /* dyld runs each image's initializer functions after fixups and before
      * entry; C++ executables depend on this for static constructors. */
     iosim_context_run_initializers(&ctx);
 
+    if (img->is_arm64 && inspect)
+    {
+        printf("arm64 image mapped; execution pending\n");
+        iosim_context_free(&ctx);
+        return 0;
+    }
     int guest_argc = argc - first_arg + 1;
     char **guest_argv = calloc((size_t)guest_argc + 1, sizeof(char *));
     if (!guest_argv)
@@ -271,6 +308,20 @@ int main(int argc, char **argv)
     iosim_environ = environ;
 
     char *apple[2] = { iosim_exec_path, NULL };
+
+    if (img->is_arm64)
+    {
+        if (!img->entry_is_main)
+        {
+            fprintf(stderr,
+                    "iosim: arm64: CRT entry points are not supported yet\n");
+            return 1;
+        }
+        int rc = arm64_run_main(img, guest_argc, guest_argv, environ, apple);
+        fflush(NULL);
+        return rc;
+    }
+
     void *entry = (void *)(uintptr_t)(img->entry_addr + img->slide);
 
     if (img->entry_is_main)

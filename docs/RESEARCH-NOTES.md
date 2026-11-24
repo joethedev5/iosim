@@ -1994,3 +1994,223 @@ components.
   for `SIMULATOR_UDID=<udid>` and SIGKILLs any remaining guest process.
 - The environment match identifies a device's processes exactly, so a
   shutdown never touches another device's guests or the host harness.
+
+## 2026-11-24: arm64 image mapping (milestone 0)
+
+- `iosim_image_load` now accepts `CPU_TYPE_ARM64` and records `is_arm64`;
+  `--arm64` selects the arm64 slice of a fat main executable while dylibs
+  keep the x86_64 slice (the reimplemented frameworks are x86_64).
+- arm64 initializers are skipped by `run_initializers`; TLV setup is skipped
+  for arm64 images. `--inspect` maps, fixes up and registers ObjC classes,
+  then exits without execution. A self-contained arm64 root-class fixture
+  (`tests/arm64_probe.m`) verifies the mapping and `objc: class Arm64Probe`.
+- Next: the AArch64 interpreter and the `objc_msgSend` bridge.
+
+## 2026-11-24: arm64 interpreter (milestone 1)
+
+- `loader/arm64.c` is a scalar AArch64 interpreter: x0-x30/sp/pc/nzcv,
+  movz/movn/movk, add/sub (immediate, shifted, extended), logical ops,
+  bitfield moves (LSL/LSR/ASR/UXT/SXT), branches, CSEL/CSINC, MADD/MSUB,
+  long multiplies, LDR/STR (unsigned, unscaled, pre/post), LDP/STP,
+  ADR/ADRP and LDR literal.
+- The loader calls `arm64_run_main` with the Darwin argument registers.
+  A branch that leaves every arm64 image is checked against a native gate
+  table; `objc_msgSend` reads x0/x1, resolves the IMP with the shared
+  runtime and enters an arm64 IMP with the original registers and return
+  address. Native IMPs and most C entry points still report unsupported.
+- Fixtures: `tests/arm64_exec.c` returns 46 through a loop and call;
+  `tests/arm64_msg_send.m` returns 42 from an arm64 class method reached by
+  objc_msgSend.
+
+## 2026-11-24: arm64 native method bridge
+
+- `objc_lookup_method_types` exposes the type encoding of the method that
+  would answer a selector. The interpreter parses it (return type, self,
+  _cmd, argument types with frame offsets) and maps each argument to the
+  arm64 GP/SSE registers, then calls `iosim_arm64_native_invoke` in
+  `loader/start.S`: a copy of the NSInvocation call gate that invokes a
+  native x86_64 IMP with rdi/rsi plus four GP and eight SSE registers.
+  rax/xmm0 return into x0/d0.
+- C gates now include objc_getClass and sel_registerName, and
+  `--load-dylib` preloads an x86 runtime framework for an arm64 main linked
+  with dynamic lookup. `tests/arm64_native.m` calls native NSString and
+  returns the string's length (5).
+- Still pending: stack arguments and aggregate (struct) arguments,
+  `objc_msgSendSuper2`, floating-point instruction coverage and the block
+  translator.
+
+## 2026-11-24: arm64 interpreter coverage and the callback bridge
+
+- Instruction coverage grew from Foundation stress fixtures. FMOV (immediate)
+  (`1e66b000`), the MOVI zero idiom (`0f/2f/4f/6f00e400`), 128-bit Q
+  register pairs in LDP/STP, and register-offset LDR/STR (including SXTW
+  index scaling) all execute now. LDRSB/LDRSH had their sign-extend
+  destination reversed (opc 2 extends to X, opc 3 to W); both the
+  unsigned-offset and unscaled forms are corrected, and integer stores use
+  XZR for Rt 31.
+- CBZ/CBNZ branched on the opposite condition: `(zero != nz)` was used as
+  the "don't branch" test, so every CBZ taken path and CBNZ fallthrough
+  were swapped. This is why the fast-enumeration loop in the Foundation
+  fixture was skipped. Fixed in `loader/arm64.c`.
+- `objc_msgSendSuper2` from arm64 enters the base-class IMP through
+  `objc_lookup_super_imp` (receiver in x0, original argument registers
+  untouched), and native IMPs through the same type-encoding bridge.
+- Native calls without a dedicated gate now go through a generic shim call:
+  `iosim_shim_lookup_addr` finds the shim for the resolved address and the
+  six-GP/eight-SSE `iosim_arm64_native_invoke` gate runs it. This makes the
+  ARC entry points, `_Block_copy`, byref helpers, `calloc`, `strtod`
+  (double return) and other plain C shims callable from arm64 code.
+- The reverse direction got its first bridge: block copy/dispose and
+  byref keep/destroy helpers are function pointers into the arm64 image,
+  so `_Block_copy`/`_Block_object_assign`/`_Block_object_dispose` now ask
+  `iosim_arm64_call_guest` to run them on a nested interpreter context
+  (fresh 8 MB stack, x0/x1 from the helper signature, x30 = 0 sentinel).
+  The interpreter also ends when any path returns to the sentinel, not
+  only when a RET does (a block helper tail-branches to
+  `_Block_object_dispose`).
+- Verified manually: an arm64 Foundation fixture parsing JSON and doubling
+  NSNumber values returns 28; fast enumeration over 4 NSNumbers plus a
+  directly invoked block returns 447; a super-call fixture returns 26
+  (`9 + 8 + 4 + 0 + 5`); an ARC fixture with `@autoreleasepool`, a copied
+  NSString, `__block` capture and a block copy returns 244. These should
+  become suite fixtures after the current suite finishes.
+
+## 2026-11-24: arm64 lazy block translator (milestone 2)
+
+- `loader/arm64_jit.c` translates a guest basic block into x86_64 in an
+  executable arena and caches it by guest address. The generated function
+  takes the shared `struct a64_cpu` in rdi, keeps it in rbx, and edits
+  register fields in place. Inline coverage: RET, B/BL, B.cond, CBZ/CBNZ,
+  TBZ/TBNZ, BR/BLR, MOVZ/MOVN/MOVK, ADR/ADRP, ADD/SUB immediate and
+  shifted/extended (flagless), logical shifted (flagless), UBFM/SBFM,
+  LDR/STR unsigned and unscaled/pre/post, LDP/STP, LDR literal, NOP, MOVI
+  zero, FMOV immediate/registers, FP LDR/STR unsigned, and FP arithmetic
+  (through helpers).
+- Flag-setting arithmetic, multiply, divide, CSEL, bitfield moves and FP
+  operations call C helpers that reuse the interpreter's decoding, so the
+  two paths cannot disagree about an instruction's meaning. Helper calls
+  are absolute indirect calls because the arena and the executable can be
+  more than 2 GB apart (a rel32 call cannot reach).
+- Anything else - NEON, atomics, aggregates - ends the block at that
+  instruction; the driver single-steps it with the interpreter and resumes
+  translating at the next address. `IOSIM_ARM64_NOJIT=1` forces pure
+  interpretation, and `IOSIM_ARM64_JIT_TRACE` prints translated blocks.
+- Bugs found and fixed while validating the translator against the
+  fixtures: the prologue copied rdi from rbx instead of rbx from rdi, the
+  arena was mapped without PROT_EXEC, B.cond passed the condition in edx
+  while the helper reads it from esi (so every conditional branch used the
+  NZCV word as its condition), and a store helper had been left
+  self-recursive by a mechanical edit.
+- The suite arm64 fixtures (mapping, message sends, native method bridge,
+  printf/FP, super sends, Foundation JSON, fast enumeration/blocks, ARC)
+  pass through the translator, and `tests/arm64_super.m` also runs with
+  `IOSIM_ARM64_NOJIT=1` so interpreter and translated output are compared.
+
+## 2026-11-24: 128-bit vector registers and a NEON subset
+
+- `struct a64_cpu` gained `dhi[32]`, the high 64 bits of each vector
+  register, so Q registers have a real 128-bit model while the scalar code
+  keeps using `d[]`. Every scalar FP write (FMOV, FP loads, arithmetic,
+  conversions, immediate forms) clears the high half, matching AArch64's
+  zeroing of the upper bits on a scalar write.
+- The interpreter now implements the AdvSIMD modified-immediate family
+  (MOVI with 8/16/32/64-bit lanes and vector FMOV immediates), vector ORR
+  (mov.16b / orr.8b), 4S floating-point FMLA/FADD/FSUB/FMUL, element
+  extraction (`mov s/d/h/b, v[n]`), and Q forms of LDR/STR and LDP/STP.
+- A clang -O2 vectorized float loop (sixteen elements, arrays far enough
+  apart to bypass the aliasing check) exercises that path and returns 288;
+  the x86_64 build of the same source returns 288 as well, and the arm64
+  run agrees with `IOSIM_ARM64_NOJIT=1`. The fixture also covers the
+  translator's fallback: NEON instructions end a translated block and are
+  single-stepped until vector code gets its own emitters.
+- Foundation containers got their own arm64 fixture: building a
+  mutable dictionary, enumerating `allKeys` with fast enumeration,
+  looking values up by key and appending to a mutable string returns 65
+  with `total=6 len=5`.
+
+## 2026-11-24: native-to-guest message bridge
+
+- A native x86_64 message send that resolves to an arm64 IMP cannot jump
+  to it. `objc_msgSend_lookup` now calls `iosim_arm64_msg_hook` before
+  returning an IMP; the hook checks that the IMP is in the arm64 image,
+  parses the method type encoding, and reconstructs the arm64 argument
+  registers from the trampoline's saved frame (rdi/rsi/rdx/rcx/r8/r9 at
+  frame[5..0], xmm0..7 at frame+0x30), then runs the IMP on a nested
+  interpreter context and writes x0/d0 into the trampoline's result
+  buffer as the forwarded-result sentinel expects.
+- Only scalar arguments and returns are marshalled; aggregate arguments or
+  returns fail with an explanatory message instead of jumping into arm64
+  code. The x86 frame provides at most four integer argument registers
+  beyond self/_cmd, so wider sends are rejected the same way.
+- `tests/arm64_reverse.m` (prepared for the suite) has an arm64 object
+  inheriting NSObject; native `-performSelector:withObject:` and
+  `-[NSMutableArray containsObject:]` send `hit:` and `isEqual:` back into
+  it. The fixture prints `c=1 hit=42` and exits 77 with and without the
+  block translator.
+
+## 2026-11-24: integer vector operations
+
+- A clang -O2 integer scaling loop vectorizes to `movi.4s`, `mla.4s`,
+  `add.4s`, `addv.4s` and horizontal reduce. The interpreter now handles
+  4S integer add/sub/mul/mla, ADDV to a scalar, and bitwise
+  AND/EOR/BIC/ORN over 16-byte registers (with Q=0 zeroing the upper half).
+  The arm64 run, its x86_64 build and `IOSIM_ARM64_NOJIT=1` all return the
+  same 424 (status 168).
+
+## 2026-11-24: atomics, SIMD literal loads and native C callbacks
+
+- Clang's default arm64-apple-ios18.0-simulator target emits LSE atomics
+  for the `__atomic` builtins: `ldaddal`/`ldclral`/`ldeoral`/`ldsetal`/
+  `swpal`/`casal` (with byte and halfword forms), `ldapr` for acquire
+  loads, `stlr`/`stlrb` for release stores and `dmb ish` fences.
+  `-march=armv8-a` still selects LSE for this triple, so the fixture
+  drives `ldxr`/`stxr` and `ldaxr`/`stlxr` through inline asm.
+- Interpreter decode: LSE family `0x3f200c00 == 0x38200000` (o3=1, opc=0
+  is SWP), CAS `0x3fa07c00 == 0x08a07c00`, LDAPR `0x3ffffc00 ==
+  0x38bfc000` (the base has bits 29-27 set, unlike the first guess),
+  LDXR/LDAXR `0x085f7c00`/`0x085ffc00`, STXR/STLXR `0x3fe0fc00 ==
+  0x08007c00`/`0x0800fc00`, LDAR/STLR `0x08dffc00`/`0x089ffc00`, and
+  barriers `0xfffff09f == 0xd503309f`. The guest is single-threaded under
+  the interpreter, so the operations are plain read-modify-write;
+  LDXR/STXR use a per-cpu monitor.
+- Logical immediates were missing entirely. `a64_bitmask_imm` implements
+  DecodeBitMasks (N:immr:imms, ROR within the element, replication) for
+  the 32- and 64-bit AND/ORR/EOR/ANDS forms; the atomics fixture needed
+  `and`/`eor #1` for boolean normalization.
+- A 128-bit SIMD literal load (`ldr q0, label`) appeared in a -O1
+  fixture initializing an int array; the FP literal handler now fills
+  both vector halves.
+- The FP unsigned-offset handler used `imm12 << size`, but the Q forms
+  encode the immediate scaled by 16 while their size field is 0. `ldr
+  q0, [sp, #0x30]` therefore read from `sp+3` and corrupted a printf
+  argument area; the scale is now 4 for the Q forms.
+- `qsort`/`bsearch` are shim entries backed by `iosim_qsort`/
+  `iosim_bsearch`; an arm64 comparator is called through a new
+  `iosim_arm64_call_guest_ret` (eight GP and eight FP arguments, x0/d0
+  results). The string comparator calls native `strcmp` from inside the
+  bridged call.
+- The arm64 printf gate now renders floating-point conversions from
+  their 8-byte Darwin stack slots, reusing the caller's flags and
+  precision.
+- Guest-internal struct ABI works without bridge changes: `{int,int}`
+  and an HFA `{float,float}` return in registers, and `{long,long,long}`
+  returns through the x8 result pointer. Cross-bridge struct returns
+  remain unsupported on both sides.
+
+## 2026-11-24: a real arm64 demo app
+
+- `demo/HelloSimApp.m` compiles with the arm64 simulator target and runs
+  with `--arm64` plus `--load-dylib` for Foundation, UIKit and QuartzCore.
+  It reached `UIApplicationMain`, but framework C exports are not loader
+  shims, so the call gate rejected the resolved address. Imports resolved
+  from native framework images (and the dlsym fallback) are now recorded in
+  an address map; the generic call gate calls them with the
+  six-GP/eight-SSE convention. `tests/arm64_framework_calls.c` exercises
+  `CACurrentMediaTime` (double return) and the accessibility queries.
+- The demo app then crashes when UIKit sends `-scale` to a corrupted
+  receiver: `[[UIScreen mainScreen] bounds]` returns a `CGRect`. The
+  arm64-to-x86_64 message bridge does not marshal aggregate returns (arm64
+  passes the buffer in x8; x86_64 uses a hidden pointer and shifts self/sel
+  into the next registers), so the call corrupts state and later sends see
+  a bogus isa. Cross-bridge struct returns are the next milestone needed
+  for real apps; guest-internal struct ABI already works.

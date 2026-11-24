@@ -57,8 +57,11 @@ static uint32_t read_be32(const uint8_t *p)
            ((uint32_t)p[2] << 8) | (uint32_t)p[3];
 }
 
-/* Returns 1 if the buffer is a fat Mach-O and the x86_64 slice was found. Returns 0 for a thin Mach-O. Returns -1 on error. */
-static int find_fat_slice(const uint8_t *buf, size_t len,
+/* Returns 1 if the buffer is a fat Mach-O and the requested slice was
+ * found, 0 for a thin Mach-O and -1 on error. The main executable can ask
+ * for arm64; every dylib keeps the x86_64 slice because the reimplemented
+ * frameworks are x86_64 images. */
+static int find_fat_slice(const uint8_t *buf, size_t len, int prefer_arm64,
                           size_t *slice_off, size_t *slice_len,
                           char *err, size_t errlen)
 {
@@ -101,11 +104,14 @@ static int find_fat_slice(const uint8_t *buf, size_t len,
             off  = read_be32(p + 8);
             size = read_be32(p + 12);
         }
-        if (cputype == (int32_t)CPU_TYPE_X86_64)
+        int32_t wanted = prefer_arm64 ? (int32_t)CPU_TYPE_ARM64
+                                      : (int32_t)CPU_TYPE_X86_64;
+        if (cputype == wanted)
         {
             if (off > len || size > len - off)
             {
-                set_err(err, errlen, "fat x86_64 slice out of bounds");
+                set_err(err, errlen, "fat %s slice out of bounds",
+                        prefer_arm64 ? "arm64" : "x86_64");
                 return -1;
             }
             *slice_off = (size_t)off;
@@ -114,7 +120,8 @@ static int find_fat_slice(const uint8_t *buf, size_t len,
         }
     }
 
-    set_err(err, errlen, "fat Mach-O has no x86_64 slice");
+    set_err(err, errlen, "fat Mach-O has no %s slice",
+            prefer_arm64 ? "arm64" : "x86_64");
     return -1;
 }
 
@@ -498,7 +505,7 @@ void *iosim_find_defined_symbol(struct iosim_image *img, const char *name)
 }
 
 int iosim_image_load(const char *path, struct iosim_image *img,
-                     char *err, size_t errlen)
+                     int prefer_arm64, char *err, size_t errlen)
 {
     memset(img, 0, sizeof(*img));
     snprintf(img->path, sizeof(img->path), "%s", path);
@@ -509,7 +516,8 @@ int iosim_image_load(const char *path, struct iosim_image *img,
         return -1;
 
     size_t slice_off = 0, slice_len = 0;
-    int fat = find_fat_slice(buf, len, &slice_off, &slice_len, err, errlen);
+    int fat = find_fat_slice(buf, len, prefer_arm64, &slice_off,
+                             &slice_len, err, errlen);
     if (fat < 0)
     {
         free(buf);
@@ -546,9 +554,12 @@ int iosim_image_load(const char *path, struct iosim_image *img,
                 path, img->hdr->magic);
         goto fail;
     }
-    if (img->hdr->cputype != (int32_t)CPU_TYPE_X86_64)
+    if (img->hdr->cputype == (int32_t)CPU_TYPE_ARM64)
+        img->is_arm64 = 1;
+    else if (img->hdr->cputype != (int32_t)CPU_TYPE_X86_64)
     {
-        set_err(err, errlen, "%s: unsupported cputype 0x%x (need x86_64)",
+        set_err(err, errlen,
+                "%s: unsupported cputype 0x%x (need x86_64 or arm64)",
                 path, (unsigned)img->hdr->cputype);
         goto fail;
     }

@@ -1,9 +1,21 @@
 # Running arm64 app binaries
 
-Status: **design note, not implemented.** The loader still rejects every
-non-x86_64 image (`loader/macho.c:549`), and nothing below executes today.
-This document records a method for lifting that limit without turning iosim
-into a full-system CPU emulator, and the milestones that would prove it.
+Status: **milestones 0-2 implemented in a first form.** The loader accepts
+arm64 images (`--arm64`), registers their Objective-C metadata, and runs
+them on the scalar interpreter with native framework calls (the
+type-encoding message bridge, `objc_msgSendSuper2`, a generic C shim gate,
+native-to-guest calls for block copy/byref helpers, a callback bridge
+used by `qsort`/`bsearch` comparators, and an address map for C functions
+exported by the preloaded native framework dylibs). A lazy block translator compiles
+basic blocks of the scalar subset to x86_64, caches them by guest address,
+and falls back to single-step interpretation for instructions without an
+inline form; `IOSIM_ARM64_NOJIT=1` selects the interpreter, and scalar
+native-to-guest ObjC message dispatches re-enter it through the reverse
+bridge. Atomics (LSE read-modify-write/CAS, LDAPR/LDAR/STLR, barriers and
+LDXR/STXR exclusives) and 128-bit SIMD literal loads are implemented.
+Broader NEON coverage, aggregate arguments and returns, persistent caches
+and JIT pages are the remaining work. This
+document records the method and the milestones that prove it.
 
 ## The constraint and the reframing
 

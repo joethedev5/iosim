@@ -1752,11 +1752,39 @@ Python for iteration speed.
   `stat`, `pthread`, `kqueue`, `mmap` flags and Mach traps need explicit
   translation.
 - No code signing, entitlements, sandbox or AMFI emulation.
-- arm64 binaries are rejected (fat containers are accepted only for x86_64
-  slices). A design for running arm64 application code without emulating the
-  system — translate app methods lazily at ObjC dispatch while framework
-  calls stay native x86_64 — is in `docs/ARM64-TRANSLATION.md`; it is a plan,
-  not an implementation.
+- arm64 executables are mapped, registered and executed by a scalar
+  AArch64 interpreter (`--arm64`): frames, loops, calls,
+  `objc_msgSend`/`objc_msgSendSuper2`, and native x86_64 method IMPs
+  reached through a type-encoding argument bridge. `--load-dylib` loads the
+  x86 runtime frameworks for an arm64 main that was linked with dynamic
+  lookup. Plain C shims without a dedicated gate go through a generic
+  six-GP/eight-SSE call bridge, which covers the ARC entry points and the
+  block runtime; block copy/dispose and byref keep/destroy helpers, which
+  are arm64 function pointers, run on a nested interpreter context when the
+  native block runtime calls back into the image. Fast enumeration and
+  Foundation objects work end to end. App code runs through a lazy block
+  translator: basic blocks of scalar instructions (moves, arithmetic, loads
+  and stores, branches, calls, FP moves and common FP operations) compile to
+  x86_64 and are cached by guest address; any instruction without an inline
+  form ends the block and is single-stepped by the interpreter, which keeps
+  it as the correctness oracle (`IOSIM_ARM64_NOJIT=1` forces pure
+  interpretation). The interpreter also models both halves of the 128-bit
+  vector registers and handles a first NEON subset (modified immediates,
+  vector ORR, 4S FMA/add/sub/mul, element extraction, Q loads/stores);
+  vector instructions currently end a translated block and run on the
+  interpreter; the subset also covers integer 4S add/sub/mul/mla, ADDV and
+  bitwise AND/EOR/BIC/ORN over 16-byte registers. Atomics cover the LSE
+  read-modify-write and CAS forms clang emits for the simulator target,
+  LDAPR/LDAR/STLR loads and stores, DMB/DSB/ISB barriers and LDXR/STXR
+  exclusives with a per-cpu monitor; 128-bit SIMD literal loads are
+  modelled too. Native `qsort`/`bsearch` shims call an arm64 comparator
+  back through a general native-to-guest C call bridge. The message-send
+  trampoline also has a reverse bridge: when
+  native x86_64 code sends to an arm64 IMP, the saved register frame is
+  marshalled per the method type encoding and the IMP runs on a nested
+  interpreter context. Struct arguments and returns, stack arguments, full
+  NEON and persistent translation are still pending; `--inspect` stops
+  after mapping. The design is in `docs/ARM64-TRANSLATION.md`.
 - The dyld shared cache is not parsed; each dylib is loaded from disk.
 - Class method dispatch covers the common path; dynamic resolution,
   `-forwardingTargetForSelector:`, `-forwardInvocation:` delivery and

@@ -174,7 +174,8 @@ static struct iosim_image *load_one(struct iosim_context *ctx,
         snprintf(err, errlen, "out of memory");
         return NULL;
     }
-    if (iosim_image_load(path, img, err, errlen) != 0)
+    if (iosim_image_load(path, img, is_main && ctx->prefer_arm64,
+                         err, errlen) != 0)
     {
         free(img);
         return NULL;
@@ -236,6 +237,27 @@ struct iosim_image *iosim_context_load(struct iosim_context *ctx,
     return load_one(ctx, use, 1, err, errlen);
 }
 
+struct iosim_image *iosim_context_load_dylib(struct iosim_context *ctx,
+                                             const char *path,
+                                             char *err, size_t errlen)
+{
+    char real[PATH_MAX];
+    const char *use = path;
+    if (realpath(path, real))
+        use = real;
+    return load_one(ctx, use, 0, err, errlen);
+}
+
+/* Records symbols an arm64 image imports from native framework images so
+ * the arm64 call gate can call them by address. */
+static void note_arm64_native_symbol(struct iosim_image *img,
+                                     struct iosim_image *provider,
+                                     const char *name, void *sym)
+{
+    if (img->is_arm64 && provider && !provider->is_arm64)
+        iosim_native_symbol_note(sym, name);
+}
+
 void *iosim_context_resolve(struct iosim_resolver *r, struct iosim_image *img,
                             const char *name, int lib_ordinal, int weak)
 {
@@ -248,7 +270,10 @@ void *iosim_context_resolve(struct iosim_resolver *r, struct iosim_image *img,
         {
             void *sym = iosim_find_defined_symbol(dep, name);
             if (sym)
+            {
+                note_arm64_native_symbol(img, dep, name, sym);
                 return sym;
+            }
         }
     }
 
@@ -262,7 +287,10 @@ void *iosim_context_resolve(struct iosim_resolver *r, struct iosim_image *img,
             continue;
         void *sym = iosim_find_defined_symbol(ctx->images[i], name);
         if (sym)
+        {
+            note_arm64_native_symbol(img, ctx->images[i], name, sym);
             return sym;
+        }
     }
 
     return iosim_default_resolve(r, img, name, lib_ordinal, weak);
@@ -297,6 +325,10 @@ void iosim_context_run_initializers(struct iosim_context *ctx)
     for (int i = ctx->nimages - 1; i >= 0; i--)
     {
         struct iosim_image *img = ctx->images[i];
+        /* arm64 initializer functions are arm64 code and wait for the
+         * translation layer. */
+        if (img->is_arm64)
+            continue;
         for (int s = 0; s < img->nsects; s++)
         {
             struct iosim_section *sec = &img->sects[s];

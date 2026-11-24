@@ -1206,6 +1206,475 @@ check "[proxy] value 64" "$out" \
     "the proxy's return value reaches the caller"
 check "[proxy] done" "$out" "the proxy fixture finishes"
 
+# ---------- 4f10m. arm64 image mapping ----------
+# The loader maps an arm64 Mach-O, registers the ObjC classes in it and
+# reports its entry without executing arm64 instructions.
+"$CC" -target arm64-apple-ios18.0-simulator -fobjc-runtime=ios-18.0 \
+    -fno-objc-arc -ffreestanding -O1 \
+    -c "$ROOT/tests/arm64_probe.m" -o "$T/arm64_probe.o"
+"$LD64" -arch arm64 -platform_version $PLATFORM -e _main \
+    -o "$T/arm64_probe" "$T/arm64_probe.o" -undefined dynamic_lookup
+out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" --arm64 --inspect -v \
+    "$T/arm64_probe" 2>&1)"
+check "arch: arm64" "$out" "the loader selects the arm64 slice"
+check "objc: class Arm64Probe" "$out" \
+    "the loader registers an arm64 image's ObjC class"
+check "arm64 image mapped; execution pending" "$out" \
+    "an inspected arm64 image is not executed"
+
+# ---------- 4f10n. arm64 execution ----------
+# The interpreter runs an arm64 main with a frame, loop and call, then an
+# arm64 ObjC class method reached through objc_msgSend.
+"$CC" -target arm64-apple-ios18.0-simulator -ffreestanding -O1 \
+    -c "$ROOT/tests/arm64_exec.c" -o "$T/arm64_exec.o"
+"$LD64" -arch arm64 -platform_version $PLATFORM -e _main \
+    -o "$T/arm64_exec" "$T/arm64_exec.o" -undefined dynamic_lookup
+if DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" --arm64 "$T/arm64_exec"; then
+    rc=0
+else
+    rc=$?
+fi
+if [ "$rc" -eq 46 ]; then
+    echo "ok   the arm64 interpreter runs a frame, loop and call"
+else
+    echo "FAIL arm64 exec (exit $rc)"; fails=$((fails+1))
+fi
+"$CC" -target arm64-apple-ios18.0-simulator \
+    -fobjc-runtime=ios-18.0 -fno-objc-arc -ffreestanding -O1 \
+    -c "$ROOT/tests/arm64_msg_send.m" -o "$T/arm64_msg_send.o"
+"$LD64" -arch arm64 -platform_version $PLATFORM -e _main \
+    -o "$T/arm64_msg_send" "$T/arm64_msg_send.o" -undefined dynamic_lookup
+if DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" --arm64 "$T/arm64_msg_send"; then
+    rc=0
+else
+    rc=$?
+fi
+if [ "$rc" -eq 42 ]; then
+    echo "ok   objc_msgSend reaches an arm64 class method"
+else
+    echo "FAIL arm64 msgSend (exit $rc)"; fails=$((fails+1))
+fi
+
+# ---------- 4f10o. arm64 native method bridge ----------
+# An arm64 main calls native Foundation: objc_getClass and
+# sel_registerName are C gates, and NSString's class and instance methods
+# are x86_64 IMPs whose arguments are marshalled by type encoding.
+"$CC" -target arm64-apple-ios18.0-simulator -ffreestanding -O1 \
+    -c "$ROOT/tests/arm64_native.m" -o "$T/arm64_native.o"
+"$LD64" -arch arm64 -platform_version $PLATFORM -e _main \
+    -o "$T/arm64_native" "$T/arm64_native.o" -undefined dynamic_lookup
+if DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" --arm64 \
+    --load-dylib \
+    "$ROOT/runtime/System/Library/Frameworks/Foundation.framework/Foundation" \
+    "$T/arm64_native"; then
+    rc=0
+else
+    rc=$?
+fi
+if [ "$rc" -eq 5 ]; then
+    echo "ok   an arm64 main calls native NSString through objc_msgSend"
+else
+    echo "FAIL arm64 native bridge (exit $rc)"; fails=$((fails+1))
+fi
+
+# ---------- 4f10p. arm64 printf and floating point ----------
+# The printf gate reads Darwin's stack variadic arguments; the FP path
+# covers literal loads, FMUL, the fused multiply-add and FCVTZS.
+"$CC" -target arm64-apple-ios18.0-simulator -ffreestanding -O1 \
+    -c "$ROOT/tests/arm64_hello.c" -o "$T/arm64_hello.o"
+"$LD64" -arch arm64 -platform_version $PLATFORM -e _main \
+    -o "$T/arm64_hello" "$T/arm64_hello.o" -undefined dynamic_lookup
+out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" --arm64 "$T/arm64_hello")"
+check "arm64 hello 42 ok" "$out" \
+    "an arm64 main prints stack variadic arguments"
+"$CC" -target arm64-apple-ios18.0-simulator -ffreestanding -O1 \
+    -c "$ROOT/tests/arm64_float.c" -o "$T/arm64_float.o"
+"$LD64" -arch arm64 -platform_version $PLATFORM -e _main \
+    -o "$T/arm64_float" "$T/arm64_float.o" -undefined dynamic_lookup
+if DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" --arm64 "$T/arm64_float"; then
+    rc=0
+else
+    rc=$?
+fi
+if [ "$rc" -eq 25 ]; then
+    echo "ok   the arm64 interpreter runs floating-point arithmetic"
+else
+    echo "FAIL arm64 float (exit $rc)"; fails=$((fails+1))
+fi
+
+# ---------- 4f10q. arm64 super sends and native C calls ----------
+# [super value] reaches GenBase through objc_msgSendSuper2, and plain C
+# shims (strlen, calloc/free, strtod, strncmp) use the generic native call
+# gate.
+"$CC" -target arm64-apple-ios18.0-simulator -fobjc-runtime=ios-18.0 \
+    -fno-objc-arc -ffreestanding -O1 \
+    -c "$ROOT/tests/arm64_super.m" -o "$T/arm64_super.o"
+"$LD64" -arch arm64 -platform_version $PLATFORM -e _main \
+    -o "$T/arm64_super" "$T/arm64_super.o" -undefined dynamic_lookup
+if out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" --arm64 \
+    "$T/arm64_super")"; then
+    rc=0
+else
+    rc=$?
+fi
+check "a=9 b=8 n=4 d=5 cmp=0" "$out" \
+    "an arm64 main calls a superclass method and C shims"
+if [ "$rc" -eq 26 ]; then
+    echo "ok   the arm64 super and C shim fixture returns 26"
+else
+    echo "FAIL arm64 super (exit $rc)"; fails=$((fails+1))
+fi
+if out_nj="$(IOSIM_ARM64_NOJIT=1 DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" \
+    --arm64 "$T/arm64_super")"; then
+    rc_nj=0
+else
+    rc_nj=$?
+fi
+if [ "$rc_nj" -eq 26 ] && [ "$out_nj" = "$out" ]; then
+    echo "ok   the arm64 interpreter and translated blocks agree"
+else
+    echo "FAIL arm64 interpreter parity (exit $rc_nj)"; fails=$((fails+1))
+fi
+
+# ---------- 4f10r. arm64 Foundation, enumeration and blocks ----------
+"$CC" -target arm64-apple-ios18.0-simulator -fobjc-runtime=ios-18.0 \
+    -fno-objc-arc -ffreestanding -O1 \
+    -c "$ROOT/tests/arm64_foundation.m" -o "$T/arm64_foundation.o"
+"$LD64" -arch arm64 -platform_version $PLATFORM -e _main \
+    -o "$T/arm64_foundation" "$T/arm64_foundation.o" -undefined dynamic_lookup
+"$CC" -target arm64-apple-ios18.0-simulator -fobjc-runtime=ios-18.0 \
+    -fno-objc-arc -fblocks -ffreestanding -O1 \
+    -c "$ROOT/tests/arm64_enum_blocks.m" -o "$T/arm64_enum_blocks.o"
+"$LD64" -arch arm64 -platform_version $PLATFORM -e _main \
+    -o "$T/arm64_enum_blocks" "$T/arm64_enum_blocks.o" -undefined dynamic_lookup
+FOUNDATION_DYLIB="$ROOT/runtime/System/Library/Frameworks/Foundation.framework/Foundation"
+if DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" --arm64 --load-dylib \
+    "$FOUNDATION_DYLIB" "$T/arm64_foundation"; then
+    rc=0
+else
+    rc=$?
+fi
+if [ "$rc" -eq 28 ]; then
+    echo "ok   an arm64 main parses JSON and doubles numbers through Foundation"
+else
+    echo "FAIL arm64 foundation (exit $rc)"; fails=$((fails+1))
+fi
+if out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" --arm64 --load-dylib \
+    "$FOUNDATION_DYLIB" "$T/arm64_enum_blocks")"; then
+    rc=0
+else
+    rc=$?
+fi
+check "n=4 total=47" "$out" \
+    "an arm64 main walks an NSArray with fast enumeration"
+if [ "$rc" -eq 191 ]; then
+    echo "ok   the arm64 enumeration fixture returns 447"
+else
+    echo "FAIL arm64 enumeration (exit $rc)"; fails=$((fails+1))
+fi
+
+# ---------- 4f10s. arm64 ARC and block copy helpers ----------
+"$CC" -target arm64-apple-ios18.0-simulator -fobjc-runtime=ios-18.0 \
+    -fobjc-arc -fblocks -ffreestanding -O1 \
+    -c "$ROOT/tests/arm64_arc.m" -o "$T/arm64_arc.o"
+"$LD64" -arch arm64 -platform_version $PLATFORM -e _main \
+    -o "$T/arm64_arc" "$T/arm64_arc.o" -undefined dynamic_lookup
+if out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" --arm64 --load-dylib \
+    "$FOUNDATION_DYLIB" "$T/arm64_arc")"; then
+    rc=0
+else
+    rc=$?
+fi
+check "v=82 w=77 r=85" "$out" \
+    "an ARC arm64 main retains objects and copies a __block block"
+if [ "$rc" -eq 244 ]; then
+    echo "ok   the arm64 ARC fixture returns 244"
+else
+    echo "FAIL arm64 ARC (exit $rc)"; fails=$((fails+1))
+fi
+
+# ---------- 4f10t. arm64 NEON and container round trip ----------
+# A clang -O2 loop vectorizes to NEON: 128-bit registers, vector
+# immediates, ORR, FMLA and element extraction. The same source is built
+# for x86_64 and both exit statuses must agree.
+"$CC" -target arm64-apple-ios18.0-simulator -ffreestanding -O2 \
+    -c "$ROOT/tests/arm64_vector.c" -o "$T/arm64_vector.o"
+"$LD64" -arch arm64 -platform_version $PLATFORM -e _main \
+    -o "$T/arm64_vector" "$T/arm64_vector.o" -undefined dynamic_lookup
+obj "$ROOT/tests/arm64_vector.c" "$T/arm64_vector_x.o"
+exe "$T/arm64_vector_x" "$T/arm64_vector_x.o"
+if DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" --arm64 "$T/arm64_vector"; then
+    rc_arm=0
+else
+    rc_arm=$?
+fi
+if DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/arm64_vector_x"; then
+    rc_x=0
+else
+    rc_x=$?
+fi
+if [ "$rc_arm" -eq "$rc_x" ] && [ "$rc_arm" -eq 32 ]; then
+    echo "ok   the arm64 NEON loop agrees with its x86_64 build"
+else
+    echo "FAIL arm64 NEON parity (arm64 $rc_arm, x86_64 $rc_x)"
+    fails=$((fails+1))
+fi
+if IOSIM_ARM64_NOJIT=1 DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" --arm64 \
+    "$T/arm64_vector"; then
+    rc_nj=0
+else
+    rc_nj=$?
+fi
+if [ "$rc_nj" -eq 32 ]; then
+    echo "ok   the arm64 NEON loop agrees with pure interpretation"
+else
+    echo "FAIL arm64 NEON interpreter (exit $rc_nj)"; fails=$((fails+1))
+fi
+
+"$CC" -target arm64-apple-ios18.0-simulator -ffreestanding -O2 \
+    -c "$ROOT/tests/arm64_matrix.c" -o "$T/arm64_matrix.o"
+"$LD64" -arch arm64 -platform_version $PLATFORM -e _main \
+    -o "$T/arm64_matrix" "$T/arm64_matrix.o" -undefined dynamic_lookup
+if DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" --arm64 "$T/arm64_matrix"; then
+    rc=0
+else
+    rc=$?
+fi
+if [ "$rc" -eq 43 ]; then
+    echo "ok   the arm64 matrix multiply fixture returns 43"
+else
+    echo "FAIL arm64 matrix (exit $rc)"; fails=$((fails+1))
+fi
+
+"$CC" -target arm64-apple-ios18.0-simulator -fobjc-runtime=ios-18.0 \
+    -fno-objc-arc -ffreestanding -O2 \
+    -c "$ROOT/tests/arm64_dict.m" -o "$T/arm64_dict.o"
+"$LD64" -arch arm64 -platform_version $PLATFORM -e _main \
+    -o "$T/arm64_dict" "$T/arm64_dict.o" -undefined dynamic_lookup
+if out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" --arm64 --load-dylib \
+    "$FOUNDATION_DYLIB" "$T/arm64_dict")"; then
+    rc=0
+else
+    rc=$?
+fi
+check "total=6 len=5" "$out" \
+    "an arm64 main enumerates a dictionary and builds a string"
+if [ "$rc" -eq 65 ]; then
+    echo "ok   the arm64 dictionary fixture returns 65"
+else
+    echo "FAIL arm64 dictionary (exit $rc)"; fails=$((fails+1))
+fi
+
+# ---------- 4f10u. arm64 methods reached from native code ----------
+# Foundation's -performSelector: and -isEqual: run as x86_64 code and send
+# messages back into the arm64 image; the reverse bridge marshals the saved
+# x86 registers per the method type encoding and returns the result.
+"$CC" -target arm64-apple-ios18.0-simulator -ffreestanding -O2 \
+    -c "$ROOT/tests/arm64_vector_int.c" -o "$T/arm64_vector_int.o"
+"$LD64" -arch arm64 -platform_version $PLATFORM -e _main \
+    -o "$T/arm64_vector_int" "$T/arm64_vector_int.o" -undefined dynamic_lookup
+obj "$ROOT/tests/arm64_vector_int.c" "$T/arm64_vector_int_x.o"
+exe "$T/arm64_vector_int_x" "$T/arm64_vector_int_x.o"
+if DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" --arm64 "$T/arm64_vector_int"; then
+    rc_arm=0
+else
+    rc_arm=$?
+fi
+if DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/arm64_vector_int_x"; then
+    rc_x=0
+else
+    rc_x=$?
+fi
+if [ "$rc_arm" -eq "$rc_x" ] && [ "$rc_arm" -eq 168 ]; then
+    echo "ok   the arm64 integer vector loop agrees with its x86_64 build"
+else
+    echo "FAIL arm64 integer vector parity (arm64 $rc_arm, x86_64 $rc_x)"
+    fails=$((fails+1))
+fi
+
+"$CC" -target arm64-apple-ios18.0-simulator -fobjc-runtime=ios-18.0 \
+    -fno-objc-arc -ffreestanding -O1 \
+    -c "$ROOT/tests/arm64_reverse.m" -o "$T/arm64_reverse.o"
+"$LD64" -arch arm64 -platform_version $PLATFORM -e _main \
+    -o "$T/arm64_reverse" "$T/arm64_reverse.o" -undefined dynamic_lookup
+if out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" --arm64 --load-dylib \
+    "$FOUNDATION_DYLIB" "$T/arm64_reverse")"; then
+    rc=0
+else
+    rc=$?
+fi
+check "c=1 hit=42" "$out" \
+    "native Foundation sends messages back to an arm64 object"
+if [ "$rc" -eq 77 ]; then
+    echo "ok   the arm64 reverse-message fixture returns 77"
+else
+    echo "FAIL arm64 reverse message (exit $rc)"; fails=$((fails+1))
+fi
+
+# ---------- 4f10v. arm64 atomics ----------
+# clang emits LSE read-modify-write and CAS forms, LDAPR acquire loads and
+# LDAR/STLR; the baseline fixture adds LL/SC exclusives. The x86_64 build
+# and pure interpretation must agree with the translated run.
+"$CC" -target arm64-apple-ios18.0-simulator -ffreestanding -O2 \
+    -c "$ROOT/tests/arm64_atomic.c" -o "$T/arm64_atomic.o"
+"$LD64" -arch arm64 -platform_version $PLATFORM -e _main \
+    -o "$T/arm64_atomic" "$T/arm64_atomic.o" -undefined dynamic_lookup
+obj "$ROOT/tests/arm64_atomic.c" "$T/arm64_atomic_x.o"
+exe "$T/arm64_atomic_x" "$T/arm64_atomic_x.o"
+if DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" --arm64 "$T/arm64_atomic"; then
+    rc_arm=0
+else
+    rc_arm=$?
+fi
+if DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/arm64_atomic_x"; then
+    rc_x=0
+else
+    rc_x=$?
+fi
+if [ "$rc_arm" -eq "$rc_x" ] && [ "$rc_arm" -eq 107 ]; then
+    echo "ok   the arm64 atomic fixture agrees with its x86_64 build"
+else
+    echo "FAIL arm64 atomic parity (arm64 $rc_arm, x86_64 $rc_x)"
+    fails=$((fails+1))
+fi
+if IOSIM_ARM64_NOJIT=1 DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" --arm64 \
+    "$T/arm64_atomic"; then
+    rc_nj=0
+else
+    rc_nj=$?
+fi
+if [ "$rc_nj" -eq 107 ]; then
+    echo "ok   the arm64 atomic fixture agrees with pure interpretation"
+else
+    echo "FAIL arm64 atomic interpreter (exit $rc_nj)"; fails=$((fails+1))
+fi
+
+# ---------- 4f10w. native C callbacks into arm64 ----------
+# qsort and bsearch run as native shims; their comparator is arm64 guest
+# code called back through the callback bridge, and the string comparator
+# calls the native strcmp from inside the bridged call.
+"$CC" -target arm64-apple-ios18.0-simulator -ffreestanding -O1 \
+    -c "$ROOT/tests/arm64_callback.c" -o "$T/arm64_callback.o"
+"$LD64" -arch arm64 -platform_version $PLATFORM -e _main \
+    -o "$T/arm64_callback" "$T/arm64_callback.o" -undefined dynamic_lookup
+obj "$ROOT/tests/arm64_callback.c" "$T/arm64_callback_x.o"
+exe "$T/arm64_callback_x" "$T/arm64_callback_x.o"
+if out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" --arm64 "$T/arm64_callback")"; then
+    rc_arm=0
+else
+    rc_arm=$?
+fi
+check "1 2 3 4 5" "$out" "an arm64 comparator sorts integers under native qsort"
+check "apple banana fig pear" "$out" \
+    "an arm64 comparator sorts strings and bsearch finds a key"
+if [ "$rc_arm" -eq 33 ]; then
+    echo "ok   the arm64 callback fixture returns 33"
+else
+    echo "FAIL arm64 callback (exit $rc_arm)"; fails=$((fails+1))
+fi
+if DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/arm64_callback_x"; then
+    rc_x=0
+else
+    rc_x=$?
+fi
+if [ "$rc_x" -eq 33 ]; then
+    echo "ok   the x86_64 callback fixture returns 33"
+else
+    echo "FAIL x86_64 callback (exit $rc_x)"; fails=$((fails+1))
+fi
+if IOSIM_ARM64_NOJIT=1 DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" --arm64 \
+    "$T/arm64_callback"; then
+    rc_nj=0
+else
+    rc_nj=$?
+fi
+if [ "$rc_nj" -eq 33 ]; then
+    echo "ok   the arm64 callback fixture agrees with pure interpretation"
+else
+    echo "FAIL arm64 callback interpreter (exit $rc_nj)"; fails=$((fails+1))
+fi
+
+# ---------- 4f10x. arm64 struct ABI and FP printf ----------
+# Small aggregates return in registers, a three-long struct through the
+# x8 result pointer, and an HFA of floats in d0/d1. printf renders a
+# variadic double from its stack slot.
+"$CC" -target arm64-apple-ios18.0-simulator -ffreestanding -O2 \
+    -c "$ROOT/tests/arm64_struct.c" -o "$T/arm64_struct.o"
+"$LD64" -arch arm64 -platform_version $PLATFORM -e _main \
+    -o "$T/arm64_struct" "$T/arm64_struct.o" -undefined dynamic_lookup
+obj "$ROOT/tests/arm64_struct.c" "$T/arm64_struct_x.o"
+exe "$T/arm64_struct_x" "$T/arm64_struct_x.o"
+if out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" --arm64 "$T/arm64_struct")"; then
+    rc_arm=0
+else
+    rc_arm=$?
+fi
+check "p=50 t=12 v=4.0" "$out" \
+    "an arm64 main passes and returns structs by value"
+if [ "$rc_arm" -eq 51 ]; then
+    echo "ok   the arm64 struct fixture returns 51"
+else
+    echo "FAIL arm64 struct ABI (exit $rc_arm)"; fails=$((fails+1))
+fi
+if out_x="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/arm64_struct_x")"; then
+    rc_x=0
+else
+    rc_x=$?
+fi
+check "p=50 t=12 v=4.0" "$out_x" \
+    "the x86_64 struct fixture prints the same values"
+if [ "$rc_x" -eq 51 ]; then
+    echo "ok   the x86_64 struct fixture returns 51"
+else
+    echo "FAIL x86_64 struct ABI (exit $rc_x)"; fails=$((fails+1))
+fi
+if IOSIM_ARM64_NOJIT=1 DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" --arm64 \
+    "$T/arm64_struct"; then
+    rc_nj=0
+else
+    rc_nj=$?
+fi
+if [ "$rc_nj" -eq 51 ]; then
+    echo "ok   the arm64 struct fixture agrees with pure interpretation"
+else
+    echo "FAIL arm64 struct interpreter (exit $rc_nj)"; fails=$((fails+1))
+fi
+
+# ---------- 4f10y. arm64 calls framework C functions ----------
+# CACurrentMediaTime and the accessibility queries are exported by the
+# native framework dylibs, not loader shims; the arm64 call gate resolves
+# them through the recorded native symbol map.
+"$CC" -target arm64-apple-ios18.0-simulator -ffreestanding -O1 \
+    -c "$ROOT/tests/arm64_framework_calls.c" -o "$T/arm64_framework_calls.o"
+"$LD64" -arch arm64 -platform_version $PLATFORM -e _main \
+    -o "$T/arm64_framework_calls" "$T/arm64_framework_calls.o" \
+    -undefined dynamic_lookup
+FW_ARGS="--load-dylib $ROOT/runtime/System/Library/Frameworks/Foundation.framework/Foundation --load-dylib $ROOT/runtime/System/Library/Frameworks/UIKit.framework/UIKit --load-dylib $ROOT/runtime/System/Library/Frameworks/QuartzCore.framework/QuartzCore"
+if out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" --arm64 $FW_ARGS \
+    "$T/arm64_framework_calls")"; then
+    rc=0
+else
+    rc=$?
+fi
+check "motion=0 voice=0" "$out" \
+    "an arm64 main calls C functions exported by framework dylibs"
+if [ "$rc" -eq 64 ]; then
+    echo "ok   the arm64 framework-call fixture returns 64"
+else
+    echo "FAIL arm64 framework calls (exit $rc)"; fails=$((fails+1))
+fi
+if IOSIM_ARM64_NOJIT=1 DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" --arm64 \
+    $FW_ARGS "$T/arm64_framework_calls" >/dev/null; then
+    rc_nj=0
+else
+    rc_nj=$?
+fi
+if [ "$rc_nj" -eq 64 ]; then
+    echo "ok   the arm64 framework-call fixture agrees with pure interpretation"
+else
+    echo "FAIL arm64 framework calls interpreter (exit $rc_nj)"; fails=$((fails+1))
+fi
+
 # ---------- 4f11. CAAnimation completion and fill modes ----------
 rm -f "$T/arem.fifo"
 mkfifo "$T/arem.fifo"

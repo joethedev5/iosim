@@ -9,8 +9,15 @@ void iosim_objc_register_image(struct iosim_image *img);
 void iosim_objc_dump(void);
 
 void *objc_lookup_imp(void *obj, void *sel);
+const char *objc_lookup_method_types(void *obj, void *sel);
 void *objc_msgSend_lookup(void *obj, void *sel, void **receiver_out,
                           void *frame, void *result_out);
+
+/* Set by the arm64 runtime. When a native x86_64 message send resolves to
+ * an arm64 IMP, the hook runs it on the interpreter, writes the scalar
+ * result into the trampoline's result buffer and returns nonzero. */
+extern int (*iosim_arm64_msg_hook)(void *imp, void *self, void *sel,
+                                   void *frame, void *result);
 void *objc_msgSend(void *self, void *sel, ...);
 void *objc_msgSendSuper2(void *super_ptr, void *sel, ...);
 void *objc_msgSend_stret(void *stret_addr, void *self, void *sel, ...);

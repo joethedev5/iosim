@@ -83,14 +83,22 @@ void *iosim_default_resolve(struct iosim_resolver *res, struct iosim_image *img,
 
     void *sym = dlsym(RTLD_DEFAULT, name);
     if (sym)
+    {
+        if (img && img->is_arm64)
+            iosim_native_symbol_note(sym, name);
         return sym;
+    }
 
     /* Some Darwin private symbols have two leading underscores in C. */
     if (name[0] == '_')
     {
         sym = dlsym(RTLD_DEFAULT, name + 1);
         if (sym)
+        {
+            if (img && img->is_arm64)
+                iosim_native_symbol_note(sym, name);
             return sym;
+        }
     }
 
     if (weak)
