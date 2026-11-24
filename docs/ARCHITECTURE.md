@@ -464,9 +464,14 @@ the owning view's coordinates.
 `CAGradientLayer.type` selects axial (the default) or radial rendering; radial
 gradients sample the stop table per pixel from `startPoint` outward to the
 radius given by `endPoint`, then reuse the rounded-mask offscreen path.
-`NSAttributedString` keeps its string and one attribute dictionary;
-`UILabel` and `UIButton` read the font and foreground color from that
-dictionary and render the plain string. A single-line label shrinks its font
+`NSAttributedString` keeps its string plus a run list whose entries record
+a location, length and attribute dictionary. `NSMutableAttributedString`
+splits runs when a ranged `addAttribute`/`addAttributes`/`setAttributes`
+partly covers one, merges additions into the overlapped region, shifts runs
+across character replacement and appends another attributed string's runs
+with a new offset; `attributesAtIndex:effectiveRange:` returns the covering
+run and its range. `UILabel` and `UIButton` read the font and foreground
+color from the first attribute dictionary and render the plain string. A single-line label shrinks its font
 only when `adjustsFontSizeToFitWidth` is set, in half-point steps down to
 `minimumScaleFactor` (or 1 pt when it is zero), and otherwise truncates
 according to `lineBreakMode`: clipping keeps the string, while head, tail and

@@ -1242,6 +1242,61 @@ else
     echo "FAIL diffable collection data source"; echo "$report"; fails=$((fails+1))
 fi
 
+# ---------- 4f18. Attributed string attribute runs ----------
+"$ROOT/tools/build_app.sh" "$ROOT/tests/attributed_runs_test.m" \
+    "$T/attributed_runs_test" >/dev/null
+out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/attributed_runs_test" 2>&1)"
+check "[arun] done" "$out" "the attributed run fixture runs"
+if report="$(python3 - "$out" <<'PY'
+import re
+import sys
+
+lines = sys.argv[1].splitlines()
+want = [
+    r'\[arun\] first 0 5 1',
+    r'\[arun\] second 5 5 1',
+    r'\[arun\] split1 0 2 1',
+    r'\[arun\] split2 2 3 1',
+    r'\[arun\] split3 6 4 1 1',
+    r'\[arun\] replaced 8 2 1',
+]
+for pattern in want:
+    if not any(re.fullmatch(pattern, line) for line in lines):
+        raise SystemExit('missing attribute run line: ' + pattern)
+print("ok   attribute runs split and report effective ranges")
+PY
+)"; then
+    echo "$report"
+else
+    echo "FAIL attributed run ranges"; echo "$report"; fails=$((fails+1))
+fi
+if report="$(python3 - "$out" <<'PY'
+import re
+import sys
+
+lines = sys.argv[1].splitlines()
+want = [
+    r'\[arun\] length 8',
+    r'\[arun\] string HeXYorld',
+    r'\[arun\] edit1 0 2 1',
+    r'\[arun\] edit2 1 1',
+    r'\[arun\] edit3 1',
+    r'\[arun\] append 10 HeXYorld!!',
+    r'\[arun\] tail 8 2 1',
+    r'\[arun\] copy 4 2 1',
+    r'\[arun\] immutable 0 3 1',
+]
+for pattern in want:
+    if not any(re.fullmatch(pattern, line) for line in lines):
+        raise SystemExit('missing attributed edit line: ' + pattern)
+print("ok   replacement, appending and copies shift attribute runs")
+PY
+)"; then
+    echo "$report"
+else
+    echo "FAIL attributed run edits"; echo "$report"; fails=$((fails+1))
+fi
+
 # ---------- 4g. NSCalendar components ----------
 "$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
     -ffreestanding -O1 -I "$ROOT/frameworks" \

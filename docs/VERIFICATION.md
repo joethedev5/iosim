@@ -1833,6 +1833,18 @@ screenshot for the
 magenta image, green configuration background, dark field background and the
 white pixels of the text layer's string.
 
+### Foundation: attributed string attribute runs
+
+`tests/attributed_runs_test.m` colors `HelloWorld` red through index 4 and
+blue from index 5, then adds a bold 20 pt font over indices 2-5. The added
+attributes split the red run into `(0,2)` and `(2,3)` and the blue run into
+`(6,4)`; the fixture prints those effective ranges and the surviving colors.
+A green `setAttributes:` over indices 8-9 produces `(8,2)`. Replacing
+characters 2-5 with `XY` yields `HeXYorld`, keeps the inserted text's red
+font attributes, and shifts the later runs; appending a two-character blue
+attributed string extends the text to length 10 with a `(8,2)` blue tail, and
+an immutable copy reports the same runs.
+
 ### Page view controllers
 
 `tests/pageview_test.m` installs a scroll-style horizontal page controller as a

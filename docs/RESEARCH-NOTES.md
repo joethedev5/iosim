@@ -1413,3 +1413,20 @@ components.
 - The fixture round-trips a mutated snapshot through a table (one section,
   two rows, cell text `a1`) and a collection (one section, three items,
   0:2 -> `g3`, registered reuse identifier present).
+
+## 2026-11-24: Attributed string attribute runs
+
+- `NSAttributedString` now carries a run list in `_runs`: each run is a
+  mutable dictionary with a location, length and attribute dictionary. The
+  immutable single-dictionary form stays as the fallback when no runs exist.
+- Ranged `addAttribute:value:range:`, `addAttributes:range:` and
+  `setAttributes:range:` split partially covered runs into prefix, merged
+  (or replaced) overlap and suffix pieces. Additions merge into the existing
+  run attributes; set replaces them.
+- Character replacement rebuilds the run list over the new length: surviving
+  prefixes and suffixes keep their attributes, inserted characters inherit
+  the attributes at the replacement start, and later runs shift by the length
+  delta. Appending copies the other string's runs with a shifted location, or
+  extends a single attribute dictionary across the appended text.
+- `UILabel` still renders the plain string with the first run's font and
+  color; per-run drawing in the label renderer remains future work.

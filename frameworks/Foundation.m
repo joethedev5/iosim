@@ -1881,6 +1881,170 @@ static id character_set_from_cstr(const char *chars)
 }
 @end
 
+static id mutable_attribute_copy(id attributes)
+{
+    NSMutableDictionary *copy = [NSMutableDictionary dictionary];
+    if (!attributes)
+        return copy;
+    NSArray *keys = [attributes allKeys];
+    for (unsigned long i = 0; i < [keys count]; i++)
+    {
+        id key = [keys objectAtIndex:i];
+        [copy setObject:[attributes objectForKey:key] forKey:key];
+    }
+    return copy;
+}
+
+static NSMutableDictionary *attributed_run_make(unsigned long location,
+                                                unsigned long length,
+                                                id attributes)
+{
+    NSMutableDictionary *run = [NSMutableDictionary dictionary];
+    [run setObject:[NSNumber numberWithInteger:(long)location] forKey:@"loc"];
+    [run setObject:[NSNumber numberWithInteger:(long)length] forKey:@"len"];
+    [run setObject:(attributes ? attributes : [NSDictionary dictionary])
+            forKey:@"attrs"];
+    return run;
+}
+
+static unsigned long attributed_run_location(id run)
+{
+    return (unsigned long)[(NSNumber *)[run objectForKey:@"loc"] integerValue];
+}
+
+static unsigned long attributed_run_length(id run)
+{
+    return (unsigned long)[(NSNumber *)[run objectForKey:@"len"] integerValue];
+}
+
+static id attributed_run_attributes(id run)
+{
+    return [run objectForKey:@"attrs"];
+}
+
+static id attributed_attributes_from_runs(NSArray *runs, unsigned long index,
+                                          NSRange *range, id fallback,
+                                          unsigned long length)
+{
+    if (runs && [runs count] > 0)
+    {
+        for (unsigned long i = 0; i < [runs count]; i++)
+        {
+            id run = [runs objectAtIndex:i];
+            unsigned long location = attributed_run_location(run);
+            unsigned long runLength = attributed_run_length(run);
+            if (index >= location && index < location + runLength)
+            {
+                if (range)
+                    *range = NSMakeRange(location, runLength);
+                return attributed_run_attributes(run);
+            }
+        }
+        if (index == length)
+        {
+            id last = [runs lastObject];
+            if (range)
+                *range = NSMakeRange(length, 0);
+            return attributed_run_attributes(last);
+        }
+    }
+    if (range)
+        *range = NSMakeRange(0, length);
+    return fallback ? fallback : [NSDictionary dictionary];
+}
+
+static void attributed_runs_apply(id *runs, unsigned long length,
+                                  NSRange range, id attributes, int replace)
+{
+    if (!runs)
+        return;
+    if (!*runs)
+        *runs = [[NSMutableArray alloc] init];
+    if (range.location > length)
+        range.location = length;
+    if (range.location + range.length > length)
+        range.length = length - range.location;
+    if (range.length == 0 || !attributes)
+        return;
+    unsigned long start = range.location;
+    unsigned long end = start + range.length;
+    NSMutableArray *next = [NSMutableArray array];
+    NSArray *current = (NSArray *)*runs;
+    for (unsigned long i = 0; i < [current count]; i++)
+    {
+        id run = [current objectAtIndex:i];
+        unsigned long location = attributed_run_location(run);
+        unsigned long runLength = attributed_run_length(run);
+        unsigned long runEnd = location + runLength;
+        id runAttributes = attributed_run_attributes(run);
+        if (runEnd <= start || location >= end)
+        {
+            [next addObject:run];
+            continue;
+        }
+        if (location < start)
+            [next addObject:attributed_run_make(location, start - location,
+                                                runAttributes)];
+        id merged = replace ? mutable_attribute_copy(attributes)
+                            : mutable_attribute_copy(runAttributes);
+        if (!replace)
+        {
+            NSArray *keys = [attributes allKeys];
+            for (unsigned long k = 0; k < [keys count]; k++)
+            {
+                id key = [keys objectAtIndex:k];
+                [(NSMutableDictionary *)merged
+                    setObject:[attributes objectForKey:key] forKey:key];
+            }
+        }
+        unsigned long overlapStart = location > start ? location : start;
+        unsigned long overlapEnd = runEnd < end ? runEnd : end;
+        [next addObject:attributed_run_make(overlapStart,
+                                            overlapEnd - overlapStart,
+                                            merged)];
+        if (runEnd > end)
+            [next addObject:attributed_run_make(end, runEnd - end,
+                                                runAttributes)];
+    }
+    *runs = next;
+}
+
+static void attributed_runs_rebuild(id *runs, unsigned long oldLength,
+                                    NSRange range, unsigned long inserted)
+{
+    if (!runs || !*runs)
+        return;
+    unsigned long newLength = oldLength - range.length + inserted;
+    NSMutableArray *next = [NSMutableArray array];
+    for (unsigned long i = 0; i < newLength; i++)
+    {
+        unsigned long source;
+        if (i < range.location)
+            source = i;
+        else if (i < range.location + inserted)
+            source = range.location;
+        else
+            source = i - inserted + range.length;
+        if (oldLength == 0)
+            source = 0;
+        else if (source >= oldLength)
+            source = oldLength - 1;
+        NSRange effective;
+        id attrs = attributed_attributes_from_runs((NSArray *)*runs, source,
+                                                   &effective, nil, oldLength);
+        id last = [next count] > 0 ? [next lastObject] : nil;
+        if (last && attributed_run_attributes(last) == attrs)
+        {
+            [last setObject:[NSNumber numberWithInteger:
+                                 (long)(attributed_run_length(last) + 1)]
+                     forKey:@"len"];
+        }
+        else
+            [next addObject:attributed_run_make(i, 1, attrs)];
+    }
+    *runs = next;
+}
+
 @implementation NSAttributedString
 - (id)initWithString:(id)string
 {
@@ -1896,82 +2060,124 @@ static id character_set_from_cstr(const char *chars)
         _attributes = attributes;
     return self;
 }
+- (id)initWithAttributedString:(id)other
+{
+    self = [self initWithString:other ? [other string] : nil];
+    if (self && other)
+    {
+        NSAttributedString *source = (NSAttributedString *)other;
+        _attributes = source->_attributes;
+        if (source->_runs)
+        {
+            NSMutableArray *copy = [NSMutableArray array];
+            NSArray *runs = (NSArray *)source->_runs;
+            for (unsigned long i = 0; i < [runs count]; i++)
+            {
+                id run = [runs objectAtIndex:i];
+                [copy addObject:attributed_run_make(
+                                    attributed_run_location(run),
+                                    attributed_run_length(run),
+                                    attributed_run_attributes(run))];
+            }
+            _runs = copy;
+        }
+    }
+    return self;
+}
 - (id)string { return _string; }
 - (unsigned long)length { return _string ? [_string length] : 0; }
-- (id)attributesAtIndex:(unsigned long)index effectiveRange:(NSRange *)range
+- (id)attributesAtIndex:(unsigned long)index
+         effectiveRange:(NSRange *)range
 {
-    (void)index;
-    if (range)
-        *range = NSMakeRange(0, [self length]);
-    return _attributes ? _attributes : [NSDictionary dictionary];
+    return attributed_attributes_from_runs((NSArray *)_runs, index, range,
+                                           _attributes, [self length]);
+}
+- (id)attribute:(id)name atIndex:(unsigned long)index
+    effectiveRange:(NSRange *)range
+{
+    id attributes = [self attributesAtIndex:index effectiveRange:range];
+    return attributes ? [attributes objectForKey:name] : nil;
 }
 @end
-
-static id mutable_attribute_copy(id attributes)
-{
-    NSMutableDictionary *copy = [NSMutableDictionary dictionary];
-    if (!attributes)
-        return copy;
-    NSArray *keys = [attributes allKeys];
-    for (unsigned long i = 0; i < [keys count]; i++)
-    {
-        id key = [keys objectAtIndex:i];
-        [copy setObject:[attributes objectForKey:key] forKey:key];
-    }
-    return copy;
-}
 
 @implementation NSMutableAttributedString
 - (id)initWithString:(id)string
 {
     self = [super initWithString:string];
     if (self)
-        _attributes = [NSMutableDictionary dictionary];
+        _runs = [[NSMutableArray alloc] init];
+    if (self && [self length] > 0)
+        [(NSMutableArray *)_runs addObject:attributed_run_make(
+                                              0, [self length], nil)];
     return self;
 }
 - (id)initWithString:(id)string attributes:(id)attributes
 {
-    self = [super initWithString:string];
-    if (self)
-        _attributes = mutable_attribute_copy(attributes);
+    self = [self initWithString:string];
+    if (self && [self length] > 0)
+    {
+        [(NSMutableArray *)_runs removeAllObjects];
+        [(NSMutableArray *)_runs addObject:attributed_run_make(
+                                              0, [self length], attributes)];
+    }
     return self;
 }
 - (void)addAttribute:(id)name value:(id)value range:(NSRange)range
 {
-    (void)range;
-    if (!_attributes)
-        _attributes = [NSMutableDictionary dictionary];
-    [(NSMutableDictionary *)_attributes setObject:value forKey:name];
+    if (!name || !value)
+        return;
+    NSDictionary *addition = [NSDictionary dictionaryWithObjectsAndKeys:
+                                  value, name, nil];
+    attributed_runs_apply(&_runs, [self length], range, addition, 0);
 }
 - (void)addAttributes:(id)attributes range:(NSRange)range
 {
-    (void)range;
-    if (!_attributes)
-        _attributes = [NSMutableDictionary dictionary];
-    NSArray *keys = [attributes allKeys];
-    for (unsigned long i = 0; i < [keys count]; i++)
-    {
-        id key = [keys objectAtIndex:i];
-        [(NSMutableDictionary *)_attributes
-            setObject:[attributes objectForKey:key] forKey:key];
-    }
+    attributed_runs_apply(&_runs, [self length], range, attributes, 0);
 }
 - (void)setAttributes:(id)attributes range:(NSRange)range
 {
-    (void)range;
-    _attributes = mutable_attribute_copy(attributes);
+    attributed_runs_apply(&_runs, [self length], range, attributes, 1);
 }
 - (void)replaceCharactersInRange:(NSRange)range withString:(id)string
 {
+    unsigned long length = [self length];
+    if (range.location > length)
+        range.location = length;
+    if (range.location + range.length > length)
+        range.length = length - range.location;
+    unsigned long inserted = string ? [string length] : 0;
     _string = [_string stringByReplacingCharactersInRange:range
-                                               withString:string];
+                                               withString:(string ? string : @"")];
+    attributed_runs_rebuild(&_runs, length, range, inserted);
 }
 - (void)appendAttributedString:(id)other
 {
     if (!other)
         return;
-    _string = _string ? [_string stringByAppendingString:[other string]]
-                      : [other string];
+    unsigned long oldLength = [self length];
+    id appended = [other string];
+    unsigned long appendedLength = [other length];
+    _string = _string ? [_string stringByAppendingString:appended] : appended;
+    if (!_runs)
+        _runs = [[NSMutableArray alloc] init];
+    NSAttributedString *source = (NSAttributedString *)other;
+    if (source->_runs)
+    {
+        NSArray *runs = (NSArray *)source->_runs;
+        for (unsigned long i = 0; i < [runs count]; i++)
+        {
+            id run = [runs objectAtIndex:i];
+            [(NSMutableArray *)_runs addObject:attributed_run_make(
+                    oldLength + attributed_run_location(run),
+                    attributed_run_length(run),
+                    attributed_run_attributes(run))];
+        }
+    }
+    else if (appendedLength > 0)
+    {
+        [(NSMutableArray *)_runs addObject:attributed_run_make(
+                oldLength, appendedLength, source->_attributes)];
+    }
 }
 @end
 

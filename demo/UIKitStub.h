@@ -82,13 +82,17 @@ __attribute__((objc_root_class))
 @interface NSAttributedString : NSObject
 - (id)initWithString:(id)string;
 - (id)initWithString:(id)string attributes:(id)attributes;
+- (id)initWithAttributedString:(id)other;
 - (id)string;
 - (unsigned long)length;
 - (id)attributesAtIndex:(unsigned long)index effectiveRange:(NSRange *)range;
+- (id)attribute:(id)name atIndex:(unsigned long)index
+    effectiveRange:(NSRange *)range;
 @end
 
 @interface NSMutableAttributedString : NSAttributedString
 - (id)initWithString:(id)string;
+- (id)initWithString:(id)string attributes:(id)attributes;
 - (void)addAttribute:(id)name value:(id)value range:(NSRange)range;
 - (void)addAttributes:(id)attributes range:(NSRange)range;
 - (void)setAttributes:(id)attributes range:(NSRange)range;
