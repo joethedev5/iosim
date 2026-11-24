@@ -88,6 +88,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | Objective-C runtime method swizzling (`method_exchangeImplementations`, `class_replaceMethod`, `method_setImplementation`) through pointer-keyed overrides over read-only method lists, plus `class_getClassMethod`, `class_respondsToSelector` and `class_copyMethodList` | ✅ |
 | `NSMethodSignature` and `NSInvocation` with per-argument storage and a register-level invoke helper (integer, floating, object and pointer arguments; struct and stack arguments are rejected), plus NSObject `methodSignatureForSelector:` and `forwardInvocation:` defaults | ✅ |
 | `-forwardInvocation:` delivery from the message-send trampoline: the saved argument registers and stack arguments become an NSInvocation, and the invocation's return value is returned to the original caller | ✅ |
+| `NSProxy` as a second root class with the forwarding hooks, `isProxy`, proxy class checks and a proxy termination message | ✅ |
 | ARC entry points (`objc_storeStrong`, the weak family, `objc_retainBlock`, the autoreleased-return family), so ARC-compiled code runs; objects are never freed, so weak slots do not zero | ✅ |
 | Mach-O initializers (`__init_offsets`, `__mod_init_func`), thread-local variables, Darwin pthread normalization | ✅ |
 | Darwin ABI translation: `stat$INODE64`, `open` flags, signals, CommonCrypto, `dispatch_data` | ✅ |
@@ -102,7 +103,7 @@ runners**, combined with the public Darling and Apple dyld sources.
 | Application/scene lifecycle callbacks, notifications, UIApplication state and a background execution window for `beginBackgroundTaskWithExpirationHandler:` | ✅ |
 | App switcher: bottom-edge gestures, cached frames, animated card strip, resume, swipe-up kill | ✅ |
 | Multi-page home screen: 16-slot pages, page dots, horizontal swipe paging with a slide animation | ✅ |
-| Home-screen folders: drag to group apps, member launch, title rename, persisted across boots | ✅ |
+| Home-screen folders: drag to group apps, member launch, title rename, twelve-slot pages with pagination dots and swipe paging, persisted across boots | ✅ |
 | Home-screen icon drag: lifted ghost, edge page turns, cross-page drop and a persisted layout | ✅ |
 | Lock screen: date and clock, lock/unlock, apps suspend on lock and resume in place | ✅ |
 | Spotlight search: pill opens a keyboard-driven search over installed apps | ✅ |

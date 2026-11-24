@@ -1950,3 +1950,38 @@ components.
   loads into rax/xmm0 through a sentinel IMP check.
 - Struct and array arguments and struct returns are not captured and fall
   back to doesNotRecognizeSelector:. Exceptions remain unsupported.
+
+## 2026-11-24: NSProxy
+
+- Foundation now provides `NSProxy` as a second root class with its own isa
+  layout, allocation, class/member checks, `isProxy`, forwarding hooks and a
+  proxy-specific `doesNotRecognizeSelector:` message. It is not an NSObject
+  subclass, matching real Foundation.
+- With `-forwardInvocation:` delivery in place, an NSProxy subclass that
+  answers `-methodSignatureForSelector:` receives absent selectors through
+  `-forwardInvocation:` and supplies return values via its NSInvocation.
+
+## 2026-11-24: Folder pagination
+
+- An open folder holds up to 24 members and shows twelve slots (four columns
+  by three rows) per page. `g_folder_page` limits drawing and hit testing to
+  the current page; opening a folder resets to page one.
+- With more than one page, pagination dots are drawn near the card's bottom
+  edge (selected white, others gray), and a horizontal swipe in the folder
+  overlay changes the page and logs `folder page N of M`.
+- A folder's grid tile occupies its first member's entry: the Tools folder's
+  first member by install order is `com.iosim.fixture`, so the tile is page 1
+  row 1 column 3 (339.8333, 222.1667), not the page a previous folder test
+  left open. A thirteen-member folder also collapses twelve grid slots, so
+  the test saves and restores `folders.txt`, reboots and returns to the third
+  home page; later sections tap fixed slots computed from that layout.
+
+## 2026-11-24: Folder page turns live in the folder-open up block
+
+- The SpringBoard up handler has an early `if (g_open_folder >= 0)` block
+  that consumes every up event; branches placed after it never run while a
+  folder is open. Folder page turning therefore belongs inside that block:
+  a horizontal swipe that starts on the card (24..W-24, 120..452) changes
+  `g_folder_page`, logs `folder page N of M` and repaints. The first
+  placement after the search branch was dead code and the suite caught it
+  (suite215: page 1 opened and drew, the swipe did nothing).

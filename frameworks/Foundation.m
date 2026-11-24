@@ -11975,3 +11975,56 @@ extern void iosim_dynamic_invoke(void *imp, void *self, void *sel,
     [self invoke];
 }
 @end
+
+/* ------------------------------------------------------------------ NSProxy */
+
+@implementation NSProxy
++ (id)alloc { return iosim_objc_alloc(self); }
++ (id)new { return [[self alloc] init]; }
++ (Class)class { return self; }
+- (id)init { return self; }
+- (void)dealloc { }
+- (id)retain { return self; }
+- (void)release { }
+- (id)autorelease { return self; }
+- (unsigned long)retainCount { return 1; }
+- (Class)class { return iosim_objc_class_of(self); }
+- (BOOL)isProxy { return YES; }
+- (BOOL)isKindOfClass:(Class)cls
+{
+    return (BOOL)iosim_objc_is_kind_of(self, cls);
+}
+- (BOOL)isMemberOfClass:(Class)cls
+{
+    return iosim_objc_class_of(self) == cls;
+}
+- (BOOL)respondsToSelector:(SEL)sel
+{
+    return (BOOL)iosim_objc_responds(self, sel);
+}
+- (id)forwardingTargetForSelector:(SEL)sel
+{
+    (void)sel;
+    return nil;
+}
+- (NSMethodSignature *)methodSignatureForSelector:(SEL)sel
+{
+    (void)sel;
+    return nil;
+}
+- (void)forwardInvocation:(NSInvocation *)invocation
+{
+    [self doesNotRecognizeSelector:
+              invocation ? [invocation selector] : 0];
+}
+- (void)doesNotRecognizeSelector:(SEL)sel
+{
+    fprintf(stderr,
+            "*** Terminating app due to uncaught exception "
+            "'NSInvalidArgumentException', reason: "
+            "'-[NSProxy %s]: unrecognized selector sent to proxy %p'\n",
+            (const char *)sel, self);
+    _exit(1);
+}
+- (id)description { return [NSString stringWithUTF8String:"<NSProxy>"]; }
+@end

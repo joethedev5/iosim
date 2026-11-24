@@ -325,6 +325,9 @@ ivar_t { offset_ptr, name, type, alignment, size }
   `NSInvocation`, calls `-forwardInvocation:`, and returns the invocation's
   return value in `rax`/`xmm0` through a sentinel IMP path. Struct arguments
   and struct returns fall back to `doesNotRecognizeSelector:`.
+- `NSProxy` is a second root class, as in Foundation: it answers `isProxy`,
+  class/member checks, the forwarding hooks and a proxy-specific
+  `doesNotRecognizeSelector:` message, and it is not an NSObject subclass.
 
 ### 2.6 Darwin ABI shims
 
@@ -1761,8 +1764,9 @@ Python for iteration speed.
   `objc_removeAssociatedObjects` drops every key for one object.
 - The SpringBoard grid pages in 16-slot pages; a horizontal swipe slides
   between pages over 0.28 s, while an icon dragged to a screen edge turns the
-  page without a slide. Home-screen folders group apps and persist, but
-  folders cannot nest. Widgets and a Today view are absent. The switcher opens
+  page without a slide. Home-screen folders group apps and persist, show
+  twelve slots per page with pagination dots, page on a horizontal swipe and
+  cannot nest. Widgets and a Today view are absent. The switcher opens
   from the home screen, an in-app bottom-edge swipe, or `ui switcher`; a
   horizontal swipe eases the strip to the neighbouring card, the strip is not
   freely draggable, and a swipe up on a card force-quits its app. A resumed

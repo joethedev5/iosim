@@ -2093,6 +2093,22 @@ reads the two integer arguments back as 19 and 23, prints
 original message send. For `greet` the proxy sets an NSString return, and the
 caller receives `proxy-greeting`.
 
+### Objective-C runtime: NSProxy forwarding
+
+`tests/nsproxy_test.m` allocates a subclass of the `NSProxy` root class,
+confirms `isProxy` and `isKindOfClass:[NSProxy class]`, and sends an absent
+`value` selector. The proxy's `-methodSignatureForSelector:` and
+`-forwardInvocation:` receive the message and return 64 to the caller
+(`forwarded value`, `value 64`).
+
+### SpringBoard: folder pagination
+
+A folder is rewritten to hold thirteen members across two pages.
+`tests/run_tests.sh` boots the device, opens the folder tile and sees the
+first page's selected dot at the left of the pair; a left swipe logs
+`folder page 2 of 2` and the capture shows the second dot selected. Tapping
+the single second-page slot resumes `Page7`.
+
 ### CoreAnimation: completion and fill modes
 
 `tests/animation_removal_test.m` starts three 0.5 s opacity animations from

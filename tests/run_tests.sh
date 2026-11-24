@@ -1188,6 +1188,24 @@ check "[fwd2] object proxy-greeting" "$out" \
     "an object return value reaches the original caller"
 check "[fwd2] done" "$out" "the forwarding fixture finishes"
 
+# ---------- 4f10l. NSProxy forwarding ----------
+"$CC" -target "$TARGET" -fobjc-runtime=ios-18.0 -fno-objc-arc \
+    -ffreestanding -O1 -I "$ROOT/frameworks" \
+    -c "$ROOT/tests/nsproxy_test.m" -o "$T/nsproxy_test.o"
+"$LD64" -arch x86_64 -platform_version $PLATFORM -e _main \
+    -o "$T/nsproxy_test" "$T/nsproxy_test.o" \
+    "$ROOT/runtime/System/Library/Frameworks/Foundation.framework/Foundation" \
+    -undefined dynamic_lookup
+out="$(DYLD_ROOT_PATH="$ROOT/runtime" "$RUN" "$T/nsproxy_test" 2>&1)"
+check "[proxy] isProxy 1" "$out" "an NSProxy answers isProxy"
+check "[proxy] kind 1" "$out" \
+    "an NSProxy subclass is a kind of NSProxy"
+check "[proxy] forwarded value" "$out" \
+    "the proxy's forwardInvocation: receives the selector"
+check "[proxy] value 64" "$out" \
+    "the proxy's return value reaches the caller"
+check "[proxy] done" "$out" "the proxy fixture finishes"
+
 # ---------- 4f11. CAAnimation completion and fill modes ----------
 rm -f "$T/arem.fifo"
 mkfifo "$T/arem.fifo"
@@ -5666,6 +5684,110 @@ else
     echo "FAIL renamed folder close"; fails=$((fails+1))
 fi
 
+
+# ---------- 14d. folder pagination ----------
+# A folder with thirteen members shows twelve slots on its first page and a
+# second page with the last member; the page dots follow, a left swipe turns
+# the page and a second-page member launches. The test restores the original
+# folder list afterwards, because a thirteen-member folder collapses twelve
+# grid slots and later sections depend on the original layout.
+: > "$SBLOG"
+FOLDERS="$IOSIM_HOME/Devices/$UDID/data/Library/SpringBoard/folders.txt"
+cp "$FOLDERS" "$T/folders-before-pages.txt"
+cat > "$FOLDERS" <<'FOLDERLIST'
+Tools|com.iosim.datepicker,com.iosim.picker,com.iosim.fixture,com.iosim.uikit,com.iosim.touch,com.iosim.animation,com.iosim.page1,com.iosim.page2,com.iosim.page3,com.iosim.page4,com.iosim.page5,com.iosim.page6,com.iosim.page7
+FOLDERLIST
+"$ROOT/tools/iosimctl" shutdown "$UDID" >/dev/null
+"$ROOT/tools/iosimctl" boot "$UDID" >/dev/null
+sleep 1
+"$ROOT/tools/iosimctl" ui "$UDID" tap 339.8333 222.1667 >/dev/null
+if wait_log "[SpringBoard] folder opened name=Tools (13 apps)"; then
+    echo "ok   a thirteen-member folder opens on its first page"
+else
+    echo "FAIL paged folder open"; fails=$((fails+1))
+fi
+sleep 0.4
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/folder-page1.png" >/dev/null
+if out="$(python3 - "$ROOT/tools" "$T/folder-page1.png" <<'PAGE1'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+
+def white(x, y):
+    n = 0
+    for yy in range((y - 5) * 3, (y + 5) * 3):
+        for xx in range((x - 5) * 3, (x + 5) * 3):
+            c = pngpixel.px(rows, bpp, xx, yy)
+            if c == 0xffffff:
+                n += 1
+    return n
+
+first = white(193, 444)
+second = white(209, 444)
+if first < 20 or second > 5:
+    raise SystemExit("page dots wrong on page 1: %d %d" % (first, second))
+print("ok   the folder's first page selects the first of two dots")
+PAGE1
+)"; then
+    echo "$out"
+else
+    echo "FAIL folder page dots"; echo "$out"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" swipe 350 250 60 250 0.25 >/dev/null
+if wait_log "[SpringBoard] folder page 2 of 2"; then
+    echo "ok   a left swipe turns to the folder's second page"
+else
+    echo "FAIL folder page swipe"; fails=$((fails+1))
+fi
+sleep 0.4
+"$ROOT/tools/iosimctl" io "$UDID" screenshot "$T/folder-page2.png" >/dev/null
+if out="$(python3 - "$ROOT/tools" "$T/folder-page2.png" <<'PAGE2'
+import sys
+sys.path.insert(0, sys.argv[1])
+import pngpixel
+w, h, bpp, rows = pngpixel.load(sys.argv[2])
+
+def white(x, y):
+    n = 0
+    for yy in range((y - 5) * 3, (y + 5) * 3):
+        for xx in range((x - 5) * 3, (x + 5) * 3):
+            c = pngpixel.px(rows, bpp, xx, yy)
+            if c == 0xffffff:
+                n += 1
+    return n
+
+first = white(193, 444)
+second = white(209, 444)
+if second < 20 or first > 5:
+    raise SystemExit("page dots wrong on page 2: %d %d" % (first, second))
+print("ok   the second page selects the second dot")
+PAGE2
+)"; then
+    echo "$out"
+else
+    echo "FAIL folder second page dots"; echo "$out"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" tap 68.25 190 >/dev/null
+if wait_log "Page7 ("; then
+    echo "ok   tapping a second-page member resumes its app"
+else
+    echo "FAIL second-page member launch"; fails=$((fails+1))
+fi
+"$ROOT/tools/iosimctl" ui "$UDID" home >/dev/null
+sleep 0.4
+cp "$T/folders-before-pages.txt" "$FOLDERS"
+"$ROOT/tools/iosimctl" shutdown "$UDID" >/dev/null
+"$ROOT/tools/iosimctl" boot "$UDID" >/dev/null
+sleep 1
+"$ROOT/tools/iosimctl" ui "$UDID" swipe 350 400 50 400 0.3 >/dev/null
+sleep 0.4
+"$ROOT/tools/iosimctl" ui "$UDID" swipe 350 400 50 400 0.3 >/dev/null
+if wait_log "[SpringBoard] home page 3 of 3"; then
+    echo "ok   the restored layout returns to the third home page"
+else
+    echo "FAIL folder test cleanup"; fails=$((fails+1))
+fi
 
 # ---------- 15. lock screen ----------
 # Locking draws the lock screen over the wallpaper; swiping up unlocks. An

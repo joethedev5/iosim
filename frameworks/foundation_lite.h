@@ -169,6 +169,33 @@ __attribute__((objc_root_class))
 - (void)setSelector:(SEL)selector;
 @end
 
+/* A second root class, like the real Foundation: proxies are not NSObject
+ * subclasses and answer the forwarding hooks from their own hierarchy. */
+__attribute__((objc_root_class))
+@interface NSProxy {
+    Class isa;
+}
++ (id)alloc;
++ (id)new;
++ (Class)class;
+- (id)init;
+- (void)dealloc;
+- (id)retain;
+- (void)release;
+- (id)autorelease;
+- (unsigned long)retainCount;
+- (Class)class;
+- (BOOL)isProxy;
+- (BOOL)isKindOfClass:(Class)cls;
+- (BOOL)isMemberOfClass:(Class)cls;
+- (BOOL)respondsToSelector:(SEL)sel;
+- (id)forwardingTargetForSelector:(SEL)sel;
+- (NSMethodSignature *)methodSignatureForSelector:(SEL)sel;
+- (void)forwardInvocation:(NSInvocation *)invocation;
+- (void)doesNotRecognizeSelector:(SEL)sel;
+- (id)description;
+@end
+
 @class NSString;
 
 typedef enum {

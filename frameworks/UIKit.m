@@ -24724,7 +24724,8 @@ static int g_shell_app_count;
 static int g_home_page;
 
 #define SHELL_MAX_FOLDERS 16
-#define SHELL_FOLDER_MAX_APPS 12
+#define SHELL_FOLDER_MAX_APPS 24
+#define SHELL_FOLDER_PER_PAGE 12
 struct shell_folder {
     char name[64];
     char bundles[SHELL_FOLDER_MAX_APPS][128];
@@ -24733,6 +24734,9 @@ struct shell_folder {
 static struct shell_folder g_folders[SHELL_MAX_FOLDERS];
 static int g_folder_count;
 static int g_open_folder = -1;
+/* An open folder shows twelve slots and pages its remaining members, with
+ * pagination dots between the last row and the card's bottom edge. */
+static int g_folder_page;
 /* Folder rename: the open folder's title becomes a text field with the
  * software keyboard while g_renaming_folder matches the open folder. */
 static UITextField *g_rename_field;
@@ -25709,16 +25713,28 @@ static void shell_draw_folder(int fbWidth, int fbHeight, double scale,
                                  (int)(332 * scale), (int)(36 * scale),
                                  0x1c1c1e);
         iosim_fb_set_opacity(1.0);
+        int pages = (g_folders[g_open_folder].count +
+                     SHELL_FOLDER_PER_PAGE - 1) /
+                    SHELL_FOLDER_PER_PAGE;
+        if (pages < 1)
+            pages = 1;
+        if (g_folder_page >= pages)
+            g_folder_page = pages - 1;
+        if (g_folder_page < 0)
+            g_folder_page = 0;
+        int first = g_folder_page * SHELL_FOLDER_PER_PAGE;
+        int last = first + SHELL_FOLDER_PER_PAGE;
+        if (last > g_folders[g_open_folder].count)
+            last = g_folders[g_open_folder].count;
         double cellW = (W - 48) / 4.0;
         int iconSize = (int)(56 * scale + 0.5);
-        for (int k = 0; k < g_folders[g_open_folder].count &&
-                        k < SHELL_FOLDER_MAX_APPS;
-             k++)
+        for (int k = first; k < last; k++)
         {
             int app = shell_folder_member_app(g_open_folder, k);
             if (app < 0)
                 continue;
-            int col = k % 4, row = k / 4;
+            int slot = k - first;
+            int col = slot % 4, row = slot / 4;
             int cx = (int)((24 + cellW * (col + 0.5)) * scale + 0.5);
             int cy = (int)((190 + row * 96) * scale + 0.5);
             shell_stock_icon(g_shell_apps[app].stock, cx - iconSize / 2,
@@ -25726,6 +25742,21 @@ static void shell_draw_folder(int fbWidth, int fbHeight, double scale,
             shell_label(g_shell_apps[app].name, cx,
                         cy + iconSize / 2 + (int)(16.1 * scale + 0.5),
                         scale);
+        }
+        if (pages > 1)
+        {
+            int totalW = (pages - 1) * 16;
+            double startX = W / 2 - totalW / 2.0;
+            for (int p = 0; p < pages; p++)
+            {
+                int dx = (int)((startX + p * 16) * scale + 0.5);
+                int dy = (int)(444 * scale + 0.5);
+                int r = (int)((p == g_folder_page ? 4.0 : 3.0) * scale + 0.5);
+                iosim_fb_set_opacity(1.0);
+                iosim_fb_fill_round_rect(dx - r, dy - r, r * 2, r * 2, r,
+                                         p == g_folder_page ? 0xffffff
+                                                            : 0x8e8e93);
+            }
         }
     }
     draw_keyboard(fbWidth, fbHeight, scale);
@@ -25811,15 +25842,29 @@ static void shell_finish_folder_rename(int fbWidth, int fbHeight,
     shell_draw_folder(fbWidth, fbHeight, scale, path);
 }
 
-/* Member row under a point in the open folder overlay, or -1. */
+/* Member row under a point in the open folder overlay's current page. */
 static int shell_folder_member_at(double px, double py, double W)
 {
     if (g_open_folder < 0 || g_open_folder >= g_folder_count)
         return -1;
+    int pages = (g_folders[g_open_folder].count +
+                 SHELL_FOLDER_PER_PAGE - 1) /
+                SHELL_FOLDER_PER_PAGE;
+    if (pages < 1)
+        pages = 1;
+    if (g_folder_page >= pages)
+        g_folder_page = pages - 1;
+    if (g_folder_page < 0)
+        g_folder_page = 0;
+    int first = g_folder_page * SHELL_FOLDER_PER_PAGE;
+    int last = first + SHELL_FOLDER_PER_PAGE;
+    if (last > g_folders[g_open_folder].count)
+        last = g_folders[g_open_folder].count;
     double cellW = (W - 48) / 4.0;
-    for (int k = 0; k < g_folders[g_open_folder].count; k++)
+    for (int k = first; k < last; k++)
     {
-        int col = k % 4, row = k / 4;
+        int slot = k - first;
+        int col = slot % 4, row = slot / 4;
         double cx = 24 + cellW * (col + 0.5);
         double cy = 190 + row * 96;
         if (px >= cx - 32 && px < cx + 32 && py >= cy - 32 && py < cy + 44)
@@ -29073,6 +29118,33 @@ static int run_springboard(void)
                                               path);
                     continue;
                 }
+                /* A horizontal swipe that starts on the open folder's card
+                 * turns its page. The folder-open block below consumes every
+                 * up event, so paging has to be handled here rather than in
+                 * the later home-screen gesture branches. */
+                if (g_renaming_folder < 0 &&
+                    g_sb_down_x >= 24.0 && g_sb_down_x <= W - 24.0 &&
+                    g_sb_down_y >= 120.0 && g_sb_down_y <= 452.0 &&
+                    (dx > 80 || dx < -80) && dy > -60 && dy < 60)
+                {
+                    int pages = (g_folders[g_open_folder].count +
+                                 SHELL_FOLDER_PER_PAGE - 1) /
+                                SHELL_FOLDER_PER_PAGE;
+                    int page = g_folder_page + (dx < 0 ? 1 : -1);
+                    if (page < 0)
+                        page = 0;
+                    if (page >= pages)
+                        page = pages - 1;
+                    if (page != g_folder_page)
+                    {
+                        g_folder_page = page;
+                        printf("[SpringBoard] folder page %d of %d\n",
+                               page + 1, pages);
+                        fflush(0);
+                        shell_draw_folder(fbWidth, fbHeight, scale, path);
+                    }
+                    continue;
+                }
                 if (dy < -90 || dy > 90)
                 {
                     g_open_folder = -1;
@@ -29516,6 +29588,7 @@ static int run_springboard(void)
             folder_hit >= 0)
         {
             g_open_folder = folder_hit;
+            g_folder_page = 0;
             printf("[SpringBoard] folder opened name=%s (%d apps)\n",
                    g_folders[folder_hit].name, g_folders[folder_hit].count);
             fflush(0);
